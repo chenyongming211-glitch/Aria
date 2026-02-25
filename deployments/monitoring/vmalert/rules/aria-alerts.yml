@@ -1,0 +1,144 @@
+groups:
+  - name: aria_wireguard
+    interval: 30s
+    rules:
+      # 隧道断开告警
+      - alert: WireGuardTunnelDown
+        expr: time() - wireguard_peer_last_handshake_seconds > 300
+        for: 5m
+        labels:
+          severity: critical
+          component: wireguard
+        annotations:
+          summary: "WireGuard tunnel to {{$labels.public_key}} is down"
+          description: "Peer {{$labels.public_key}} ({{$labels.endpoint}}) has not handshaked for {{ $value | humanizeDuration }}. The tunnel may be down."
+
+      # 多个隧道同时断开
+      - alert: MultipleWireGuardTunnelsDown
+        expr: count(time() - wireguard_peer_last_handshake_seconds > 300) >= 2
+        for: 3m
+        labels:
+          severity: critical
+          component: wireguard
+        annotations:
+          summary: "Multiple WireGuard tunnels are down"
+          description: "{{ $value }} tunnels have not handshaked in the last 5 minutes. Network connectivity issues may exist."
+
+      # 流量异常低（可能网络问题）
+      - alert: WireGuardLowTraffic
+        expr: rate(wireguard_peer_rx_bytes[5m]) < 100 and wireguard_peer_connected == 1
+        for: 10m
+        labels:
+          severity: warning
+          component: wireguard
+        annotations:
+          summary: "Very low traffic on {{$labels.public_key}}"
+          description: "Peer {{$labels.public_key}} has received only {{ $value | humanize }}B/s in the last 5 minutes, but the tunnel is marked as connected."
+
+  - name: aria_link_quality
+    interval: 30s
+    rules:
+      # 高丢包率告警
+      - alert: HighPacketLoss
+        expr: aria_probe_loss_ratio > 0.1
+        for: 3m
+        labels:
+          severity: warning
+          component: link_quality
+        annotations:
+          summary: "High packet loss to {{$labels.peer_ip}}"
+          description: "Packet loss to peer {{$labels.peer_ip}} is {{ $value | humanizePercentage }}. Network quality is degraded."
+
+      # 严重丢包
+      - alert: SeverePacketLoss
+        expr: aria_probe_loss_ratio > 0.3
+        for: 2m
+        labels:
+          severity: critical
+          component: link_quality
+        annotations:
+          summary: "Severe packet loss to {{$labels.peer_ip}}"
+          description: "Packet loss to peer {{$labels.peer_ip}} is {{ $value | humanizePercentage }}. Connection is severely degraded."
+
+      # 高延迟告警
+      - alert: HighLatency
+        expr: aria_probe_rtt_milliseconds > 200
+        for: 5m
+        labels:
+          severity: warning
+          component: link_quality
+        annotations:
+          summary: "High latency to {{$labels.peer_ip}}"
+          description: "RTT to peer {{$labels.peer_ip}} is {{ $value }}ms. Network latency is high."
+
+      # 链路不健康
+      - alert: LinkUnhealthy
+        expr: aria_link_health_score == 0
+        for: 5m
+        labels:
+          severity: warning
+          component: link_quality
+        annotations:
+          summary: "Link to {{$labels.peer_ip}} is unhealthy"
+          description: "Health score for peer {{$labels.peer_ip}} is 0. The link has been marked as unhealthy for 5 minutes."
+
+  - name: aria_system
+    interval: 1m
+    rules:
+      # 高 CPU 使用率
+      - alert: HighCPUUsage
+        expr: aria_cpu_usage_percent > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High CPU usage on {{$labels.host_id}}"
+          description: "CPU usage on {{$labels.host_id}} is {{ $value }}%. System may be overloaded."
+
+      # 高内存使用
+      - alert: HighMemoryUsage
+        expr: aria_memory_bytes{type="alloc"} / 1024 / 1024 > 500
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage on {{$labels.host_id}}"
+          description: "Memory usage on {{$labels.host_id}} is {{ $value }}MB. System may be low on memory."
+
+      # Goroutine 泄漏检测
+      - alert: GoroutineLeak
+        expr: aria_go_goroutines > 1000
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "Possible goroutine leak on {{$labels.host_id}}"
+          description: "Goroutine count on {{$labels.host_id}} is {{ $value }}. This may indicate a goroutine leak."
+
+  - name: aria_controller
+    interval: 1m
+    rules:
+      # 节点大量离线
+      - alert: ManyNodesOffline
+        expr: aria_controller_nodes_total{status="offline"} / (aria_controller_nodes_total{status="online"} + aria_controller_nodes_total{status="offline"}) > 0.3
+        for: 5m
+        labels:
+          severity: critical
+          component: controller
+        annotations:
+          summary: "Many nodes are offline"
+          description: "{{ $value | humanizePercentage }} of nodes are offline. Controller may be unreachable or there is a network issue."
+
+      # 节点长时间未上报
+      - alert: NodeNotReporting
+        expr: time() - aria_controller_node_last_seen_seconds > 600
+        for: 0m
+        labels:
+          severity: warning
+          component: controller
+        annotations:
+          summary: "Node {{$labels.hostname}} not reporting"
+          description: "Node {{$labels.hostname}} in VPC {{$labels.vpc_id}} has not reported for {{ $value | humanizeDuration }}."

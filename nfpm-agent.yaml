@@ -1,0 +1,93 @@
+# nFPM configuration for SD-WAN Agent
+# Build with: nfpm pkg --config nfpm-agent.yaml --packager deb --target dist/
+#             nfpm pkg --config nfpm-agent.yaml --packager rpm --target dist/
+
+name: "aria-agent"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+release: "1"
+epoch: "1"
+section: "net"
+priority: "optional"
+maintainer: "SD-WAN Team <aria@example.com>"
+description: |
+  Cloud-Native SD-WAN Agent
+  A lightweight WireGuard-based SD-WAN agent that automatically
+  connects to the controller and establishes secure mesh networking.
+vendor: "SD-WAN Project"
+homepage: "https://github.com/example/aria"
+license: "Apache-2.0"
+
+# Package contents
+contents:
+  # Main binary
+  - src: ./bin/agent-linux-${ARCH}
+    dst: /usr/local/bin/aria-agent
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
+  # Systemd service file
+  - src: ./deployments/systemd/aria-agent.service
+    dst: /lib/systemd/system/aria-agent.service
+    file_info:
+      mode: 0644
+
+  # Default configuration
+  - src: ./deployments/config/agent.yaml.example
+    dst: /etc/aria/agent.yaml.example
+    type: config
+    file_info:
+      mode: 0640
+
+  # Log directory
+  - dst: /var/log/aria
+    type: dir
+    file_info:
+      mode: 0755
+
+  # Data directory (for storing keys, state)
+  - dst: /var/lib/aria
+    type: dir
+    file_info:
+      mode: 0700
+
+# Installation scripts
+scripts:
+  postinstall: ./scripts/packaging/agent-postinstall.sh
+  preremove: ./scripts/packaging/agent-preremove.sh
+  postremove: ./scripts/packaging/agent-postremove.sh
+
+# Dependencies
+depends:
+  - wireguard-tools
+recommends:
+  - iproute2
+suggests:
+  - iptables
+
+# RPM specific
+rpm:
+  group: "Applications/Internet"
+  compression: gzip
+  signature:
+    key_file: ${GPG_KEY_FILE}
+    key_id: ${GPG_KEY_ID}
+
+# DEB specific
+deb:
+  compression: gzip
+  signature:
+    key_file: ${GPG_KEY_FILE}
+    type: origin
+
+# Overrides for different architectures
+overrides:
+  arm64:
+    contents:
+      - src: ./bin/agent-linux-arm64
+        dst: /usr/local/bin/aria-agent
+        file_info:
+          mode: 0755

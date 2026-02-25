@@ -1,0 +1,29 @@
+[Unit]
+Description=Aria SD-WAN Agent
+Documentation=https://github.com/example/aria
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/aria up --daemon --config=/etc/aria/agent.yaml
+# 🔥 修复：删除 ExecStop，让进程自然退出
+# ExecStop=/usr/local/bin/aria down  ← 这行导致重启丢包
+Environment="ARIA_ENV=production"
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aria
+
+# Security hardening
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/aria /var/log/aria /etc/wireguard /etc/aria /run
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,166 @@
+#!/usr/sbin/nft -f
+# Aria Firewall ACL Initialization Script (Stateless Mode with NOTRACK)
+# This script creates the nftables table, chains, and concatenated sets.
+# The Go code only manages the set elements (data filling).
+#
+# Design: Dual Concatenated Sets for Stateless Bidirectional Matching
+# - Reason: SD-WAN requires exact authorization (A→B:80 ≠ A→B:443)
+# - Performance: O(1) hash lookup, no conntrack overhead
+# - Precision: 100% - no Cartesian product side effects
+# - Stateless: NOTRACK for WireGuard, explicit bidirectional ACL rules
+#
+# Architecture:
+# - Table: aria_raw (inet family, priority raw) - NOTRACK for WireGuard
+# - Table: aria_filter (inet family, priority filter) - ACL enforcement
+# - Chain: forward (hook forward, policy drop)
+# - Chain: input (hook input, policy drop)
+# - Set: aria_whitelist_outbound (saddr . daddr . protocol . dport)
+# - Set: aria_whitelist_inbound (saddr . daddr . protocol . sport)
+#
+# Safety rules (hardcoded, cannot be overridden):
+# 1. Allow SSH (tcp/22)
+# 2. Allow HTTPS (tcp/443 - for Web UI)
+# 3. Allow WireGuard (udp/{WireGuardPort})
+# 4. Allow ICMP/ICMPv6
+# 5. Allow loopback
+# 6. Allow Controller API (tcp/8080 from localhost/private networks)
+# 7. Allow DHCP
+#
+# ACL lookup rules (stateless bidirectional):
+# - Outbound: ip saddr . ip daddr . meta l4proto . th dport @aria_whitelist_outbound tcp flags syn / syn,ack accept
+# - Inbound: ip saddr . ip daddr . meta l4proto . th sport @aria_whitelist_inbound tcp flags != syn / syn,ack accept
+
+# Idempotency Pattern: Create -> Flush -> Define
+# Step 1: Ensure tables exist (safe on first run, no-op on subsequent runs)
+table inet aria_raw {}
+table inet aria_filter {}
+
+# Step 2: Flush all existing rules (safe now that tables exist)
+flush table inet aria_raw
+flush table inet aria_filter
+
+# Step 3: Define clean configuration
+
+# Raw table: NOTRACK for WireGuard (bypass conntrack)
+table inet aria_raw {
+    chain prerouting {
+        type filter hook prerouting priority raw; policy accept;
+
+        # NOTRACK for WireGuard UDP traffic (both directions)
+        # Support multi-tunnel mode with port range
+        udp dport { {{.WireGuardPort}} } notrack
+        udp sport { {{.WireGuardPort}} } notrack
+    }
+
+    chain output {
+        type filter hook output priority raw; policy accept;
+
+        # NOTRACK for WireGuard UDP traffic (both directions)
+        # Support multi-tunnel mode with port range
+        udp sport { {{.WireGuardPort}} } notrack
+        udp dport { {{.WireGuardPort}} } notrack
+    }
+}
+
+# Filter table: ACL enforcement (stateless mode)
+table inet aria_filter {
+    # Counter definitions for monitoring
+    counter drop_counter { }
+    counter invalid_counter { }
+    counter tcp_counter { }
+    counter udp_counter { }
+    counter icmp_counter { }
+
+    # Outbound ACL set: Src . Dst . Proto . Dport
+    # Used for checking new connections (SYN packets)
+    set aria_whitelist_outbound {
+        type ipv4_addr . ipv4_addr . inet_proto . inet_service
+        flags interval
+    }
+
+    # Inbound ACL set: Dst . Src . Proto . Sport (reversed)
+    # Used for checking return traffic (non-SYN packets)
+    set aria_whitelist_inbound {
+        type ipv4_addr . ipv4_addr . inet_proto . inet_service
+        flags interval
+    }
+
+    # Forward chain: handle traffic passing through the node
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+
+        # Safety rule 1: Allow ICMP (for path MTU discovery, ping)
+        meta l4proto icmp counter name icmp_counter accept
+        meta l4proto ipv6-icmp counter name icmp_counter accept
+
+        # Safety rule 2: Allow Docker bridge traffic (for container networking)
+        # This is critical when Controller runs in Docker containers
+        iifname "docker0" accept
+        oifname "docker0" accept
+
+        # Safety rule 3: Allow DNAT traffic (external access to Docker containers)
+        # This allows external traffic (e.g., https://public-ip:443) to reach containers
+        # after being DNAT'd by iptables (0.0.0.0:443 -> container:443)
+        ct status dnat accept
+
+        # Protocol counters (before ACL rules for accurate stats)
+        ip protocol tcp counter name tcp_counter
+        ip protocol udp counter name udp_counter
+
+        # ACL Rule 1: Outbound traffic (new connections)
+        # Allow TCP SYN packets matching outbound whitelist
+        meta l4proto tcp ip saddr . ip daddr . meta l4proto . th dport @aria_whitelist_outbound tcp flags syn / syn,ack accept
+
+        # ACL Rule 2: Inbound traffic (return packets)
+        # Allow TCP non-SYN packets matching inbound whitelist (prevents external active connections)
+        meta l4proto tcp ip saddr . ip daddr . meta l4proto . th sport @aria_whitelist_inbound tcp flags != syn / syn,ack accept
+
+        # ACL Rule 3: UDP outbound traffic
+        meta l4proto udp ip saddr . ip daddr . meta l4proto . th dport @aria_whitelist_outbound accept
+
+        # ACL Rule 4: UDP inbound traffic
+        meta l4proto udp ip saddr . ip daddr . meta l4proto . th sport @aria_whitelist_inbound accept
+
+        # Count invalid packets before dropping
+        ct state invalid counter name invalid_counter drop
+
+        # Default drop counter
+        counter name drop_counter drop
+    }
+
+    # Input chain: handle traffic destined to this node
+    chain input {
+        type filter hook input priority filter; policy drop;
+
+        # Safety rule 0: Allow established and related connections
+        ct state established,related accept
+
+        # Safety rule 1: Allow loopback
+        iifname "lo" accept
+
+        # Safety rule 2: Allow ICMP (for management)
+        meta l4proto icmp accept
+        meta l4proto ipv6-icmp accept
+
+        # Safety rule 3: Allow SSH (prevent lockout)
+        tcp dport 22 accept
+
+        # Safety rule 4: Allow HTTPS (for Web UI access)
+        tcp dport 443 accept
+
+        # Safety rule 5: Allow WireGuard (support multi-tunnel port range)
+        udp dport { {{.WireGuardPort}} } accept
+
+        # Safety rule 6: Allow Controller API (for co-located agent)
+        # Allow access to Controller from localhost and RFC1918 private networks
+        # This is critical when agent and controller run on the same node
+        tcp dport 8080 ip saddr { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } accept
+
+        # Safety rule 7: Allow DHCP (prevent cloud VM IP loss)
+        # This is critical for cloud environments (AWS, Azure, Alibaba Cloud, etc.)
+        udp sport 67 udp dport 68 accept  # DHCP responses from server
+        udp sport 68 udp dport 67 accept  # DHCP requests to server
+
+        # Implicit: all other traffic is dropped (policy drop)
+    }
+}

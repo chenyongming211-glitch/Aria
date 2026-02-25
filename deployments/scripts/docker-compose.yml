@@ -1,0 +1,21 @@
+# Aria Controller Docker Compose
+# Controller 容器 + 本地 PostgreSQL/Redis（二进制安装）
+
+version: '3.8'
+
+services:
+  controller:
+    image: aria-controller:latest
+    container_name: aria_controller
+    restart: unless-stopped
+    network_mode: host    # 使用主机网络，直接访问本地 PostgreSQL/Redis
+    volumes:
+      - ./controller.yaml:/etc/aria/controller.yaml:ro
+      - /var/log/aria:/var/log/aria
+    environment:
+      - POSTGRES_HOST=127.0.0.1
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=aria
+      - POSTGRES_PASSWORD=aria-local-password
+      - POSTGRES_DATABASE=aria
+      - REDIS_ADDR=127.0.0.1:6379

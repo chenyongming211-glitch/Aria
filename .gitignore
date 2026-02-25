@@ -1,0 +1,78 @@
+# ===================
+# SD-WAN 项目 .gitignore
+# ===================
+
+# 二进制文件和编译产物
+bin/
+dist/
+releases/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# 测试产物
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Go 相关
+vendor/
+go.work
+go.work.sum
+
+# eBPF 构建产物
+internal/agent/firewall/ebpf/build/
+
+# IDE 和编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# 临时文件
+*.tmp
+*.temp
+*.log
+tmp/
+temp/
+
+# 环境配置（包含敏感信息）
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+credentials.json
+
+# 打包临时目录
+aria-package/
+
+# Docker 相关
+*.tar
+docker-compose.override.yml
+
+# 前端构建产物
+temp-dist/
+
+# 前端 node_modules（不提交）
+frontend-refactor/node_modules/
+
+# UI 构建产物
+deployments/controller-web/ui-dist/
+
+# 演示和测试文件
+ebpf_demo
+test_multitenant.html
+frontend_patches/

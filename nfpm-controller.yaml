@@ -1,0 +1,70 @@
+# nFPM configuration for SD-WAN Controller
+# Build with: nfpm pkg --config nfpm-controller.yaml --packager deb --target dist/
+#             nfpm pkg --config nfpm-controller.yaml --packager rpm --target dist/
+
+name: "aria-controller"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+release: "1"
+epoch: "1"
+section: "net"
+priority: "optional"
+maintainer: "SD-WAN Team <aria@example.com>"
+description: |
+  Cloud-Native SD-WAN Controller
+  A centralized control plane for SD-WAN mesh network management.
+  Provides node registration, IP allocation, and peer discovery.
+vendor: "SD-WAN Project"
+homepage: "https://github.com/example/aria"
+license: "Apache-2.0"
+
+# Package contents
+contents:
+  # Main binary
+  - src: ./bin/controller-linux-${ARCH}
+    dst: /usr/local/bin/aria-controller
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+
+  # Systemd service file
+  - src: ./deployments/systemd/aria-controller.service
+    dst: /lib/systemd/system/aria-controller.service
+    file_info:
+      mode: 0644
+
+  # Environment file template
+  - src: ./deployments/config/controller.env.example
+    dst: /etc/aria/controller.env.example
+    type: config
+    file_info:
+      mode: 0640
+
+  # Log directory
+  - dst: /var/log/aria
+    type: dir
+    file_info:
+      mode: 0755
+
+# Installation scripts
+scripts:
+  postinstall: ./scripts/packaging/controller-postinstall.sh
+  preremove: ./scripts/packaging/controller-preremove.sh
+  postremove: ./scripts/packaging/controller-postremove.sh
+
+# Dependencies - Controller needs database connectivity
+recommends:
+  - postgresql-client
+suggests:
+  - redis-tools
+
+# RPM specific
+rpm:
+  group: "Applications/Internet"
+  compression: gzip
+
+# DEB specific
+deb:
+  compression: gzip

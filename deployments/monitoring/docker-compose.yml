@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  victoria-metrics:
+    image: victoriametrics/victoria-metrics:latest
+    container_name: aria-victoria-metrics
+    ports:
+      - "8428:8428"
+    volumes:
+      - vmdata:/victoria-metrics-data
+    command:
+      - '--storageDataPath=/victoria-metrics-data'
+      - '--retentionPeriod=30d'
+      - '--httpListenAddr=:8428'
+    restart: unless-stopped
+    networks:
+      - aria_shared_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8428/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: aria-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_INSTALL_PLUGINS=
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+    depends_on:
+      victoria-metrics:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aria_shared_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  vmalert:
+    image: victoriametrics/vmalert:latest
+    container_name: aria-vmalert
+    ports:
+      - "8880:8880"
+    volumes:
+      - ./vmalert/rules:/etc/vmalert/rules
+    command:
+      - '-datasource.url=http://aria-victoria-metrics:8428'
+      - '-remoteWrite.url=http://aria-victoria-metrics:8428'
+      - '-remoteRead.url=http://aria-victoria-metrics:8428'
+      - '-rule=/etc/vmalert/rules/*.yml'
+      - '-httpListenAddr=:8880'
+      - '-evaluationInterval=30s'
+      - '-notifier.blackhole'
+    depends_on:
+      victoria-metrics:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aria_shared_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8880/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  vmdata:
+    driver: local
+  grafana-data:
+    driver: local
+
+networks:
+  aria_shared_net:
+    name: aria_shared_net
+    external: true

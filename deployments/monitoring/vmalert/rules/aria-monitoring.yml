@@ -1,0 +1,303 @@
+# Aria Monitoring Alert Rules
+# VictoriaMetrics Alert (vmalert) Configuration
+#
+# 分级告警设计：
+# - Warning: 异常趋势，需关注但不影响业务
+# - Critical: 严重问题，影响业务运行，需立即处理
+
+groups:
+  # ========================================
+  # 网络质量告警（Network Quality）
+  # ========================================
+  - name: aria_network_quality
+    interval: 30s
+    rules:
+      # 抖动告警（分级）
+      - alert: HighJitterWarning
+        expr: aria_probe_jitter_milliseconds > 30
+        for: 2m
+        labels:
+          severity: warning
+          component: network
+        annotations:
+          summary: "Moderate jitter on {{ $labels.peer_ip }}"
+          description: "Jitter {{ $value }}ms > 30ms on {{ $labels.peer_ip }} (VoIP quality may degrade)"
+          hint: "Check link stability, 4G/5G接入常有此波动"
+
+      - alert: HighJitterCritical
+        expr: aria_probe_jitter_milliseconds > 100
+        for: 2m
+        labels:
+          severity: critical
+          component: network
+        annotations:
+          summary: "Severe jitter on {{ $labels.peer_ip }}"
+          description: "Jitter {{ $value }}ms > 100ms on {{ $labels.peer_ip }} (VoIP unusable, investigate immediately)"
+          hint: "检查链路拥塞、MTU分片问题、运营商QoS策略"
+
+      # 丢包率告警（分级，考虑 4G/5G 场景）
+      - alert: HighPacketLossWarning
+        expr: aria_probe_loss_ratio > 0.03
+        for: 2m
+        labels:
+          severity: warning
+          component: network
+        annotations:
+          summary: "Moderate packet loss on {{ $labels.peer_ip }}"
+          description: "Loss {{ $value | humanizePercentage }} > 3% on {{ $labels.peer_ip }} (monitor closely)"
+          hint: "4G/5G弱信号区域常见，持续监控"
+
+      - alert: HighPacketLossCritical
+        expr: aria_probe_loss_ratio > 0.10
+        for: 2m
+        labels:
+          severity: critical
+          component: network
+        annotations:
+          summary: "Severe packet loss on {{ $labels.peer_ip }}"
+          description: "Loss {{ $value | humanizePercentage }} > 10% on {{ $labels.peer_ip }} (link failure imminent)"
+          hint: "链路严重拥塞或故障，检查物理链路、WireGuard隧道状态"
+
+      # 链路完全中断
+      - alert: LinkDown
+        expr: aria_link_health_score == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: network
+        annotations:
+          summary: "Link down to {{ $labels.peer_ip }}"
+          description: "No successful probes to {{ $labels.peer_ip }} for 5 minutes"
+          hint: "检查远端节点是否在线、防火墙规则、WireGuard配置"
+
+  # ========================================
+  # 控制面健康（Control Plane）
+  # ========================================
+  - name: aria_control_plane
+    interval: 30s
+    rules:
+      # Controller 连接中断
+      - alert: ControllerDisconnected
+        expr: aria_agent_controller_connected == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: control_plane
+        annotations:
+          summary: "Agent disconnected from Controller"
+          description: "Agent {{ $labels.host_id }} has not synced with controller for {{ $value }}s"
+          hint: "检查 Controller 是否在线、网络连通性、认证 Token 有效性"
+
+      # 配置缓存老化
+      - alert: ConfigCacheTooOld
+        expr: aria_config_cache_age_seconds{config_type="peers"} > 600
+        for: 2m
+        labels:
+          severity: warning
+          component: control_plane
+        annotations:
+          summary: "Config cache aging on {{ $labels.host_id }}"
+          description: "Peer config {{ $value }}s old (Controller unreachable, running on cached config)"
+          hint: "Agent 进入 Fail-Static 模式，检查 Controller 可用性"
+
+      # 配置同步持续失败
+      - alert: ConfigSyncFailing
+        expr: rate(aria_config_sync_failure_count[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: control_plane
+        annotations:
+          summary: "Config sync failing on {{ $labels.host_id }}"
+          description: "Config sync failing at {{ $value }} errors/sec"
+          hint: "检查 Controller 日志、数据库连接、网络间歇性故障"
+
+      # Controller 同步延迟异常
+      - alert: ControllerSyncSlowness
+        expr: histogram_quantile(0.95, rate(aria_agent_controller_sync_latency_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: control_plane
+        annotations:
+          summary: "Controller sync latency high"
+          description: "P95 sync latency {{ $value }}s > 5s on {{ $labels.host_id }}"
+          hint: "检查 Controller 负载、数据库查询性能、网络 RTT"
+
+  # ========================================
+  # 系统稳定性（System Stability）
+  # ========================================
+  - name: aria_system_stability
+    interval: 30s
+    rules:
+      # 文件描述符告警（分级）
+      - alert: FDUsageHigh
+        expr: process_open_fds / process_max_fds > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "FD usage high on {{ $labels.host_id }}"
+          description: "{{ $value | humanizePercentage }} of {{ $labels.process_max_fds }} FD limit used"
+          hint: "检查连接泄漏（WireGuard peers、HTTP连接、文件句柄）"
+
+      - alert: FDExhaustion
+        expr: process_open_fds / process_max_fds > 0.95
+        for: 2m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "FD exhaustion on {{ $labels.host_id }}"
+          description: "{{ $value | humanizePercentage }} of FD limit, process crash imminent"
+          hint: "立即增加 ulimit -n 或重启进程"
+
+      # Conntrack 表告警（分级）
+      - alert: ConntrackTableNearFull
+        expr: node_nf_conntrack_entries / node_nf_conntrack_entries_limit > 0.9
+        for: 5m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Conntrack table near full on {{ $labels.host_id }}"
+          description: "{{ $value | humanizePercentage }} of {{ $labels.node_nf_conntrack_entries_limit }} entries used"
+          hint: "Silent drop 即将发生，增加 nf_conntrack_max (sysctl -w net.netfilter.nf_conntrack_max=262144)"
+
+      - alert: ConntrackTableFull
+        expr: node_nf_conntrack_entries / node_nf_conntrack_entries_limit > 0.98
+        for: 1m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Conntrack table full on {{ $labels.host_id }}"
+          description: "{{ $value | humanizePercentage }} of limit, new connections being dropped"
+          hint: "立即增加 nf_conntrack_max 或重启防火墙"
+
+      # 磁盘空间告警
+      - alert: DiskSpaceRunningOut
+        expr: aria_disk_usage_percent{path=~"/var/log|/var/lib/aria"} > 90
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "Disk space low on {{ $labels.host_id }}"
+          description: "{{ $labels.path }} {{ $value }}% full"
+          hint: "清理旧日志（journalctl --vacuum-size=500M）或扩容磁盘"
+
+      # Goroutine 泄漏检测
+      - alert: GoroutineLeakSuspect
+        expr: aria_go_goroutines > 10000
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "Goroutine leak suspected on {{ $labels.host_id }}"
+          description: "{{ $value }} goroutines (normal < 1000)"
+          hint: "可能的 goroutine 泄漏，检查代码中的 channel 阻塞、未关闭的连接"
+
+      # 内存使用告警
+      - alert: MemoryUsageHigh
+        expr: aria_memory_bytes{type="heap_alloc"} > 2147483648  # 2GB
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "Memory usage high on {{ $labels.host_id }}"
+          description: "Heap memory {{ $value | humanize1024 }}B > 2GB"
+          hint: "检查内存泄漏、大量 peer 连接、缓存未清理"
+
+  # ========================================
+  # 防火墙和安全（Firewall & Security）
+  # ========================================
+  - name: aria_firewall_security
+    interval: 30s
+    rules:
+      # ACL 拦截突发流量（可能的攻击或误配置）
+      - alert: ACLDropBurst
+        expr: rate(aria_firewall_drop_packets_total[5m]) > 1000
+        for: 2m
+        labels:
+          severity: warning
+          component: firewall
+        annotations:
+          summary: "ACL drop burst on {{ $labels.host_id }}"
+          description: "{{ $value }} packets/sec dropped (possible attack or misconfiguration)"
+          hint: "检查 nft list table inet aria_filter，确认是攻击流量还是 ACL 规则错误"
+
+      # 无效数据包突发（链路不稳定或攻击）
+      - alert: InvalidPacketsBurst
+        expr: rate(aria_firewall_invalid_packets_total[5m]) > 100
+        for: 2m
+        labels:
+          severity: warning
+          component: firewall
+        annotations:
+          summary: "Invalid packets detected on {{ $labels.host_id }}"
+          description: "{{ $value }} invalid packets/sec (link instability or attack)"
+          hint: "检查物理链路质量、WireGuard加密错误、可能的重放攻击"
+
+      # MTU 问题导致丢包
+      - alert: MTUFragmentationIssue
+        expr: rate(wireguard_dropped_mtu_packets[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: network
+        annotations:
+          summary: "MTU fragmentation issue on {{ $labels.interface }}"
+          description: "{{ $value }} packets/sec dropped due to MTU on {{ $labels.interface }}"
+          hint: "调整 WireGuard MTU（建议 1420 for PPPoE, 1380 for nested VPN）"
+
+  # ========================================
+  # 数据面健康（Data Plane）
+  # ========================================
+  - name: aria_data_plane
+    interval: 30s
+    rules:
+      # WireGuard 握手失败（密钥错误或时钟偏移）
+      - alert: WireGuardHandshakeFailure
+        expr: wireguard_peer_connected == 0 and on(public_key) aria_link_health_score == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: data_plane
+        annotations:
+          summary: "WireGuard handshake failed to {{ $labels.endpoint }}"
+          description: "No successful handshake for 5 minutes"
+          hint: "检查对端 public key 是否正确、时钟同步（NTP）、UDP 51820 端口可达性"
+
+      # 流量异常增长（可能的流量环路或 DDoS）
+      - alert: TrafficSpikeDetected
+        expr: rate(wireguard_peer_tx_bytes[5m]) > 100000000  # 100MB/s
+        for: 5m
+        labels:
+          severity: warning
+          component: data_plane
+        annotations:
+          summary: "Traffic spike detected on {{ $labels.host_id }}"
+          description: "Outbound traffic {{ $value | humanize1024 }}B/s to {{ $labels.public_key }}"
+          hint: "检查是否有流量环路、异常大文件传输、DDoS 攻击"
+
+  # ========================================
+  # 版本兼容性（Version Compatibility）
+  # ========================================
+  - name: aria_version
+    interval: 1h
+    rules:
+      # 版本不一致告警（建议所有节点版本一致）
+      - alert: VersionMismatch
+        expr: count(count by (version) (aria_build_info)) > 1
+        for: 1h
+        labels:
+          severity: info
+          component: version
+        annotations:
+          summary: "Multiple Aria versions detected in cluster"
+          description: "{{ $value }} different versions running"
+          hint: "建议统一升级到最新版本以避免兼容性问题"

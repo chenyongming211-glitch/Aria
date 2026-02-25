@@ -1,0 +1,271 @@
+package cli
+
+import (
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"aria/pkg/config"
+	"aria/pkg/rpc"
+)
+
+var networkCmd = &cobra.Command{
+	Use:   "network",
+	Short: "Manage advertised network routes (Site-to-Site VPN)",
+	Long: `Manage the network routes advertised to other peers for Site-to-Site VPN.
+
+When you advertise a route (e.g., 172.16.0.0/24), other peers will add it to
+their WireGuard AllowedIPs for this node, enabling Site-to-Site connectivity.
+
+Examples:
+  aria network list                 # List advertised routes
+  aria network add 172.16.0.0/24    # Advertise a network
+  aria network remove 172.16.0.0/24 # Stop advertising a network`,
+	RunE: runNetworkList, // Default: list
+}
+
+var networkAddCmd = &cobra.Command{
+	Use:   "add <CIDR>",
+	Short: "Add a network route to advertise",
+	Long: `Add a CIDR network to the advertised routes list.
+
+After adding, you must restart the aria service for changes to take effect:
+  sudo systemctl restart aria
+
+Example:
+  aria network add 172.16.0.0/24`,
+	Args: cobra.ExactArgs(1),
+	RunE: runNetworkAdd,
+}
+
+var networkRemoveCmd = &cobra.Command{
+	Use:   "remove <CIDR>",
+	Short: "Remove an advertised network route",
+	Long: `Remove a CIDR network from the advertised routes list.
+
+After removing, you must restart the aria service for changes to take effect:
+  sudo systemctl restart aria
+
+Example:
+  aria network remove 172.16.0.0/24`,
+	Args: cobra.ExactArgs(1),
+	RunE: runNetworkRemove,
+}
+
+var networkListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List advertised network routes",
+	RunE:  runNetworkList,
+}
+
+func init() {
+	rootCmd.AddCommand(networkCmd)
+	networkCmd.AddCommand(networkAddCmd)
+	networkCmd.AddCommand(networkRemoveCmd)
+	networkCmd.AddCommand(networkListCmd)
+}
+
+func runNetworkList(cmd *cobra.Command, args []string) error {
+	// Check if running as root
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("this command must be run as root")
+	}
+
+	configPath := "/etc/aria/agent.yaml"
+	if cfgFile != "" {
+		configPath = cfgFile
+	}
+
+	configMgr := config.NewManager(configPath)
+	if !configMgr.Exists() {
+		return fmt.Errorf("configuration file not found. Run 'aria up' first")
+	}
+
+	cfg, err := configMgr.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	fmt.Println("Advertised Routes:")
+	fmt.Println("──────────────────────────────────")
+	if len(cfg.AdvertisedRoutes) == 0 {
+		fmt.Println("(none)")
+	} else {
+		for i, route := range cfg.AdvertisedRoutes {
+			fmt.Printf("%d. %s\n", i+1, route)
+		}
+	}
+	fmt.Println()
+	fmt.Printf("Total: %d routes\n", len(cfg.AdvertisedRoutes))
+	fmt.Println()
+	fmt.Println("Note: Changes require service restart to take effect:")
+	fmt.Println("  sudo systemctl restart aria")
+
+	return nil
+}
+
+func runNetworkAdd(cmd *cobra.Command, args []string) error {
+	// Check if running as root
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("this command must be run as root")
+	}
+
+	cidr := args[0]
+
+	// Validate CIDR format
+	if _, _, err := net.ParseCIDR(cidr); err != nil {
+		return fmt.Errorf("invalid CIDR format: %s (example: 172.16.0.0/24)", cidr)
+	}
+
+	configPath := "/etc/aria/agent.yaml"
+	if cfgFile != "" {
+		configPath = cfgFile
+	}
+
+	configMgr := config.NewManager(configPath)
+	if !configMgr.Exists() {
+		return fmt.Errorf("configuration file not found. Run 'aria up' first")
+	}
+
+	cfg, err := configMgr.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Check if already exists
+	for _, route := range cfg.AdvertisedRoutes {
+		if route == cidr {
+			return fmt.Errorf("route %s already advertised", cidr)
+		}
+	}
+
+	// Add to list
+	cfg.AdvertisedRoutes = append(cfg.AdvertisedRoutes, cidr)
+
+	// Save config
+	if err := configMgr.Save(cfg); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	fmt.Printf("✓ Added advertised route: %s\n", cidr)
+
+	// Apply immediately: add route to system routing table
+	fmt.Print("Adding route to system... ")
+	execCmd := exec.Command("ip", "route", "add", cidr, "dev", cfg.Interface, "metric", "100")
+	if output, err := execCmd.CombinedOutput(); err != nil {
+		if !strings.Contains(string(output), "File exists") {
+			fmt.Printf("warning: %v\n", err)
+		} else {
+			fmt.Println("already exists")
+		}
+	} else {
+		fmt.Println("done")
+	}
+
+	// Trigger daemon to re-register with controller
+	fmt.Print("Syncing with controller... ")
+	client := rpc.NewClient("")
+	if client.IsServerRunning() {
+		if _, err := client.SyncConfig(); err != nil {
+			fmt.Printf("warning: %v\n", err)
+			fmt.Println()
+			fmt.Println("⚠️  Manual sync required:")
+			fmt.Println("  sudo aria sync")
+		} else {
+			fmt.Println("done")
+		}
+	} else {
+		fmt.Println("skipped (daemon not running)")
+		fmt.Println()
+		fmt.Println("⚠️  Changes will take effect after service restart:")
+		fmt.Println("  sudo systemctl restart aria")
+	}
+
+	return nil
+}
+
+func runNetworkRemove(cmd *cobra.Command, args []string) error {
+	// Check if running as root
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("this command must be run as root")
+	}
+
+	cidr := args[0]
+
+	configPath := "/etc/aria/agent.yaml"
+	if cfgFile != "" {
+		configPath = cfgFile
+	}
+
+	configMgr := config.NewManager(configPath)
+	if !configMgr.Exists() {
+		return fmt.Errorf("configuration file not found. Run 'aria up' first")
+	}
+
+	cfg, err := configMgr.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Find and remove
+	found := false
+	newRoutes := make([]string, 0, len(cfg.AdvertisedRoutes))
+	for _, route := range cfg.AdvertisedRoutes {
+		if route == cidr {
+			found = true
+			continue // Skip this one
+		}
+		newRoutes = append(newRoutes, route)
+	}
+
+	if !found {
+		return fmt.Errorf("route %s not found in advertised routes", cidr)
+	}
+
+	cfg.AdvertisedRoutes = newRoutes
+
+	// Save config
+	if err := configMgr.Save(cfg); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	fmt.Printf("✓ Removed advertised route: %s\n", cidr)
+
+	// Apply immediately: remove route from system routing table
+	fmt.Print("Removing route from system... ")
+	execCmd := exec.Command("ip", "route", "del", cidr, "dev", cfg.Interface)
+	if output, err := execCmd.CombinedOutput(); err != nil {
+		if !strings.Contains(string(output), "No such process") {
+			fmt.Printf("warning: %v\n", err)
+		} else {
+			fmt.Println("not found")
+		}
+	} else {
+		fmt.Println("done")
+	}
+
+	// Trigger daemon to re-register with controller
+	fmt.Print("Syncing with controller... ")
+	client := rpc.NewClient("")
+	if client.IsServerRunning() {
+		if _, err := client.SyncConfig(); err != nil {
+			fmt.Printf("warning: %v\n", err)
+			fmt.Println()
+			fmt.Println("⚠️  Manual sync required:")
+			fmt.Println("  sudo aria sync")
+		} else {
+			fmt.Println("done")
+		}
+	} else {
+		fmt.Println("skipped (daemon not running)")
+		fmt.Println()
+		fmt.Println("⚠️  Changes will take effect after service restart:")
+		fmt.Println("  sudo systemctl restart aria")
+	}
+
+	return nil
+}

@@ -1,0 +1,57 @@
+# SD-WAN Agent Configuration
+# Copy this file to /etc/aria/agent.yaml and modify as needed
+
+# Controller connection
+controller:
+  # Primary controller URL (required)
+  url: "http://controller.example.com:8080"
+  # Backup controller URLs (optional, for high availability)
+  backup_urls:
+    - "http://controller2.example.com:8080"
+  # Connection timeout in seconds
+  timeout: 10
+  # Retry interval in seconds when controller is unavailable
+  retry_interval: 5
+
+# WireGuard configuration
+wireguard:
+  # Interface name
+  interface: "wg0"
+  # Listen port (0 for auto-select)
+  listen_port: 51820
+  # MTU (optional, auto-detected if not set)
+  mtu: 1420
+
+# Logging configuration
+logging:
+  # Log level: debug, info, warn, error
+  level: "info"
+  # Log directory
+  dir: "/var/log/aria"
+  # Max log file size in MB before rotation
+  max_size: 100
+  # Number of old log files to retain
+  max_backups: 5
+  # Max age in days to retain old log files
+  max_age: 30
+
+# Auto-update configuration
+update:
+  # Enable automatic updates
+  enabled: true
+  # Check interval in minutes
+  check_interval: 60
+  # Auto-restart after update
+  auto_restart: true
+
+# Health check configuration
+health:
+  # Enable health check endpoint
+  enabled: true
+  # Health check port
+  port: 9090
+
+# Data storage
+data:
+  # Directory for storing keys and state
+  dir: "/var/lib/aria"

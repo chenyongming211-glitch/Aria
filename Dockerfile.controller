@@ -1,0 +1,63 @@
+# Aria Controller Dockerfile
+# Multi-stage build for minimal image size
+
+# ==========================================
+# 阶段 1: 编译 Go 二进制文件
+# ==========================================
+FROM golang:1.25-alpine AS builder
+
+# Build argument for version
+ARG VERSION=0.2.26-test-7
+
+WORKDIR /build
+
+# Set Go proxy for China
+ENV GOPROXY=https://goproxy.cn,direct
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build Controller binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-X aria/internal/cli.Version=${VERSION}" \
+    -o aria-controller \
+    ./cmd
+
+# ==========================================
+# 阶段 2: 最终运行环境
+# ==========================================
+FROM alpine:3.19
+
+# Install SSH client and necessary CA certificates
+RUN apk add --no-cache openssh-client ca-certificates curl
+
+# Create necessary directories
+RUN mkdir -p /var/log/aria /etc/aria
+
+# Copy binary from builder
+COPY --from=builder /build/aria-controller /usr/local/bin/aria
+RUN chmod +x /usr/local/bin/aria
+
+# Set working directory
+WORKDIR /opt/aria
+
+# Expose HTTP port
+EXPOSE 8080
+
+# Default environment variables for database connection
+ENV POSTGRES_HOST=postgres \
+    POSTGRES_PORT=5432 \
+    POSTGRES_USER=aria \
+    POSTGRES_PASSWORD=aria-local-password \
+    POSTGRES_DATABASE=aria \
+    POSTGRES_SSLMODE=disable \
+    REDIS_ADDR=redis:6379 \
+    REDIS_PASSWORD=""
+
+# Run controller
+ENTRYPOINT ["/usr/local/bin/aria"]
+CMD ["controller", "serve", "--config=/etc/aria/controller.yaml"]
