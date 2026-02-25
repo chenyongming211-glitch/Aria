@@ -40,3 +40,21 @@ func (m *NoopFirewallManager) GetStats() (*FirewallStats, error) {
 func (m *NoopFirewallManager) IsEnabled() bool {
 	return false
 }
+
+// BlockIP blocks a specific IP address.
+// No-op implementation always succeeds.
+func (m *NoopFirewallManager) BlockIP(ip string) error {
+	return nil
+}
+
+// LimitIP applies bandwidth limit to a specific IP.
+// No-op implementation always succeeds.
+func (m *NoopFirewallManager) LimitIP(ip string, mbps int) error {
+	return nil
+}
+
+// LimitPeerPair applies bandwidth limit between two IPs.
+// No-op implementation always succeeds.
+func (m *NoopFirewallManager) LimitPeerPair(srcIP, dstIP string, mbps int) error {
+	return nil
+}

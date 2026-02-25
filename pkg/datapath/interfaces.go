@@ -90,18 +90,18 @@ type BGPManager interface {
 	GetNeighbors() ([]*BGPNeighbor, error)
 }
 
-// FirewallManager manages firewall rules and ACL policies using nftables.
+// FirewallManager manages firewall rules and ACL policies using eBPF.
+// Implementation: XDP for ingress filtering, TC for egress QoS.
 type FirewallManager interface {
-	// Init initializes firewall tables, chains, and default safety rules.
-	// Creates: aria_filter table, forward/input chains, whitelist sets.
-	// Hardcodes: SSH, WireGuard, ICMP, loopback allow rules (failsafe).
+	// Init initializes firewall resources and applies default security rules.
+	// Hardcodes: SSH, WireGuard, ICMP, loopback, DHCP allow rules (failsafe).
 	Init() error
 
-	// Cleanup removes all managed firewall rules and tables.
+	// Cleanup removes all managed firewall rules and resources.
 	Cleanup() error
 
 	// ApplyPolicy atomically applies a new set of ACL rules.
-	// This replaces all existing rules with the new set (atomic transaction).
+	// This replaces all existing rules with the new set.
 	// Rules define: SrcNet -> DstNet:Protocol:Port whitelist.
 	ApplyPolicy(rules []ACLRule) error
 
@@ -110,6 +110,15 @@ type FirewallManager interface {
 
 	// IsEnabled returns true if the firewall is active.
 	IsEnabled() bool
+
+	// BlockIP blocks traffic from/to a specific IP address.
+	BlockIP(ip string) error
+
+	// LimitIP applies bandwidth limit to a specific IP (eBPF QoS).
+	LimitIP(ip string, mbps int) error
+
+	// LimitPeerPair applies bandwidth limit between two IPs (eBPF QoS).
+	LimitPeerPair(srcIP, dstIP string, mbps int) error
 }
 
 // HAManager manages high availability state synchronization (reserved for future implementation).

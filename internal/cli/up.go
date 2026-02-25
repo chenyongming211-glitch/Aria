@@ -137,21 +137,21 @@ type upNodeInfo struct {
 }
 
 type upSyncResponseWithPeers struct {
-	Peers              []upNodeInfo  `json:"peers"`
-	AssignedIP         string        `json:"assigned_ip"`
-	LastUpdate         int64         `json:"last_update"`
-	ACLRules           []upACLRule   `json:"acl_rules,omitempty"`           // Firewall ACL rules
-	MetricsPushGateway string        `json:"metrics_push_gateway,omitempty"` // VictoriaMetrics push gateway URL
+	Peers              []upNodeInfo `json:"peers"`
+	AssignedIP         string       `json:"assigned_ip"`
+	LastUpdate         int64        `json:"last_update"`
+	ACLRules           []upACLRule  `json:"acl_rules,omitempty"`            // Firewall ACL rules
+	MetricsPushGateway string       `json:"metrics_push_gateway,omitempty"` // VictoriaMetrics push gateway URL
 }
 
 // upACLRule represents an ACL rule from the Controller.
 // Format: SrcNet -> DstNet:Protocol:Port whitelist.
 type upACLRule struct {
-	SrcNet   string `json:"src_net"`   // Source CIDR (e.g., "10.0.0.0/8")
-	DstNet   string `json:"dst_net"`   // Destination CIDR (e.g., "192.168.0.0/16")
-	Protocol uint8  `json:"protocol"`  // IP protocol (6=TCP, 17=UDP, 0=any)
-	MinPort  uint16 `json:"min_port"`  // Min port (0=any)
-	MaxPort  uint16 `json:"max_port"`  // Max port (65535=any)
+	SrcNet   string `json:"src_net"`  // Source CIDR (e.g., "10.0.0.0/8")
+	DstNet   string `json:"dst_net"`  // Destination CIDR (e.g., "192.168.0.0/16")
+	Protocol uint8  `json:"protocol"` // IP protocol (6=TCP, 17=UDP, 0=any)
+	MinPort  uint16 `json:"min_port"` // Min port (0=any)
+	MaxPort  uint16 `json:"max_port"` // Max port (65535=any)
 }
 
 func runUp(cmd *cobra.Command, args []string) error {
@@ -204,7 +204,6 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Using existing configuration (Device: %s...)\n", deviceID)
 
-
 	// Handle --advertise-routes parameter to update advertised routes at runtime
 	if upAdvertiseRoutes != "" {
 		var newRoutes []string
@@ -239,7 +238,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 
 		_, _, err = registerWithCtrl(
 			agentConfig.ControllerURL,
-			"",  // Token not needed for re-registration
+			"", // Token not needed for re-registration
 			agentConfig.PublicKey,
 			privateIP,
 			publicIP,
@@ -267,19 +266,8 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// 使用 DataPath 管理数据面
 	var dpOpts []datapath.Option
 
-	// Determine WireGuard port range based on multi-tunnel configuration
-	wgPortMin := 51820
-	wgPortMax := 51820
-	if upMultiTunnel || agentConfig.MultiTunnel.Enabled {
-		// Calculate port range for multi-tunnel
-		tunnelCount := datapath.DetermineTunnelCount(agentConfig.MultiTunnel.TunnelCount)
-		wgPortMin = agentConfig.MultiTunnel.BasePort
-		wgPortMax = agentConfig.MultiTunnel.BasePort + tunnelCount - 1
-	}
-
 	// Enable firewall based on selected mode
 	useEBPF := upEBPFEnabled || upEBPFAclOnly || upEBPFQoSONly
-	useTraditionalFirewall := !useEBPF && !upNoFirewall
 
 	if useEBPF {
 		// Initialize eBPF firewall/QoS
@@ -305,17 +293,18 @@ func runUp(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("  eBPF enabled with options: all=%v, acl_only=%v, qos_only=%v\n", upEBPFEnabled, upEBPFAclOnly, upEBPFQoSONly)
 
-		// Integrate with datapath - for now, we'll log the intent
-		// The actual integration would happen through the datapath package
-	} else if runtime.GOOS == "linux" && useTraditionalFirewall {
-		dpOpts = append(dpOpts, datapath.WithNftablesFirewall(
-			datapath.WithWireGuardPortRange(wgPortMin, wgPortMax),
-		))
-		fmt.Println("Firewall: enabled (use --no-firewall to disable)")
+		// Add eBPF firewall to datapath options
+		dpOpts = append(dpOpts, datapath.WithEBPFFirewall())
 	} else if upNoFirewall {
 		fmt.Println("Firewall: disabled (--no-firewall flag set)")
-	} else if useEBPF {
-		fmt.Println("eBPF: enabled")
+	} else {
+		// Default: use eBPF firewall on Linux
+		if runtime.GOOS == "linux" {
+			dpOpts = append(dpOpts, datapath.WithEBPFFirewall())
+			fmt.Println("Firewall: enabled (eBPF-based)")
+		} else {
+			fmt.Println("Firewall: disabled (not supported on this platform)")
+		}
 	}
 
 	dp, err := datapath.NewDataPath(agentConfig.Interface, runtimeMode, dpOpts...)
@@ -325,10 +314,10 @@ func runUp(cmd *cobra.Command, args []string) error {
 
 	// Initialize datapath (firewall, routing tables)
 	if err := dp.Init(); err != nil {
-		// On Linux, firewall init failure may indicate missing nftables
+		// On Linux, firewall init failure may indicate missing eBPF support
 		if runtime.GOOS == "linux" && !upNoFirewall {
 			fmt.Printf("Warning: firewall initialization failed: %v\n", err)
-			fmt.Println("Hint: Install nftables with: apt install nftables (or yum install nftables)")
+			fmt.Println("Hint: Ensure kernel supports eBPF (Linux 5.4+)")
 			fmt.Println("Or disable firewall with --no-firewall flag")
 		} else {
 			fmt.Printf("Warning: datapath initialization failed: %v\n", err)
@@ -1151,7 +1140,6 @@ func syncPeers(agentConfig *config.AgentConfig, storage *agentstorage.Storage, d
 	if err := json.NewDecoder(resp.Body).Decode(&syncResp); err != nil {
 		return fmt.Errorf("failed to decode sync response: %w", err)
 	}
-
 
 	// Convert to storage format and save to cache
 	var cachePeers []agentstorage.PeerConfig

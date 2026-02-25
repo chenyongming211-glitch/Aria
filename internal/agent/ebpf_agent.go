@@ -6,7 +6,6 @@ import (
 	"log"
 
 	firewall "aria/internal/agent/firewall"
-	"aria/internal/eBPF"
 )
 
 // EBPFAgent wraps the eBPF functionality for use in Aria's agent
@@ -31,7 +30,7 @@ func (e *EBPFAgent) Start(ctx context.Context) error {
 	log.Println("Starting eBPF firewall and QoS engine...")
 
 	// Load default policies
-	if err := e.adapter.LoadDefaultPolicies(); err != nil {
+	if err := e.adapter.ApplyDefaultPolicy(); err != nil {
 		log.Printf("Warning: Failed to load default policies: %v", err)
 	}
 
