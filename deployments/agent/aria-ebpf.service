@@ -1,0 +1,12 @@
+[Unit]
+Description=Aria eBPF Agent (QoS/ACL)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/root/agent-rust/target/release/aria-agent daemon -i eth0
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

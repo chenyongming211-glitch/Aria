@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result};
 use aya::{
+    include_bytes_aligned,
     programs::{tc, SchedClassifier, TcAttachType, Xdp, XdpFlags},
     Ebpf,
     EbpfLoader,
@@ -178,7 +179,7 @@ enum AclCommands {
         src_ip: Option<String>,
         #[arg(long)]
         dst_ip: Option<String>,
-        #[arg(long)]
+        #[arg(long, default_value = "0")]
         src_port: u16,
         #[arg(long)]
         dst_port: u16,
@@ -190,7 +191,7 @@ enum AclCommands {
         src_ip: Option<String>,
         #[arg(long)]
         dst_ip: Option<String>,
-        #[arg(long)]
+        #[arg(long, default_value = "0")]
         src_port: u16,
         #[arg(long)]
         dst_port: u16,
@@ -202,7 +203,7 @@ enum AclCommands {
         src_ip: Option<String>,
         #[arg(long)]
         dst_ip: Option<String>,
-        #[arg(long)]
+        #[arg(long, default_value = "0")]
         src_port: u16,
         #[arg(long)]
         dst_port: u16,
@@ -214,7 +215,7 @@ enum AclCommands {
         src_ip: Option<String>,
         #[arg(long)]
         dst_ip: Option<String>,
-        #[arg(long)]
+        #[arg(long, default_value = "0")]
         src_port: u16,
         #[arg(long)]
         dst_port: u16,
@@ -284,17 +285,16 @@ fn run_daemon(interface: &str, log_handle: LogLevelHandle) -> Result<()> {
     let acl_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/acl"));
     let qos_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/qos"));
 
-    // Load ACL program first - this will create identity maps
+    // Load ACL program first - this will create and auto-pin identity maps
     info!("Loading ACL eBPF program...");
-    let mut acl_ebpf = Ebpf::load(acl_bytes)?;
+    let mut acl_ebpf = EbpfLoader::new()
+        .map_pin_path(BPF_FS_PATH)
+        .load(acl_bytes)?;
     
     attach_xdp(&mut acl_ebpf, interface)?;
-    
-    // Pin identity maps so QoS program can share them
-    pin_identity_maps(&mut acl_ebpf)?;
-    info!("Pinned identity maps to {}", BPF_FS_PATH);
+    info!("Identity maps auto-pinned to {}", BPF_FS_PATH);
 
-    // Load QoS program with map pin path to reuse pinned identity maps
+    // Load QoS program with same map pin path to reuse pinned identity maps
     info!("Loading QoS eBPF program...");
     let mut qos_ebpf = EbpfLoader::new()
         .map_pin_path(BPF_FS_PATH)
@@ -680,10 +680,9 @@ fn process_request(
         "acl_allow" => {
             let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
             let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
-            let src_port = req.args["src_port"].as_u64().unwrap_or(0) as u16;
             let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
             let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
-            match get_acl_mgr(acl_mgr).allow(&src_ip, &dst_ip, src_port, dst_port, protocol) {
+            match get_acl_mgr(acl_mgr).allow(&src_ip, &dst_ip, dst_port, protocol) {
                 Ok(rule_id) => Response { success: true, message: Some(format!("Added allow rule {}", rule_id)), data: None },
                 Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
             }
@@ -691,10 +690,9 @@ fn process_request(
         "acl_deny" => {
             let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
             let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
-            let src_port = req.args["src_port"].as_u64().unwrap_or(0) as u16;
             let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
             let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
-            match get_acl_mgr(acl_mgr).deny(&src_ip, &dst_ip, src_port, dst_port, protocol) {
+            match get_acl_mgr(acl_mgr).deny(&src_ip, &dst_ip, dst_port, protocol) {
                 Ok(rule_id) => Response { success: true, message: Some(format!("Added deny rule {}", rule_id)), data: None },
                 Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
             }
@@ -702,10 +700,9 @@ fn process_request(
         "acl_remove_rule" => {
             let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
             let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
-            let src_port = req.args["src_port"].as_u64().unwrap_or(0) as u16;
             let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
             let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
-            match get_acl_mgr(acl_mgr).remove_rule(&src_ip, &dst_ip, src_port, dst_port, protocol) {
+            match get_acl_mgr(acl_mgr).remove_rule(&src_ip, &dst_ip, dst_port, protocol) {
                 Ok(_) => Response { success: true, message: Some("Removed rule".to_string()), data: None },
                 Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
             }
@@ -713,10 +710,9 @@ fn process_request(
         "acl_stats" => {
             let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
             let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
-            let src_port = req.args["src_port"].as_u64().unwrap_or(0) as u16;
             let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
             let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
-            match get_acl_mgr(acl_mgr).get_rule_stats(&src_ip, &dst_ip, src_port, dst_port, protocol) {
+            match get_acl_mgr(acl_mgr).get_rule_stats(&src_ip, &dst_ip, dst_port, protocol) {
                 Ok(Some(stats)) => Response { success: true, message: None, data: Some(serde_json::to_value(stats).unwrap()) },
                 Ok(None) => Response { success: true, message: Some("No stats found".to_string()), data: None },
                 Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
@@ -991,8 +987,8 @@ fn attach_tc(ebpf: &mut Ebpf, interface: &str) -> Result<()> {
     
     program.load()?;
     
-    let tc_builder = tc::_tc_qdisc_add_clsact(interface)?;
-    tc_builder.attach(program.id(), TcAttachType::Egress)?;
+    tc::qdisc_add_clsact(interface)?;
+    program.attach(interface, TcAttachType::Egress)?;
     
     info!("TC program attached to {} (egress)", interface);
     Ok(())

@@ -1,11 +1,10 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use aya::maps::LpmTrie as AyaLpmTrie;
 use aya::maps::MapData;
 use aya::maps::lpm_trie::Key;
-use aya::Pod;
 use aya::Ebpf;
 use thiserror::Error;
 
@@ -26,36 +25,6 @@ pub enum IdentityError {
     IdNotFound(u32),
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct Ipv4LpmKey {
-    pub prefixlen: u32,
-    pub ip: u32,
-}
-
-impl Default for Ipv4LpmKey {
-    fn default() -> Self {
-        Self { prefixlen: 0, ip: 0 }
-    }
-}
-
-unsafe impl Pod for Ipv4LpmKey {}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct Ipv6LpmKey {
-    pub prefixlen: u32,
-    pub ip: [u8; 16],
-}
-
-impl Default for Ipv6LpmKey {
-    fn default() -> Self {
-        Self { prefixlen: 0, ip: [0u8; 16] }
-    }
-}
-
-unsafe impl Pod for Ipv6LpmKey {}
-
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct CidrEntry {
     pub network: IpAddr,
@@ -63,32 +32,32 @@ pub struct CidrEntry {
 }
 
 pub struct IdentityManager {
-    src_ipv4_id_map: AyaLpmTrie<MapData, Ipv4LpmKey, u32>,
-    dst_ipv4_id_map: AyaLpmTrie<MapData, Ipv4LpmKey, u32>,
-    src_ipv6_id_map: AyaLpmTrie<MapData, Ipv6LpmKey, u32>,
-    dst_ipv6_id_map: AyaLpmTrie<MapData, Ipv6LpmKey, u32>,
+    src_ipv4_id_map: AyaLpmTrie<MapData, u32, u32>,
+    dst_ipv4_id_map: AyaLpmTrie<MapData, u32, u32>,
+    src_ipv6_id_map: AyaLpmTrie<MapData, [u8; 16], u32>,
+    dst_ipv6_id_map: AyaLpmTrie<MapData, [u8; 16], u32>,
     cidr_to_id: HashMap<CidrEntry, u32>,
     id_to_cidr: HashMap<u32, CidrEntry>,
 }
 
 impl IdentityManager {
     pub fn new(ebpf: &mut Ebpf) -> Result<Self, IdentityError> {
-        let src_ipv4_id_map: AyaLpmTrie<_, Ipv4LpmKey, u32> = ebpf
+        let src_ipv4_id_map: AyaLpmTrie<_, u32, u32> = ebpf
             .take_map("SRC_IPV4_ID_MAP")
             .ok_or_else(|| IdentityError::MapNotFound("SRC_IPV4_ID_MAP".to_string()))?
             .try_into()?;
 
-        let dst_ipv4_id_map: AyaLpmTrie<_, Ipv4LpmKey, u32> = ebpf
+        let dst_ipv4_id_map: AyaLpmTrie<_, u32, u32> = ebpf
             .take_map("DST_IPV4_ID_MAP")
             .ok_or_else(|| IdentityError::MapNotFound("DST_IPV4_ID_MAP".to_string()))?
             .try_into()?;
 
-        let src_ipv6_id_map: AyaLpmTrie<_, Ipv6LpmKey, u32> = ebpf
+        let src_ipv6_id_map: AyaLpmTrie<_, [u8; 16], u32> = ebpf
             .take_map("SRC_IPV6_ID_MAP")
             .ok_or_else(|| IdentityError::MapNotFound("SRC_IPV6_ID_MAP".to_string()))?
             .try_into()?;
 
-        let dst_ipv6_id_map: AyaLpmTrie<_, Ipv6LpmKey, u32> = ebpf
+        let dst_ipv6_id_map: AyaLpmTrie<_, [u8; 16], u32> = ebpf
             .take_map("DST_IPV6_ID_MAP")
             .ok_or_else(|| IdentityError::MapNotFound("DST_IPV6_ID_MAP".to_string()))?
             .try_into()?;
@@ -114,22 +83,16 @@ impl IdentityManager {
         
         match entry.network {
             IpAddr::V4(ipv4) => {
-                let key = Ipv4LpmKey {
-                    prefixlen: entry.prefix_len as u32,
-                    ip: u32::from_be_bytes(ipv4.octets()),
-                };
-                let lpm_key = Key::new(entry.prefix_len as u32, key);
-                self.src_ipv4_id_map.insert(&lpm_key, id, 0)?;
-                self.dst_ipv4_id_map.insert(&lpm_key, id, 0)?;
+                let ip = u32::from_be_bytes(ipv4.octets());
+                let key = Key::new(entry.prefix_len as u32, ip);
+                self.src_ipv4_id_map.insert(&key, id, 0)?;
+                self.dst_ipv4_id_map.insert(&key, id, 0)?;
             }
             IpAddr::V6(ipv6) => {
-                let key = Ipv6LpmKey {
-                    prefixlen: entry.prefix_len as u32,
-                    ip: ipv6.octets(),
-                };
-                let lpm_key = Key::new(entry.prefix_len as u32, key);
-                self.src_ipv6_id_map.insert(&lpm_key, id, 0)?;
-                self.dst_ipv6_id_map.insert(&lpm_key, id, 0)?;
+                let ip = ipv6.octets();
+                let key = Key::new(entry.prefix_len as u32, ip);
+                self.src_ipv6_id_map.insert(&key, id, 0)?;
+                self.dst_ipv6_id_map.insert(&key, id, 0)?;
             }
         }
 
@@ -145,22 +108,16 @@ impl IdentityManager {
 
         match entry.network {
             IpAddr::V4(ipv4) => {
-                let key = Ipv4LpmKey {
-                    prefixlen: entry.prefix_len as u32,
-                    ip: u32::from_be_bytes(ipv4.octets()),
-                };
-                let lpm_key = Key::new(entry.prefix_len as u32, key);
-                let _ = self.src_ipv4_id_map.remove(&lpm_key);
-                let _ = self.dst_ipv4_id_map.remove(&lpm_key);
+                let ip = u32::from_be_bytes(ipv4.octets());
+                let key = Key::new(entry.prefix_len as u32, ip);
+                let _ = self.src_ipv4_id_map.remove(&key);
+                let _ = self.dst_ipv4_id_map.remove(&key);
             }
             IpAddr::V6(ipv6) => {
-                let key = Ipv6LpmKey {
-                    prefixlen: entry.prefix_len as u32,
-                    ip: ipv6.octets(),
-                };
-                let lpm_key = Key::new(entry.prefix_len as u32, key);
-                let _ = self.src_ipv6_id_map.remove(&lpm_key);
-                let _ = self.dst_ipv6_id_map.remove(&lpm_key);
+                let ip = ipv6.octets();
+                let key = Key::new(entry.prefix_len as u32, ip);
+                let _ = self.src_ipv6_id_map.remove(&key);
+                let _ = self.dst_ipv6_id_map.remove(&key);
             }
         }
 

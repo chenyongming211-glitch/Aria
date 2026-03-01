@@ -113,7 +113,7 @@ fn try_tc_egress_qos(ctx: TcContext) -> Result<i32, u64> {
     if let Some(bucket) = unsafe { SERVICE_QOS_MAP.get(&service_key) } {
         let bucket = *bucket;
         let (new_bucket, pass) = update_bucket(&bucket, pkt_len);
-        let _ = unsafe { SERVICE_QOS_MAP.insert(&service_key, &new_bucket, 0) };
+        let _ = SERVICE_QOS_MAP.insert(&service_key, &new_bucket, 0);
         return Ok(if pass { TC_ACT_OK } else { TC_ACT_SHOT });
     }
 
@@ -121,7 +121,7 @@ fn try_tc_egress_qos(ctx: TcContext) -> Result<i32, u64> {
     if let Some(bucket) = unsafe { PAIR_ID_QOS_MAP.get(&pair_key) } {
         let bucket = *bucket;
         let (new_bucket, pass) = update_bucket(&bucket, pkt_len);
-        let _ = unsafe { PAIR_ID_QOS_MAP.insert(&pair_key, &new_bucket, 0) };
+        let _ = PAIR_ID_QOS_MAP.insert(&pair_key, &new_bucket, 0);
         return Ok(if pass { TC_ACT_OK } else { TC_ACT_SHOT });
     }
 
@@ -129,7 +129,7 @@ fn try_tc_egress_qos(ctx: TcContext) -> Result<i32, u64> {
         if let Some(bucket) = unsafe { SRC_ID_QOS_MAP.get(&src_id) } {
             let bucket = *bucket;
             let (new_bucket, pass) = update_bucket(&bucket, pkt_len);
-            let _ = unsafe { SRC_ID_QOS_MAP.insert(&src_id, &new_bucket, 0) };
+            let _ = SRC_ID_QOS_MAP.insert(&src_id, &new_bucket, 0);
             return Ok(if pass { TC_ACT_OK } else { TC_ACT_SHOT });
         }
     }

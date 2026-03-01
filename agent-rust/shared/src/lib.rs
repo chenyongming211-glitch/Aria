@@ -1,5 +1,3 @@
-#![no_std]
-
 pub const BPF_PIN_PATH: &str = "/sys/fs/bpf";
 
 pub const TC_ACT_OK: u32 = 0;

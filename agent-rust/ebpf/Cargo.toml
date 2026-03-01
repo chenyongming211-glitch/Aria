@@ -5,7 +5,6 @@ edition.workspace = true
 
 [dependencies]
 aya-ebpf = { version = "0.1" }
-aya-log-ebpf = "0.1"
 network-types = "0.1"
 
 [build-dependencies]
@@ -18,9 +17,3 @@ path = "src/qos.rs"
 [[bin]]
 name = "acl"
 path = "src/acl.rs"
-
-[profile.dev]
-panic = "abort"
-
-[profile.release]
-panic = "abort"

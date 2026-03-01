@@ -259,9 +259,12 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// Enable firewall based on selected mode
 	if upNoFirewall {
 		fmt.Println("Firewall: disabled (--no-firewall flag set)")
+	} else if runtime.GOOS == "linux" {
+		// Use Rust eBPF agent via Unix socket
+		dpOpts = append(dpOpts, datapath.WithFirewallManager(datapath.NewEbpfFirewallManager()))
+		fmt.Println("Firewall: enabled (via Rust eBPF agent)")
 	} else {
-		// Note: Go eBPF implementation has been removed, use Rust version instead
-		fmt.Println("Firewall: disabled (Go eBPF removed, use Rust version)")
+		fmt.Println("Firewall: disabled (only supported on Linux)")
 	}
 
 	dp, err := datapath.NewDataPath(agentConfig.Interface, runtimeMode, dpOpts...)

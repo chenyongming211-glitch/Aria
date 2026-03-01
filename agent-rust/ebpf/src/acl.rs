@@ -18,7 +18,6 @@ const XDP_DROP: u32 = 1;
 const ETH_P_IP: u16 = 0x0800;
 const ETH_P_IPV6: u16 = 0x86DD;
 
-const ACTION_DROP: u32 = 0;
 const ACTION_PASS: u32 = 1;
 
 const ID_WILDCARD: u32 = 0;
@@ -234,7 +233,7 @@ fn update_policy_stats(key: &PolicyKey, policy: &PolicyValue, pkt_len: u64) {
         bytes: policy.bytes.wrapping_add(pkt_len),
         packets: policy.packets.wrapping_add(1),
     };
-    let _ = unsafe { POLICY_MAP.insert(key, &new_policy, 0) };
+    let _ = POLICY_MAP.insert(key, &new_policy, 0);
 }
 
 #[inline(always)]

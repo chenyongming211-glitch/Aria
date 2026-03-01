@@ -24,7 +24,7 @@ pub enum QoSError {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, serde::Serialize)]
 pub struct BucketState {
     pub rate_bytes_per_sec: u64,
     pub burst_bytes: u64,
