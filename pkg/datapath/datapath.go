@@ -1,9 +1,5 @@
 package datapath
 
-import (
-	"log"
-)
-
 // DataPath provides a unified interface to all data plane managers.
 type DataPath struct {
 	// Tunnel manages WireGuard tunnels and peers.
@@ -74,19 +70,6 @@ func WithFirewallManager(fw FirewallManager) Option {
 func WithHAManager(ha HAManager) Option {
 	return func(dp *DataPath) {
 		dp.HA = ha
-	}
-}
-
-// WithEBPFFirewall enables the eBPF-based firewall manager.
-// Only available on Linux with kernel 5.4+. On other platforms, this is a no-op.
-func WithEBPFFirewall() Option {
-	return func(dp *DataPath) {
-		fw, err := NewEBPFFirewallManager()
-		if err != nil {
-			log.Printf("Warning: failed to create eBPF firewall: %v", err)
-			return
-		}
-		dp.Firewall = fw
 	}
 }
 

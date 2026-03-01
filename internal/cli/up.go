@@ -31,8 +31,6 @@ import (
 	"aria/pkg/route"
 	"aria/pkg/rpc"
 	"aria/pkg/wgmanager"
-
-	firewall_ebpf "aria/internal/agent/firewall"
 )
 
 var upCmd = &cobra.Command{
@@ -74,9 +72,6 @@ var (
 	upNoFirewall      bool // Disable firewall (emergency escape hatch)
 	upMultiTunnel     bool // Enable multi-tunnel mode
 	upTunnelCount     int  // Number of tunnels (0=default 4)
-	upEBPFEnabled     bool // Enable eBPF-based firewall/QoS
-	upEBPFAclOnly     bool // Enable only eBPF ACL (skip QoS)
-	upEBPFQoSONly     bool // Enable only eBPF QoS (skip ACL)
 )
 
 func init() {
@@ -92,11 +87,6 @@ func init() {
 	upCmd.Flags().BoolVar(&upNoFirewall, "no-firewall", false, "Disable firewall/ACL (use only for troubleshooting)")
 	upCmd.Flags().BoolVar(&upMultiTunnel, "multi-tunnel", false, "Enable multi-tunnel mode for higher throughput")
 	upCmd.Flags().IntVar(&upTunnelCount, "tunnel-count", 0, "Number of tunnels (0=default 4, range: 1-8)")
-
-	// eBPF flags
-	upCmd.Flags().BoolVar(&upEBPFEnabled, "ebpf", false, "Enable eBPF-based firewall/QoS")
-	upCmd.Flags().BoolVar(&upEBPFAclOnly, "ebpf-acl", false, "Enable only eBPF ACL (skip QoS)")
-	upCmd.Flags().BoolVar(&upEBPFQoSONly, "ebpf-qos", false, "Enable only eBPF QoS (skip ACL)")
 }
 
 type upRegisterRequest struct {
@@ -267,44 +257,11 @@ func runUp(cmd *cobra.Command, args []string) error {
 	var dpOpts []datapath.Option
 
 	// Enable firewall based on selected mode
-	useEBPF := upEBPFEnabled || upEBPFAclOnly || upEBPFQoSONly
-
-	if useEBPF {
-		// Initialize eBPF firewall/QoS
-		fmt.Println("Initializing eBPF firewall/QoS...")
-
-		ebpfAdapter, err := firewall_ebpf.NewEBPFAdapter()
-		if err != nil {
-			return fmt.Errorf("failed to initialize eBPF adapter: %w", err)
-		}
-		defer func() {
-			if ebpfAdapter != nil {
-				ebpfAdapter.Close()
-			}
-		}()
-
-		// Configure based on selected components
-		if upEBPFEnabled || upEBPFAclOnly {
-			fmt.Println("  eBPF ACL: enabled")
-		}
-		if upEBPFEnabled || upEBPFQoSONly {
-			fmt.Println("  eBPF QoS: enabled")
-		}
-
-		fmt.Printf("  eBPF enabled with options: all=%v, acl_only=%v, qos_only=%v\n", upEBPFEnabled, upEBPFAclOnly, upEBPFQoSONly)
-
-		// Add eBPF firewall to datapath options
-		dpOpts = append(dpOpts, datapath.WithEBPFFirewall())
-	} else if upNoFirewall {
+	if upNoFirewall {
 		fmt.Println("Firewall: disabled (--no-firewall flag set)")
 	} else {
-		// Default: use eBPF firewall on Linux
-		if runtime.GOOS == "linux" {
-			dpOpts = append(dpOpts, datapath.WithEBPFFirewall())
-			fmt.Println("Firewall: enabled (eBPF-based)")
-		} else {
-			fmt.Println("Firewall: disabled (not supported on this platform)")
-		}
+		// Note: Go eBPF implementation has been removed, use Rust version instead
+		fmt.Println("Firewall: disabled (Go eBPF removed, use Rust version)")
 	}
 
 	dp, err := datapath.NewDataPath(agentConfig.Interface, runtimeMode, dpOpts...)

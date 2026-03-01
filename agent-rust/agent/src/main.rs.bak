@@ -1,0 +1,999 @@
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::io::{BufReader, BufWriter, BufRead, Write};
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use anyhow::{Context, Result};
+use aya::{
+    programs::{tc, SchedClassifier, TcAttachType, Xdp, XdpFlags},
+    Ebpf,
+    EbpfLoader,
+};
+use clap::{Parser, Subcommand};
+use serde::{Deserialize, Serialize};
+use tracing::{info, error, warn};
+use tracing_subscriber::{
+    layer::SubscriberExt,
+    util::SubscriberInitExt,
+    EnvFilter,
+    Registry,
+    reload,
+    fmt,
+};
+
+mod acl;
+mod qos;
+mod identity;
+
+const SOCKET_PATH: &str = "/run/aria-agent.sock";
+const BPF_FS_PATH: &str = "/sys/fs/bpf/aria";
+
+static RUNNING: AtomicBool = AtomicBool::new(true);
+
+type LogLevelHandle = Arc<Mutex<Option<reload::Handle<EnvFilter, Registry>>>>;
+
+#[derive(Parser)]
+#[command(name = "aria-agent")]
+#[command(about = "Aria Agent - eBPF-based QoS and ACL", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Daemon {
+        #[arg(short, long)]
+        interface: String,
+        #[arg(short = 'l', long, default_value = "info")]
+        log_level: String,
+    },
+    Qos {
+        #[command(subcommand)]
+        cmd: QosCommands,
+    },
+    Acl {
+        #[command(subcommand)]
+        cmd: AclCommands,
+    },
+    Log {
+        #[arg(short, long)]
+        level: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum QosCommands {
+    LimitIp {
+        #[arg(short, long)]
+        ip: String,
+        #[arg(short = 'b', long)]
+        mbps: u64,
+    },
+    LimitPeer {
+        #[arg(long)]
+        src_ip: String,
+        #[arg(long)]
+        dst_ip: String,
+        #[arg(short = 'b', long)]
+        mbps: u64,
+    },
+    LimitPort {
+        #[arg(short, long)]
+        port: u16,
+        #[arg(short = 'b', long)]
+        mbps: u64,
+        #[arg(long, default_value = "0")]
+        protocol: u8,
+    },
+    LimitService {
+        #[arg(long)]
+        src_ip: Option<String>,
+        #[arg(long)]
+        dst_ip: Option<String>,
+        #[arg(long)]
+        src_port: u16,
+        #[arg(long)]
+        dst_port: u16,
+        #[arg(long, default_value = "6")]
+        protocol: u8,
+        #[arg(short = 'b', long)]
+        mbps: u64,
+    },
+    RemoveIp {
+        #[arg(short, long)]
+        ip: String,
+    },
+    RemovePeer {
+        #[arg(long)]
+        src_ip: String,
+        #[arg(long)]
+        dst_ip: String,
+    },
+    RemoveService {
+        #[arg(long)]
+        src_ip: Option<String>,
+        #[arg(long)]
+        dst_ip: Option<String>,
+        #[arg(long)]
+        src_port: u16,
+        #[arg(long)]
+        dst_port: u16,
+        #[arg(long, default_value = "6")]
+        protocol: u8,
+    },
+    StatsIp {
+        #[arg(short, long)]
+        ip: String,
+    },
+    StatsPeer {
+        #[arg(long)]
+        src_ip: String,
+        #[arg(long)]
+        dst_ip: String,
+    },
+    StatsService {
+        #[arg(long)]
+        src_ip: Option<String>,
+        #[arg(long)]
+        dst_ip: Option<String>,
+        #[arg(long)]
+        src_port: u16,
+        #[arg(long)]
+        dst_port: u16,
+        #[arg(long, default_value = "6")]
+        protocol: u8,
+    },
+}
+
+#[derive(Subcommand)]
+enum AclCommands {
+    BlockSrcIp {
+        #[arg(short, long)]
+        ip: String,
+    },
+    UnblockSrcIp {
+        #[arg(short, long)]
+        ip: String,
+    },
+    BlockDstIp {
+        #[arg(short, long)]
+        ip: String,
+    },
+    UnblockDstIp {
+        #[arg(short, long)]
+        ip: String,
+    },
+    BlockPort {
+        #[arg(short, long)]
+        port: u16,
+    },
+    UnblockPort {
+        #[arg(short, long)]
+        port: u16,
+    },
+    Allow {
+        #[arg(long)]
+        src_ip: Option<String>,
+        #[arg(long)]
+        dst_ip: Option<String>,
+        #[arg(long)]
+        src_port: u16,
+        #[arg(long)]
+        dst_port: u16,
+        #[arg(long, default_value = "6")]
+        protocol: u8,
+    },
+    Deny {
+        #[arg(long)]
+        src_ip: Option<String>,
+        #[arg(long)]
+        dst_ip: Option<String>,
+        #[arg(long)]
+        src_port: u16,
+        #[arg(long)]
+        dst_port: u16,
+        #[arg(long, default_value = "6")]
+        protocol: u8,
+    },
+    RemoveRule {
+        #[arg(long)]
+        src_ip: Option<String>,
+        #[arg(long)]
+        dst_ip: Option<String>,
+        #[arg(long)]
+        src_port: u16,
+        #[arg(long)]
+        dst_port: u16,
+        #[arg(long, default_value = "6")]
+        protocol: u8,
+    },
+    Stats {
+        #[arg(long)]
+        src_ip: Option<String>,
+        #[arg(long)]
+        dst_ip: Option<String>,
+        #[arg(long)]
+        src_port: u16,
+        #[arg(long)]
+        dst_port: u16,
+        #[arg(long, default_value = "6")]
+        protocol: u8,
+    },
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Request {
+    cmd: String,
+    args: serde_json::Value,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Response {
+    success: bool,
+    message: Option<String>,
+    data: Option<serde_json::Value>,
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::Daemon { interface, log_level } => {
+            let log_handle = init_logging(&log_level)?;
+            run_daemon(&interface, log_handle)?
+        },
+        Commands::Qos { cmd } => send_qos_command(cmd)?,
+        Commands::Acl { cmd } => send_acl_command(cmd)?,
+        Commands::Log { level } => send_log_command(&level)?,
+    }
+
+    Ok(())
+}
+
+fn init_logging(level: &str) -> Result<LogLevelHandle> {
+    let filter = EnvFilter::try_new(level)
+        .context("Invalid log level")?;
+    
+    let (filter_layer, reload_handle) = reload::Layer::new(filter);
+    let fmt_layer = fmt::layer();
+
+    Registry::default()
+        .with(filter_layer)
+        .with(fmt_layer)
+        .try_init()
+        .context("Failed to initialize logging")?;
+    
+    let handle = Arc::new(Mutex::new(Some(reload_handle)));
+    info!("Initialized logging with level: {}", level);
+    
+    Ok(handle)
+}
+
+fn run_daemon(interface: &str, log_handle: LogLevelHandle) -> Result<()> {
+    info!("Starting Aria Agent daemon on interface: {}", interface);
+
+    // Create bpffs directory for map pinning
+    if !Path::new(BPF_FS_PATH).exists() {
+        std::fs::create_dir_all(BPF_FS_PATH)
+            .context("Failed to create bpffs directory")?;
+        info!("Created bpffs directory: {}", BPF_FS_PATH);
+    }
+
+    let acl_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/acl"));
+    let qos_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/qos"));
+
+    // Load ACL program first - this will create identity maps
+    info!("Loading ACL eBPF program...");
+    let mut acl_ebpf = Ebpf::load(acl_bytes)?;
+    
+    attach_xdp(&mut acl_ebpf, interface)?;
+    
+    // Pin identity maps so QoS program can share them
+    pin_identity_maps(&mut acl_ebpf)?;
+    info!("Pinned identity maps to {}", BPF_FS_PATH);
+
+    // Load QoS program with map pin path to reuse pinned identity maps
+    info!("Loading QoS eBPF program...");
+    let mut qos_ebpf = EbpfLoader::new()
+        .map_pin_path(BPF_FS_PATH)
+        .load(qos_bytes)
+        .context("Failed to load QoS eBPF program")?;
+    
+    attach_tc(&mut qos_ebpf, interface)?;
+
+    // Initialize IdentityManager with ACL's maps
+    let identity_mgr = identity::IdentityManager::new(&mut acl_ebpf)?;
+    let identity_mgr = Arc::new(Mutex::new(identity_mgr));
+
+    // Initialize managers with shared identity maps
+    let acl_mgr = acl::AclManager::new(&mut acl_ebpf, identity_mgr.clone())?;
+    let qos_mgr = qos::QoSManager::new(&mut qos_ebpf, identity_mgr.clone())?;
+
+    let qos_mgr = Arc::new(Mutex::new(qos_mgr));
+    let acl_mgr = Arc::new(Mutex::new(acl_mgr));
+
+    if Path::new(SOCKET_PATH).exists() {
+        std::fs::remove_file(SOCKET_PATH)?;
+    }
+
+    let listener = UnixListener::bind(SOCKET_PATH)?;
+    info!("Listening on {}", SOCKET_PATH);
+
+    setup_signal_handlers();
+
+    listener.set_nonblocking(true)?;
+
+    while RUNNING.load(Ordering::SeqCst) {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                let qos_mgr = qos_mgr.clone();
+                let acl_mgr = acl_mgr.clone();
+                let log_handle = log_handle.clone();
+                std::thread::spawn(move || {
+                    if let Err(e) = handle_client(stream, qos_mgr, acl_mgr, log_handle) {
+                        error!("Error handling client: {}", e);
+                    }
+                });
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => {
+                error!("Error accepting connection: {}", e);
+            }
+        }
+    }
+
+    info!("Shutting down daemon...");
+    
+    // Cleanup pinned maps
+    if let Err(e) = cleanup_pinned_maps() {
+        error!("Failed to cleanup pinned maps: {}", e);
+    }
+    
+    if Path::new(SOCKET_PATH).exists() {
+        std::fs::remove_file(SOCKET_PATH)?;
+    }
+    info!("Daemon stopped");
+
+    Ok(())
+}
+
+fn setup_signal_handlers() {
+    #[cfg(unix)]
+    {
+        ctrlc::set_handler(move || {
+            info!("Received shutdown signal");
+            RUNNING.store(false, Ordering::SeqCst);
+            // Cleanup will be handled by the main loop exit
+        }).expect("Error setting Ctrl-C handler");
+    }
+}
+
+fn pin_identity_maps(ebpf: &mut Ebpf) -> Result<()> {
+    let map_names = [
+        "SRC_IPV4_ID_MAP",
+        "DST_IPV4_ID_MAP",
+        "SRC_IPV6_ID_MAP",
+        "DST_IPV6_ID_MAP",
+    ];
+
+    for map_name in map_names {
+        let map = ebpf
+            .map_mut(map_name)
+            .context(format!("Map {} not found", map_name))?;
+        
+        let pin_path = format!("{}/{}", BPF_FS_PATH, map_name);
+        
+        // Remove existing pin if present
+        if Path::new(&pin_path).exists() {
+            std::fs::remove_file(&pin_path)
+                .context(format!("Failed to remove existing pin: {}", pin_path))?;
+            info!("Removed existing pin: {}", pin_path);
+        }
+        
+        // Pin the map
+        map.pin(&pin_path)
+            .context(format!("Failed to pin map {}", map_name))?;
+        
+        info!("Pinned {} to {}", map_name, pin_path);
+    }
+
+    Ok(())
+}
+
+fn cleanup_pinned_maps() -> Result<()> {
+    let map_names = [
+        "SRC_IPV4_ID_MAP",
+        "DST_IPV4_ID_MAP",
+        "SRC_IPV6_ID_MAP",
+        "DST_IPV6_ID_MAP",
+    ];
+
+    let mut cleaned_count = 0;
+    
+    for map_name in map_names {
+        let pin_path = format!("{}/{}", BPF_FS_PATH, map_name);
+        if Path::new(&pin_path).exists() {
+            match std::fs::remove_file(&pin_path) {
+                Ok(_) => {
+                    info!("Removed pinned map: {}", pin_path);
+                    cleaned_count += 1;
+                }
+                Err(e) => {
+                    warn!("Failed to remove pinned map {}: {}", pin_path, e);
+                }
+            }
+        }
+    }
+
+    // Try to remove directory if empty (ignore errors)
+    if Path::new(BPF_FS_PATH).exists() {
+        if let Ok(entries) = std::fs::read_dir(BPF_FS_PATH) {
+            if entries.count() == 0 {
+                match std::fs::remove_dir(BPF_FS_PATH) {
+                    Ok(_) => info!("Removed bpffs directory: {}", BPF_FS_PATH),
+                    Err(e) => warn!("Failed to remove bpffs directory: {}", e),
+                }
+            }
+        }
+    }
+
+    if cleaned_count > 0 {
+        info!("Cleaned up {} pinned maps", cleaned_count);
+    }
+
+    Ok(())
+}
+
+fn handle_client(
+    stream: UnixStream,
+    qos_mgr: Arc<Mutex<qos::QoSManager>>,
+    acl_mgr: Arc<Mutex<acl::AclManager>>,
+    log_handle: LogLevelHandle,
+) -> Result<()> {
+    let reader = BufReader::new(&stream);
+    let mut writer = BufWriter::new(&stream);
+
+    for line in reader.lines() {
+        let line = line?;
+        if line.is_empty() {
+            continue;
+        }
+        
+        let req: Request = match serde_json::from_str(&line) {
+            Ok(r) => r,
+            Err(e) => {
+                let resp = Response {
+                    success: false,
+                    message: Some(format!("Invalid request: {}", e)),
+                    data: None,
+                };
+                let resp_json = serde_json::to_string(&resp)?;
+                writer.write_all(resp_json.as_bytes())?;
+                writer.write_all(b"\n")?;
+                writer.flush()?;
+                continue;
+            }
+        };
+        
+        let resp = process_request(req, &qos_mgr, &acl_mgr, &log_handle);
+        
+        let resp_json = serde_json::to_string(&resp)?;
+        writer.write_all(resp_json.as_bytes())?;
+        writer.write_all(b"\n")?;
+        writer.flush()?;
+    }
+
+    Ok(())
+}
+
+fn get_qos_mgr(
+    qos_mgr: &Arc<Mutex<qos::QoSManager>>,
+) -> std::sync::MutexGuard<qos::QoSManager> {
+    qos_mgr.lock().unwrap_or_else(|e| {
+        warn!("QoS manager mutex poisoned, recovering: {}", e);
+        e.into_inner()
+    })
+}
+
+fn get_acl_mgr(
+    acl_mgr: &Arc<Mutex<acl::AclManager>>,
+) -> std::sync::MutexGuard<acl::AclManager> {
+    acl_mgr.lock().unwrap_or_else(|e| {
+        warn!("ACL manager mutex poisoned, recovering: {}", e);
+        e.into_inner()
+    })
+}
+
+fn set_log_level(log_handle: &LogLevelHandle, level: &str) -> Result<()> {
+    let new_filter = EnvFilter::try_new(level)
+        .context("Invalid log level")?;
+    
+    let handle = log_handle.lock()
+        .map_err(|_| anyhow::anyhow!("Failed to lock log handle"))?;
+    
+    if let Some(ref reload_handle) = *handle {
+        reload_handle.reload(new_filter)
+            .context("Failed to reload log filter")?;
+        info!("Log level changed to: {}", level);
+    }
+    
+    Ok(())
+}
+
+fn get_current_log_level() -> String {
+    // tracing doesn't provide a direct way to query the current dynamic level
+    // The reload handle doesn't expose the current filter
+    // Return "dynamic" to indicate dynamic filtering is active
+    "dynamic".to_string()
+}
+
+fn process_request(
+    req: Request,
+    qos_mgr: &Arc<Mutex<qos::QoSManager>>,
+    acl_mgr: &Arc<Mutex<acl::AclManager>>,
+    log_handle: &LogLevelHandle,
+) -> Response {
+    match req.cmd.as_str() {
+        "qos_limit_ip" => {
+            let ip = req.args["ip"].as_str().unwrap_or("").to_string();
+            let mbps = req.args["mbps"].as_u64().unwrap_or(0);
+            match get_qos_mgr(qos_mgr).limit_ip(&ip, mbps) {
+                Ok(_) => Response { success: true, message: Some(format!("Limited {} to {} Mbps", ip, mbps)), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "qos_limit_peer" => {
+            let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
+            let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
+            let mbps = req.args["mbps"].as_u64().unwrap_or(0);
+            if src_ip.is_empty() {
+                Response { success: false, message: Some("src_ip is required for peer limit (use limit-ip for single IP)".to_string()), data: None }
+            } else {
+                match get_qos_mgr(qos_mgr).limit_peer_pair(&src_ip, &dst_ip, mbps) {
+                    Ok(_) => Response { success: true, message: Some(format!("Limited {} -> {} to {} Mbps", src_ip, dst_ip, mbps)), data: None },
+                    Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+                }
+            }
+        }
+        "qos_limit_port" => {
+            let port = req.args["port"].as_u64().unwrap_or(0) as u16;
+            let mbps = req.args["mbps"].as_u64().unwrap_or(0);
+            let protocol = req.args["protocol"].as_u64().unwrap_or(0) as u8;
+            match get_qos_mgr(qos_mgr).limit_port(port, mbps, protocol) {
+                Ok(_) => Response { success: true, message: Some(format!("Limited port {} to {} Mbps (protocol {})", port, mbps, protocol)), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "qos_limit_service" => {
+            let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
+            let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
+            let src_port = req.args["src_port"].as_u64().unwrap_or(0) as u16;
+            let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
+            let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
+            let mbps = req.args["mbps"].as_u64().unwrap_or(0);
+            match get_qos_mgr(qos_mgr).limit_service(&src_ip, &dst_ip, src_port, dst_port, protocol, mbps) {
+                Ok(_) => Response { success: true, message: Some(format!("Limited service to {} Mbps", mbps)), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "qos_remove_ip" => {
+            let ip = req.args["ip"].as_str().unwrap_or("").to_string();
+            match get_qos_mgr(qos_mgr).remove_ip_limit(&ip) {
+                Ok(_) => Response { success: true, message: Some(format!("Removed limit for {}", ip)), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "qos_remove_peer" => {
+            let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
+            let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
+            match get_qos_mgr(qos_mgr).remove_peer_limit(&src_ip, &dst_ip) {
+                Ok(_) => Response { success: true, message: Some(format!("Removed peer limit {} -> {}", src_ip, dst_ip)), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "qos_remove_service" => {
+            let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
+            let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
+            let src_port = req.args["src_port"].as_u64().unwrap_or(0) as u16;
+            let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
+            let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
+            match get_qos_mgr(qos_mgr).remove_service_limit(&src_ip, &dst_ip, src_port, dst_port, protocol) {
+                Ok(_) => Response { success: true, message: Some("Removed service limit".to_string()), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "qos_stats_ip" => {
+            let ip = req.args["ip"].as_str().unwrap_or("").to_string();
+            match get_qos_mgr(qos_mgr).get_ip_stats(&ip) {
+                Ok(Some(stats)) => Response { success: true, message: None, data: Some(serde_json::to_value(stats).unwrap()) },
+                Ok(None) => Response { success: true, message: Some("No stats found".to_string()), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "qos_stats_peer" => {
+            let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
+            let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
+            match get_qos_mgr(qos_mgr).get_peer_stats(&src_ip, &dst_ip) {
+                Ok(Some(stats)) => Response { success: true, message: None, data: Some(serde_json::to_value(stats).unwrap()) },
+                Ok(None) => Response { success: true, message: Some("No stats found".to_string()), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "qos_stats_service" => {
+            let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
+            let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
+            let src_port = req.args["src_port"].as_u64().unwrap_or(0) as u16;
+            let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
+            let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
+            match get_qos_mgr(qos_mgr).get_service_stats(&src_ip, &dst_ip, src_port, dst_port, protocol) {
+                Ok(Some(stats)) => Response { success: true, message: None, data: Some(serde_json::to_value(stats).unwrap()) },
+                Ok(None) => Response { success: true, message: Some("No stats found".to_string()), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "acl_block_src_ip" => {
+            let ip = req.args["ip"].as_str().unwrap_or("").to_string();
+            match get_acl_mgr(acl_mgr).block_src_ip(&ip) {
+                Ok(_) => Response { success: true, message: Some(format!("Blocked source IP {}", ip)), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "acl_block_dst_ip" => {
+            let ip = req.args["ip"].as_str().unwrap_or("").to_string();
+            match get_acl_mgr(acl_mgr).block_dst_ip(&ip) {
+                Ok(_) => Response { success: true, message: Some(format!("Blocked destination IP {}", ip)), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "acl_unblock_src_ip" => {
+            let ip = req.args["ip"].as_str().unwrap_or("").to_string();
+            match get_acl_mgr(acl_mgr).unblock_src_ip(&ip) {
+                Ok(_) => Response { success: true, message: Some(format!("Unblocked source IP {}", ip)), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "acl_unblock_dst_ip" => {
+            let ip = req.args["ip"].as_str().unwrap_or("").to_string();
+            match get_acl_mgr(acl_mgr).unblock_dst_ip(&ip) {
+                Ok(_) => Response { success: true, message: Some(format!("Unblocked destination IP {}", ip)), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "acl_block_port" => {
+            let port = req.args["port"].as_u64().unwrap_or(0) as u16;
+            match get_acl_mgr(acl_mgr).block_port(port) {
+                Ok(_) => Response { success: true, message: Some(format!("Blocked port {}", port)), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "acl_unblock_port" => {
+            let port = req.args["port"].as_u64().unwrap_or(0) as u16;
+            match get_acl_mgr(acl_mgr).unblock_port(port) {
+                Ok(_) => Response { success: true, message: Some(format!("Unblocked port {}", port)), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "acl_allow" => {
+            let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
+            let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
+            let src_port = req.args["src_port"].as_u64().unwrap_or(0) as u16;
+            let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
+            let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
+            match get_acl_mgr(acl_mgr).allow(&src_ip, &dst_ip, src_port, dst_port, protocol) {
+                Ok(rule_id) => Response { success: true, message: Some(format!("Added allow rule {}", rule_id)), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "acl_deny" => {
+            let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
+            let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
+            let src_port = req.args["src_port"].as_u64().unwrap_or(0) as u16;
+            let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
+            let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
+            match get_acl_mgr(acl_mgr).deny(&src_ip, &dst_ip, src_port, dst_port, protocol) {
+                Ok(rule_id) => Response { success: true, message: Some(format!("Added deny rule {}", rule_id)), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "acl_remove_rule" => {
+            let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
+            let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
+            let src_port = req.args["src_port"].as_u64().unwrap_or(0) as u16;
+            let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
+            let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
+            match get_acl_mgr(acl_mgr).remove_rule(&src_ip, &dst_ip, src_port, dst_port, protocol) {
+                Ok(_) => Response { success: true, message: Some("Removed rule".to_string()), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "acl_stats" => {
+            let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
+            let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
+            let src_port = req.args["src_port"].as_u64().unwrap_or(0) as u16;
+            let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
+            let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
+            match get_acl_mgr(acl_mgr).get_rule_stats(&src_ip, &dst_ip, src_port, dst_port, protocol) {
+                Ok(Some(stats)) => Response { success: true, message: None, data: Some(serde_json::to_value(stats).unwrap()) },
+                Ok(None) => Response { success: true, message: Some("No stats found".to_string()), data: None },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "ping" => Response { success: true, message: Some("pong".to_string()), data: None },
+        "set_log_level" => {
+            let level = req.args["level"].as_str().unwrap_or("info").to_string();
+            match set_log_level(log_handle, &level) {
+                Ok(_) => Response { 
+                    success: true, 
+                    message: Some(format!("Log level set to: {}", level)), 
+                    data: None 
+                },
+                Err(e) => Response { 
+                    success: false, 
+                    message: Some(format!("Failed to set log level: {}", e)), 
+                    data: None 
+                },
+            }
+        }
+        "get_log_level" => {
+            Response { 
+                success: true, 
+                message: None, 
+                data: Some(serde_json::json!({
+                    "level": get_current_log_level()
+                }))
+            }
+        }
+        _ => Response { success: false, message: Some(format!("Unknown command: {}", req.cmd)), data: None },
+    }
+}
+
+fn send_qos_command(cmd: QosCommands) -> Result<()> {
+    let stream = UnixStream::connect(SOCKET_PATH)?;
+    let mut writer = BufWriter::new(&stream);
+    let mut reader = BufReader::new(&stream);
+
+    let req = match cmd {
+        QosCommands::LimitIp { ip, mbps } => Request {
+            cmd: "qos_limit_ip".to_string(),
+            args: serde_json::json!({"ip": ip, "mbps": mbps}),
+        },
+        QosCommands::LimitPeer { src_ip, dst_ip, mbps } => Request {
+            cmd: "qos_limit_peer".to_string(),
+            args: serde_json::json!({"src_ip": src_ip, "dst_ip": dst_ip, "mbps": mbps}),
+        },
+        QosCommands::LimitPort { port, mbps, protocol } => Request {
+            cmd: "qos_limit_port".to_string(),
+            args: serde_json::json!({"port": port, "mbps": mbps, "protocol": protocol}),
+        },
+        QosCommands::LimitService { src_ip, dst_ip, src_port, dst_port, protocol, mbps } => Request {
+            cmd: "qos_limit_service".to_string(),
+            args: serde_json::json!({
+                "src_ip": src_ip.unwrap_or_default(),
+                "dst_ip": dst_ip.unwrap_or_default(),
+                "src_port": src_port,
+                "dst_port": dst_port,
+                "protocol": protocol,
+                "mbps": mbps
+            }),
+        },
+        QosCommands::RemoveIp { ip } => Request {
+            cmd: "qos_remove_ip".to_string(),
+            args: serde_json::json!({"ip": ip}),
+        },
+        QosCommands::RemovePeer { src_ip, dst_ip } => Request {
+            cmd: "qos_remove_peer".to_string(),
+            args: serde_json::json!({"src_ip": src_ip, "dst_ip": dst_ip}),
+        },
+        QosCommands::RemoveService { src_ip, dst_ip, src_port, dst_port, protocol } => Request {
+            cmd: "qos_remove_service".to_string(),
+            args: serde_json::json!({
+                "src_ip": src_ip.unwrap_or_default(),
+                "dst_ip": dst_ip.unwrap_or_default(),
+                "src_port": src_port,
+                "dst_port": dst_port,
+                "protocol": protocol
+            }),
+        },
+        QosCommands::StatsIp { ip } => Request {
+            cmd: "qos_stats_ip".to_string(),
+            args: serde_json::json!({"ip": ip}),
+        },
+        QosCommands::StatsPeer { src_ip, dst_ip } => Request {
+            cmd: "qos_stats_peer".to_string(),
+            args: serde_json::json!({"src_ip": src_ip, "dst_ip": dst_ip}),
+        },
+        QosCommands::StatsService { src_ip, dst_ip, src_port, dst_port, protocol } => Request {
+            cmd: "qos_stats_service".to_string(),
+            args: serde_json::json!({
+                "src_ip": src_ip.unwrap_or_default(),
+                "dst_ip": dst_ip.unwrap_or_default(),
+                "src_port": src_port,
+                "dst_port": dst_port,
+                "protocol": protocol
+            }),
+        },
+    };
+
+    let req_json = serde_json::to_string(&req)?;
+    writer.write_all(req_json.as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+
+    let mut resp_line = String::new();
+    reader.read_line(&mut resp_line)?;
+    let resp: Response = serde_json::from_str(&resp_line)?;
+    
+    if resp.success {
+        if let Some(msg) = resp.message {
+            println!("{}", msg);
+        }
+        if let Some(data) = resp.data {
+            println!("{}", serde_json::to_string_pretty(&data)?);
+        }
+    } else {
+        eprintln!("Error: {}", resp.message.unwrap_or_else(|| "Unknown error".to_string()));
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+fn send_acl_command(cmd: AclCommands) -> Result<()> {
+    let stream = UnixStream::connect(SOCKET_PATH)?;
+    let mut writer = BufWriter::new(&stream);
+    let mut reader = BufReader::new(&stream);
+
+    let req = match cmd {
+        AclCommands::BlockSrcIp { ip } => Request {
+            cmd: "acl_block_src_ip".to_string(),
+            args: serde_json::json!({"ip": ip}),
+        },
+        AclCommands::UnblockSrcIp { ip } => Request {
+            cmd: "acl_unblock_src_ip".to_string(),
+            args: serde_json::json!({"ip": ip}),
+        },
+        AclCommands::BlockDstIp { ip } => Request {
+            cmd: "acl_block_dst_ip".to_string(),
+            args: serde_json::json!({"ip": ip}),
+        },
+        AclCommands::UnblockDstIp { ip } => Request {
+            cmd: "acl_unblock_dst_ip".to_string(),
+            args: serde_json::json!({"ip": ip}),
+        },
+        AclCommands::BlockPort { port } => Request {
+            cmd: "acl_block_port".to_string(),
+            args: serde_json::json!({"port": port}),
+        },
+        AclCommands::UnblockPort { port } => Request {
+            cmd: "acl_unblock_port".to_string(),
+            args: serde_json::json!({"port": port}),
+        },
+        AclCommands::Allow { src_ip, dst_ip, src_port, dst_port, protocol } => Request {
+            cmd: "acl_allow".to_string(),
+            args: serde_json::json!({
+                "src_ip": src_ip.unwrap_or_default(),
+                "dst_ip": dst_ip.unwrap_or_default(),
+                "src_port": src_port,
+                "dst_port": dst_port,
+                "protocol": protocol
+            }),
+        },
+        AclCommands::Deny { src_ip, dst_ip, src_port, dst_port, protocol } => Request {
+            cmd: "acl_deny".to_string(),
+            args: serde_json::json!({
+                "src_ip": src_ip.unwrap_or_default(),
+                "dst_ip": dst_ip.unwrap_or_default(),
+                "src_port": src_port,
+                "dst_port": dst_port,
+                "protocol": protocol
+            }),
+        },
+        AclCommands::RemoveRule { src_ip, dst_ip, src_port, dst_port, protocol } => Request {
+            cmd: "acl_remove_rule".to_string(),
+            args: serde_json::json!({
+                "src_ip": src_ip.unwrap_or_default(),
+                "dst_ip": dst_ip.unwrap_or_default(),
+                "src_port": src_port,
+                "dst_port": dst_port,
+                "protocol": protocol
+            }),
+        },
+        AclCommands::Stats { src_ip, dst_ip, src_port, dst_port, protocol } => Request {
+            cmd: "acl_stats".to_string(),
+            args: serde_json::json!({
+                "src_ip": src_ip.unwrap_or_default(),
+                "dst_ip": dst_ip.unwrap_or_default(),
+                "src_port": src_port,
+                "dst_port": dst_port,
+                "protocol": protocol
+            }),
+        },
+    };
+
+    let req_json = serde_json::to_string(&req)?;
+    writer.write_all(req_json.as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+
+    let mut resp_line = String::new();
+    reader.read_line(&mut resp_line)?;
+    let resp: Response = serde_json::from_str(&resp_line)?;
+    
+    if resp.success {
+        if let Some(msg) = resp.message {
+            println!("{}", msg);
+        }
+        if let Some(data) = resp.data {
+            println!("{}", serde_json::to_string_pretty(&data)?);
+        }
+    } else {
+        eprintln!("Error: {}", resp.message.unwrap_or_else(|| "Unknown error".to_string()));
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+fn send_log_command(level: &str) -> Result<()> {
+    let stream = UnixStream::connect(SOCKET_PATH)?;
+    let mut writer = BufWriter::new(&stream);
+    let mut reader = BufReader::new(&stream);
+
+    let req = Request {
+        cmd: "set_log_level".to_string(),
+        args: serde_json::json!({"level": level}),
+    };
+
+    let req_json = serde_json::to_string(&req)?;
+    writer.write_all(req_json.as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+
+    let mut resp_line = String::new();
+    reader.read_line(&mut resp_line)?;
+    let resp: Response = serde_json::from_str(&resp_line)?;
+    
+    if resp.success {
+        if let Some(msg) = resp.message {
+            println!("{}", msg);
+        }
+        if let Some(data) = resp.data {
+            println!("{}", serde_json::to_string_pretty(&data)?);
+        }
+    } else {
+        eprintln!("Error: {}", resp.message.unwrap_or_else(|| "Unknown error".to_string()));
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+fn attach_xdp(ebpf: &mut Ebpf, interface: &str) -> Result<()> {
+    let program: &mut Xdp = ebpf.program_mut("xdp_ingress_acl")
+        .context("XDP program not found")?
+        .try_into()?;
+    
+    program.load()?;
+    program.attach(interface, XdpFlags::default())?;
+    
+    info!("XDP program attached to {}", interface);
+    Ok(())
+}
+
+fn attach_tc(ebpf: &mut Ebpf, interface: &str) -> Result<()> {
+    let program: &mut SchedClassifier = ebpf.program_mut("tc_egress_qos")
+        .context("TC program not found")?
+        .try_into()?;
+    
+    program.load()?;
+    
+    let tc_builder = tc::_tc_qdisc_add_clsact(interface)?;
+    tc_builder.attach(program.fd(), TcAttachType::Egress)?;
+    
+    info!("TC program attached to {} (egress)", interface);
+    Ok(())
+}

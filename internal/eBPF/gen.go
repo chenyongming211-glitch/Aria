@@ -1,4 +1,0 @@
-package eBPF
-
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -g -Wall -Werror -I../agent/firewall/ebpf/include" -target bpfel -type acl_5tuple_key -type acl_rule_value -type bucket_state -type flow_detail_key -type flow_detail_stats -type drop_event_t AriaIngress ../agent/firewall/ebpf/progs/xdp_acl.c
-//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -g -Wall -Werror -I../agent/firewall/ebpf/include" -target bpfel -type acl_5tuple_key -type acl_rule_value -type bucket_state -type flow_detail_key -type flow_detail_stats -type drop_event_t AriaEgress ../agent/firewall/ebpf/progs/tc_qos.c
