@@ -3,9 +3,12 @@ package cli
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -16,15 +19,19 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"gopkg.in/yaml.v3"
 
 	"aria/internal/api/middleware"
+	"aria/internal/api/v1"
+	grpcserver "aria/internal/controller/grpc"
+	"aria/internal/im"
+	"aria/internal/service"
 	"aria/internal/token"
 	"aria/pkg/controllerstorage"
+	"aria/pkg/grpc/agentpb"
 	"aria/pkg/logging"
-	"aria/internal/service"
-	"aria/internal/api/v1"
-	"aria/internal/im"
 )
 
 var controllerServeCmd = &cobra.Command{
@@ -107,7 +114,7 @@ type ControllerConfig struct {
 // Controller represents the controller service
 type Controller struct {
 	store              *controllerstorage.Storage
-	tenantScopedStore  *middleware.TenantScopedStorage  // Enhanced tenant-scoped storage
+	tenantScopedStore  *middleware.TenantScopedStorage // Enhanced tenant-scoped storage
 	heartbeat          *controllerstorage.HeartbeatStore
 	tokenStore         *token.Store
 	tokenValidator     *token.Validator
@@ -162,17 +169,17 @@ type SyncResponse struct {
 	Peers              []NodeInfo    `json:"peers"`
 	AssignedIP         string        `json:"assigned_ip"`
 	LastUpdate         int64         `json:"last_update"`
-	ACLRules           []ACLRuleJSON `json:"acl_rules,omitempty"`           // Firewall ACL rules
+	ACLRules           []ACLRuleJSON `json:"acl_rules,omitempty"`            // Firewall ACL rules
 	MetricsPushGateway string        `json:"metrics_push_gateway,omitempty"` // VictoriaMetrics push gateway URL
 }
 
 // ACLRuleJSON represents an ACL rule in API responses.
 type ACLRuleJSON struct {
-	SrcNet   string `json:"src_net"`   // Source CIDR
-	DstNet   string `json:"dst_net"`   // Destination CIDR
-	Protocol uint8  `json:"protocol"`  // IP protocol (6=TCP, 17=UDP, 0=any)
-	MinPort  uint16 `json:"min_port"`  // Min port (0=any)
-	MaxPort  uint16 `json:"max_port"`  // Max port (65535=any)
+	SrcNet   string `json:"src_net"`  // Source CIDR
+	DstNet   string `json:"dst_net"`  // Destination CIDR
+	Protocol uint8  `json:"protocol"` // IP protocol (6=TCP, 17=UDP, 0=any)
+	MinPort  uint16 `json:"min_port"` // Min port (0=any)
+	MaxPort  uint16 `json:"max_port"` // Max port (65535=any)
 }
 
 func runControllerServe(cmd *cobra.Command, args []string) error {
@@ -284,7 +291,7 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 
 	controller := &Controller{
 		store:              store,
-		tenantScopedStore:  middleware.NewTenantScopedStorage(store),  // Initialize tenant-scoped storage
+		tenantScopedStore:  middleware.NewTenantScopedStorage(store), // Initialize tenant-scoped storage
 		heartbeat:          heartbeat,
 		tokenStore:         tokenStore,
 		tokenValidator:     tokenValidator,
@@ -405,6 +412,78 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 		os.Exit(0)
 	}()
 
+	// ========== Start gRPC Server ==========
+	grpcPort := 50051
+	grpcListener, err := net.Listen("tcp", fmt.Sprintf(":%d", grpcPort))
+	if err != nil {
+		return fmt.Errorf("failed to listen on gRPC port %d: %w", grpcPort, err)
+	}
+
+	// Load TLS configuration for mTLS
+	var grpcServerOpts []grpc.ServerOption
+
+	// Check if mTLS is enabled (default: enabled for production)
+	mtlsEnabled := getEnvOrDefault("ARIA_GRPC_MTLS_ENABLED", "true")
+
+	if mtlsEnabled == "true" {
+		logger.Info("gRPC mTLS enabled, loading certificates...")
+
+		// Load server certificate
+		serverCertPath := getEnvOrDefault("ARIA_GRPC_SERVER_CERT", "/etc/aria/certs/server.crt")
+		serverKeyPath := getEnvOrDefault("ARIA_GRPC_SERVER_KEY", "/etc/aria/certs/server.key")
+		caCertPath := getEnvOrDefault("ARIA_GRPC_CA_CERT", "/etc/aria/certs/ca.crt")
+
+		serverCert, err := tls.LoadX509KeyPair(serverCertPath, serverKeyPath)
+		if err != nil {
+			return fmt.Errorf("failed to load server certificate: %w", err)
+		}
+
+		// Load CA certificate for client verification
+		caCert, err := ioutil.ReadFile(caCertPath)
+		if err != nil {
+			return fmt.Errorf("failed to read CA certificate: %w", err)
+		}
+
+		caCertPool := x509.NewCertPool()
+		if !caCertPool.AppendCertsFromPEM(caCert) {
+			return fmt.Errorf("failed to parse CA certificate")
+		}
+
+		// Create TLS config with mTLS
+		tlsConfig := &tls.Config{
+			Certificates: []tls.Certificate{serverCert},
+			ClientAuth:   tls.RequireAndVerifyClientCert,
+			ClientCAs:    caCertPool,
+			MinVersion:   tls.VersionTLS12,
+		}
+
+		// Create gRPC credentials
+		creds := credentials.NewTLS(tlsConfig)
+		grpcServerOpts = append(grpcServerOpts, grpc.Creds(creds))
+
+		logger.Info("gRPC mTLS configured with server cert: %s, CA: %s", serverCertPath, caCertPath)
+	} else {
+		logger.Warn("⚠️  gRPC mTLS disabled - using plaintext (not recommended for production)")
+	}
+
+	// Create gRPC server with TLS
+	grpcSrv := grpc.NewServer(grpcServerOpts...)
+	grpcController := grpcserver.NewControllerServer(
+		controller.createRegisterAdapter(),
+		controller.createSyncAdapter(),
+	)
+	agentpb.RegisterControllerServiceServer(grpcSrv, grpcController)
+
+	// Start gRPC server in goroutine
+	go func() {
+		logger.Info("gRPC server listening on :%d (mTLS: %s)", grpcPort, mtlsEnabled)
+		if err := grpcSrv.Serve(grpcListener); err != nil {
+			logger.Error("gRPC server error: %v", err)
+		}
+	}()
+
+	// ========== Start HTTP Server ==========
+	logger.Info("HTTP server listening on %s", listenAddr)
 	if err := http.ListenAndServe(listenAddr, nil); err != nil {
 		return fmt.Errorf("failed to start HTTP server: %w", err)
 	}
@@ -835,7 +914,7 @@ func (c *Controller) HandleSync(w http.ResponseWriter, r *http.Request) {
 			}
 
 			peerInfo := map[string]interface{}{
-				"public_key":         peer.PublicKey,
+				"public_key":        peer.PublicKey,
 				"endpoint":          fmt.Sprintf("%s:51820", peer.PublicIP),
 				"private_ip":        peer.PrivateIP,
 				"public_ip":         peer.PublicIP,
@@ -881,7 +960,7 @@ func (c *Controller) HandleSync(w http.ResponseWriter, r *http.Request) {
 			}
 
 			peerInfo := map[string]interface{}{
-				"public_key":         peer.PublicKey,
+				"public_key":        peer.PublicKey,
 				"endpoint":          fmt.Sprintf("%s:51820", peer.PublicIP),
 				"private_ip":        peer.PrivateIP,
 				"public_ip":         peer.PublicIP,
@@ -947,10 +1026,10 @@ func (c *Controller) HandleSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"peers":              peerInfos,
-		"assigned_ip":         assignedIP,
-		"last_update":         time.Now().Unix(),
-		"acl_rules":           aclRulesJSON,
+		"peers":                peerInfos,
+		"assigned_ip":          assignedIP,
+		"last_update":          time.Now().Unix(),
+		"acl_rules":            aclRulesJSON,
 		"metrics_push_gateway": c.metricsPushGateway,
 	}
 
@@ -1024,21 +1103,21 @@ func (c *Controller) HandleListNodes(w http.ResponseWriter, r *http.Request) {
 			response := make([]map[string]interface{}, 0)
 			for _, nodeInfo := range nodeInfos {
 				nodeInfoMap := map[string]interface{}{
-					"public_key":         nodeInfo.PublicKey,
-					"endpoint":          nodeInfo.Endpoint,
-					"private_ip":        nodeInfo.PrivateIP,
-					"public_ip":         nodeInfo.PublicIP,
-					"region":            nodeInfo.Region,
-					"vpc_id":            nodeInfo.VPCID,
-					"hostname":          nodeInfo.Hostname,
-					"last_seen":         nodeInfo.LastSeen,
-					"assigned_ip":       nodeInfo.AssignedIP,
-					"role":              nodeInfo.Role,
-					"runtime_mode":      nodeInfo.RuntimeMode,
-					"kernel_version":    nodeInfo.KernelVersion,
-					"advertised_routes": nodeInfo.AdvertisedRoutes,
+					"public_key":          nodeInfo.PublicKey,
+					"endpoint":            nodeInfo.Endpoint,
+					"private_ip":          nodeInfo.PrivateIP,
+					"public_ip":           nodeInfo.PublicIP,
+					"region":              nodeInfo.Region,
+					"vpc_id":              nodeInfo.VPCID,
+					"hostname":            nodeInfo.Hostname,
+					"last_seen":           nodeInfo.LastSeen,
+					"assigned_ip":         nodeInfo.AssignedIP,
+					"role":                nodeInfo.Role,
+					"runtime_mode":        nodeInfo.RuntimeMode,
+					"kernel_version":      nodeInfo.KernelVersion,
+					"advertised_routes":   nodeInfo.AdvertisedRoutes,
 					"enrolled_with_token": nodeInfo.EnrolledWithToken,
-					"status":            nodeInfo.Status,
+					"status":              nodeInfo.Status,
 					"i18n": map[string]interface{}{
 						"status": fmt.Sprintf("node.status.%s", nodeInfo.Status),
 						"role":   fmt.Sprintf("node.role.%s", nodeInfo.Role),
@@ -1074,21 +1153,21 @@ func (c *Controller) HandleListNodes(w http.ResponseWriter, r *http.Request) {
 			}
 
 			nodeInfoMap := map[string]interface{}{
-				"public_key":         peer.PublicKey,
-				"endpoint":          peer.Endpoint,
-				"private_ip":        peer.PrivateIP,
-				"public_ip":         peer.PublicIP,
-				"region":            peer.Region,
-				"vpc_id":            peer.VPCID,
-				"hostname":          peer.Hostname,
-				"last_seen":         peer.LastSeen,
-				"assigned_ip":       peer.AssignedIP,
-				"role":              role,
-				"runtime_mode":      peer.RuntimeMode,
-				"kernel_version":    peer.KernelVersion,
-				"advertised_routes": peer.AdvertisedRoutes,  // Site-to-Site VPN
+				"public_key":          peer.PublicKey,
+				"endpoint":            peer.Endpoint,
+				"private_ip":          peer.PrivateIP,
+				"public_ip":           peer.PublicIP,
+				"region":              peer.Region,
+				"vpc_id":              peer.VPCID,
+				"hostname":            peer.Hostname,
+				"last_seen":           peer.LastSeen,
+				"assigned_ip":         peer.AssignedIP,
+				"role":                role,
+				"runtime_mode":        peer.RuntimeMode,
+				"kernel_version":      peer.KernelVersion,
+				"advertised_routes":   peer.AdvertisedRoutes,  // Site-to-Site VPN
 				"enrolled_with_token": peer.EnrolledWithToken, // Token used for registration
-				"status":            peer.Status,
+				"status":              peer.Status,
 				"i18n": map[string]interface{}{
 					"status": fmt.Sprintf("node.status.%s", i18nStatus),
 					"role":   fmt.Sprintf("node.role.%s", role),
@@ -1131,21 +1210,21 @@ func (c *Controller) HandleListNodes(w http.ResponseWriter, r *http.Request) {
 		}
 
 		nodeInfoMap := map[string]interface{}{
-			"public_key":         node.PublicKey,
-			"endpoint":          node.Endpoint,
-			"private_ip":        node.PrivateIP,
-			"public_ip":         node.PublicIP,
-			"region":            node.Region,
-			"vpc_id":            node.VPCID,
-			"hostname":          node.Hostname,
-			"last_seen":         node.LastSeen,
-			"assigned_ip":       node.AssignedIP,
-			"role":              node.Role,
-			"runtime_mode":      node.RuntimeMode,
-			"kernel_version":    node.KernelVersion,
-			"advertised_routes": node.AdvertisedRoutes,  // Site-to-Site VPN
+			"public_key":          node.PublicKey,
+			"endpoint":            node.Endpoint,
+			"private_ip":          node.PrivateIP,
+			"public_ip":           node.PublicIP,
+			"region":              node.Region,
+			"vpc_id":              node.VPCID,
+			"hostname":            node.Hostname,
+			"last_seen":           node.LastSeen,
+			"assigned_ip":         node.AssignedIP,
+			"role":                node.Role,
+			"runtime_mode":        node.RuntimeMode,
+			"kernel_version":      node.KernelVersion,
+			"advertised_routes":   node.AdvertisedRoutes,  // Site-to-Site VPN
 			"enrolled_with_token": node.EnrolledWithToken, // Token used for registration
-			"status":            node.Status,
+			"status":              node.Status,
 			"i18n": map[string]interface{}{
 				"status": fmt.Sprintf("node.status.%s", i18nStatus),
 				"role":   fmt.Sprintf("node.role.%s", role),
@@ -1689,7 +1768,7 @@ func (c *Controller) HandlePolicies(w http.ResponseWriter, r *http.Request) {
 				"dstPort":  formatPortRange(rule.MinPort, rule.MaxPort),
 				"action":   rule.Action,
 				"i18n": map[string]interface{}{
-					"action": fmt.Sprintf("policy.action.%s", rule.Action),
+					"action":  fmt.Sprintf("policy.action.%s", rule.Action),
 					"srcNode": fmt.Sprintf("policy.node.%s", rule.SrcNode),
 					"dstNode": fmt.Sprintf("policy.node.%s", rule.DstNode),
 				},
@@ -1829,7 +1908,7 @@ func (c *Controller) HandlePolicies(w http.ResponseWriter, r *http.Request) {
 			"dstPort":  req.DstPort,
 			"action":   rule.Action,
 			"i18n": map[string]interface{}{
-				"action": fmt.Sprintf("policy.action.%s", rule.Action),
+				"action":  fmt.Sprintf("policy.action.%s", rule.Action),
 				"srcNode": fmt.Sprintf("policy.node.%s", rule.SrcNode),
 				"dstNode": fmt.Sprintf("policy.node.%s", rule.DstNode),
 			},
@@ -2027,3 +2106,293 @@ func (c *Controller) getACLRulesForRegion(region string, allRules []*controllers
 	c.logger.Debug("Region %s: filtered %d rules from %d total", region, len(result), len(allRules))
 	return result
 }
+
+// ========== gRPC Adapters ==========
+// 以下两个方法将 REST API handler 适配为 gRPC 所需的格式
+
+// createRegisterAdapter 创建注册适配器
+// 将 REST API 的 HandleRegister 逻辑包装成 gRPC 可调用的函数
+func (c *Controller) createRegisterAdapter() func(interface{}) (string, string, error) {
+	return func(reqInterface interface{}) (string, string, error) {
+		reqMap, ok := reqInterface.(map[string]interface{})
+		if !ok {
+			return "", "", fmt.Errorf("invalid request format")
+		}
+
+		// 从 map 中提取字段
+		req := &RegisterRequest{
+			PublicKey:     getStringFromMap(reqMap, "public_key"),
+			Endpoint:      getStringFromMap(reqMap, "endpoint"),
+			PrivateIP:     getStringFromMap(reqMap, "private_ip"),
+			PublicIP:      getStringFromMap(reqMap, "public_ip"),
+			Region:        getStringFromMap(reqMap, "region"),
+			VPCID:         getStringFromMap(reqMap, "vpc_id"),
+			Hostname:      getStringFromMap(reqMap, "hostname"),
+			MachineID:     getStringFromMap(reqMap, "machine_id"),
+			RegisteredAt:  getInt64FromMap(reqMap, "registered_at"),
+			Token:         getStringFromMap(reqMap, "token"),
+			RuntimeMode:   getStringFromMap(reqMap, "runtime_mode"),
+			KernelVersion: getStringFromMap(reqMap, "kernel_version"),
+			HasAESNI:      getBoolFromMap(reqMap, "has_aesni"),
+		}
+
+		// 处理数组字段
+		if routes, ok := reqMap["advertised_routes"].([]interface{}); ok {
+			req.AdvertisedRoutes = make([]string, 0, len(routes))
+			for _, r := range routes {
+				if str, ok := r.(string); ok {
+					req.AdvertisedRoutes = append(req.AdvertisedRoutes, str)
+				}
+			}
+		}
+
+		// 调用现有的注册逻辑
+		assignedIP, err := c.processRegistration(req, "")
+		if err != nil {
+			return "", "", err
+		}
+
+		// 生成 Metrics Push Gateway URL
+		// 注意：req 中没有 TenantID，需要从 token 中提取（已在 processRegistration 中处理）
+		metricsGateway := c.metricsPushGateway
+
+		return assignedIP, metricsGateway, nil
+	}
+}
+
+// createSyncAdapter 创建同步适配器
+// 将 REST API 的 HandleSync 逻辑包装成 gRPC 可调用的函数
+func (c *Controller) createSyncAdapter() func(string) (interface{}, string, interface{}, string, error) {
+	return func(publicKey string) (interface{}, string, interface{}, string, error) {
+		// 调用现有的同步逻辑（提取自 HandleSync）
+		peers, assignedIP, aclRules, tenantID, err := c.processSync(publicKey)
+		if err != nil {
+			return nil, "", nil, "", err
+		}
+
+		// 生成 Metrics Push Gateway URL
+		metricsGateway := c.metricsPushGateway
+		if tenantID != uuid.Nil {
+			metricsGateway = fmt.Sprintf("%s?tenant=%s", c.metricsPushGateway, tenantID)
+		}
+
+		return peers, assignedIP, aclRules, metricsGateway, nil
+	}
+}
+
+// processRegistration 处理注册逻辑（从 HandleRegister 提取）
+func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) (string, error) {
+	// Token Validation
+	existingNode, _ := c.store.GetNode(req.PublicKey)
+	isReRegistration := (existingNode != nil)
+
+	if !isReRegistration {
+		if req.Token == "" {
+			return "", fmt.Errorf("token required")
+		}
+
+		tkn, err := c.tokenValidator.Validate(req.Token)
+		if err != nil {
+			return "", fmt.Errorf("invalid token: %w", err)
+		}
+		c.logger.Debug("Token validated: %s (tag: %s)", tkn.Token[:12], tkn.Tag)
+	}
+
+	// Use provided public IP or empty
+	if req.PublicIP == "" {
+		req.PublicIP = publicIP
+	}
+
+	var assignedIP string
+	var ipOffset int
+
+	existingNode, err := c.store.GetNode(req.PublicKey)
+	if err == nil && existingNode != nil {
+		assignedIP = existingNode.AssignedIP
+		ipOffset = existingNode.IPOffset
+		c.logger.Info("Node re-registered: %s (hostname=%s), reusing IP: %s",
+			req.PublicKey[:8], req.Hostname, assignedIP)
+		if len(req.AdvertisedRoutes) == 0 && len(existingNode.AdvertisedRoutes) > 0 {
+			req.AdvertisedRoutes = existingNode.AdvertisedRoutes
+		}
+	} else {
+		allNodes, _ := c.store.GetAllNodes()
+		for _, node := range allNodes {
+			if node.Hostname == req.Hostname {
+				c.logger.Info("Found existing node with same hostname: %s, reusing IP: %s",
+					req.Hostname, node.AssignedIP)
+				assignedIP = node.AssignedIP
+				ipOffset = node.IPOffset
+				if len(req.AdvertisedRoutes) == 0 && len(node.AdvertisedRoutes) > 0 {
+					req.AdvertisedRoutes = node.AdvertisedRoutes
+				}
+				c.store.DeleteNode(node.PublicKey)
+				break
+			}
+		}
+	}
+
+	if assignedIP == "" {
+		var err error
+		ipOffset, err = c.store.GetNextAvailableOffset()
+		if err != nil {
+			return "", fmt.Errorf("failed to get next offset: %w", err)
+		}
+		assignedIP, err = c.store.CalculateIP(ipOffset)
+		if err != nil {
+			return "", fmt.Errorf("failed to calculate IP: %w", err)
+		}
+	}
+
+	// Extract tenant ID from token
+	var tenantID uuid.UUID
+	if req.Token != "" {
+		var err error
+		tenantID, err = c.store.GetTenantIDByToken(req.Token)
+		if err != nil {
+			c.logger.Warn("Failed to get tenant ID by token: %v, using default", err)
+			tenantID, _ = c.store.GetOrCreateTenant("default")
+		}
+	} else if existingNode != nil {
+		// For re-registration, preserve existing tenant ID
+		tenantID = existingNode.TenantID
+	} else {
+		// Default to system tenant
+		tenantID, _ = c.store.GetOrCreateTenant("default")
+	}
+
+	node := &controllerstorage.Node{
+		PublicKey:        req.PublicKey,
+		Endpoint:         req.Endpoint,
+		PrivateIP:        req.PrivateIP,
+		PublicIP:         req.PublicIP,
+		Region:           req.Region,
+		VPCID:            req.VPCID,
+		Hostname:         req.Hostname,
+		MachineID:        req.MachineID,
+		AssignedIP:       assignedIP,
+		IPOffset:         ipOffset,
+		AdvertisedRoutes: req.AdvertisedRoutes,
+		RuntimeMode:      req.RuntimeMode,
+		KernelVersion:    req.KernelVersion,
+		HasAESNI:         req.HasAESNI,
+		LastSeen:         time.Now().Unix(),
+		RegisteredAt:     req.RegisteredAt,
+		Role:             "agent",
+		TenantID:         tenantID,
+	}
+
+	if existingNode != nil {
+		node.RegisteredAt = existingNode.RegisteredAt
+	}
+
+	if err := c.store.SaveNode(node); err != nil {
+		return "", fmt.Errorf("failed to save node: %w", err)
+	}
+
+	if req.Token != "" && !isReRegistration {
+		if err := c.tokenStore.IncrementUsage(req.Token, req.PublicKey); err != nil {
+			c.logger.Warn("Failed to increment token usage: %v", err)
+		}
+	}
+
+	c.logger.Info("Node registered successfully: %s (hostname=%s, IP=%s, region=%s)",
+		req.PublicKey[:8], req.Hostname, assignedIP, req.Region)
+
+	return assignedIP, nil
+}
+
+// processSync 处理同步逻辑（从 HandleSync 提取）
+func (c *Controller) processSync(publicKey string) (interface{}, string, interface{}, uuid.UUID, error) {
+	node, err := c.store.GetNode(publicKey)
+	if err != nil {
+		return nil, "", nil, uuid.Nil, fmt.Errorf("node not found: %w", err)
+	}
+
+	// Update last seen
+	node.LastSeen = time.Now().Unix()
+	if err := c.store.SaveNode(node); err != nil {
+		c.logger.Warn("Failed to update last seen for %s: %v", publicKey[:8], err)
+	}
+
+	allNodes, err := c.store.GetAllNodes()
+	if err != nil {
+		return nil, "", nil, uuid.Nil, fmt.Errorf("failed to get nodes: %w", err)
+	}
+
+	var peers []map[string]interface{}
+	for _, n := range allNodes {
+		if n.PublicKey == publicKey {
+			continue
+		}
+		peers = append(peers, map[string]interface{}{
+			"public_key":        n.PublicKey,
+			"endpoint":          n.Endpoint,
+			"private_ip":        n.PrivateIP,
+			"public_ip":         n.PublicIP,
+			"region":            n.Region,
+			"vpc_id":            n.VPCID,
+			"hostname":          n.Hostname,
+			"assigned_ip":       n.AssignedIP,
+			"role":              n.Role,
+			"advertised_routes": n.AdvertisedRoutes,
+		})
+	}
+
+	allACLRules, err := c.getTenantEnabledACLRules(context.Background())
+	if err != nil {
+		c.logger.Warn("Failed to get ACL rules: %v", err)
+		allACLRules = []*controllerstorage.ACLRule{}
+	}
+
+	regionACLs := c.getACLRulesForRegion(node.Region, allACLRules)
+	var aclRules []map[string]interface{}
+	for _, rule := range regionACLs {
+		aclRules = append(aclRules, map[string]interface{}{
+			"src_net":  rule.SrcNet,
+			"dst_net":  rule.DstNet,
+			"protocol": rule.Protocol,
+			"min_port": rule.MinPort,
+			"max_port": rule.MaxPort,
+		})
+	}
+
+	return peers, node.AssignedIP, aclRules, node.TenantID, nil
+}
+
+// 辅助函数：从 map 中安全获取字符串
+func getStringFromMap(m map[string]interface{}, key string) string {
+	if val, ok := m[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
+}
+
+// 辅助函数：从 map 中安全获取 int64
+func getInt64FromMap(m map[string]interface{}, key string) int64 {
+	if val, ok := m[key]; ok {
+		switch v := val.(type) {
+		case int64:
+			return v
+		case int:
+			return int64(v)
+		case float64:
+			return int64(v)
+		}
+	}
+	return 0
+}
+
+// 辅助函数：从 map 中安全获取 bool
+func getBoolFromMap(m map[string]interface{}, key string) bool {
+	if val, ok := m[key]; ok {
+		if b, ok := val.(bool); ok {
+			return b
+		}
+	}
+	return false
+}
+
+// getEnvOrDefault gets environment variable or returns default value

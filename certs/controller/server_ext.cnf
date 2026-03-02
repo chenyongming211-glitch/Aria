@@ -1,0 +1,13 @@
+basicConstraints = CA:FALSE
+keyUsage = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+DNS.2 = aria-controller
+DNS.3 = aria_controller
+DNS.4 = *.aria-controller.local
+IP.1 = 127.0.0.1
+IP.2 = 172.16.0.211
+IP.3 = 112.124.8.241
