@@ -1,0 +1,163 @@
+// Aria Agent gRPC Protocol
+// 基于 internal/cli/up.go 中的 REST API 数据结构设计
+// 
+// 通信模式：
+// - Controller 监听 :50051 (gRPC)
+// - Agent 定期轮询 Sync()（5秒间隔）
+// - 支持双向认证（TLS）
+
+syntax = "proto3";
+
+package aria.agent;
+
+option go_package = "aria/pkg/grpc/agentpb";
+
+// ============ Controller 服务 ============
+// Agent 调用 Controller 的接口（Agent -> Controller）
+
+service ControllerService {
+  // Agent 注册（首次启动或重新注册）
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  
+  // 定期配置同步（轮询模式，5秒间隔）
+  rpc Sync(SyncRequest) returns (SyncResponse);
+}
+
+// ============ Agent 服务 ============
+// Controller 调用 Agent 的接口（Controller -> Agent）
+// 预留用于未来推模式或健康检查
+
+service AgentService {
+  // 配置下发（推模式，当前未使用）
+  rpc SyncConfig(SyncConfigRequest) returns (SyncConfigResponse);
+  
+  // 健康检查
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  
+  // 统计上报（Agent -> Controller，未来可能使用）
+  rpc ReportStats(ReportStatsRequest) returns (ReportStatsResponse);
+}
+
+// ============ 注册相关 ============
+
+message RegisterRequest {
+  string public_key = 1;              // WireGuard 公钥
+  string endpoint = 2;                // 监听地址 ":51820"
+  string private_ip = 3;              // 内网 IP（可选）
+  string public_ip = 4;               // 公网 IP
+  string hostname = 5;                // 主机名
+  int64 registered_at = 6;            // 注册时间戳
+  string token = 7;                   // 注册 Token
+  repeated string advertised_routes = 8;  // Site-to-Site VPN 路由
+  string region = 9;                  // 地域
+  string customer_id = 10;            // 客户 ID
+  
+  // 能力检测
+  string runtime_mode = 11;           // "kernel" or "ebpf"
+  string kernel_version = 12;         // 内核版本
+  bool has_aesni = 13;                // 是否支持 AES-NI
+}
+
+message RegisterResponse {
+  string assigned_ip = 1;             // 分配的 VPN IP
+  string metrics_push_gateway = 2;    // Prometheus Push Gateway URL
+}
+
+// ============ 同步相关 ============
+
+message SyncRequest {
+  string public_key = 1;              // 用于认证（替代 X-Public-Key header）
+}
+
+message SyncResponse {
+  repeated PeerInfo peers = 1;        // WireGuard Peers 列表
+  string assigned_ip = 2;             // 当前节点的 VPN IP
+  int64 last_update = 3;              // 最后更新时间戳
+  repeated ACLRule acl_rules = 4;     // 防火墙 ACL 规则
+  string metrics_push_gateway = 5;    // Prometheus Push Gateway URL
+  
+  // 未来扩展字段
+  repeated QoSRule qos_rules = 6;     // QoS 限速规则（预留）
+}
+
+message PeerInfo {
+  string public_key = 1;              // WireGuard 公钥
+  string endpoint = 2;                // UDP 端点地址
+  string private_ip = 3;              // 内网 IP
+  string public_ip = 4;               // 公网 IP
+  string region = 5;                  // 地域
+  string vpc_id = 6;                  // VPC ID
+  string hostname = 7;                // 主机名
+  string assigned_ip = 8;             // VPN IP
+  string role = 9;                    // 角色
+  repeated string advertised_routes = 10;  // Site-to-Site VPN 路由
+}
+
+message ACLRule {
+  string src_net = 1;                 // 源 CIDR（如 "10.0.0.0/8"）
+  string dst_net = 2;                 // 目标 CIDR（如 "192.168.0.0/16"）
+  uint32 protocol = 3;                // IP 协议（6=TCP, 17=UDP, 0=any）
+  uint32 min_port = 4;                // 最小端口（0=any）
+  uint32 max_port = 5;                // 最大端口（65535=any）
+}
+
+message QoSRule {
+  string src_ip = 1;                  // 源 IP
+  string dst_ip = 2;                  // 目标 IP
+  uint32 src_port = 3;                // 源端口
+  uint32 dst_port = 4;                // 目标端口
+  uint32 protocol = 5;                // 协议
+  uint64 bandwidth_mbps = 6;          // 带宽限制
+}
+
+// ============ 配置下发（推模式，预留） ============
+
+message SyncConfigRequest {
+  repeated PeerConfig peers = 1;      // Peer 配置
+  repeated ACLRule acl_rules = 2;     // ACL 规则
+  repeated QoSRule qos_rules = 3;     // QoS 规则
+}
+
+message SyncConfigResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message PeerConfig {
+  string public_key = 1;
+  string endpoint = 2;
+  repeated string allowed_ips = 3;
+  uint32 persistent_keepalive = 4;
+}
+
+// ============ 健康检查 ============
+
+message HealthCheckRequest {
+  string agent_id = 1;
+}
+
+message HealthCheckResponse {
+  bool healthy = 1;
+  string message = 2;
+  AgentStats stats = 3;
+}
+
+message AgentStats {
+  uint64 total_peers = 1;             // 总 Peer 数
+  uint64 active_peers = 2;            // 活跃 Peer 数
+  double cpu_usage = 3;               // CPU 使用率
+  double memory_usage = 4;            // 内存使用率
+  uint64 tx_bytes = 5;                // 发送字节数
+  uint64 rx_bytes = 6;                // 接收字节数
+}
+
+// ============ 统计上报 ============
+
+message ReportStatsRequest {
+  string agent_id = 1;
+  AgentStats stats = 2;
+}
+
+message ReportStatsResponse {
+  bool success = 1;
+}

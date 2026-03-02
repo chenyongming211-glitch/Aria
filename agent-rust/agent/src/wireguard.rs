@@ -96,15 +96,22 @@ impl WireGuardManager {
 
     /// 生成新的密钥对
     pub fn generate_keypair() -> Result<(String, String)> {
-        use x25519_dalek::{EphemeralSecret, PublicKey};
+        use x25519_dalek::{PublicKey, StaticSecret};
         use rand::rngs::OsRng;
+        use rand::RngCore;
 
-        let secret = EphemeralSecret::random_from_rng(OsRng);
+        // 生成随机字节
+        let mut bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut bytes);
+        
+        // 创建密钥
+        let secret = StaticSecret::from(bytes);
         let public = PublicKey::from(&secret);
         
+        // Base64 编码
         let private_key = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
-            secret.to_bytes(),
+            secret.as_bytes(),
         );
         let public_key = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
