@@ -9,6 +9,23 @@ pub mod aria {
 
 use aria::controller_service_client::ControllerServiceClient;
 
+/// 获取内核版本
+fn get_kernel_version() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/osrelease")
+        .unwrap_or_else(|_| "unknown".to_string())
+        .trim()
+        .to_string()
+}
+
+/// 检测是否支持 AES-NI
+fn has_aesni_support() -> bool {
+    if let Ok(cpuinfo) = std::fs::read_to_string("/proc/cpuinfo") {
+        cpuinfo.contains("aes")
+    } else {
+        false
+    }
+}
+
 /// gRPC Controller 客户端
 pub struct GrpcClient {
     client: ControllerServiceClient<Channel>,
@@ -59,6 +76,9 @@ impl GrpcClient {
         token: String,
         region: String,
     ) -> Result<String> {
+        let kernel_version = get_kernel_version();
+        let has_aesni = has_aesni_support();
+        
         let request = tonic::Request::new(aria::RegisterRequest {
             public_key,
             endpoint,
@@ -66,15 +86,16 @@ impl GrpcClient {
             public_ip,
             hostname,
             registered_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
                 .as_secs() as i64,
             token,
             advertised_routes: vec![],
             region,
             customer_id: String::new(),
             runtime_mode: "ebpf".to_string(),
-            kernel_version: "5.15.0".to_string(),
-            has_aesni: true,
+            kernel_version,
+            has_aesni,
         });
         
         let response = self.client.register(request).await?;
@@ -115,6 +136,7 @@ impl GrpcClient {
             }).collect(),
         })
     }
+    
 }
 
 /// 同步结果

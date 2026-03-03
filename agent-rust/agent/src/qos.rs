@@ -8,6 +8,7 @@ use aya::Ebpf;
 use thiserror::Error;
 
 use crate::identity::{IdentityManager, ID_WILDCARD, parse_single_ip};
+use crate::metrics;
 
 #[derive(Error, Debug)]
 pub enum QoSError {
@@ -514,6 +515,184 @@ impl QoSManager {
         };
         
         self.get_service_cidr_stats(&src_cidr, &dst_cidr, dst_port, protocol)
+    }
+    
+    pub fn get_all_qos_stats(&self) -> Result<Vec<(String, u32, u64, u64)>, QoSError> {
+        let mut stats = Vec::new();
+        let mut errors = 0;
+        
+        for entry in self.src_id_qos_map.iter() {
+            match entry {
+                Ok((_, value)) => {
+                    stats.push((
+                        "ip".to_string(),
+                        value.rule_id,
+                        value.pass_bytes,
+                        value.drop_bytes,
+                    ));
+                }
+                Err(e) => {
+                    errors += 1;
+                    tracing::warn!("Failed to read src_id_qos_map entry: {:?}", e);
+                }
+            }
+        }
+        
+        for entry in self.pair_id_qos_map.iter() {
+            match entry {
+                Ok((_, value)) => {
+                    stats.push((
+                        "peer".to_string(),
+                        value.rule_id,
+                        value.pass_bytes,
+                        value.drop_bytes,
+                    ));
+                }
+                Err(e) => {
+                    errors += 1;
+                    tracing::warn!("Failed to read pair_id_qos_map entry: {:?}", e);
+                }
+            }
+        }
+        
+        for entry in self.service_qos_map.iter() {
+            match entry {
+                Ok((_, value)) => {
+                    stats.push((
+                        "service".to_string(),
+                        value.rule_id,
+                        value.pass_bytes,
+                        value.drop_bytes,
+                    ));
+                }
+                Err(e) => {
+                    errors += 1;
+                    tracing::warn!("Failed to read service_qos_map entry: {:?}", e);
+                }
+            }
+        }
+        
+        if errors > 0 {
+            tracing::warn!(
+                "get_all_qos_stats completed with {} errors, {} entries read successfully",
+                errors, stats.len()
+            );
+        }
+        
+        Ok(stats)
+    }
+    
+    pub fn clear_all_rules(&mut self) -> Result<(), QoSError> {
+        let mut read_errors = 0;
+        
+        let ip_keys: Vec<u32> = self.src_id_qos_map.iter()
+            .filter_map(|entry| {
+                match entry {
+                    Ok((key, _)) => Some(key),
+                    Err(e) => {
+                        read_errors += 1;
+                        tracing::warn!("Failed to read src_id_qos_map entry: {:?}", e);
+                        None
+                    }
+                }
+            })
+            .collect();
+        
+        let pair_keys: Vec<PairQoSKey> = self.pair_id_qos_map.iter()
+            .filter_map(|entry| {
+                match entry {
+                    Ok((key, _)) => Some(key),
+                    Err(e) => {
+                        read_errors += 1;
+                        tracing::warn!("Failed to read pair_id_qos_map entry: {:?}", e);
+                        None
+                    }
+                }
+            })
+            .collect();
+        
+        let service_keys: Vec<ServiceQoSKey> = self.service_qos_map.iter()
+            .filter_map(|entry| {
+                match entry {
+                    Ok((key, _)) => Some(key),
+                    Err(e) => {
+                        read_errors += 1;
+                        tracing::warn!("Failed to read service_qos_map entry: {:?}", e);
+                        None
+                    }
+                }
+            })
+            .collect();
+        
+        let total = ip_keys.len() + pair_keys.len() + service_keys.len();
+        let mut removed_count = 0;
+        let mut failed_count = 0;
+        
+        for key in ip_keys {
+            for attempt in 1..=3 {
+                match self.src_id_qos_map.remove(&key) {
+                    Ok(_) => {
+                        removed_count += 1;
+                        break;
+                    }
+                    Err(e) if attempt < 3 => {
+                        tracing::debug!("Attempt {} failed to remove IP QoS rule: {:?}", attempt, e);
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to remove IP QoS rule after 3 attempts: {:?}", e);
+                        failed_count += 1;
+                    }
+                }
+            }
+        }
+        
+        for key in pair_keys {
+            for attempt in 1..=3 {
+                match self.pair_id_qos_map.remove(&key) {
+                    Ok(_) => {
+                        removed_count += 1;
+                        break;
+                    }
+                    Err(e) if attempt < 3 => {
+                        tracing::debug!("Attempt {} failed to remove pair QoS rule: {:?}", attempt, e);
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to remove pair QoS rule after 3 attempts: {:?}", e);
+                        failed_count += 1;
+                    }
+                }
+            }
+        }
+        
+        for key in service_keys {
+            for attempt in 1..=3 {
+                match self.service_qos_map.remove(&key) {
+                    Ok(_) => {
+                        removed_count += 1;
+                        break;
+                    }
+                    Err(e) if attempt < 3 => {
+                        tracing::debug!("Attempt {} failed to remove service QoS rule: {:?}", attempt, e);
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to remove service QoS rule after 3 attempts: {:?}", e);
+                        failed_count += 1;
+                    }
+                }
+            }
+        }
+        
+        if failed_count > 0 || read_errors > 0 {
+            tracing::error!(
+                "clear_all_rules completed: {} rules removed, {} deletions failed, {} read errors",
+                removed_count, failed_count, read_errors
+            );
+            metrics::record_cleanup_failure("qos_maps", (failed_count + read_errors) as u64);
+        } else {
+            tracing::info!("Cleared {} QoS rules successfully", removed_count);
+        }
+        
+        Ok(())
     }
 }
 

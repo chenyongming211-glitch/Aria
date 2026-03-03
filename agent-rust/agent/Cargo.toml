@@ -15,10 +15,23 @@ path = "../tests/test_grpc_client.rs"
 name = "test-grpc-plain"
 path = "../tests/test_grpc_plain.rs"
 
+[[bin]]
+name = "test-grpc-sync"
+path = "../tests/test_grpc_sync.rs"
+
+[[bin]]
+name = "test-wireguard"
+path = "../tests/test_wireguard.rs"
+
+[[bin]]
+name = "test-routing"
+path = "../tests/test_routing.rs"
+
 [dependencies]
 aya.workspace = true
 aya-log.workspace = true
 tokio = { workspace = true, features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
@@ -27,8 +40,12 @@ clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 ctrlc.workspace = true
+serde_yaml = "0.9"
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
 
 # WireGuard 和网络管理
+wireguard-uapi = "3.0"
 netlink-packet-route = "0.19"
 netlink-packet-wireguard = "0.2"
 netlink-proto = "0.11"
@@ -37,6 +54,7 @@ socket2 = "0.5"
 base64 = "0.22"
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 rand = "0.8"
+ipnetwork = "0.20"
 
 # gRPC 客户端
 tonic = { version = "0.12", features = ["tls"] }

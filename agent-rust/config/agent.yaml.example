@@ -1,0 +1,31 @@
+# Aria Agent 配置文件示例
+
+# Controller 地址
+controller_url: "https://controller.example.com:50051"
+
+# mTLS 证书路径
+ca_cert: "/etc/aria/certs/ca.crt"
+client_cert: "/etc/aria/certs/client.crt"
+client_key: "/etc/aria/certs/client.key"
+
+# WireGuard 配置
+interface_name: "aria0"
+listen_port: 51820
+mtu: 1360
+
+# 节点标识
+public_key: ""  # 由 aria-agent init 生成
+private_key: "" # 由 aria-agent init 生成
+hostname: "node-1"
+region: "cn-east"
+
+# VPN IP 地址（由 Controller 分配）
+assigned_ip: "100.64.0.1"
+
+# 路由广播（可选）
+advertised_routes:
+  - "10.0.0.0/24"
+  - "192.168.1.0/24"
+
+# 同步间隔（秒）
+sync_interval: 5

@@ -1,11 +1,11 @@
 # SD-WAN Makefile
 # Version 0.1.0
 
-.PHONY: all build build-aria build-agent build-controller clean test run-controller run-agent \
+.PHONY: all build build-controller clean test run-controller \
         build-linux-amd64 build-linux-arm64 package package-deb package-rpm \
         package-all docker-build docker-push lint fmt help release release-deploy \
         clean-old-releases release-deploy-web docker-build-controller sync-version \
-        ebpf-generate ebpf-clean ebpf-test build-aria-cli
+        ebpf-generate ebpf-clean ebpf-test build-ariactl
 
 # Variables
 # 版本号：优先使用命令行传入，否则从 VERSION 文件读取，最后使用默认值
@@ -31,44 +31,35 @@ ARCH ?= amd64
 
 all: build
 
-# Build unified aria binary (new)
-build: build-aria
+# Build controller binary
+build: build-controller
 
-build-aria:
-	@echo "Building aria $(VERSION)..."
+build-controller:
+	@echo "Building aria-controller $(VERSION)..."
 	@mkdir -p $(BIN_DIR)
-	go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/aria ./cmd
+	go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/aria-controller ./cmd
 
-# Build aria-cli binary
-build-aria-cli:
-	@echo "Building aria-cli $(VERSION)..."
+# Build ariactl CLI
+build-ariactl:
+	@echo "Building ariactl $(VERSION)..."
 	@mkdir -p $(BIN_DIR)
-	go build -o $(BIN_DIR)/aria-cli ./cmd/aria-cli
-
-# Legacy targets for backwards compatibility
-build-agent: build-aria
-	@echo "Note: agent is now part of unified 'aria' binary"
-	@ln -sf aria $(BIN_DIR)/agent 2>/dev/null || true
-
-build-controller: build-aria
-	@echo "Note: controller is now part of unified 'aria' binary"
-	@ln -sf aria $(BIN_DIR)/controller 2>/dev/null || true
+	go build -o $(BIN_DIR)/ariactl ./cmd/ariactl
 
 # Cross compilation for Linux
 build-linux-amd64:
-	@echo "Building aria for Linux AMD64..."
+	@echo "Building aria-controller for Linux AMD64..."
 	@mkdir -p $(BIN_DIR)
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/aria-linux-amd64 ./cmd
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/aria-controller-linux-amd64 ./cmd
 
 build-linux-arm64:
-	@echo "Building aria for Linux ARM64..."
+	@echo "Building aria-controller for Linux ARM64..."
 	@mkdir -p $(BIN_DIR)
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/aria-linux-arm64 ./cmd
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/aria-controller-linux-arm64 ./cmd
 
 build-linux-amd64-cli:
-	@echo "Building aria-cli for Linux AMD64..."
+	@echo "Building ariactl for Linux AMD64..."
 	@mkdir -p $(BIN_DIR)
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $(BIN_DIR)/aria-cli-linux-amd64 ./cmd/aria-cli
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $(BIN_DIR)/ariactl-linux-amd64 ./cmd/ariactl
 
 build-all: build-linux-amd64 build-linux-arm64
 
@@ -81,14 +72,6 @@ prepare-packaging:
 	@chmod +x scripts/packaging/*.sh
 
 # Build DEB packages
-package-deb-agent: build-linux-$(ARCH) prepare-packaging
-	@echo "Building Agent DEB package for $(ARCH)..."
-	@mkdir -p $(DIST_DIR)
-	ARCH=$(ARCH) VERSION=$(VERSION) nfpm pkg \
-		--config nfpm-agent.yaml \
-		--packager deb \
-		--target $(DIST_DIR)/
-
 package-deb-controller: build-linux-$(ARCH) prepare-packaging
 	@echo "Building Controller DEB package for $(ARCH)..."
 	@mkdir -p $(DIST_DIR)
@@ -97,17 +80,9 @@ package-deb-controller: build-linux-$(ARCH) prepare-packaging
 		--packager deb \
 		--target $(DIST_DIR)/
 
-package-deb: package-deb-agent package-deb-controller
+package-deb: package-deb-controller
 
 # Build RPM packages
-package-rpm-agent: build-linux-$(ARCH) prepare-packaging
-	@echo "Building Agent RPM package for $(ARCH)..."
-	@mkdir -p $(DIST_DIR)
-	ARCH=$(ARCH) VERSION=$(VERSION) nfpm pkg \
-		--config nfpm-agent.yaml \
-		--packager rpm \
-		--target $(DIST_DIR)/
-
 package-rpm-controller: build-linux-$(ARCH) prepare-packaging
 	@echo "Building Controller RPM package for $(ARCH)..."
 	@mkdir -p $(DIST_DIR)
@@ -116,7 +91,7 @@ package-rpm-controller: build-linux-$(ARCH) prepare-packaging
 		--packager rpm \
 		--target $(DIST_DIR)/
 
-package-rpm: package-rpm-agent package-rpm-controller
+package-rpm: package-rpm-controller
 
 # Build all packages for a specific architecture
 package-arch: package-deb package-rpm
@@ -131,15 +106,15 @@ package-all:
 	@ls -la $(DIST_DIR)/
 
 # Legacy tarball package
-package-tarball: build-linux-amd64 build-linux-arm64
+package-tarball: build-linux-amd64
 	@echo "Creating tarball package $(VERSION)..."
-	@mkdir -p aria-package
-	cp $(BIN_DIR)/* aria-package/
-	cp scripts/install.sh aria-package/ 2>/dev/null || true
-	cp -r deployments/config/* aria-package/ 2>/dev/null || true
-	cd aria-package && tar -czvf ../$(DIST_DIR)/aria-v$(VERSION)-linux.tar.gz *
-	rm -rf aria-package
-	@echo "Package created: $(DIST_DIR)/aria-v$(VERSION)-linux.tar.gz"
+	@mkdir -p aria-controller-package
+	cp $(BIN_DIR)/aria-controller-linux-amd64 aria-controller-package/aria-controller
+	cp scripts/install.sh aria-controller-package/ 2>/dev/null || true
+	cp -r deployments/config/* aria-controller-package/ 2>/dev/null || true
+	cd aria-controller-package && tar -czvf ../$(DIST_DIR)/aria-controller-v$(VERSION)-linux-amd64.tar.gz *
+	rm -rf aria-controller-package
+	@echo "Package created: $(DIST_DIR)/aria-controller-v$(VERSION)-linux-amd64.tar.gz"
 
 #------------------------------------------------------------------------------
 # eBPF Targets
@@ -245,12 +220,8 @@ lint:
 	golangci-lint run ./...
 
 # Run controller locally
-run-controller: build-aria
-	./$(BIN_DIR)/aria controller serve --config=configs/controller.yaml
-
-# Run agent locally
-run-agent: build-aria
-	sudo ./$(BIN_DIR)/aria up --server=http://localhost:8080 --token=test
+run-controller: build-controller
+	./$(BIN_DIR)/aria-controller serve --config=configs/controller.yaml
 
 #------------------------------------------------------------------------------
 # Installation Targets
@@ -262,13 +233,13 @@ INSTALL_SYSCONFDIR ?= $(PREFIX)/etc/aria
 
 install: build
 	@echo "Installing to $(PREFIX)..."
-	install -D -m 755 $(BIN_DIR)/aria $(INSTALL_BINDIR)/aria
+	install -D -m 755 $(BIN_DIR)/aria-controller $(INSTALL_BINDIR)/aria-controller
 	install -d $(INSTALL_SYSCONFDIR)
 	@echo "Installed successfully"
 
 uninstall:
 	@echo "Uninstalling..."
-	rm -f $(INSTALL_BINDIR)/aria
+	rm -f $(INSTALL_BINDIR)/aria-controller
 	@echo "Uninstalled successfully"
 
 #------------------------------------------------------------------------------
@@ -313,7 +284,7 @@ clean-old-releases:
 release: sync-version sync-ui build-linux-amd64 clean-old-releases
 	@echo "Creating release $(VERSION)..."
 	@mkdir -p $(RELEASE_VERSION_DIR)
-	@cp $(BIN_DIR)/aria-linux-amd64 $(RELEASE_VERSION_DIR)/aria
+	@cp $(BIN_DIR)/aria-controller-linux-amd64 $(RELEASE_VERSION_DIR)/aria-controller
 	@echo "$(VERSION)" > $(RELEASE_VERSION_DIR)/VERSION
 	@echo "Build: $(BUILD_TIME)" >> $(RELEASE_VERSION_DIR)/VERSION
 	@echo "Commit: $(COMMIT)" >> $(RELEASE_VERSION_DIR)/VERSION
@@ -325,17 +296,12 @@ release: sync-version sync-ui build-linux-amd64 clean-old-releases
 	@echo "Current releases:"
 	@ls -d $(RELEASE_DIR)/*/ 2>/dev/null | grep -v deploy | sed 's/.*\//  /'
 
-# 准备部署包目录
+# 准备部署包目录（仅 Controller，Agent 由 Rust 实现）
 release-deploy: release
-	@echo "Preparing deploy package..."
-	@mkdir -p $(RELEASE_DIR)/deploy/agent
+	@echo "Preparing Controller deploy package..."
 	@mkdir -p $(RELEASE_DIR)/deploy/controller/images
-	@# Agent 部署包
-	@cp $(RELEASE_VERSION_DIR)/aria $(RELEASE_DIR)/deploy/agent/aria
-	@cp deployments/scripts/agent-deploy.sh $(RELEASE_DIR)/deploy/agent/deploy.sh
-	@chmod +x $(RELEASE_DIR)/deploy/agent/deploy.sh
 	@# Controller 部署包
-	@cp $(RELEASE_VERSION_DIR)/aria $(RELEASE_DIR)/deploy/controller/aria
+	@cp $(RELEASE_VERSION_DIR)/aria-controller $(RELEASE_DIR)/deploy/controller/aria-controller
 	@cp deployments/scripts/controller-deploy.sh $(RELEASE_DIR)/deploy/controller/deploy.sh
 	@cp deployments/scripts/controller.yaml $(RELEASE_DIR)/deploy/controller/
 	@cp deployments/scripts/docker-compose.yml $(RELEASE_DIR)/deploy/controller/

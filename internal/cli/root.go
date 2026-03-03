@@ -10,25 +10,26 @@ import (
 var (
 	cfgFile string
 	Version = "0.2.26-test-7" // 导出的版本号，通过 ldflags 注入
-	commit  = "unknown" // Will be set by ldflags during build
+	commit  = "unknown"       // Will be set by ldflags during build
 )
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "aria",
-	Short: "Aria - Decentralized SD-WAN System",
-	Long: `Aria is a decentralized SD-WAN system that creates secure mesh networks
-using WireGuard. It consists of a Controller (control plane) and Agents (edge nodes).
+	Use:   "aria-controller",
+	Short: "Aria Controller - Decentralized SD-WAN Control Plane",
+	Long: `Aria Controller is the control plane for the Aria SD-WAN system.
 
-Roles:
-  Controller  - Central brain, distributes routing and manages devices
-  Gateway     - Edge node, tunnels traffic between sites
-  Admin Tool  - Management commands for tokens and devices
+It manages network topology, distributes routing information, and provides
+a web interface for monitoring and configuration.
+
+Components:
+  Controller  - Central brain (this binary)
+  Agent       - Edge node (separate Rust binary: aria-agent)
 
 Quick Start:
-  aria up --server=https://controller:8080 --token=xxx   # Connect as gateway
-  aria controller serve                                   # Run controller
-  aria token create --uses=10 --ttl=24h                  # Create enrollment token`,
+  aria-controller serve --config /etc/aria/controller.yaml   # Run controller
+  aria-controller token create --uses=10 --ttl=24h          # Create enrollment token
+  aria-controller admin list                                 # View all agents`,
 	Version: Version,
 }
 
@@ -41,5 +42,5 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: /etc/aria/agent.yaml or /etc/aria/controller.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: /etc/aria/controller.yaml)")
 }

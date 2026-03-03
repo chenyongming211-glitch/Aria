@@ -8,6 +8,7 @@ use aya::Ebpf;
 use thiserror::Error;
 
 use crate::identity::{IdentityManager, ID_WILDCARD, parse_single_ip};
+use crate::metrics;
 
 pub const ACTION_DROP: u32 = 0;
 pub const ACTION_PASS: u32 = 1;
@@ -316,5 +317,117 @@ impl AclManager {
         };
 
         Ok(self.policy_map.get(&key, 0).ok())
+    }
+    
+    pub fn get_all_rule_stats(&self) -> Result<Vec<(PolicyKey, PolicyValue)>, AclError> {
+        let mut stats = Vec::new();
+        let mut errors = 0;
+        
+        for entry in self.policy_map.iter() {
+            match entry {
+                Ok((key, value)) => {
+                    stats.push((key, value));
+                }
+                Err(e) => {
+                    errors += 1;
+                    tracing::warn!("Failed to read policy map entry: {:?}", e);
+                }
+            }
+        }
+        
+        if errors > 0 {
+            tracing::warn!(
+                "get_all_rule_stats completed with {} errors, {} entries read successfully",
+                errors, stats.len()
+            );
+        }
+        
+        Ok(stats)
+    }
+    
+    pub fn clear_all_rules(&mut self) -> Result<(), AclError> {
+        // 第一次遍历：收集所有 key
+        let mut first_pass_errors = 0;
+        let keys: Vec<PolicyKey> = self.policy_map.iter()
+            .filter_map(|entry| {
+                match entry {
+                    Ok((key, _)) => Some(key),
+                    Err(e) => {
+                        first_pass_errors += 1;
+                        tracing::warn!("Failed to read policy map entry in first pass: {:?}", e);
+                        None
+                    }
+                }
+            })
+            .collect();
+        
+        let total_count = keys.len();
+        let mut removed_count = 0;
+        let mut failed_keys = Vec::new();
+        
+        // 第二次遍历：尝试删除，最多重试3次
+        for key in keys {
+            let mut success = false;
+            
+            for attempt in 1..=3 {
+                match self.policy_map.remove(&key) {
+                    Ok(_) => {
+                        success = true;
+                        removed_count += 1;
+                        break;
+                    }
+                    Err(e) if attempt < 3 => {
+                        tracing::debug!("Attempt {} failed to remove policy rule, retrying immediately: {:?}", attempt, e);
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to remove policy rule after 3 attempts (src_id={}, dst_id={}, port={}, proto={}): {:?}",
+                            key.src_id, key.dst_id, key.dst_port, key.protocol, e
+                        );
+                        failed_keys.push(key);
+                    }
+                }
+            }
+        }
+        
+        // 如果第一次遍历有读取失败，尝试再次迭代清理
+        if first_pass_errors > 0 {
+            tracing::warn!("Retrying to clear {} entries that failed to read in first pass", first_pass_errors);
+            
+            let retry_keys: Vec<PolicyKey> = self.policy_map.iter()
+                .filter_map(|entry| entry.ok())
+                .map(|(key, _)| key)
+                .collect();
+            
+            for key in retry_keys {
+                for attempt in 1..=2 {
+                    match self.policy_map.remove(&key) {
+                        Ok(_) => {
+                            removed_count += 1;
+                            tracing::info!("Successfully removed previously unreadable entry on retry");
+                            break;
+                        }
+                        Err(e) if attempt < 2 => {
+                            tracing::debug!("Retry attempt {} failed: {:?}", attempt, e);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to remove entry even after retry: {:?}", e);
+                        }
+                    }
+                }
+            }
+        }
+        
+        if !failed_keys.is_empty() || first_pass_errors > 0 {
+            tracing::error!(
+                "clear_all_rules completed: {} rules removed, {} deletions failed, {} read errors",
+                removed_count, failed_keys.len(), first_pass_errors
+            );
+            metrics::record_cleanup_failure("acl_policy_map", (failed_keys.len() + first_pass_errors) as u64);
+        } else {
+            tracing::info!("Cleared {} ACL rules successfully", removed_count);
+        }
+        
+        Ok(())
     }
 }

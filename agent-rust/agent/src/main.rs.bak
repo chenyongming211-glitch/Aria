@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result};
 use aya::{
+    include_bytes_aligned,
     programs::{tc, SchedClassifier, TcAttachType, Xdp, XdpFlags},
     Ebpf,
     EbpfLoader,
@@ -25,6 +26,12 @@ use tracing_subscriber::{
 mod acl;
 mod qos;
 mod identity;
+mod config;
+mod metrics;
+mod unified_agent;
+mod grpc_client;
+mod wireguard;
+mod routing;
 
 const SOCKET_PATH: &str = "/run/aria-agent.sock";
 const BPF_FS_PATH: &str = "/sys/fs/bpf/aria";
@@ -43,12 +50,32 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Daemon {
+    Up {
         #[arg(short, long)]
         interface: String,
         #[arg(short = 'l', long, default_value = "info")]
         log_level: String,
+        #[arg(long, default_value = "0.0.0.0:9090")]
+        metrics_addr: String,
+        #[arg(long)]
+        config: Option<String>,
     },
+    Init {
+        #[arg(long)]
+        server: String,
+        #[arg(long)]
+        token: String,
+        #[arg(long)]
+        region: Option<String>,
+        #[arg(long)]
+        interface: Option<String>,
+        #[arg(long)]
+        advertise_routes: Option<String>,
+    },
+    Status,
+    Peers,
+    Route,
+    Down,
     Qos {
         #[command(subcommand)]
         cmd: QosCommands,
@@ -178,7 +205,7 @@ enum AclCommands {
         src_ip: Option<String>,
         #[arg(long)]
         dst_ip: Option<String>,
-        #[arg(long)]
+        #[arg(long, default_value = "0")]
         src_port: u16,
         #[arg(long)]
         dst_port: u16,
@@ -190,7 +217,7 @@ enum AclCommands {
         src_ip: Option<String>,
         #[arg(long)]
         dst_ip: Option<String>,
-        #[arg(long)]
+        #[arg(long, default_value = "0")]
         src_port: u16,
         #[arg(long)]
         dst_port: u16,
@@ -202,7 +229,7 @@ enum AclCommands {
         src_ip: Option<String>,
         #[arg(long)]
         dst_ip: Option<String>,
-        #[arg(long)]
+        #[arg(long, default_value = "0")]
         src_port: u16,
         #[arg(long)]
         dst_port: u16,
@@ -214,7 +241,7 @@ enum AclCommands {
         src_ip: Option<String>,
         #[arg(long)]
         dst_ip: Option<String>,
-        #[arg(long)]
+        #[arg(long, default_value = "0")]
         src_port: u16,
         #[arg(long)]
         dst_port: u16,
@@ -240,14 +267,14 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Daemon { interface, log_level } => {
-            let log_handle = init_logging(&log_level)?;
-            run_daemon(&interface, log_handle)?
-        },
-        Commands::Qos { cmd } => send_qos_command(cmd)?,
-        Commands::Acl { cmd } => send_acl_command(cmd)?,
-        Commands::Log { level } => send_log_command(&level)?,
-    }
+        Commands::Up { interface, log_level, metrics_addr, config } => {
+            let rt = tokio::runtime::Runtime::new()
+                .context("Failed to create tokio runtime")?;
+            rt.block_on(run_unified_agent(&interface, &log_level, &metrics_addr, config.as_deref()))?;
+        }
+        Commands::Init { server, token, region, interface, advertise_routes } => {
+            run_init(&server, &token, region.as_deref(), interface.as_deref(), advertise_routes.as_deref())?
+        }
 
     Ok(())
 }
@@ -284,17 +311,16 @@ fn run_daemon(interface: &str, log_handle: LogLevelHandle) -> Result<()> {
     let acl_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/acl"));
     let qos_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/qos"));
 
-    // Load ACL program first - this will create identity maps
+    // Load ACL program first - this will create and auto-pin identity maps
     info!("Loading ACL eBPF program...");
-    let mut acl_ebpf = Ebpf::load(acl_bytes)?;
+    let mut acl_ebpf = EbpfLoader::new()
+        .map_pin_path(BPF_FS_PATH)
+        .load(acl_bytes)?;
     
     attach_xdp(&mut acl_ebpf, interface)?;
-    
-    // Pin identity maps so QoS program can share them
-    pin_identity_maps(&mut acl_ebpf)?;
-    info!("Pinned identity maps to {}", BPF_FS_PATH);
+    info!("Identity maps auto-pinned to {}", BPF_FS_PATH);
 
-    // Load QoS program with map pin path to reuse pinned identity maps
+    // Load QoS program with same map pin path to reuse pinned identity maps
     info!("Loading QoS eBPF program...");
     let mut qos_ebpf = EbpfLoader::new()
         .map_pin_path(BPF_FS_PATH)
@@ -680,10 +706,9 @@ fn process_request(
         "acl_allow" => {
             let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
             let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
-            let src_port = req.args["src_port"].as_u64().unwrap_or(0) as u16;
             let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
             let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
-            match get_acl_mgr(acl_mgr).allow(&src_ip, &dst_ip, src_port, dst_port, protocol) {
+            match get_acl_mgr(acl_mgr).allow(&src_ip, &dst_ip, dst_port, protocol) {
                 Ok(rule_id) => Response { success: true, message: Some(format!("Added allow rule {}", rule_id)), data: None },
                 Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
             }
@@ -691,10 +716,9 @@ fn process_request(
         "acl_deny" => {
             let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
             let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
-            let src_port = req.args["src_port"].as_u64().unwrap_or(0) as u16;
             let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
             let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
-            match get_acl_mgr(acl_mgr).deny(&src_ip, &dst_ip, src_port, dst_port, protocol) {
+            match get_acl_mgr(acl_mgr).deny(&src_ip, &dst_ip, dst_port, protocol) {
                 Ok(rule_id) => Response { success: true, message: Some(format!("Added deny rule {}", rule_id)), data: None },
                 Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
             }
@@ -702,10 +726,9 @@ fn process_request(
         "acl_remove_rule" => {
             let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
             let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
-            let src_port = req.args["src_port"].as_u64().unwrap_or(0) as u16;
             let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
             let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
-            match get_acl_mgr(acl_mgr).remove_rule(&src_ip, &dst_ip, src_port, dst_port, protocol) {
+            match get_acl_mgr(acl_mgr).remove_rule(&src_ip, &dst_ip, dst_port, protocol) {
                 Ok(_) => Response { success: true, message: Some("Removed rule".to_string()), data: None },
                 Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
             }
@@ -713,10 +736,9 @@ fn process_request(
         "acl_stats" => {
             let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
             let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
-            let src_port = req.args["src_port"].as_u64().unwrap_or(0) as u16;
             let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
             let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
-            match get_acl_mgr(acl_mgr).get_rule_stats(&src_ip, &dst_ip, src_port, dst_port, protocol) {
+            match get_acl_mgr(acl_mgr).get_rule_stats(&src_ip, &dst_ip, dst_port, protocol) {
                 Ok(Some(stats)) => Response { success: true, message: None, data: Some(serde_json::to_value(stats).unwrap()) },
                 Ok(None) => Response { success: true, message: Some("No stats found".to_string()), data: None },
                 Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
@@ -745,6 +767,36 @@ fn process_request(
                 data: Some(serde_json::json!({
                     "level": get_current_log_level()
                 }))
+            }
+        }
+        "get_peers" => {
+            match get_wireguard_peers() {
+                Ok(peers) => Response { 
+                    success: true, 
+                    message: None, 
+                    data: Some(serde_json::to_value(peers).unwrap()) 
+                },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "get_routes" => {
+            match get_routing_table() {
+                Ok(routes) => Response { 
+                    success: true, 
+                    message: None, 
+                    data: Some(serde_json::to_value(routes).unwrap()) 
+                },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
+            }
+        }
+        "get_status" => {
+            match get_agent_status() {
+                Ok(status) => Response { 
+                    success: true, 
+                    message: None, 
+                    data: Some(serde_json::to_value(status).unwrap()) 
+                },
+                Err(e) => Response { success: false, message: Some(e.to_string()), data: None },
             }
         }
         _ => Response { success: false, message: Some(format!("Unknown command: {}", req.cmd)), data: None },
@@ -961,6 +1013,192 @@ fn send_log_command(level: &str) -> Result<()> {
         if let Some(msg) = resp.message {
             println!("{}", msg);
         }
+    } else {
+        eprintln!("Error: {}", resp.message.unwrap_or_else(|| "Unknown error".to_string()));
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct PeerInfo {
+    public_key: String,
+    endpoint: Option<String>,
+    allowed_ips: Vec<String>,
+    last_handshake: Option<u64>,
+    rx_bytes: u64,
+    tx_bytes: u64,
+    status: String,
+}
+
+fn get_wireguard_peers() -> Result<Vec<PeerInfo>> {
+    let output = std::process::Command::new("wg")
+        .args(&["show", "all", "dump"])
+        .output()
+        .context("Failed to execute wg show")?;
+    
+    if !output.status.success() {
+        return Err(anyhow::anyhow!("wg show failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+
+    let lines: Vec<&str> = std::str::from_utf8(&output.stdout)?
+        .lines()
+        .collect();
+    
+    let mut peers = Vec::new();
+    
+    for line in lines.iter().skip(1) {
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() < 8 {
+            continue;
+        }
+
+        let public_key = fields[0].to_string();
+        let endpoint = if fields[2].is_empty() { None } else { Some(fields[2].to_string()) };
+        let allowed_ips: Vec<String> = fields[3].split(',').map(|s| s.to_string()).collect();
+        let last_handshake: Option<u64> = fields[4].parse().ok();
+        let rx_bytes: u64 = fields[5].parse().unwrap_or(0);
+        let tx_bytes: u64 = fields[6].parse().unwrap_or(0);
+
+        let status = match last_handshake {
+            Some(hs) if hs > 0 => {
+                let elapsed = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)?
+                    .as_secs() - hs;
+                if elapsed < 180 { "online".to_string() } else { "offline".to_string() }
+            },
+            _ => "never".to_string(),
+        };
+
+        peers.push(PeerInfo {
+            public_key,
+            endpoint,
+            allowed_ips,
+            last_handshake,
+            rx_bytes,
+            tx_bytes,
+            status,
+        });
+    }
+
+    Ok(peers)
+}
+
+#[derive(Serialize)]
+struct RouteInfo {
+    destination: String,
+    interface: String,
+    gateway: Option<String>,
+    metric: Option<u32>,
+}
+
+fn get_routing_table() -> Result<Vec<RouteInfo>> {
+    let output = std::process::Command::new("ip")
+        .args(&["route", "show", "table", "100"])
+        .output()
+        .context("Failed to execute ip route")?;
+    
+    if !output.status.success() {
+        return Err(anyhow::anyhow!("ip route failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+
+    let routes_str = std::str::from_utf8(&output.stdout)?;
+    let mut routes = Vec::new();
+
+    for line in routes_str.lines() {
+        if line.is_empty() {
+            continue;
+        }
+
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if let Some(dest) = parts.first() {
+            routes.push(RouteInfo {
+                destination: dest.to_string(),
+                interface: "aria0".to_string(),
+                gateway: None,
+                metric: None,
+            });
+        }
+    }
+
+    Ok(routes)
+}
+
+#[derive(Serialize)]
+struct StatusInfo {
+    version: String,
+    interface: String,
+    status: String,
+    peer_count: usize,
+}
+
+fn get_agent_status() -> Result<StatusInfo> {
+    let peers = get_wireguard_peers()?;
+    
+    Ok(StatusInfo {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        interface: "aria0".to_string(),
+        status: "running".to_string(),
+        peer_count: peers.len(),
+    })
+}
+
+fn run_init(server: &str, token: &str, region: Option<&str>, interface: Option<&str>, advertise_routes: Option<&str>) -> Result<()> {
+    println!("Initializing Aria Agent...");
+    println!("  Server: {}", server);
+    println!("  Token: {}...", &token[..16.min(token.len())]);
+    
+    let iface = interface.unwrap_or("aria0");
+    let config = config::AgentConfig {
+        controller_url: server.to_string(),
+        ca_cert: String::new(),
+        client_cert: String::new(),
+        client_key: String::new(),
+        device_id: None,
+        private_key: String::new(),
+        public_key: String::new(),
+        assigned_ip: None,
+        address: None,
+        interface_name: iface.to_string(),
+        listen_port: 51820,
+        mtu: 1360,
+        region: region.map(|s| s.to_string()),
+        customer_id: None,
+        advertised_routes: advertise_routes.map(|s| s.split(',').map(|r| r.trim().to_string()).collect()),
+        hostname: None,
+        sync_interval: std::time::Duration::from_secs(5),
+    };
+
+    let config_manager = config::ConfigManager::new("/etc/aria/agent.yaml");
+    config_manager.save(&config)?;
+    
+    println!("Config saved to /etc/aria/agent.yaml");
+    println!("Run 'aria-agent up' to start the agent.");
+    
+    Ok(())
+}
+
+fn send_status_command() -> Result<()> {
+    let stream = UnixStream::connect(SOCKET_PATH)?;
+    let mut writer = BufWriter::new(&stream);
+    let mut reader = BufReader::new(&stream);
+
+    let req = Request {
+        cmd: "get_status".to_string(),
+        args: serde_json::json!({}),
+    };
+
+    let req_json = serde_json::to_string(&req)?;
+    writer.write_all(req_json.as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+
+    let mut resp_line = String::new();
+    reader.read_line(&mut resp_line)?;
+    let resp: Response = serde_json::from_str(&resp_line)?;
+    
+    if resp.success {
         if let Some(data) = resp.data {
             println!("{}", serde_json::to_string_pretty(&data)?);
         }
@@ -969,6 +1207,80 @@ fn send_log_command(level: &str) -> Result<()> {
         std::process::exit(1);
     }
 
+    Ok(())
+}
+
+fn send_peers_command() -> Result<()> {
+    let stream = UnixStream::connect(SOCKET_PATH)?;
+    let mut writer = BufWriter::new(&stream);
+    let mut reader = BufReader::new(&stream);
+
+    let req = Request {
+        cmd: "get_peers".to_string(),
+        args: serde_json::json!({}),
+    };
+
+    let req_json = serde_json::to_string(&req)?;
+    writer.write_all(req_json.as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+
+    let mut resp_line = String::new();
+    reader.read_line(&mut resp_line)?;
+    let resp: Response = serde_json::from_str(&resp_line)?;
+    
+    if resp.success {
+        if let Some(data) = resp.data {
+            println!("{}", serde_json::to_string_pretty(&data)?);
+        }
+    } else {
+        eprintln!("Error: {}", resp.message.unwrap_or_else(|| "Unknown error".to_string()));
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+fn send_route_command() -> Result<()> {
+    let stream = UnixStream::connect(SOCKET_PATH)?;
+    let mut writer = BufWriter::new(&stream);
+    let mut reader = BufReader::new(&stream);
+
+    let req = Request {
+        cmd: "get_routes".to_string(),
+        args: serde_json::json!({}),
+    };
+
+    let req_json = serde_json::to_string(&req)?;
+    writer.write_all(req_json.as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+
+    let mut resp_line = String::new();
+    reader.read_line(&mut resp_line)?;
+    let resp: Response = serde_json::from_str(&resp_line)?;
+    
+    if resp.success {
+        if let Some(data) = resp.data {
+            println!("{}", serde_json::to_string_pretty(&data)?);
+        }
+    } else {
+        eprintln!("Error: {}", resp.message.unwrap_or_else(|| "Unknown error".to_string()));
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+fn send_up_command() -> Result<()> {
+    println!("Starting agent daemon...");
+    println!("Use: systemctl start aria-agent");
+    Ok(())
+}
+
+fn send_down_command() -> Result<()> {
+    println!("Stopping agent daemon...");
+    println!("Use: systemctl stop aria-agent");
     Ok(())
 }
 
@@ -991,9 +1303,42 @@ fn attach_tc(ebpf: &mut Ebpf, interface: &str) -> Result<()> {
     
     program.load()?;
     
-    let tc_builder = tc::_tc_qdisc_add_clsact(interface)?;
-    tc_builder.attach(program.fd(), TcAttachType::Egress)?;
+    tc::qdisc_add_clsact(interface)?;
+    program.attach(interface, TcAttachType::Egress)?;
     
     info!("TC program attached to {} (egress)", interface);
     Ok(())
 }
+
+// ==================== UnifiedAgent 启动函数 ====================
+
+async fn run_unified_agent(
+    interface: &str,
+    log_level: &str,
+    metrics_addr: &str,
+    config_path: Option<&str>,
+) -> Result<()> {
+    let log_handle = init_logging(log_level)?;
+    info!("Starting Aria Agent v{}", env!("CARGO_PKG_VERSION"));
+    
+    metrics::init_metrics(metrics_addr)
+        .context("Failed to initialize metrics")?;
+    info!("Metrics server started on {}", metrics_addr);
+    
+    let config = if let Some(path) = config_path {
+        let config_manager = config::ConfigManager::new(path);
+        config_manager.load()?
+    } else {
+        let config_manager = config::ConfigManager::new("/etc/aria/agent.yaml");
+        config_manager.load_or_init(false)?.unwrap_or_default()
+    };
+    
+    let mut agent = unified_agent::UnifiedAgent::new(config, interface, log_handle).await?;
+    agent.start().await
+}
+
+// ==================== 辅助函数 ====================
+
+// Unix Socket 服务器已集成到 unified_agent.rs 中的 UnifiedAgent
+// 使用 UnifiedAgent::start_unix_socket_server() 启动
+
