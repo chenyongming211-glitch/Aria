@@ -124,12 +124,21 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 		}
 	}
 
+	// 查询 QoS 规则
+	qosRules, err := s.getQoSRules(ctx, req.PublicKey)
+	if err != nil {
+		// 记录错误但继续
+		fmt.Printf("[WARN] Failed to get QoS rules: %v\n", err)
+		qosRules = []*agentpb.QoSRule{} // 空列表
+	}
+
 	return &agentpb.SyncResponse{
 		Peers:              peers,
 		AssignedIp:         assignedIP,
 		LastUpdate:         time.Now().Unix(),
 		AclRules:           aclRules,
 		MetricsPushGateway: metricsGateway,
+		QosRules:           qosRules, // 新增
 	}, nil
 }
 
