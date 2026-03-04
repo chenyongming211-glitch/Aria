@@ -14,7 +14,7 @@ use aya::{
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::{EnvFilter, Registry, reload};
 
-use crate::grpc_client::{GrpcClient, PeerInfo as GrpcPeerInfo, AclRule};
+use crate::grpc_client::{GrpcClient, PeerInfo as GrpcPeerInfo, AclRule, QoSRule as GrpcQoSRule};
 use crate::wireguard::{WireGuardManager, PeerConfig, InterfaceConfig};
 use crate::routing::RoutingManager;
 use crate::acl::AclManager;
@@ -1034,6 +1034,87 @@ impl UnifiedAgent {
         *self.last_sync_peers.lock().unwrap() = sync_result.peers;
         tracing::debug!("Sync completed");
         Ok(())
+    }
+    
+    /// 同步 QoS 规则
+    async fn sync_qos_rules(&mut self, new_rules: &[GrpcQoSRule]) -> Result<()> {
+        use crate::qos::QoSManager;
+        
+        tracing::info!("Syncing {} QoS rules", new_rules.len());
+        
+        // 在阻塞任务中执行 QoS 操作（因为 QoS Manager 不是异步的）
+        let new_rules = new_rules.to_vec();
+        let result = tokio::task::spawn_blocking(move || -> Result<()> {
+            let mut qos_mgr = match QoSManager::new("eth0") {
+                Ok(mgr) => mgr,
+                Err(e) => {
+                    tracing::error!("Failed to create QoS manager: {:?}", e);
+                    return Err(e);
+                }
+            };
+            
+            let mut success_count = 0;
+            let mut fail_count = 0;
+            
+            for rule in &new_rules {
+                // 根据规则特征判断类型并应用
+                let result = if rule.src_ip.is_empty() && rule.dst_ip.is_empty() {
+                    // 端口级规则（已弃用，忽略）
+                    tracing::warn!("Port-level rules are deprecated, skipping");
+                    continue;
+                } else if rule.src_ip.is_empty() || rule.dst_ip.is_empty() {
+                    // IP 级规则
+                    let ip = if !rule.src_ip.is_empty() {
+                        &rule.src_ip
+                    } else {
+                        &rule.dst_ip
+                    };
+                    qos_mgr.limit_ip(ip, rule.bandwidth_mbps)
+                } else if rule.src_port == 0 && rule.dst_port == 0 {
+                    // Peer 级规则（只有 IP 对）
+                    qos_mgr.limit_peer_pair(&rule.src_ip, &rule.dst_ip, rule.bandwidth_mbps)
+                } else {
+                    // 服务级规则（五元组）
+                    qos_mgr.limit_service(
+                        &rule.src_ip,
+                        &rule.dst_ip,
+                        rule.src_port,
+                        rule.dst_port,
+                        rule.protocol,
+                        rule.bandwidth_mbps,
+                    )
+                };
+                
+                match result {
+                    Ok(_) => {
+                        success_count += 1;
+                        tracing::debug!(
+                            "Applied QoS rule: {}:{}:{}:{}:{} -> {} Mbps",
+                            rule.src_ip, rule.dst_ip, rule.src_port,
+                            rule.dst_port, rule.protocol, rule.bandwidth_mbps
+                        );
+                    }
+                    Err(e) => {
+                        fail_count += 1;
+                        tracing::error!(
+                            "Failed to apply QoS rule: {}:{}:{}:{}:{} -> {:?}",
+                            rule.src_ip, rule.dst_ip, rule.src_port,
+                            rule.dst_port, rule.protocol, e
+                        );
+                    }
+                }
+            }
+            
+            tracing::info!(
+                "QoS sync completed: {} success, {} failed",
+                success_count,
+                fail_count
+            );
+            
+            Ok(())
+        }).await?;
+        
+        result
     }
     
     async fn sync_peers(&mut self, new_peers: &[GrpcPeerInfo]) -> Result<()> {
