@@ -134,6 +134,14 @@ impl GrpcClient {
                 min_port: r.min_port,
                 max_port: r.max_port,
             }).collect(),
+            qos_rules: resp.qos_rules.into_iter().map(|r| QoSRule {
+                src_ip: r.src_ip,
+                dst_ip: r.dst_ip,
+                src_port: r.src_port,
+                dst_port: r.dst_port,
+                protocol: r.protocol,
+                bandwidth_mbps: r.bandwidth_mbps,
+            }).collect(),
         })
     }
     
