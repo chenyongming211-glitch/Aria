@@ -144,6 +144,7 @@ pub struct SyncResult {
     pub peers: Vec<PeerInfo>,
     pub assigned_ip: String,
     pub acl_rules: Vec<AclRule>,
+    pub qos_rules: Vec<QoSRule>,
 }
 
 /// Peer 信息
