@@ -746,25 +746,36 @@ fn send_peers_command() -> Result<()> {
             let total = data["total"].as_u64().unwrap_or(0);
             
             println!("Total peers: {}", total);
-            println!("{:-<80}", "");
+            println!();
+            
+            // 表头
+            println!("{:<8} {:<20} {:<25} {:<15} {:<12}", "Region", "Public Key", "Endpoint", "VPN IP", "Handshake");
+            println!("{:-<8} {:-<20} {:-<25} {:-<15} {:-<12}", "", "", "", "", "");
             
             for peer in peers {
-                let public_key = peer["public_key"].as_str().unwrap_or("unknown");
-                let endpoint = peer["endpoint"].as_str().unwrap_or("N/A");
                 let region = peer["region"].as_str().unwrap_or("unknown");
-                let allowed_ips = peer["allowed_ips"].as_array()
-                    .map(|ips| ips.iter().filter_map(|ip| ip.as_str()).collect::<Vec<_>>().join(", "))
-                    .unwrap_or_else(|| "N/A".to_string());
-                let last_handshake = peer["last_handshake_secs"].as_u64().unwrap_or(0);
+                let public_key = peer["public_key"].as_str().unwrap_or("unknown");
+                let public_key_display = if public_key.len() > 20 {
+                    format!("{}...{}", &public_key[..8], &public_key[public_key.len()-8..])
+                } else {
+                    public_key.to_string()
+                };
+                let endpoint = peer["endpoint"].as_str().unwrap_or("N/A");
                 
-                println!("Region:      {}", region);
-                println!("Public Key:  {}...{}", &public_key[..16.min(public_key.len())], 
-                    if public_key.len() > 16 { &public_key[public_key.len()-8..] } else { "" });
-                println!("Endpoint:    {}", endpoint);
-                println!("Allowed IPs: {}", allowed_ips);
-                println!("Handshake:   {} seconds ago", last_handshake);
-                println!("{:-<80}", "");
+                // 从 allowed_ips 中提取 VPN IP（/32 地址）
+                let vpn_ip = peer["allowed_ips"].as_array()
+                    .and_then(|ips| ips.iter().find(|ip| ip.as_str().map(|s| s.contains("/32")).unwrap_or(false)))
+                    .and_then(|ip| ip.as_str())
+                    .map(|ip| ip.replace("/32", ""))
+                    .unwrap_or_else(|| "N/A".to_string());
+                
+                let last_handshake = peer["last_handshake_secs"].as_u64().unwrap_or(0);
+                let handshake_display = format!("{}s", last_handshake);
+                
+                println!("{:<8} {:<20} {:<25} {:<15} {:<12}", 
+                    region, public_key_display, endpoint, vpn_ip, handshake_display);
             }
+            println!();
         }
     } else {
         eprintln!("Error: {}", resp.message.unwrap_or_else(|| "Unknown error".to_string()));
@@ -799,29 +810,48 @@ fn send_route_command() -> Result<()> {
             let total = data["total"].as_u64().unwrap_or(0);
             let table = data["table"].as_u64().unwrap_or(100);
             
-            println!("VPN Routes (table {}):", table);
+            println!("VPN Routes (table {})", table);
             println!("Total: {} routes", total);
-            println!("{:-<80}", "");
+            println!();
+            
+            // 表头
+            println!("{:<20} {:<60}", "Destination", "Nexthops");
+            println!("{:-<20} {:-<60}", "", "");
+            
+            // 合并ECMP路由
+            let mut current_dest = String::new();
+            let mut nexthops = Vec::new();
             
             for route in routes {
                 let route_str = route.as_str().unwrap_or("unknown");
-                // 检查是否是 ECMP 路由（包含 nexthop）
+                
                 if route_str.contains("nexthop") {
-                    // ECMP 路由格式化
-                    let lines: Vec<&str> = route_str.lines().collect();
-                    if !lines.is_empty() {
-                        println!("{}", lines[0].trim());
-                        for line in &lines[1..] {
-                            println!("  {}", line.trim());
+                    // 这是nexthop行，提取信息
+                    let parts: Vec<&str> = route_str.split_whitespace().collect();
+                    if let Some(idx) = parts.iter().position(|&x| x == "dev") {
+                        if idx + 1 < parts.len() {
+                            nexthops.push(parts[idx + 1].to_string());
                         }
-                        println!("{:-<80}", "");
                     }
                 } else {
-                    // 普通路由
-                    println!("{}", route_str);
-                    println!("{:-<40}", "");
+                    // 这是目标地址行
+                    if !current_dest.is_empty() && !nexthops.is_empty() {
+                        // 输出前一个路由
+                        let nexthop_str = nexthops.join(", ");
+                        println!("{:<20} {:<60}", current_dest, nexthop_str);
+                    }
+                    current_dest = route_str.trim().to_string();
+                    nexthops.clear();
                 }
             }
+            
+            // 输出最后一个路由
+            if !current_dest.is_empty() && !nexthops.is_empty() {
+                let nexthop_str = nexthops.join(", ");
+                println!("{:<20} {:<60}", current_dest, nexthop_str);
+            }
+            
+            println!();
         }
     } else {
         eprintln!("Error: {}", resp.message.unwrap_or_else(|| "Unknown error".to_string()));
