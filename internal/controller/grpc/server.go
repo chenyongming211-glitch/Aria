@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -240,4 +241,65 @@ func getUint32(m map[string]interface{}, key string) uint32 {
 		}
 	}
 	return 0
+}
+
+// getQoSRules 查询适用于该 Agent 的 QoS 规则
+func (s *ControllerServer) getQoSRules(ctx context.Context, publicKey string) ([]*agentpb.QoSRule, error) {
+	var qosRules []*agentpb.QoSRule
+
+	// 防御性编程：确保 store 存在
+	if s.store == nil {
+		return qosRules, nil // 返回空列表
+	}
+
+	// 查询 tenant_id
+	var tenantID string
+	err := s.store.DB().QueryRowContext(ctx,
+		"SELECT tenant_id FROM nodes WHERE public_key = $1",
+		publicKey,
+	).Scan(&tenantID)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// 节点不存在，返回空列表
+			return qosRules, nil
+		}
+		// 记录错误但继续
+		fmt.Printf("[WARN] Failed to query tenant_id for %s: %v\n", publicKey, err)
+		return qosRules, nil
+	}
+
+	// 查询 QoS 规则
+	query := `
+		SELECT src_ip, dst_ip, src_port, dst_port, protocol, bandwidth_mbps
+		FROM bandwidth_limits
+		WHERE tenant_id = $1
+		ORDER BY created_at DESC
+	`
+	rows, err := s.store.DB().QueryContext(ctx, query, tenantID)
+	if err != nil {
+		fmt.Printf("[WARN] Failed to query QoS rules: %v\n", err)
+		return qosRules, nil
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var rule agentpb.QoSRule
+		err := rows.Scan(
+			&rule.SrcIp,
+			&rule.DstIp,
+			&rule.SrcPort,
+			&rule.DstPort,
+			&rule.Protocol,
+			&rule.BandwidthMbps,
+		)
+		if err != nil {
+			fmt.Printf("[WARN] Failed to scan QoS rule: %v\n", err)
+			continue
+		}
+		qosRules = append(qosRules, &rule)
+	}
+
+	fmt.Printf("[INFO] Retrieved %d QoS rules for tenant %s\n", len(qosRules), tenantID)
+	return qosRules, nil
 }
