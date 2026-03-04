@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 
 	"aria/pkg/grpc/agentpb"
@@ -124,6 +125,75 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 		LastUpdate:         time.Now().Unix(),
 		AclRules:           aclRules,
 		MetricsPushGateway: metricsGateway,
+	}, nil
+}
+
+// CommandStream 处理双向流命令
+// Agent 连接后，Controller 可以推送命令，Agent 返回执行结果
+func (s *ControllerServer) CommandStream(stream agentpb.ControllerService_CommandStreamServer) error {
+	var agentID string
+
+	for {
+		// 接收来自 Agent 的响应
+		resp, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("stream recv error: %w", err)
+		}
+
+		// 第一次响应用于识别 Agent
+		if agentID == "" && resp.CommandId == "init" {
+			if result, ok := resp.Result["agent_id"]; ok {
+				agentID = result
+			}
+			continue
+		}
+
+		// 处理命令执行结果
+		// TODO: 更新数据库中的命令状态
+		// store.UpdateCommandStatus(resp.CommandId, resp.Status, resp.Message, resp.Result)
+
+		// 发送新命令给 Agent（如果有待执行的命令）
+		// TODO: 从数据库或 Redis 中获取待执行的命令
+		// cmd := store.GetPendingCommand(agentID)
+		// if cmd != nil {
+		// 	err := stream.Send(&agentpb.CommandRequest{
+		// 		CommandId: cmd.ID,
+		// 		Command:   cmd.Command,
+		// 		Params:    cmd.Params,
+		// 		Timeout:   int32(cmd.Timeout),
+		// 		Priority:  int32(cmd.Priority),
+		// 		CreatedAt: cmd.CreatedAt,
+		// 	})
+		// 	if err != nil {
+		// 		return fmt.Errorf("stream send error: %w", err)
+		// 	}
+		// }
+		_ = agentID // 暂时忽略未使用警告
+	}
+}
+
+// ReportMetrics 处理 Agent 指标上报
+func (s *ControllerServer) ReportMetrics(ctx context.Context, req *agentpb.MetricsReportRequest) (*agentpb.MetricsReportResponse, error) {
+	if req.AgentId == "" {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+
+	// TODO: 将指标存储到时序数据库（如 Prometheus, VictoriaMetrics, InfluxDB）
+	// 示例：
+	// - 存储到 VictoriaMetrics: POST /api/v1/import/prometheus
+	// - 使用 Prometheus remote write API
+	// - 存储到 PostgreSQL 的 metrics 表
+
+	// 暂时只记录日志
+	// log.Printf("[Metrics] Agent: %s, CPU: %.2f%%, Memory: %.2f%%, Network TX: %d bytes, RX: %d bytes",
+	// 	req.AgentId, req.CpuUsage, req.MemoryUsage, req.NetworkTxBytes, req.NetworkRxBytes)
+
+	return &agentpb.MetricsReportResponse{
+		Success: true,
+		Message: "Metrics reported successfully",
 	}, nil
 }
 

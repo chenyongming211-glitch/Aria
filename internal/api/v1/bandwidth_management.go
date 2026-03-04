@@ -12,13 +12,14 @@ import (
 )
 
 type BandwidthLimitRequest struct {
-	SrcIP     string `json:"src_ip,omitempty"`
-	DstIP     string `json:"dst_ip,omitempty"`
-	SrcPort   int    `json:"src_port,omitempty"`
-	DstPort   int    `json:"dst_port,omitempty"`
-	Protocol  int    `json:"protocol,omitempty"` 
-	Bandwidth int    `json:"bandwidth"`          
-	Direction string `json:"direction,omitempty"` 
+	SrcIP         string `json:"src_ip,omitempty"`
+	DstIP         string `json:"dst_ip,omitempty"`
+	SrcPort       int    `json:"src_port,omitempty"`
+	DstPort       int    `json:"dst_port,omitempty"`
+	Protocol      int    `json:"protocol,omitempty"`
+	Bandwidth     int    `json:"bandwidth"`
+	BandwidthMbps int    `json:"bandwidth_mbps,omitempty"` // 别名字段
+	Direction     string `json:"direction,omitempty"`
 }
 
 type PolicyRule struct {
@@ -27,7 +28,7 @@ type PolicyRule struct {
 	Description string `json:"description,omitempty"`
 	Enabled     bool   `json:"enabled"`
 	Priority    int    `json:"priority"`
-	Action      string `json:"action"` 
+	Action      string `json:"action"`
 
 	SrcIP     string `json:"src_ip,omitempty"`
 	SrcPort   int    `json:"src_port,omitempty"`
@@ -37,11 +38,11 @@ type PolicyRule struct {
 	DstPort   int    `json:"dst_port,omitempty"`
 	DstRegion string `json:"dst_region,omitempty"`
 
-	Protocol  int    `json:"protocol,omitempty"`
+	Protocol     int    `json:"protocol,omitempty"`
 	ProtocolName string `json:"protocol_name,omitempty"`
 
-	LimitBandwidth int `json:"limit_bandwidth,omitempty"` 
-	LimitType      string `json:"limit_type,omitempty"`   
+	LimitBandwidth int    `json:"limit_bandwidth,omitempty"`
+	LimitType      string `json:"limit_type,omitempty"`
 
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
@@ -79,7 +80,13 @@ func (b *BandwidthManagementAPI) LimitBandwidth(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if req.Bandwidth <= 0 {
+	// 兼容 bandwidth 和 bandwidth_mbps 两个字段名
+	bandwidth := req.Bandwidth
+	if bandwidth <= 0 && req.BandwidthMbps > 0 {
+		bandwidth = req.BandwidthMbps
+	}
+
+	if bandwidth <= 0 {
 		WriteError(w, http.StatusBadRequest, CodeInvalidBandwidth, "Bandwidth must be greater than 0", nil)
 		return
 	}
@@ -95,7 +102,7 @@ func (b *BandwidthManagementAPI) LimitBandwidth(w http.ResponseWriter, r *http.R
 
 	columns = append(columns, "tenant_id", "bandwidth_mbps")
 	placeholders = append(placeholders, fmt.Sprintf("$%d", paramIndex), fmt.Sprintf("$%d", paramIndex+1))
-	values = append(values, userTenantID.String(), req.Bandwidth)
+	values = append(values, userTenantID.String(), bandwidth)
 	paramIndex += 2
 
 	if req.SrcIP != "" {
@@ -199,7 +206,7 @@ func (b *BandwidthManagementAPI) CreatePolicy(w http.ResponseWriter, r *http.Req
 	}
 
 	if req.Action == "" {
-		req.Action = "allow" 
+		req.Action = "allow"
 	}
 
 	if req.Action != "allow" && req.Action != "deny" && req.Action != "limit" {
@@ -217,14 +224,22 @@ func (b *BandwidthManagementAPI) CreatePolicy(w http.ResponseWriter, r *http.Req
 	var values []interface{}
 	var paramIndex = 1
 
-	columns = append(columns, "tenant_id", "name", "description", "enabled", "priority", "action", "created_at", "updated_at")
+	columns = append(columns, "tenant_id", "name", "enabled", "priority", "action", "created_at", "updated_at")
 	placeholders = append(placeholders, fmt.Sprintf("$%d", paramIndex), fmt.Sprintf("$%d", paramIndex+1), fmt.Sprintf("$%d", paramIndex+2),
 		fmt.Sprintf("$%d", paramIndex+3), fmt.Sprintf("$%d", paramIndex+4),
-		fmt.Sprintf("$%d", paramIndex+5), fmt.Sprintf("$%d", paramIndex+6), fmt.Sprintf("$%d", paramIndex+7))
-	
+		fmt.Sprintf("$%d", paramIndex+5), fmt.Sprintf("$%d", paramIndex+6))
+
 	now := time.Now()
-	values = append(values, userTenantID.String(), req.Name, req.Description, req.Enabled, req.Priority, req.Action, now, now)
-	paramIndex = 8
+	values = append(values, userTenantID.String(), req.Name, req.Enabled, req.Priority, req.Action, now, now)
+	paramIndex = 7
+
+	// 处理可选字段
+	if req.Description != "" {
+		columns = append(columns, "description")
+		placeholders = append(placeholders, fmt.Sprintf("$%d", paramIndex))
+		values = append(values, req.Description)
+		paramIndex++
+	}
 
 	if req.SrcIP != "" {
 		columns = append(columns, "src_ip", "src_port", "src_region")
@@ -392,7 +407,7 @@ func (b *BandwidthManagementAPI) UpdatePolicy(w http.ResponseWriter, r *http.Req
 		setClauses = append(setClauses, "protocol = $"+strconv.Itoa(paramIndex))
 		setValues = append(setValues, req.Protocol)
 		paramIndex++
-		
+
 		// ✅ 修复：修正了 protocol_name 占位符错位的严重 Bug
 		setClauses = append(setClauses, "protocol_name = $"+strconv.Itoa(paramIndex))
 		setValues = append(setValues, getProtocolName(req.Protocol))
@@ -403,7 +418,7 @@ func (b *BandwidthManagementAPI) UpdatePolicy(w http.ResponseWriter, r *http.Req
 		setClauses = append(setClauses, "limit_bandwidth = $"+strconv.Itoa(paramIndex))
 		setValues = append(setValues, req.LimitBandwidth)
 		paramIndex++
-		
+
 		setClauses = append(setClauses, "limit_type = $"+strconv.Itoa(paramIndex))
 		setValues = append(setValues, req.LimitType)
 		paramIndex++
@@ -411,7 +426,7 @@ func (b *BandwidthManagementAPI) UpdatePolicy(w http.ResponseWriter, r *http.Req
 
 	setClauses = append(setClauses, "updated_at = NOW()")
 
-	query := "UPDATE policy_rules SET " + strings.Join(setClauses, ", ") + 
+	query := "UPDATE policy_rules SET " + strings.Join(setClauses, ", ") +
 		fmt.Sprintf(" WHERE id = $%d AND tenant_id = $%d", paramIndex, paramIndex+1)
 
 	var values []interface{}
@@ -471,7 +486,7 @@ func (b *BandwidthManagementAPI) ListPolicies(w http.ResponseWriter, r *http.Req
 
 	queryParams := r.URL.Query()
 	var whereClauses []string
-	
+
 	// ✅ 修复：将提取到的参数准确追加到 args 列表中供 DB.Query 使用
 	var args []interface{}
 	args = append(args, userTenantID.String())
@@ -538,13 +553,13 @@ func (b *BandwidthManagementAPI) ListPolicies(w http.ResponseWriter, r *http.Req
 }
 
 func (b *BandwidthManagementAPI) HandleBandwidthManagement(w http.ResponseWriter, r *http.Request) {
-	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 4 {
+	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/bandwidth/"), "/")
+	if len(pathParts) < 1 || pathParts[0] == "" {
 		WriteError(w, http.StatusBadRequest, CodeInvalidPath, "Invalid path", nil)
 		return
 	}
 
-	subResource := pathParts[3]
+	subResource := pathParts[0]
 
 	switch subResource {
 	case "limits":
@@ -557,7 +572,7 @@ func (b *BandwidthManagementAPI) HandleBandwidthManagement(w http.ResponseWriter
 }
 
 func (b *BandwidthManagementAPI) handleLimits(w http.ResponseWriter, r *http.Request, pathParts []string) {
-	if len(pathParts) >= 5 {
+	if len(pathParts) >= 2 && pathParts[1] != "" {
 		switch r.Method {
 		case http.MethodGet:
 			b.ListBandwidthLimits(w, r)
@@ -580,7 +595,7 @@ func (b *BandwidthManagementAPI) handleLimits(w http.ResponseWriter, r *http.Req
 }
 
 func (b *BandwidthManagementAPI) handlePolicies(w http.ResponseWriter, r *http.Request, pathParts []string) {
-	if len(pathParts) >= 5 {
+	if len(pathParts) >= 2 && pathParts[1] != "" {
 		switch r.Method {
 		case http.MethodGet:
 			b.GetPolicy(w, r)

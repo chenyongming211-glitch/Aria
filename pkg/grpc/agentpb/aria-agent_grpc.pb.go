@@ -10,7 +10,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v4.25.3
-// source: pkg/grpc/agentpb/aria-agent.proto
+// source: aria-agent.proto
 
 package agentpb
 
@@ -27,8 +27,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ControllerService_Register_FullMethodName = "/aria.agent.ControllerService/Register"
-	ControllerService_Sync_FullMethodName     = "/aria.agent.ControllerService/Sync"
+	ControllerService_Register_FullMethodName      = "/aria.agent.ControllerService/Register"
+	ControllerService_Sync_FullMethodName          = "/aria.agent.ControllerService/Sync"
+	ControllerService_CommandStream_FullMethodName = "/aria.agent.ControllerService/CommandStream"
+	ControllerService_ReportMetrics_FullMethodName = "/aria.agent.ControllerService/ReportMetrics"
 )
 
 // ControllerServiceClient is the client API for ControllerService service.
@@ -39,6 +41,10 @@ type ControllerServiceClient interface {
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
 	// 定期配置同步（轮询模式，5秒间隔）
 	Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (*SyncResponse, error)
+	// 命令流（双向流，Controller -> Agent）
+	CommandStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[CommandResponse, CommandRequest], error)
+	// 指标上报（Agent -> Controller）
+	ReportMetrics(ctx context.Context, in *MetricsReportRequest, opts ...grpc.CallOption) (*MetricsReportResponse, error)
 }
 
 type controllerServiceClient struct {
@@ -69,6 +75,29 @@ func (c *controllerServiceClient) Sync(ctx context.Context, in *SyncRequest, opt
 	return out, nil
 }
 
+func (c *controllerServiceClient) CommandStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[CommandResponse, CommandRequest], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ControllerService_ServiceDesc.Streams[0], ControllerService_CommandStream_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[CommandResponse, CommandRequest]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ControllerService_CommandStreamClient = grpc.BidiStreamingClient[CommandResponse, CommandRequest]
+
+func (c *controllerServiceClient) ReportMetrics(ctx context.Context, in *MetricsReportRequest, opts ...grpc.CallOption) (*MetricsReportResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MetricsReportResponse)
+	err := c.cc.Invoke(ctx, ControllerService_ReportMetrics_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ControllerServiceServer is the server API for ControllerService service.
 // All implementations must embed UnimplementedControllerServiceServer
 // for forward compatibility.
@@ -77,6 +106,10 @@ type ControllerServiceServer interface {
 	Register(context.Context, *RegisterRequest) (*RegisterResponse, error)
 	// 定期配置同步（轮询模式，5秒间隔）
 	Sync(context.Context, *SyncRequest) (*SyncResponse, error)
+	// 命令流（双向流，Controller -> Agent）
+	CommandStream(grpc.BidiStreamingServer[CommandResponse, CommandRequest]) error
+	// 指标上报（Agent -> Controller）
+	ReportMetrics(context.Context, *MetricsReportRequest) (*MetricsReportResponse, error)
 	mustEmbedUnimplementedControllerServiceServer()
 }
 
@@ -92,6 +125,12 @@ func (UnimplementedControllerServiceServer) Register(context.Context, *RegisterR
 }
 func (UnimplementedControllerServiceServer) Sync(context.Context, *SyncRequest) (*SyncResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Sync not implemented")
+}
+func (UnimplementedControllerServiceServer) CommandStream(grpc.BidiStreamingServer[CommandResponse, CommandRequest]) error {
+	return status.Error(codes.Unimplemented, "method CommandStream not implemented")
+}
+func (UnimplementedControllerServiceServer) ReportMetrics(context.Context, *MetricsReportRequest) (*MetricsReportResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportMetrics not implemented")
 }
 func (UnimplementedControllerServiceServer) mustEmbedUnimplementedControllerServiceServer() {}
 func (UnimplementedControllerServiceServer) testEmbeddedByValue()                           {}
@@ -150,6 +189,31 @@ func _ControllerService_Sync_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ControllerService_CommandStream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ControllerServiceServer).CommandStream(&grpc.GenericServerStream[CommandResponse, CommandRequest]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ControllerService_CommandStreamServer = grpc.BidiStreamingServer[CommandResponse, CommandRequest]
+
+func _ControllerService_ReportMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MetricsReportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControllerServiceServer).ReportMetrics(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ControllerService_ReportMetrics_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControllerServiceServer).ReportMetrics(ctx, req.(*MetricsReportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ControllerService_ServiceDesc is the grpc.ServiceDesc for ControllerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -165,9 +229,20 @@ var ControllerService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Sync",
 			Handler:    _ControllerService_Sync_Handler,
 		},
+		{
+			MethodName: "ReportMetrics",
+			Handler:    _ControllerService_ReportMetrics_Handler,
+		},
 	},
-	Streams:  []grpc.StreamDesc{},
-	Metadata: "pkg/grpc/agentpb/aria-agent.proto",
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "CommandStream",
+			Handler:       _ControllerService_CommandStream_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
+	Metadata: "aria-agent.proto",
 }
 
 const (
@@ -351,5 +426,5 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "pkg/grpc/agentpb/aria-agent.proto",
+	Metadata: "aria-agent.proto",
 }

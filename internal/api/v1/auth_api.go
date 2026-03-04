@@ -46,7 +46,7 @@ func (a *AuthAPI) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	var userID, role, dbPasswordHash string
 	var tenantID sql.NullString
 
-	query := `SELECT id, role, tenant_id, password FROM users WHERE username = $1 AND status = 'active'`
+	query := `SELECT id, role, tenant_id, password_hash FROM users WHERE username = $1`
 	err := a.store.DB().QueryRow(query, req.Username).Scan(&userID, &role, &tenantID, &dbPasswordHash)
 	if err != nil {
 		if err == sql.ErrNoRows {

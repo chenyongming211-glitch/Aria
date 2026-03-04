@@ -321,14 +321,12 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	// Set up HTTP handlers
 	http.HandleFunc("/register", controller.HandleRegister)
 	http.HandleFunc("/unregister", controller.HandleUnregister)
-	http.HandleFunc("/sync", controller.HandleSync)
 	http.HandleFunc("/nodes", controller.HandleListNodes) // 公开API，无需认证
 	http.HandleFunc("/config", controller.HandleConfig)
 	http.HandleFunc("/tokens", controller.HandleTokens)
 	http.HandleFunc("/tokens/revoke", controller.HandleTokenRevoke)
 	http.HandleFunc("/tokens/detail", controller.HandleTokenDetail)
 	http.HandleFunc("/network/manage", controller.HandleNetworkManage)
-	// http.HandleFunc("/policies", controller.HandlePolicies) // DEPRECATED: 使用新API
 	http.HandleFunc("/v1/monitor/stats", HandleMonitorStats)
 	http.HandleFunc("/v1/monitor/node/", HandleNodeDetail)
 	http.HandleFunc("/version", handleVersion)
@@ -344,6 +342,9 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 
 	// Initialize Authentication API (JWT-based)
 	v1.SetupAuthRoutes(http.DefaultServeMux, store)
+
+	// Initialize Agent Proxy API (Controller -> Agent commands)
+	v1.SetupAgentProxyRoutes(http.DefaultServeMux, store)
 
 	// AI handlers (Production)
 	if cfg.AI.Enabled {
@@ -379,7 +380,6 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	logger.Info("Available endpoints:")
 	logger.Info("  POST /register          - Register new node (requires token)")
 	logger.Info("  POST /unregister        - Unregister node")
-	logger.Info("  GET  /sync              - Get peer list")
 	logger.Info("  GET  /nodes             - List all nodes")
 	logger.Info("  GET  /config            - Get network config")
 	logger.Info("  POST /config            - Update network config")
@@ -388,9 +388,6 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	logger.Info("  POST /tokens/revoke     - Revoke token")
 	logger.Info("  GET  /tokens/detail     - Get token details and usage")
 	logger.Info("  POST /network/manage    - Manage advertised routes")
-	logger.Info("  GET  /policies          - List policies")
-	logger.Info("  POST /policies          - Create policy")
-	logger.Info("  DELETE /policies        - Delete policy")
 	logger.Info("  GET  /v1/monitor/stats  - Get monitoring statistics")
 	logger.Info("  GET  /v1/monitor/node/{host_id} - Get node detail")
 	if cfg.AI.Enabled {
@@ -854,183 +851,6 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 		LastUpdate:         time.Now().Unix(),
 		ACLRules:           aclRulesJSON,
 		MetricsPushGateway: c.metricsPushGateway,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
-}
-
-func (c *Controller) HandleSync(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Support both URL query parameter and HTTP header for public key
-	pubkey := r.URL.Query().Get("pubkey")
-	if pubkey == "" {
-		pubkey = r.Header.Get("X-Public-Key")
-	}
-	var assignedIP string
-	var nodeRegion string
-	var nodeTenantID uuid.UUID
-
-	if pubkey != "" {
-		node, err := c.store.GetNode(pubkey)
-		if err == nil && node != nil {
-			node.LastSeen = time.Now().Unix()
-			c.store.SaveNode(node)
-			assignedIP = node.AssignedIP
-			nodeRegion = node.Region
-			nodeTenantID = node.TenantID
-			c.logger.Debug("Sync request from node: %s (tenant: %s)...", pubkey[:8], nodeTenantID.String()[:8])
-		}
-	}
-
-	// Get peers from the same tenant only
-	var peerInfos []map[string]interface{}
-	if nodeTenantID != uuid.Nil {
-		// Get nodes scoped to the tenant
-		peers, err := c.store.GetNodesByTenant(nodeTenantID)
-		if err != nil {
-			c.logger.Error("Failed to get tenant peers: %v", err)
-			peers = []*controllerstorage.Node{}
-		}
-
-		for _, peer := range peers {
-			// Skip deleted nodes - they should not appear in sync
-			if peer.Status == "deleted" {
-				continue
-			}
-
-			role := peer.Role
-			if role == "" {
-				role = "spoke"
-			}
-
-			status := peer.Status
-			if status == "" {
-				status = "online"
-			}
-
-			peerInfo := map[string]interface{}{
-				"public_key":        peer.PublicKey,
-				"endpoint":          fmt.Sprintf("%s:51820", peer.PublicIP),
-				"private_ip":        peer.PrivateIP,
-				"public_ip":         peer.PublicIP,
-				"region":            peer.Region,
-				"vpc_id":            peer.VPCID,
-				"hostname":          peer.Hostname,
-				"last_seen":         peer.LastSeen,
-				"assigned_ip":       peer.AssignedIP,
-				"role":              role,
-				"runtime_mode":      peer.RuntimeMode,
-				"kernel_version":    peer.KernelVersion,
-				"status":            status,
-				"advertised_routes": peer.AdvertisedRoutes, // Site-to-Site VPN
-				"i18n": map[string]interface{}{
-					"status": fmt.Sprintf("node.status.%s", status),
-					"role":   fmt.Sprintf("node.role.%s", role),
-				},
-			}
-			peerInfos = append(peerInfos, peerInfo)
-		}
-	} else {
-		// Fallback to all nodes if no tenant identified (backward compatibility)
-		peers, err := c.store.GetAllNodes()
-		if err != nil {
-			c.logger.Error("Failed to get peers: %v", err)
-			peers = []*controllerstorage.Node{}
-		}
-
-		for _, peer := range peers {
-			// Skip deleted nodes - they should not appear in sync
-			if peer.Status == "deleted" {
-				continue
-			}
-
-			role := peer.Role
-			if role == "" {
-				role = "spoke"
-			}
-
-			status := peer.Status
-			if status == "" {
-				status = "online"
-			}
-
-			peerInfo := map[string]interface{}{
-				"public_key":        peer.PublicKey,
-				"endpoint":          fmt.Sprintf("%s:51820", peer.PublicIP),
-				"private_ip":        peer.PrivateIP,
-				"public_ip":         peer.PublicIP,
-				"region":            peer.Region,
-				"vpc_id":            peer.VPCID,
-				"hostname":          peer.Hostname,
-				"last_seen":         peer.LastSeen,
-				"assigned_ip":       peer.AssignedIP,
-				"role":              role,
-				"runtime_mode":      peer.RuntimeMode,
-				"kernel_version":    peer.KernelVersion,
-				"status":            status,
-				"advertised_routes": peer.AdvertisedRoutes, // Site-to-Site VPN
-				"i18n": map[string]interface{}{
-					"status": fmt.Sprintf("node.status.%s", status),
-					"role":   fmt.Sprintf("node.role.%s", role),
-				},
-			}
-			peerInfos = append(peerInfos, peerInfo)
-		}
-	}
-
-	// Create a dummy context for ACL rules retrieval (since sync is called without tenant context)
-	// For sync, we'll temporarily use the node's tenant ID if available
-	syncCtx := context.Background()
-	if nodeTenantID != uuid.Nil {
-		syncCtx = context.WithValue(syncCtx, middleware.TenantIDKey, nodeTenantID)
-	}
-
-	// Get enabled ACL rules for sync (filtered by region and tenant)
-	var aclRulesJSON []ACLRuleJSON
-	var aclRules []*controllerstorage.ACLRule
-	var err error
-
-	if c.tenantScopedStore != nil {
-		// Use tenant-scoped storage if available, but only if context has tenant ID
-		// This prevents "tenant ID not found in context" errors when syncing
-		_, exists := middleware.GetTenantID(syncCtx)
-		if exists {
-			aclRules, err = c.getTenantEnabledACLRules(syncCtx)
-		} else {
-			// Fallback to global ACL rules when no tenant context
-			aclRules, err = c.store.GetEnabledACLRules()
-		}
-	} else {
-		// Fallback to regular storage
-		aclRules, err = c.store.GetEnabledACLRules()
-	}
-
-	if err != nil {
-		c.logger.Error("Failed to get ACL rules: %v", err)
-	} else {
-		// Filter rules by region
-		aclRulesJSON = c.getACLRulesForRegion(nodeRegion, aclRules)
-		if pubkey != "" {
-			// Safe truncation of public key
-			pk := pubkey
-			if len(pk) > 16 {
-				pk = pk[:16]
-			}
-			c.logger.Debug("Agent %s (Region: %s): sending %d ACL rules", pk, nodeRegion, len(aclRulesJSON))
-		}
-	}
-
-	response := map[string]interface{}{
-		"peers":                peerInfos,
-		"assigned_ip":          assignedIP,
-		"last_update":          time.Now().Unix(),
-		"acl_rules":            aclRulesJSON,
-		"metrics_push_gateway": c.metricsPushGateway,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1731,291 +1551,6 @@ type PolicyResponse struct {
 }
 
 // HandlePolicies manages ACL policies (CRUD operations)
-func (c *Controller) HandlePolicies(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	switch r.Method {
-	case http.MethodGet:
-		// List all policies
-		rules, err := c.store.GetAllACLRules()
-		if err != nil {
-			c.logger.Error("Failed to get policies: %v", err)
-			http.Error(w, "Failed to get policies", http.StatusInternalServerError)
-			return
-		}
-
-		// Convert ACL rules to frontend policy format with internationalization support
-		policies := make([]map[string]interface{}, 0, len(rules))
-		for _, rule := range rules {
-			// Convert protocol number to name
-			protocolName := "tcp"
-			switch rule.Protocol {
-			case 17:
-				protocolName = "udp"
-			case 1:
-				protocolName = "icmp"
-			default:
-				protocolName = "tcp"
-			}
-
-			policy := map[string]interface{}{
-				"id":       rule.ID,
-				"srcNode":  rule.SrcNode,
-				"srcIp":    rule.SrcNet,
-				"dstNode":  rule.DstNode,
-				"dstIp":    rule.DstNet,
-				"protocol": protocolName,
-				"dstPort":  formatPortRange(rule.MinPort, rule.MaxPort),
-				"action":   rule.Action,
-				"i18n": map[string]interface{}{
-					"action":  fmt.Sprintf("policy.action.%s", rule.Action),
-					"srcNode": fmt.Sprintf("policy.node.%s", rule.SrcNode),
-					"dstNode": fmt.Sprintf("policy.node.%s", rule.DstNode),
-				},
-			}
-			policies = append(policies, policy)
-		}
-
-		json.NewEncoder(w).Encode(policies)
-
-	case http.MethodPost:
-		// Create new policy
-		var req PolicyRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		// Validate inputs
-		if req.SrcIp == "" || req.DstIp == "" {
-			http.Error(w, "Source IP and Destination IP are required", http.StatusBadRequest)
-			return
-		}
-
-		if req.Action != "allow" && req.Action != "deny" {
-			http.Error(w, "Action must be 'allow' or 'deny'", http.StatusBadRequest)
-			return
-		}
-
-		// Get all nodes to validate IP ranges
-		allNodes, err := c.store.GetAllNodes()
-		if err != nil {
-			c.logger.Error("Failed to get nodes: %v", err)
-			http.Error(w, "Failed to get nodes", http.StatusInternalServerError)
-			return
-		}
-
-		// Find source and destination nodes
-		var srcNode, dstNode *controllerstorage.Node
-		for _, node := range allNodes {
-			if node.Hostname == req.SrcNode {
-				srcNode = node
-			}
-			if node.Hostname == req.DstNode {
-				dstNode = node
-			}
-		}
-
-		// Validate source IP is within source node's advertised routes
-		if srcNode != nil && len(srcNode.AdvertisedRoutes) > 0 {
-			// Extract IP from CIDR if needed (e.g., "192.168.0.1/32" -> "192.168.0.1")
-			srcIP := req.SrcIp
-			if strings.Contains(srcIP, "/") {
-				ip, _, err := net.ParseCIDR(srcIP)
-				if err == nil {
-					srcIP = ip.String()
-				}
-			}
-
-			inRange, matchRoute := ipInRoutes(srcIP, srcNode.AdvertisedRoutes)
-			if !inRange {
-				http.Error(w, fmt.Sprintf("源 IP %s 不在节点 %s 的路由范围内 (%v)，请检查输入",
-					req.SrcIp, req.SrcNode, srcNode.AdvertisedRoutes), http.StatusBadRequest)
-				return
-			}
-			c.logger.Debug("Source IP %s validated against route %s", req.SrcIp, matchRoute)
-		}
-
-		// Validate destination IP is within destination node's advertised routes
-		if dstNode != nil && len(dstNode.AdvertisedRoutes) > 0 {
-			// Extract IP from CIDR if needed
-			dstIP := req.DstIp
-			if strings.Contains(dstIP, "/") {
-				ip, _, err := net.ParseCIDR(dstIP)
-				if err == nil {
-					dstIP = ip.String()
-				}
-			}
-
-			inRange, matchRoute := ipInRoutes(dstIP, dstNode.AdvertisedRoutes)
-			if !inRange {
-				http.Error(w, fmt.Sprintf("目标 IP %s 不在节点 %s 的路由范围内 (%v)，请检查输入",
-					req.DstIp, req.DstNode, dstNode.AdvertisedRoutes), http.StatusBadRequest)
-				return
-			}
-			c.logger.Debug("Destination IP %s validated against route %s", req.DstIp, matchRoute)
-		}
-
-		// Parse port range
-		minPort, maxPort := parsePortRange(req.DstPort)
-
-		// Parse protocol
-		var protocol uint8 = 6 // Default to TCP
-		if req.Protocol == "udp" {
-			protocol = 17
-		} else if req.Protocol == "icmp" {
-			protocol = 1
-		}
-		// Note: req.Protocol == "tcp" or empty defaults to 6 (TCP)
-
-		// Convert to ACL rule
-		rule := &controllerstorage.ACLRule{
-			SrcNode:  req.SrcNode,
-			SrcNet:   req.SrcIp,
-			DstNode:  req.DstNode,
-			DstNet:   req.DstIp,
-			Protocol: protocol,
-			MinPort:  minPort,
-			MaxPort:  maxPort,
-			Action:   req.Action,
-			Enabled:  true,
-			Priority: 100,
-		}
-
-		if err := c.store.SaveACLRule(rule); err != nil {
-			c.logger.Error("Failed to save policy: %v", err)
-			http.Error(w, "Failed to save policy", http.StatusInternalServerError)
-			return
-		}
-
-		c.logger.Info("Policy created: %s -> %s (action=%s)", req.SrcIp, req.DstIp, req.Action)
-
-		// Notify agents about policy update
-		if c.heartbeat != nil {
-			c.heartbeat.PublishConfigChange("default", "acl_update", map[string]string{
-				"action": "policy_created",
-			})
-		}
-
-		// Return created policy with internationalization support
-		policy := map[string]interface{}{
-			"id":       rule.ID,
-			"srcNode":  rule.SrcNode,
-			"srcIp":    rule.SrcNet,
-			"dstNode":  rule.DstNode,
-			"dstIp":    rule.DstNet,
-			"protocol": req.Protocol,
-			"dstPort":  req.DstPort,
-			"action":   rule.Action,
-			"i18n": map[string]interface{}{
-				"action":  fmt.Sprintf("policy.action.%s", rule.Action),
-				"srcNode": fmt.Sprintf("policy.node.%s", rule.SrcNode),
-				"dstNode": fmt.Sprintf("policy.node.%s", rule.DstNode),
-			},
-		}
-
-		json.NewEncoder(w).Encode(policy)
-
-	case http.MethodDelete:
-		// Delete policy by ID
-		var req struct {
-			ID int `json:"id"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		if err := c.store.DeleteACLRule(req.ID); err != nil {
-			c.logger.Error("Failed to delete policy: %v", err)
-			http.Error(w, "Failed to delete policy", http.StatusInternalServerError)
-			return
-		}
-
-		c.logger.Info("Policy deleted: ID=%d", req.ID)
-
-		// Notify agents about policy update
-		if c.heartbeat != nil {
-			c.heartbeat.PublishConfigChange("default", "acl_update", map[string]string{
-				"action": "policy_deleted",
-			})
-		}
-
-		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
-
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-// Helper functions for port range parsing
-func parsePortRange(portStr string) (uint16, uint16) {
-	if portStr == "" {
-		return 0, 65535
-	}
-
-	// Handle comma-separated ports (e.g., "22,80,443")
-	// For now, we'll just use the first port
-	// TODO: Support multiple port ranges
-
-	// Handle single port or port range
-	var minPort, maxPort uint16
-	if _, err := fmt.Sscanf(portStr, "%d-%d", &minPort, &maxPort); err == nil {
-		return minPort, maxPort
-	}
-	if _, err := fmt.Sscanf(portStr, "%d", &minPort); err == nil {
-		return minPort, minPort
-	}
-	return 0, 65535
-}
-
-func formatPortRange(minPort, maxPort uint16) string {
-	if minPort == 0 && maxPort == 65535 {
-		return ""
-	}
-	if minPort == maxPort {
-		return fmt.Sprintf("%d", minPort)
-	}
-	return fmt.Sprintf("%d-%d", minPort, maxPort)
-}
-
-// cidrsOverlap checks if two CIDR networks overlap.
-// Returns true if:
-//   - One network contains the other
-//   - The networks have any IP addresses in common
-func cidrsOverlap(a, b *net.IPNet) bool {
-	// Check if a contains b's network address
-	if a.Contains(b.IP) {
-		return true
-	}
-	// Check if b contains a's network address
-	if b.Contains(a.IP) {
-		return true
-	}
-	return false
-}
-
-// ipInRoutes checks if an IP address is within any of the given CIDR routes.
-func ipInRoutes(ipStr string, routes []string) (bool, string) {
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return false, ""
-	}
-
-	for _, route := range routes {
-		_, network, err := net.ParseCIDR(route)
-		if err != nil {
-			continue
-		}
-		if network.Contains(ip) {
-			return true, route
-		}
-	}
-	return false, ""
-}
-
-// getRegionByNetwork finds the region that owns a given network CIDR.
-// It searches through all nodes and their advertised routes.
 func (c *Controller) getRegionByNetwork(network string) string {
 	// Get all nodes
 	nodes, err := c.store.GetAllNodes()
@@ -2396,3 +1931,70 @@ func getBoolFromMap(m map[string]interface{}, key string) bool {
 }
 
 // getEnvOrDefault gets environment variable or returns default value
+
+// parsePortRange parses a port range string (e.g., "22", "80-443")
+func parsePortRange(portStr string) (uint16, uint16) {
+	if portStr == "" {
+		return 0, 65535
+	}
+
+	// Handle comma-separated ports (e.g., "22,80,443")
+	// For now, we'll just use the first port
+	// TODO: Support multiple port ranges
+
+	// Handle single port or port range
+	var minPort, maxPort uint16
+	if _, err := fmt.Sscanf(portStr, "%d-%d", &minPort, &maxPort); err == nil {
+		return minPort, maxPort
+	}
+	if _, err := fmt.Sscanf(portStr, "%d", &minPort); err == nil {
+		return minPort, minPort
+	}
+	return 0, 65535
+}
+
+// formatPortRange formats a port range for display
+func formatPortRange(minPort, maxPort uint16) string {
+	if minPort == 0 && maxPort == 65535 {
+		return ""
+	}
+	if minPort == maxPort {
+		return fmt.Sprintf("%d", minPort)
+	}
+	return fmt.Sprintf("%d-%d", minPort, maxPort)
+}
+
+// cidrsOverlap checks if two CIDR networks overlap.
+// Returns true if:
+//   - One network contains the other
+//   - The networks have any IP addresses in common
+func cidrsOverlap(a, b *net.IPNet) bool {
+	// Check if a contains b's network address
+	if a.Contains(b.IP) {
+		return true
+	}
+	// Check if b contains a's network address
+	if b.Contains(a.IP) {
+		return true
+	}
+	return false
+}
+
+// ipInRoutes checks if an IP address is within any of the given CIDR routes.
+func ipInRoutes(ipStr string, routes []string) (bool, string) {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false, ""
+	}
+
+	for _, route := range routes {
+		_, network, err := net.ParseCIDR(route)
+		if err != nil {
+			continue
+		}
+		if network.Contains(ip) {
+			return true, route
+		}
+	}
+	return false, ""
+}

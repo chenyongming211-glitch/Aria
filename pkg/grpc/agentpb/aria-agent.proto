@@ -21,6 +21,12 @@ service ControllerService {
   
   // 定期配置同步（轮询模式，5秒间隔）
   rpc Sync(SyncRequest) returns (SyncResponse);
+  
+  // 命令流（双向流，Controller -> Agent）
+  rpc CommandStream(stream CommandResponse) returns (stream CommandRequest);
+  
+  // 指标上报（Agent -> Controller）
+  rpc ReportMetrics(MetricsReportRequest) returns (MetricsReportResponse);
 }
 
 // ============ Agent 服务 ============
@@ -160,4 +166,62 @@ message ReportStatsRequest {
 
 message ReportStatsResponse {
   bool success = 1;
+}
+
+// ============ 命令流相关 ============
+// Controller -> Agent 命令下发
+
+message CommandRequest {
+  string command_id = 1;            // 命令唯一ID
+  string command = 2;               // 命令类型: "sync", "restart", "config_reload", "health_check"
+  map<string, string> params = 3;   // 命令参数
+  int32 timeout = 4;                // 超时时间（秒）
+  int32 priority = 5;               // 优先级: 0=普通, 1=高, 2=紧急
+  int64 created_at = 6;             // 命令创建时间戳
+}
+
+message CommandResponse {
+  string command_id = 1;            // 命令唯一ID
+  string status = 2;                // pending, acknowledged, completed, failed
+  string message = 3;               // 状态消息或错误信息
+  map<string, string> result = 4;   // 命令执行结果
+  int64 completed_at = 5;           // 命令完成时间戳
+}
+
+// ============ 指标上报相关 ============
+
+message MetricsReportRequest {
+  string agent_id = 1;              // Agent ID (public_key)
+  int64 timestamp = 2;              // 上报时间戳
+  
+  // 系统指标
+  double cpu_usage = 3;             // CPU 使用率 (0-100)
+  double memory_usage = 4;          // 内存使用率 (0-100)
+  uint64 memory_total = 5;          // 总内存 (bytes)
+  uint64 memory_used = 6;           // 已用内存 (bytes)
+  double disk_usage = 7;            // 磁盘使用率 (0-100)
+  uint64 disk_total = 8;            // 总磁盘 (bytes)
+  uint64 disk_used = 9;             // 已用磁盘 (bytes)
+  
+  // 网络指标
+  uint64 network_tx_bytes = 10;     // 发送字节数
+  uint64 network_rx_bytes = 11;     // 接收字节数
+  uint64 network_tx_packets = 12;   // 发送包数
+  uint64 network_rx_packets = 13;   // 接收包数
+  uint64 network_tx_errors = 14;    // 发送错误数
+  uint64 network_rx_errors = 15;    // 接收错误数
+  
+  // WireGuard 指标
+  uint64 wg_tx_bytes = 16;          // WireGuard 发送字节数
+  uint64 wg_rx_bytes = 17;          // WireGuard 接收字节数
+  uint32 wg_peer_count = 18;        // WireGuard Peer 数量
+  uint32 wg_active_peers = 19;      // 活跃 Peer 数量
+  
+  // 自定义指标
+  map<string, double> custom_metrics = 20;  // 自定义指标键值对
+}
+
+message MetricsReportResponse {
+  bool success = 1;
+  string message = 2;
 }

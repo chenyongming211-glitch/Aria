@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"strings"
@@ -78,12 +79,12 @@ func (t *TenantAPI) GetTenant(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) < 4 {
+	if len(pathParts) < 5 {
 		WriteError(w, http.StatusBadRequest, CodeTenantIDRequired, "Tenant ID is required", nil)
 		return
 	}
 
-	tenantIDStr := pathParts[3]
+	tenantIDStr := pathParts[4]
 	tenantID, err := uuid.Parse(tenantIDStr)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, CodeInvalidTenantID, "Invalid tenant ID", nil)
@@ -143,16 +144,22 @@ func (t *TenantAPI) ListTenants(w http.ResponseWriter, r *http.Request) {
 	var tenants []TenantResponse
 	for rows.Next() {
 		var id uuid.UUID
-		var name, code string
+		var name string
+		var code sql.NullString
 		if err := rows.Scan(&id, &name, &code); err != nil {
 			WriteError(w, http.StatusInternalServerError, CodeScanTenantFailed, "Failed to scan tenant", nil)
 			return
 		}
 
+		codeStr := ""
+		if code.Valid {
+			codeStr = code.String
+		}
+
 		tenants = append(tenants, TenantResponse{
 			ID:   id.String(),
 			Name: name,
-			Code: code,
+			Code: codeStr,
 		})
 	}
 
@@ -222,22 +229,17 @@ func (t *TenantAPI) GetTenantNodes(w http.ResponseWriter, r *http.Request) {
 
 func (t *TenantAPI) HandleTenants(w http.ResponseWriter, r *http.Request) {
 	pathParts := strings.Split(r.URL.Path, "/")
-	if len(pathParts) >= 4 {
-		switch pathParts[3] {
-		case "list":
-			if r.Method == http.MethodGet {
-				t.ListTenants(w, r)
-				return
-			}
-		default:
-			switch r.Method {
-			case http.MethodGet:
-				t.GetTenant(w, r)
-				return
-			}
+
+	// /api/v1/tenants/{id} - 获取单个租户
+	if len(pathParts) >= 5 && pathParts[4] != "" {
+		switch r.Method {
+		case http.MethodGet:
+			t.GetTenant(w, r)
+			return
 		}
 	}
 
+	// /api/v1/tenants - 列表或创建
 	switch r.Method {
 	case http.MethodPost:
 		t.CreateTenant(w, r)

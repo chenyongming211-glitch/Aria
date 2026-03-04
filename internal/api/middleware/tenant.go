@@ -62,9 +62,24 @@ func GetTenantID(ctx context.Context) (uuid.UUID, bool) {
 	if ctx == nil {
 		return uuid.Nil, false
 	}
-	tenantID, ok := ctx.Value(TenantIDKey).(uuid.UUID)
-	if !ok {
+
+	val := ctx.Value(TenantIDKey)
+	if val == nil {
 		return uuid.Nil, false
 	}
-	return tenantID, true
+
+	// 尝试作为 uuid.UUID 类型断言
+	if tenantID, ok := val.(uuid.UUID); ok {
+		return tenantID, true
+	}
+
+	// 尝试作为 string 类型断言并解析
+	if tenantIDStr, ok := val.(string); ok && tenantIDStr != "" {
+		tenantID, err := uuid.Parse(tenantIDStr)
+		if err == nil {
+			return tenantID, true
+		}
+	}
+
+	return uuid.Nil, false
 }

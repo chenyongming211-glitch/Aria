@@ -42,19 +42,19 @@ type User struct {
 
 // EnrollmentToken represents an enrollment token for agent registration
 type EnrollmentToken struct {
-	ID          uuid.UUID `json:"id"`
-	Token       string    `json:"token"`
-	TenantID    uuid.UUID `json:"tenant_id"`
-	Tag         string    `json:"tag"`
-	MaxUses     int       `json:"max_uses"`
-	UsedCount   int       `json:"used_count"`
-	ExpiresAt   string    `json:"expires_at"`
-	CreatedAt   string    `json:"created_at"`
-	CreatedBy   string    `json:"created_by"`
-	Status      string    `json:"status"`
-	LastUsedAt  string    `json:"last_used_at,omitempty"`
-	LastUsedBy  string    `json:"last_used_by,omitempty"`
-	I18n struct {
+	ID         uuid.UUID `json:"id"`
+	Token      string    `json:"token"`
+	TenantID   uuid.UUID `json:"tenant_id"`
+	Tag        string    `json:"tag"`
+	MaxUses    int       `json:"max_uses"`
+	UsedCount  int       `json:"used_count"`
+	ExpiresAt  string    `json:"expires_at"`
+	CreatedAt  string    `json:"created_at"`
+	CreatedBy  string    `json:"created_by"`
+	Status     string    `json:"status"`
+	LastUsedAt string    `json:"last_used_at,omitempty"`
+	LastUsedBy string    `json:"last_used_by,omitempty"`
+	I18n       struct {
 		Status string `json:"status,omitempty"`
 		Tag    string `json:"tag,omitempty"`
 	} `json:"i18n,omitempty"`
@@ -68,9 +68,9 @@ type CreateUserRequest struct {
 }
 
 type CreateTokenRequest struct {
-	Tag      string `json:"tag"`
-	MaxUses  int    `json:"max_uses"`
-	TTL      string `json:"ttl"`
+	Tag     string `json:"tag"`
+	MaxUses int    `json:"max_uses"`
+	TTL     string `json:"ttl"`
 }
 
 type CreateTenantRequest struct {
@@ -289,16 +289,16 @@ func (t *TenantManagementAPI) GetTenantTokens(w http.ResponseWriter, r *http.Req
 		}
 
 		tokenMap := map[string]interface{}{
-			"id":          id.String(),
-			"token":       tokenStr,
-			"tenant_id":   tenantID.String(),
-			"tag":         tag,
-			"max_uses":    maxUses,
-			"used_count":  usedCount,
-			"expires_at":  expiresAt,
-			"created_at":  createdAt,
-			"created_by":  createdBy,
-			"status":      status,
+			"id":           id.String(),
+			"token":        tokenStr,
+			"tenant_id":    tenantID.String(),
+			"tag":          tag,
+			"max_uses":     maxUses,
+			"used_count":   usedCount,
+			"expires_at":   expiresAt,
+			"created_at":   createdAt,
+			"created_by":   createdBy,
+			"status":       status,
 			"last_used_at": lastUsedAt,
 			"last_used_by": lastUsedBy,
 			"i18n": map[string]interface{}{
@@ -399,30 +399,30 @@ func (t *TenantManagementAPI) GetTenantNodes(w http.ResponseWriter, r *http.Requ
 		}
 
 		nodeMap := map[string]interface{}{
-			"id":                node.ID.String(),
-			"public_key":        node.PublicKey,
-			"machine_id":        node.MachineID,
-			"tenant_id":         node.TenantID.String(),
-			"endpoint":          node.Endpoint,
-			"private_ip":        node.PrivateIP,
-			"public_ip":         node.PublicIP,
-			"region":            node.Region,
-			"vpc_id":            node.VPCID,
-			"hostname":          node.Hostname,
-			"assigned_ip":       node.AssignedIP,
-			"ip_offset":         node.IPOffset,
-			"last_seen":         node.LastSeen,
-			"registered_at":     node.RegisteredAt,
-			"role":              node.Role,
-			"runtime_mode":      node.RuntimeMode,
-			"kernel_version":    node.KernelVersion,
-			"has_aesni":         node.HasAESNI,
-			"status":            node.Status,
-			"offline_since":     node.OfflineSince,
-			"advertised_routes": advertisedRoutes,
+			"id":                  node.ID.String(),
+			"public_key":          node.PublicKey,
+			"machine_id":          node.MachineID,
+			"tenant_id":           node.TenantID.String(),
+			"endpoint":            node.Endpoint,
+			"private_ip":          node.PrivateIP,
+			"public_ip":           node.PublicIP,
+			"region":              node.Region,
+			"vpc_id":              node.VPCID,
+			"hostname":            node.Hostname,
+			"assigned_ip":         node.AssignedIP,
+			"ip_offset":           node.IPOffset,
+			"last_seen":           node.LastSeen,
+			"registered_at":       node.RegisteredAt,
+			"role":                node.Role,
+			"runtime_mode":        node.RuntimeMode,
+			"kernel_version":      node.KernelVersion,
+			"has_aesni":           node.HasAESNI,
+			"status":              node.Status,
+			"offline_since":       node.OfflineSince,
+			"advertised_routes":   advertisedRoutes,
 			"enrolled_with_token": enrolledWithToken,
-			"created_at":        node.CreatedAt,
-			"updated_at":        node.UpdatedAt,
+			"created_at":          node.CreatedAt,
+			"updated_at":          node.UpdatedAt,
 			"i18n": map[string]interface{}{
 				"status": fmt.Sprintf("node.status.%s", node.Status),
 				"role":   fmt.Sprintf("node.role.%s", node.Role),
@@ -537,7 +537,7 @@ func (t *TenantManagementAPI) GetTenantACLRules(w http.ResponseWriter, r *http.R
 
 	// Apply pagination to base query
 	query := baseQuery + whereClause +
-	         fmt.Sprintf(" ORDER BY priority ASC, id ASC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2)
+		fmt.Sprintf(" ORDER BY priority ASC, id ASC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2)
 
 	// Add pagination parameters to args
 	args = append(args, pageSize, (page-1)*pageSize)
@@ -904,7 +904,7 @@ func (t *TenantManagementAPI) HandleTenantManagement(w http.ResponseWriter, r *h
 	}
 
 	if len(pathParts) >= 5 {
-		subResource := pathParts[4] 
+		subResource := pathParts[4]
 		switch subResource {
 		case "tokens":
 			if len(pathParts) >= 6 {
@@ -938,9 +938,21 @@ func (t *TenantManagementAPI) HandleTenantManagement(w http.ResponseWriter, r *h
 			return
 
 		case "acl-rules", "acl", "policies":
-			// 检测是否请求特定资源（例如 /api/v1/tenant-management/acl-rules/12）
-			if len(pathParts) >= 6 && pathParts[5] != "" {
+			// 支持 /api/v1/tenant-management/acl/rules 格式
+			if len(pathParts) >= 6 {
+				// /api/v1/tenant-management/acl/rules 或 /api/v1/tenant-management/acl/{id}
+				subPath := pathParts[5]
+
+				// 如果是 "rules"，则是获取规则列表
+				if subPath == "rules" && r.Method == http.MethodGet {
+					t.GetTenantACLRules(w, r)
+					return
+				}
+
+				// 否则认为是 ID，进行单个资源操作
 				switch r.Method {
+				case http.MethodGet:
+					t.GetTenantACLRules(w, r)
 				case http.MethodPut:
 					t.UpdateTenantACLRule(w, r)
 				case http.MethodDelete:
@@ -972,7 +984,7 @@ func SetupTenantManagementRoutes(mux *http.ServeMux, store *controllerstorage.St
 	withJWT := middleware.JWTAuthMiddleware
 
 	mux.HandleFunc("/api/v1/tenant-management/", withJWT(api.HandleTenantManagement))
-	
+
 	mux.HandleFunc("/api/v1/system/tenants", withJWT(api.SuperAdminOnly(api.CreateTenant)))
 
 	mux.HandleFunc("/api/v1/tokens", withJWT(func(w http.ResponseWriter, r *http.Request) {
@@ -992,7 +1004,7 @@ func SetupTenantManagementRoutes(mux *http.ServeMux, store *controllerstorage.St
 			action := pathParts[4]
 
 			if action == "detail" {
-				var err error 
+				var err error
 				tokenStr := r.URL.Query().Get("token")
 				if tokenStr == "" {
 					WriteError(w, http.StatusBadRequest, CodeTokenParamRequired, "token parameter required", nil)
@@ -1061,15 +1073,15 @@ func SetupTenantManagementRoutes(mux *http.ServeMux, store *controllerstorage.St
 					}
 
 					nodeMap := map[string]interface{}{
-						"public_key":        node.PublicKey,
-						"hostname":          node.Hostname,
-						"assigned_ip":       node.AssignedIP,
-						"region":            node.Region,
-						"public_ip":         node.PublicIP,
-						"last_seen":         node.LastSeen,
-						"status":            node.Status,
-						"runtime_mode":      node.RuntimeMode,
-						"role":              node.Role,
+						"public_key":   node.PublicKey,
+						"hostname":     node.Hostname,
+						"assigned_ip":  node.AssignedIP,
+						"region":       node.Region,
+						"public_ip":    node.PublicIP,
+						"last_seen":    node.LastSeen,
+						"status":       node.Status,
+						"runtime_mode": node.RuntimeMode,
+						"role":         node.Role,
 					}
 					usedByNodes = append(usedByNodes, nodeMap)
 				}

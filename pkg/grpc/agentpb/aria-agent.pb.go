@@ -10,7 +10,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v4.25.3
-// source: pkg/grpc/agentpb/aria-agent.proto
+// source: aria-agent.proto
 
 package agentpb
 
@@ -51,7 +51,7 @@ type RegisterRequest struct {
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[0]
+	mi := &file_aria_agent_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -63,7 +63,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[0]
+	mi := &file_aria_agent_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -76,7 +76,7 @@ func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterRequest.ProtoReflect.Descriptor instead.
 func (*RegisterRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{0}
+	return file_aria_agent_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *RegisterRequest) GetPublicKey() string {
@@ -180,7 +180,7 @@ type RegisterResponse struct {
 
 func (x *RegisterResponse) Reset() {
 	*x = RegisterResponse{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[1]
+	mi := &file_aria_agent_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -192,7 +192,7 @@ func (x *RegisterResponse) String() string {
 func (*RegisterResponse) ProtoMessage() {}
 
 func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[1]
+	mi := &file_aria_agent_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -205,7 +205,7 @@ func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterResponse.ProtoReflect.Descriptor instead.
 func (*RegisterResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{1}
+	return file_aria_agent_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *RegisterResponse) GetAssignedIp() string {
@@ -231,7 +231,7 @@ type SyncRequest struct {
 
 func (x *SyncRequest) Reset() {
 	*x = SyncRequest{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[2]
+	mi := &file_aria_agent_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -243,7 +243,7 @@ func (x *SyncRequest) String() string {
 func (*SyncRequest) ProtoMessage() {}
 
 func (x *SyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[2]
+	mi := &file_aria_agent_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -256,7 +256,7 @@ func (x *SyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncRequest.ProtoReflect.Descriptor instead.
 func (*SyncRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{2}
+	return file_aria_agent_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *SyncRequest) GetPublicKey() string {
@@ -281,7 +281,7 @@ type SyncResponse struct {
 
 func (x *SyncResponse) Reset() {
 	*x = SyncResponse{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[3]
+	mi := &file_aria_agent_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -293,7 +293,7 @@ func (x *SyncResponse) String() string {
 func (*SyncResponse) ProtoMessage() {}
 
 func (x *SyncResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[3]
+	mi := &file_aria_agent_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -306,7 +306,7 @@ func (x *SyncResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncResponse.ProtoReflect.Descriptor instead.
 func (*SyncResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{3}
+	return file_aria_agent_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *SyncResponse) GetPeers() []*PeerInfo {
@@ -369,7 +369,7 @@ type PeerInfo struct {
 
 func (x *PeerInfo) Reset() {
 	*x = PeerInfo{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[4]
+	mi := &file_aria_agent_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -381,7 +381,7 @@ func (x *PeerInfo) String() string {
 func (*PeerInfo) ProtoMessage() {}
 
 func (x *PeerInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[4]
+	mi := &file_aria_agent_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -394,7 +394,7 @@ func (x *PeerInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerInfo.ProtoReflect.Descriptor instead.
 func (*PeerInfo) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{4}
+	return file_aria_agent_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *PeerInfo) GetPublicKey() string {
@@ -480,7 +480,7 @@ type ACLRule struct {
 
 func (x *ACLRule) Reset() {
 	*x = ACLRule{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[5]
+	mi := &file_aria_agent_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -492,7 +492,7 @@ func (x *ACLRule) String() string {
 func (*ACLRule) ProtoMessage() {}
 
 func (x *ACLRule) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[5]
+	mi := &file_aria_agent_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -505,7 +505,7 @@ func (x *ACLRule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ACLRule.ProtoReflect.Descriptor instead.
 func (*ACLRule) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{5}
+	return file_aria_agent_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ACLRule) GetSrcNet() string {
@@ -557,7 +557,7 @@ type QoSRule struct {
 
 func (x *QoSRule) Reset() {
 	*x = QoSRule{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[6]
+	mi := &file_aria_agent_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -569,7 +569,7 @@ func (x *QoSRule) String() string {
 func (*QoSRule) ProtoMessage() {}
 
 func (x *QoSRule) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[6]
+	mi := &file_aria_agent_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -582,7 +582,7 @@ func (x *QoSRule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QoSRule.ProtoReflect.Descriptor instead.
 func (*QoSRule) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{6}
+	return file_aria_agent_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *QoSRule) GetSrcIp() string {
@@ -638,7 +638,7 @@ type SyncConfigRequest struct {
 
 func (x *SyncConfigRequest) Reset() {
 	*x = SyncConfigRequest{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[7]
+	mi := &file_aria_agent_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -650,7 +650,7 @@ func (x *SyncConfigRequest) String() string {
 func (*SyncConfigRequest) ProtoMessage() {}
 
 func (x *SyncConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[7]
+	mi := &file_aria_agent_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -663,7 +663,7 @@ func (x *SyncConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncConfigRequest.ProtoReflect.Descriptor instead.
 func (*SyncConfigRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{7}
+	return file_aria_agent_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SyncConfigRequest) GetPeers() []*PeerConfig {
@@ -697,7 +697,7 @@ type SyncConfigResponse struct {
 
 func (x *SyncConfigResponse) Reset() {
 	*x = SyncConfigResponse{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[8]
+	mi := &file_aria_agent_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -709,7 +709,7 @@ func (x *SyncConfigResponse) String() string {
 func (*SyncConfigResponse) ProtoMessage() {}
 
 func (x *SyncConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[8]
+	mi := &file_aria_agent_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -722,7 +722,7 @@ func (x *SyncConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncConfigResponse.ProtoReflect.Descriptor instead.
 func (*SyncConfigResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{8}
+	return file_aria_agent_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SyncConfigResponse) GetSuccess() bool {
@@ -751,7 +751,7 @@ type PeerConfig struct {
 
 func (x *PeerConfig) Reset() {
 	*x = PeerConfig{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[9]
+	mi := &file_aria_agent_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -763,7 +763,7 @@ func (x *PeerConfig) String() string {
 func (*PeerConfig) ProtoMessage() {}
 
 func (x *PeerConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[9]
+	mi := &file_aria_agent_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -776,7 +776,7 @@ func (x *PeerConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerConfig.ProtoReflect.Descriptor instead.
 func (*PeerConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{9}
+	return file_aria_agent_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *PeerConfig) GetPublicKey() string {
@@ -816,7 +816,7 @@ type HealthCheckRequest struct {
 
 func (x *HealthCheckRequest) Reset() {
 	*x = HealthCheckRequest{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[10]
+	mi := &file_aria_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -828,7 +828,7 @@ func (x *HealthCheckRequest) String() string {
 func (*HealthCheckRequest) ProtoMessage() {}
 
 func (x *HealthCheckRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[10]
+	mi := &file_aria_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -841,7 +841,7 @@ func (x *HealthCheckRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheckRequest.ProtoReflect.Descriptor instead.
 func (*HealthCheckRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{10}
+	return file_aria_agent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *HealthCheckRequest) GetAgentId() string {
@@ -862,7 +862,7 @@ type HealthCheckResponse struct {
 
 func (x *HealthCheckResponse) Reset() {
 	*x = HealthCheckResponse{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[11]
+	mi := &file_aria_agent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -874,7 +874,7 @@ func (x *HealthCheckResponse) String() string {
 func (*HealthCheckResponse) ProtoMessage() {}
 
 func (x *HealthCheckResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[11]
+	mi := &file_aria_agent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -887,7 +887,7 @@ func (x *HealthCheckResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheckResponse.ProtoReflect.Descriptor instead.
 func (*HealthCheckResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{11}
+	return file_aria_agent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *HealthCheckResponse) GetHealthy() bool {
@@ -925,7 +925,7 @@ type AgentStats struct {
 
 func (x *AgentStats) Reset() {
 	*x = AgentStats{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[12]
+	mi := &file_aria_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -937,7 +937,7 @@ func (x *AgentStats) String() string {
 func (*AgentStats) ProtoMessage() {}
 
 func (x *AgentStats) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[12]
+	mi := &file_aria_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -950,7 +950,7 @@ func (x *AgentStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentStats.ProtoReflect.Descriptor instead.
 func (*AgentStats) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{12}
+	return file_aria_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *AgentStats) GetTotalPeers() uint64 {
@@ -1005,7 +1005,7 @@ type ReportStatsRequest struct {
 
 func (x *ReportStatsRequest) Reset() {
 	*x = ReportStatsRequest{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[13]
+	mi := &file_aria_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1017,7 +1017,7 @@ func (x *ReportStatsRequest) String() string {
 func (*ReportStatsRequest) ProtoMessage() {}
 
 func (x *ReportStatsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[13]
+	mi := &file_aria_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1030,7 +1030,7 @@ func (x *ReportStatsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportStatsRequest.ProtoReflect.Descriptor instead.
 func (*ReportStatsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{13}
+	return file_aria_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ReportStatsRequest) GetAgentId() string {
@@ -1056,7 +1056,7 @@ type ReportStatsResponse struct {
 
 func (x *ReportStatsResponse) Reset() {
 	*x = ReportStatsResponse{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[14]
+	mi := &file_aria_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1068,7 +1068,7 @@ func (x *ReportStatsResponse) String() string {
 func (*ReportStatsResponse) ProtoMessage() {}
 
 func (x *ReportStatsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[14]
+	mi := &file_aria_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1081,7 +1081,7 @@ func (x *ReportStatsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportStatsResponse.ProtoReflect.Descriptor instead.
 func (*ReportStatsResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{14}
+	return file_aria_agent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ReportStatsResponse) GetSuccess() bool {
@@ -1091,11 +1091,423 @@ func (x *ReportStatsResponse) GetSuccess() bool {
 	return false
 }
 
-var File_pkg_grpc_agentpb_aria_agent_proto protoreflect.FileDescriptor
+type CommandRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CommandId     string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`                                                    // 命令唯一ID
+	Command       string                 `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`                                                                         // 命令类型: "sync", "restart", "config_reload", "health_check"
+	Params        map[string]string      `protobuf:"bytes,3,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // 命令参数
+	Timeout       int32                  `protobuf:"varint,4,opt,name=timeout,proto3" json:"timeout,omitempty"`                                                                        // 超时时间（秒）
+	Priority      int32                  `protobuf:"varint,5,opt,name=priority,proto3" json:"priority,omitempty"`                                                                      // 优先级: 0=普通, 1=高, 2=紧急
+	CreatedAt     int64                  `protobuf:"varint,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`                                                   // 命令创建时间戳
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
 
-const file_pkg_grpc_agentpb_aria_agent_proto_rawDesc = "" +
+func (x *CommandRequest) Reset() {
+	*x = CommandRequest{}
+	mi := &file_aria_agent_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommandRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommandRequest) ProtoMessage() {}
+
+func (x *CommandRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aria_agent_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommandRequest.ProtoReflect.Descriptor instead.
+func (*CommandRequest) Descriptor() ([]byte, []int) {
+	return file_aria_agent_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *CommandRequest) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *CommandRequest) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
+func (x *CommandRequest) GetParams() map[string]string {
+	if x != nil {
+		return x.Params
+	}
+	return nil
+}
+
+func (x *CommandRequest) GetTimeout() int32 {
+	if x != nil {
+		return x.Timeout
+	}
+	return 0
+}
+
+func (x *CommandRequest) GetPriority() int32 {
+	if x != nil {
+		return x.Priority
+	}
+	return 0
+}
+
+func (x *CommandRequest) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+type CommandResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CommandId     string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`                                                    // 命令唯一ID
+	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`                                                                           // pending, acknowledged, completed, failed
+	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`                                                                         // 状态消息或错误信息
+	Result        map[string]string      `protobuf:"bytes,4,rep,name=result,proto3" json:"result,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // 命令执行结果
+	CompletedAt   int64                  `protobuf:"varint,5,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`                                             // 命令完成时间戳
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommandResponse) Reset() {
+	*x = CommandResponse{}
+	mi := &file_aria_agent_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommandResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommandResponse) ProtoMessage() {}
+
+func (x *CommandResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aria_agent_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommandResponse.ProtoReflect.Descriptor instead.
+func (*CommandResponse) Descriptor() ([]byte, []int) {
+	return file_aria_agent_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *CommandResponse) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *CommandResponse) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *CommandResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *CommandResponse) GetResult() map[string]string {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *CommandResponse) GetCompletedAt() int64 {
+	if x != nil {
+		return x.CompletedAt
+	}
+	return 0
+}
+
+type MetricsReportRequest struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	AgentId   string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"` // Agent ID (public_key)
+	Timestamp int64                  `protobuf:"varint,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`           // 上报时间戳
+	// 系统指标
+	CpuUsage    float64 `protobuf:"fixed64,3,opt,name=cpu_usage,json=cpuUsage,proto3" json:"cpu_usage,omitempty"`          // CPU 使用率 (0-100)
+	MemoryUsage float64 `protobuf:"fixed64,4,opt,name=memory_usage,json=memoryUsage,proto3" json:"memory_usage,omitempty"` // 内存使用率 (0-100)
+	MemoryTotal uint64  `protobuf:"varint,5,opt,name=memory_total,json=memoryTotal,proto3" json:"memory_total,omitempty"`  // 总内存 (bytes)
+	MemoryUsed  uint64  `protobuf:"varint,6,opt,name=memory_used,json=memoryUsed,proto3" json:"memory_used,omitempty"`     // 已用内存 (bytes)
+	DiskUsage   float64 `protobuf:"fixed64,7,opt,name=disk_usage,json=diskUsage,proto3" json:"disk_usage,omitempty"`       // 磁盘使用率 (0-100)
+	DiskTotal   uint64  `protobuf:"varint,8,opt,name=disk_total,json=diskTotal,proto3" json:"disk_total,omitempty"`        // 总磁盘 (bytes)
+	DiskUsed    uint64  `protobuf:"varint,9,opt,name=disk_used,json=diskUsed,proto3" json:"disk_used,omitempty"`           // 已用磁盘 (bytes)
+	// 网络指标
+	NetworkTxBytes   uint64 `protobuf:"varint,10,opt,name=network_tx_bytes,json=networkTxBytes,proto3" json:"network_tx_bytes,omitempty"`       // 发送字节数
+	NetworkRxBytes   uint64 `protobuf:"varint,11,opt,name=network_rx_bytes,json=networkRxBytes,proto3" json:"network_rx_bytes,omitempty"`       // 接收字节数
+	NetworkTxPackets uint64 `protobuf:"varint,12,opt,name=network_tx_packets,json=networkTxPackets,proto3" json:"network_tx_packets,omitempty"` // 发送包数
+	NetworkRxPackets uint64 `protobuf:"varint,13,opt,name=network_rx_packets,json=networkRxPackets,proto3" json:"network_rx_packets,omitempty"` // 接收包数
+	NetworkTxErrors  uint64 `protobuf:"varint,14,opt,name=network_tx_errors,json=networkTxErrors,proto3" json:"network_tx_errors,omitempty"`    // 发送错误数
+	NetworkRxErrors  uint64 `protobuf:"varint,15,opt,name=network_rx_errors,json=networkRxErrors,proto3" json:"network_rx_errors,omitempty"`    // 接收错误数
+	// WireGuard 指标
+	WgTxBytes     uint64 `protobuf:"varint,16,opt,name=wg_tx_bytes,json=wgTxBytes,proto3" json:"wg_tx_bytes,omitempty"`             // WireGuard 发送字节数
+	WgRxBytes     uint64 `protobuf:"varint,17,opt,name=wg_rx_bytes,json=wgRxBytes,proto3" json:"wg_rx_bytes,omitempty"`             // WireGuard 接收字节数
+	WgPeerCount   uint32 `protobuf:"varint,18,opt,name=wg_peer_count,json=wgPeerCount,proto3" json:"wg_peer_count,omitempty"`       // WireGuard Peer 数量
+	WgActivePeers uint32 `protobuf:"varint,19,opt,name=wg_active_peers,json=wgActivePeers,proto3" json:"wg_active_peers,omitempty"` // 活跃 Peer 数量
+	// 自定义指标
+	CustomMetrics map[string]float64 `protobuf:"bytes,20,rep,name=custom_metrics,json=customMetrics,proto3" json:"custom_metrics,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"fixed64,2,opt,name=value"` // 自定义指标键值对
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MetricsReportRequest) Reset() {
+	*x = MetricsReportRequest{}
+	mi := &file_aria_agent_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MetricsReportRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MetricsReportRequest) ProtoMessage() {}
+
+func (x *MetricsReportRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aria_agent_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MetricsReportRequest.ProtoReflect.Descriptor instead.
+func (*MetricsReportRequest) Descriptor() ([]byte, []int) {
+	return file_aria_agent_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *MetricsReportRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *MetricsReportRequest) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetCpuUsage() float64 {
+	if x != nil {
+		return x.CpuUsage
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetMemoryUsage() float64 {
+	if x != nil {
+		return x.MemoryUsage
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetMemoryTotal() uint64 {
+	if x != nil {
+		return x.MemoryTotal
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetMemoryUsed() uint64 {
+	if x != nil {
+		return x.MemoryUsed
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetDiskUsage() float64 {
+	if x != nil {
+		return x.DiskUsage
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetDiskTotal() uint64 {
+	if x != nil {
+		return x.DiskTotal
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetDiskUsed() uint64 {
+	if x != nil {
+		return x.DiskUsed
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetNetworkTxBytes() uint64 {
+	if x != nil {
+		return x.NetworkTxBytes
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetNetworkRxBytes() uint64 {
+	if x != nil {
+		return x.NetworkRxBytes
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetNetworkTxPackets() uint64 {
+	if x != nil {
+		return x.NetworkTxPackets
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetNetworkRxPackets() uint64 {
+	if x != nil {
+		return x.NetworkRxPackets
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetNetworkTxErrors() uint64 {
+	if x != nil {
+		return x.NetworkTxErrors
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetNetworkRxErrors() uint64 {
+	if x != nil {
+		return x.NetworkRxErrors
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetWgTxBytes() uint64 {
+	if x != nil {
+		return x.WgTxBytes
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetWgRxBytes() uint64 {
+	if x != nil {
+		return x.WgRxBytes
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetWgPeerCount() uint32 {
+	if x != nil {
+		return x.WgPeerCount
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetWgActivePeers() uint32 {
+	if x != nil {
+		return x.WgActivePeers
+	}
+	return 0
+}
+
+func (x *MetricsReportRequest) GetCustomMetrics() map[string]float64 {
+	if x != nil {
+		return x.CustomMetrics
+	}
+	return nil
+}
+
+type MetricsReportResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MetricsReportResponse) Reset() {
+	*x = MetricsReportResponse{}
+	mi := &file_aria_agent_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MetricsReportResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MetricsReportResponse) ProtoMessage() {}
+
+func (x *MetricsReportResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aria_agent_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MetricsReportResponse.ProtoReflect.Descriptor instead.
+func (*MetricsReportResponse) Descriptor() ([]byte, []int) {
+	return file_aria_agent_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *MetricsReportResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *MetricsReportResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+var File_aria_agent_proto protoreflect.FileDescriptor
+
+const file_aria_agent_proto_rawDesc = "" +
 	"\n" +
-	"!pkg/grpc/agentpb/aria-agent.proto\x12\n" +
+	"\x10aria-agent.proto\x12\n" +
 	"aria.agent\"\xac\x03\n" +
 	"\x0fRegisterRequest\x12\x1d\n" +
 	"\n" +
@@ -1193,10 +1605,65 @@ const file_pkg_grpc_agentpb_aria_agent_proto_rawDesc = "" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12,\n" +
 	"\x05stats\x18\x02 \x01(\v2\x16.aria.agent.AgentStatsR\x05stats\"/\n" +
 	"\x13ReportStatsResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess2\x95\x01\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"\x99\x02\n" +
+	"\x0eCommandRequest\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x18\n" +
+	"\acommand\x18\x02 \x01(\tR\acommand\x12>\n" +
+	"\x06params\x18\x03 \x03(\v2&.aria.agent.CommandRequest.ParamsEntryR\x06params\x12\x18\n" +
+	"\atimeout\x18\x04 \x01(\x05R\atimeout\x12\x1a\n" +
+	"\bpriority\x18\x05 \x01(\x05R\bpriority\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\x06 \x01(\x03R\tcreatedAt\x1a9\n" +
+	"\vParamsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x81\x02\n" +
+	"\x0fCommandResponse\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\x12?\n" +
+	"\x06result\x18\x04 \x03(\v2'.aria.agent.CommandResponse.ResultEntryR\x06result\x12!\n" +
+	"\fcompleted_at\x18\x05 \x01(\x03R\vcompletedAt\x1a9\n" +
+	"\vResultEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe0\x06\n" +
+	"\x14MetricsReportRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1c\n" +
+	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\x12\x1b\n" +
+	"\tcpu_usage\x18\x03 \x01(\x01R\bcpuUsage\x12!\n" +
+	"\fmemory_usage\x18\x04 \x01(\x01R\vmemoryUsage\x12!\n" +
+	"\fmemory_total\x18\x05 \x01(\x04R\vmemoryTotal\x12\x1f\n" +
+	"\vmemory_used\x18\x06 \x01(\x04R\n" +
+	"memoryUsed\x12\x1d\n" +
+	"\n" +
+	"disk_usage\x18\a \x01(\x01R\tdiskUsage\x12\x1d\n" +
+	"\n" +
+	"disk_total\x18\b \x01(\x04R\tdiskTotal\x12\x1b\n" +
+	"\tdisk_used\x18\t \x01(\x04R\bdiskUsed\x12(\n" +
+	"\x10network_tx_bytes\x18\n" +
+	" \x01(\x04R\x0enetworkTxBytes\x12(\n" +
+	"\x10network_rx_bytes\x18\v \x01(\x04R\x0enetworkRxBytes\x12,\n" +
+	"\x12network_tx_packets\x18\f \x01(\x04R\x10networkTxPackets\x12,\n" +
+	"\x12network_rx_packets\x18\r \x01(\x04R\x10networkRxPackets\x12*\n" +
+	"\x11network_tx_errors\x18\x0e \x01(\x04R\x0fnetworkTxErrors\x12*\n" +
+	"\x11network_rx_errors\x18\x0f \x01(\x04R\x0fnetworkRxErrors\x12\x1e\n" +
+	"\vwg_tx_bytes\x18\x10 \x01(\x04R\twgTxBytes\x12\x1e\n" +
+	"\vwg_rx_bytes\x18\x11 \x01(\x04R\twgRxBytes\x12\"\n" +
+	"\rwg_peer_count\x18\x12 \x01(\rR\vwgPeerCount\x12&\n" +
+	"\x0fwg_active_peers\x18\x13 \x01(\rR\rwgActivePeers\x12Z\n" +
+	"\x0ecustom_metrics\x18\x14 \x03(\v23.aria.agent.MetricsReportRequest.CustomMetricsEntryR\rcustomMetrics\x1a@\n" +
+	"\x12CustomMetricsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x01R\x05value:\x028\x01\"K\n" +
+	"\x15MetricsReportResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage2\xb9\x02\n" +
 	"\x11ControllerService\x12E\n" +
 	"\bRegister\x12\x1b.aria.agent.RegisterRequest\x1a\x1c.aria.agent.RegisterResponse\x129\n" +
-	"\x04Sync\x12\x17.aria.agent.SyncRequest\x1a\x18.aria.agent.SyncResponse2\xfb\x01\n" +
+	"\x04Sync\x12\x17.aria.agent.SyncRequest\x1a\x18.aria.agent.SyncResponse\x12L\n" +
+	"\rCommandStream\x12\x1b.aria.agent.CommandResponse\x1a\x1a.aria.agent.CommandRequest(\x010\x01\x12T\n" +
+	"\rReportMetrics\x12 .aria.agent.MetricsReportRequest\x1a!.aria.agent.MetricsReportResponse2\xfb\x01\n" +
 	"\fAgentService\x12K\n" +
 	"\n" +
 	"SyncConfig\x12\x1d.aria.agent.SyncConfigRequest\x1a\x1e.aria.agent.SyncConfigResponse\x12N\n" +
@@ -1204,36 +1671,43 @@ const file_pkg_grpc_agentpb_aria_agent_proto_rawDesc = "" +
 	"\vReportStats\x12\x1e.aria.agent.ReportStatsRequest\x1a\x1f.aria.agent.ReportStatsResponseB\x17Z\x15aria/pkg/grpc/agentpbb\x06proto3"
 
 var (
-	file_pkg_grpc_agentpb_aria_agent_proto_rawDescOnce sync.Once
-	file_pkg_grpc_agentpb_aria_agent_proto_rawDescData []byte
+	file_aria_agent_proto_rawDescOnce sync.Once
+	file_aria_agent_proto_rawDescData []byte
 )
 
-func file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP() []byte {
-	file_pkg_grpc_agentpb_aria_agent_proto_rawDescOnce.Do(func() {
-		file_pkg_grpc_agentpb_aria_agent_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_pkg_grpc_agentpb_aria_agent_proto_rawDesc), len(file_pkg_grpc_agentpb_aria_agent_proto_rawDesc)))
+func file_aria_agent_proto_rawDescGZIP() []byte {
+	file_aria_agent_proto_rawDescOnce.Do(func() {
+		file_aria_agent_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_aria_agent_proto_rawDesc), len(file_aria_agent_proto_rawDesc)))
 	})
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescData
+	return file_aria_agent_proto_rawDescData
 }
 
-var file_pkg_grpc_agentpb_aria_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
-var file_pkg_grpc_agentpb_aria_agent_proto_goTypes = []any{
-	(*RegisterRequest)(nil),     // 0: aria.agent.RegisterRequest
-	(*RegisterResponse)(nil),    // 1: aria.agent.RegisterResponse
-	(*SyncRequest)(nil),         // 2: aria.agent.SyncRequest
-	(*SyncResponse)(nil),        // 3: aria.agent.SyncResponse
-	(*PeerInfo)(nil),            // 4: aria.agent.PeerInfo
-	(*ACLRule)(nil),             // 5: aria.agent.ACLRule
-	(*QoSRule)(nil),             // 6: aria.agent.QoSRule
-	(*SyncConfigRequest)(nil),   // 7: aria.agent.SyncConfigRequest
-	(*SyncConfigResponse)(nil),  // 8: aria.agent.SyncConfigResponse
-	(*PeerConfig)(nil),          // 9: aria.agent.PeerConfig
-	(*HealthCheckRequest)(nil),  // 10: aria.agent.HealthCheckRequest
-	(*HealthCheckResponse)(nil), // 11: aria.agent.HealthCheckResponse
-	(*AgentStats)(nil),          // 12: aria.agent.AgentStats
-	(*ReportStatsRequest)(nil),  // 13: aria.agent.ReportStatsRequest
-	(*ReportStatsResponse)(nil), // 14: aria.agent.ReportStatsResponse
+var file_aria_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_aria_agent_proto_goTypes = []any{
+	(*RegisterRequest)(nil),       // 0: aria.agent.RegisterRequest
+	(*RegisterResponse)(nil),      // 1: aria.agent.RegisterResponse
+	(*SyncRequest)(nil),           // 2: aria.agent.SyncRequest
+	(*SyncResponse)(nil),          // 3: aria.agent.SyncResponse
+	(*PeerInfo)(nil),              // 4: aria.agent.PeerInfo
+	(*ACLRule)(nil),               // 5: aria.agent.ACLRule
+	(*QoSRule)(nil),               // 6: aria.agent.QoSRule
+	(*SyncConfigRequest)(nil),     // 7: aria.agent.SyncConfigRequest
+	(*SyncConfigResponse)(nil),    // 8: aria.agent.SyncConfigResponse
+	(*PeerConfig)(nil),            // 9: aria.agent.PeerConfig
+	(*HealthCheckRequest)(nil),    // 10: aria.agent.HealthCheckRequest
+	(*HealthCheckResponse)(nil),   // 11: aria.agent.HealthCheckResponse
+	(*AgentStats)(nil),            // 12: aria.agent.AgentStats
+	(*ReportStatsRequest)(nil),    // 13: aria.agent.ReportStatsRequest
+	(*ReportStatsResponse)(nil),   // 14: aria.agent.ReportStatsResponse
+	(*CommandRequest)(nil),        // 15: aria.agent.CommandRequest
+	(*CommandResponse)(nil),       // 16: aria.agent.CommandResponse
+	(*MetricsReportRequest)(nil),  // 17: aria.agent.MetricsReportRequest
+	(*MetricsReportResponse)(nil), // 18: aria.agent.MetricsReportResponse
+	nil,                           // 19: aria.agent.CommandRequest.ParamsEntry
+	nil,                           // 20: aria.agent.CommandResponse.ResultEntry
+	nil,                           // 21: aria.agent.MetricsReportRequest.CustomMetricsEntry
 }
-var file_pkg_grpc_agentpb_aria_agent_proto_depIdxs = []int32{
+var file_aria_agent_proto_depIdxs = []int32{
 	4,  // 0: aria.agent.SyncResponse.peers:type_name -> aria.agent.PeerInfo
 	5,  // 1: aria.agent.SyncResponse.acl_rules:type_name -> aria.agent.ACLRule
 	6,  // 2: aria.agent.SyncResponse.qos_rules:type_name -> aria.agent.QoSRule
@@ -1242,43 +1716,50 @@ var file_pkg_grpc_agentpb_aria_agent_proto_depIdxs = []int32{
 	6,  // 5: aria.agent.SyncConfigRequest.qos_rules:type_name -> aria.agent.QoSRule
 	12, // 6: aria.agent.HealthCheckResponse.stats:type_name -> aria.agent.AgentStats
 	12, // 7: aria.agent.ReportStatsRequest.stats:type_name -> aria.agent.AgentStats
-	0,  // 8: aria.agent.ControllerService.Register:input_type -> aria.agent.RegisterRequest
-	2,  // 9: aria.agent.ControllerService.Sync:input_type -> aria.agent.SyncRequest
-	7,  // 10: aria.agent.AgentService.SyncConfig:input_type -> aria.agent.SyncConfigRequest
-	10, // 11: aria.agent.AgentService.HealthCheck:input_type -> aria.agent.HealthCheckRequest
-	13, // 12: aria.agent.AgentService.ReportStats:input_type -> aria.agent.ReportStatsRequest
-	1,  // 13: aria.agent.ControllerService.Register:output_type -> aria.agent.RegisterResponse
-	3,  // 14: aria.agent.ControllerService.Sync:output_type -> aria.agent.SyncResponse
-	8,  // 15: aria.agent.AgentService.SyncConfig:output_type -> aria.agent.SyncConfigResponse
-	11, // 16: aria.agent.AgentService.HealthCheck:output_type -> aria.agent.HealthCheckResponse
-	14, // 17: aria.agent.AgentService.ReportStats:output_type -> aria.agent.ReportStatsResponse
-	13, // [13:18] is the sub-list for method output_type
-	8,  // [8:13] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	19, // 8: aria.agent.CommandRequest.params:type_name -> aria.agent.CommandRequest.ParamsEntry
+	20, // 9: aria.agent.CommandResponse.result:type_name -> aria.agent.CommandResponse.ResultEntry
+	21, // 10: aria.agent.MetricsReportRequest.custom_metrics:type_name -> aria.agent.MetricsReportRequest.CustomMetricsEntry
+	0,  // 11: aria.agent.ControllerService.Register:input_type -> aria.agent.RegisterRequest
+	2,  // 12: aria.agent.ControllerService.Sync:input_type -> aria.agent.SyncRequest
+	16, // 13: aria.agent.ControllerService.CommandStream:input_type -> aria.agent.CommandResponse
+	17, // 14: aria.agent.ControllerService.ReportMetrics:input_type -> aria.agent.MetricsReportRequest
+	7,  // 15: aria.agent.AgentService.SyncConfig:input_type -> aria.agent.SyncConfigRequest
+	10, // 16: aria.agent.AgentService.HealthCheck:input_type -> aria.agent.HealthCheckRequest
+	13, // 17: aria.agent.AgentService.ReportStats:input_type -> aria.agent.ReportStatsRequest
+	1,  // 18: aria.agent.ControllerService.Register:output_type -> aria.agent.RegisterResponse
+	3,  // 19: aria.agent.ControllerService.Sync:output_type -> aria.agent.SyncResponse
+	15, // 20: aria.agent.ControllerService.CommandStream:output_type -> aria.agent.CommandRequest
+	18, // 21: aria.agent.ControllerService.ReportMetrics:output_type -> aria.agent.MetricsReportResponse
+	8,  // 22: aria.agent.AgentService.SyncConfig:output_type -> aria.agent.SyncConfigResponse
+	11, // 23: aria.agent.AgentService.HealthCheck:output_type -> aria.agent.HealthCheckResponse
+	14, // 24: aria.agent.AgentService.ReportStats:output_type -> aria.agent.ReportStatsResponse
+	18, // [18:25] is the sub-list for method output_type
+	11, // [11:18] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
-func init() { file_pkg_grpc_agentpb_aria_agent_proto_init() }
-func file_pkg_grpc_agentpb_aria_agent_proto_init() {
-	if File_pkg_grpc_agentpb_aria_agent_proto != nil {
+func init() { file_aria_agent_proto_init() }
+func file_aria_agent_proto_init() {
+	if File_aria_agent_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_grpc_agentpb_aria_agent_proto_rawDesc), len(file_pkg_grpc_agentpb_aria_agent_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aria_agent_proto_rawDesc), len(file_aria_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
-		GoTypes:           file_pkg_grpc_agentpb_aria_agent_proto_goTypes,
-		DependencyIndexes: file_pkg_grpc_agentpb_aria_agent_proto_depIdxs,
-		MessageInfos:      file_pkg_grpc_agentpb_aria_agent_proto_msgTypes,
+		GoTypes:           file_aria_agent_proto_goTypes,
+		DependencyIndexes: file_aria_agent_proto_depIdxs,
+		MessageInfos:      file_aria_agent_proto_msgTypes,
 	}.Build()
-	File_pkg_grpc_agentpb_aria_agent_proto = out.File
-	file_pkg_grpc_agentpb_aria_agent_proto_goTypes = nil
-	file_pkg_grpc_agentpb_aria_agent_proto_depIdxs = nil
+	File_aria_agent_proto = out.File
+	file_aria_agent_proto_goTypes = nil
+	file_aria_agent_proto_depIdxs = nil
 }
