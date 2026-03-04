@@ -455,85 +455,106 @@ ssh root@112.124.8.241 "cd /root/aria-controller && ./deploy-controller.sh deplo
 |------|-----|----------|
 | Controller | 112.124.8.241 | /root/aria-controller |
 
-### 7. 🤖 Agent 部署
+### 7. 🤖 Rust Agent 部署（重要）
 
 当用户说"部署 Agent"或类似指令时，**必须**按以下流程执行：
 
-#### 完整部署流程
+#### 完整部署流程（每个节点单独编译）
 
-**第一步：本地构建**
+**第一步：同步源码到所有节点**
 ```bash
-# 1. 编译 Agent（必须！）
-make build-linux-amd64
+# 同步修改的源码文件到所有 Agent 节点
+# 示例：同步单个文件
+rsync -avz agent-rust/agent/src/config.rs root@146.56.196.231:/root/agent-rust/agent/src/
+rsync -avz agent-rust/agent/src/config.rs root@118.195.135.16:/root/agent-rust/agent/src/
 
-# 2. 复制到部署目录
-cp bin/aria-linux-amd64 releases/deploy/agent/aria
+# 或同步整个 src 目录
+rsync -avz --delete agent-rust/agent/src/ root@146.56.196.231:/root/agent-rust/agent/src/
+rsync -avz --delete agent-rust/agent/src/ root@118.195.135.16:/root/agent-rust/agent/src/
 ```
 
-**第二步：上传到服务器**
+**第二步：在每个节点上编译**
 ```bash
-# 上传到所有 Agent 服务器
-rsync -avz releases/deploy/agent/ root@146.56.196.231:/root/aria-agent/
-rsync -avz releases/deploy/agent/ root@118.195.135.16:/root/aria-agent/
+# sh 节点编译
+ssh root@146.56.196.231 "source ~/.cargo/env && cd /root/agent-rust && cargo build --release"
+
+# bj 节点编译
+ssh root@118.195.135.16 "source ~/.cargo/env && cd /root/agent-rust && cargo build --release"
 ```
 
-**第三步：服务器部署**
+**第三步：原子替换并重启**
 ```bash
-# 在每个 Agent 服务器上执行
-# 关键：必须先替换 /usr/local/bin/aria，再重启服务
-
 # sh 节点
-ssh root@146.56.196.231 "cp /root/aria-agent/aria /usr/local/bin/aria && systemctl restart aria"
+ssh root@146.56.196.231 "cp /root/agent-rust/target/release/aria-agent /usr/local/bin/aria.new && chmod +x /usr/local/bin/aria.new && mv -f /usr/local/bin/aria.new /usr/local/bin/aria && systemctl restart aria"
 
 # bj 节点
-ssh root@118.195.135.16 "cp /root/aria-agent/aria /usr/local/bin/aria && systemctl restart aria"
-
-# 验证版本
-ssh root@146.56.196.231 "aria --version"
-ssh root@118.195.135.16 "aria --version"
+ssh root@118.195.135.16 "cp /root/agent-rust/target/release/aria-agent /usr/local/bin/aria.new && chmod +x /usr/local/bin/aria.new && mv -f /usr/local/bin/aria.new /usr/local/bin/aria && systemctl restart aria"
 ```
 
-#### 优雅升级流程（原子替换，不中断业务）
-
+**第四步：验证部署**
 ```bash
-# ========== 1. 本地编译 ==========
-make build-linux-amd64
-cp bin/aria-linux-amd64 releases/deploy/agent/aria
+# sh 节点验证
+ssh root@146.56.196.231 "aria --version && aria status && aria peers"
 
-# ========== 2. 原子替换（推荐方式）==========
-# 原理：mv 在同一文件系统下是原子操作，无需停止服务
+# bj 节点验证
+ssh root@118.195.135.16 "aria --version && aria status && aria peers"
+```
 
-# sh 节点
-rsync -avz releases/deploy/agent/aria root@146.56.196.231:/usr/local/bin/aria.new
-ssh root@146.56.196.231 "chmod +x /usr/local/bin/aria.new && mv -f /usr/local/bin/aria.new /usr/local/bin/aria"
+#### 为什么要每个节点单独编译？
 
-# bj 节点
-rsync -avz releases/deploy/agent/aria root@118.195.135.16:/usr/local/bin/aria.new
-ssh root@118.195.135.16 "chmod +x /usr/local/bin/aria.new && mv -f /usr/local/bin/aria.new /usr/local/bin/aria"
+**重要原因：**
+- ✅ **glibc 版本不兼容**：不同虚拟机的 glibc 版本可能不同（如 Ubuntu 22.04 vs 24.04）
+- ✅ **避免运行时错误**：高版本 glibc 编译的二进制无法在低版本系统运行
+- ✅ **依赖库差异**：不同系统的系统库版本可能不同
 
-# ========== 3. 重启服务 ==========
-ssh root@146.56.196.231 "systemctl restart aria"
-ssh root@118.195.135.16 "systemctl restart aria"
-
-# ========== 4. 验证 ==========
-ssh root@146.56.196.231 "aria --version && aria status"
-ssh root@118.195.135.16 "aria --version && aria status"
+**错误示例：**
+```
+/lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found
 ```
 
 #### 关键规则
 
-* **必须先编译**：`make build-linux-amd64`，不能直接用旧二进制
-* **原子替换**：使用 `mv -f` 在同一目录下操作，原子替换无需停机
-* **同一目录**：临时文件和目标文件必须在同一挂载点，确保 mv 是原子操作
-* **通过 systemctl 重启**：使用 `systemctl restart aria`，不要直接 `aria up`（会绕过服务管理）
-* **数据面不断**：升级时 WireGuard tunnel 保持连接，只有控制面短暂中断
+* **必须在每个节点编译**：禁止跨节点复制二进制文件
+* **原子替换**：使用 `mv -f` 原子替换，无需停止服务
+* **先替换后重启**：必须先替换二进制文件，再通过 systemctl 重启
+* **验证部署**：每次部署后必须验证版本和状态
 
 #### Agent 服务器信息
 
-| 节点 | IP | Region | VPN IP |
-|------|-----|--------|--------|
-| sh | 146.56.196.231 | sh | 100.64.0.1 |
-| bj | 118.195.135.16 | bj | 100.64.0.2 |
+| 节点 | IP | Region | VPN IP | OS |
+|------|-----|--------|--------|-----|
+| sh | 146.56.196.231 | sh | 100.64.0.1 | Ubuntu 24.04 |
+| bj | 118.195.135.16 | bj | 100.64.0.2 | Ubuntu 22.04 |
+
+#### 快速部署脚本
+
+创建一键部署脚本 `scripts/deploy-rust-agent.sh`：
+```bash
+#!/bin/bash
+# 快速部署 Rust Agent 到所有节点
+
+echo "=== Step 1: Syncing source code ==="
+rsync -avz --delete agent-rust/agent/src/ root@146.56.196.231:/root/agent-rust/agent/src/
+rsync -avz --delete agent-rust/agent/src/ root@118.195.135.16:/root/agent-rust/agent/src/
+
+echo "=== Step 2: Building on sh node ==="
+ssh root@146.56.196.231 "source ~/.cargo/env && cd /root/agent-rust && cargo build --release"
+
+echo "=== Step 3: Building on bj node ==="
+ssh root@118.195.135.16 "source ~/.cargo/env && cd /root/agent-rust && cargo build --release"
+
+echo "=== Step 4: Deploying to sh node ==="
+ssh root@146.56.196.231 "cp /root/agent-rust/target/release/aria-agent /usr/local/bin/aria.new && chmod +x /usr/local/bin/aria.new && mv -f /usr/local/bin/aria.new /usr/local/bin/aria && systemctl restart aria"
+
+echo "=== Step 5: Deploying to bj node ==="
+ssh root@118.195.135.16 "cp /root/agent-rust/target/release/aria-agent /usr/local/bin/aria.new && chmod +x /usr/local/bin/aria.new && mv -f /usr/local/bin/aria.new /usr/local/bin/aria && systemctl restart aria"
+
+echo "=== Step 6: Verifying deployment ==="
+ssh root@146.56.196.231 "aria --version && aria peers"
+ssh root@118.195.135.16 "aria --version && aria peers"
+
+echo "✅ Deployment complete!"
+```
 
 #### 创建 Token（首次部署或新增节点）
 
@@ -907,3 +928,541 @@ func WriteValidationError(w http.ResponseWriter, fieldErrors map[string]string) 
 2. 现有API应逐步按此规范进行改造
 3. 所有API都需要包含适当的参数验证
 4. 错误处理需保持一致
+
+---
+
+## 13. 🚨 Agent 部署避坑指南（重要）
+
+### 13.1 核心原则
+
+**⚠️ 禁止随意重建容器**
+- Controller 容器更新时，**不要删除重建**，会导致配置丢失
+- 使用 `docker restart` 重启容器
+- 只有镜像本身需要更新时，才使用 `docker rm` + `docker run`
+- 更新时确保环境变量和卷挂载与之前完全一致
+
+---
+
+### 13.2 Controller gRPC 配置（必坑）
+
+#### 问题 1: 端口未映射
+
+**症状：** Agent 报错 "Connection refused" 或 "Failed to connect to Controller"
+
+**原因：** Controller 容器未映射 50051 端口到宿主机
+
+**解决方案：**
+```bash
+# 启动 Controller 时必须添加端口映射
+docker run -d \
+    --name aria_controller \
+    --network aria_shared_net \
+    -p 50051:50051 \  # ← 必须添加
+    ...
+```
+
+#### 问题 2: gRPC 证书配置错误（最常见）
+
+**症状：** 
+- "invalid peer certificate: UnknownIssuer"
+- "certificate not valid for name"
+- "peer closed connection without sending TLS close_notify"
+
+**原因：** Controller 默认使用 `server.crt`（公网 HTTPS 证书），但 gRPC 应该使用 `grpc-server.crt`
+
+**解决方案：**
+```bash
+# ❌ 错误：不指定环境变量，会使用默认的 server.crt
+docker run -d --name aria_controller ...
+
+# ✅ 正确：通过环境变量指定 gRPC 专用证书
+docker run -d \
+    --name aria_controller \
+    --network aria_shared_net \
+    -p 50051:50051 \
+    -v /root/aria-controller/certs:/etc/aria/certs:ro \
+    -e ARIA_GRPC_SERVER_CERT=/etc/aria/certs/grpc-server.crt \
+    -e ARIA_GRPC_SERVER_KEY=/etc/aria/certs/grpc-server.key \
+    -e ARIA_GRPC_CA_CERT=/etc/aria/certs/ca.crt \
+    ...
+```
+
+**证书说明：**
+- `server.crt` / `server.key`: 公网 HTTPS 证书（用于 Web UI）
+- `grpc-server.crt` / `grpc-server.key`: gRPC mTLS 证书（用于 Agent 通信）
+- `ca.crt`: CA 根证书（用于验证客户端证书）
+
+---
+
+### 13.3 Agent 证书配置（必坑）
+
+#### 问题 1: 证书路径配置缺失
+
+**症状：** "missing field `ca_cert`" 或 "missing field `client_cert`"
+
+**原因：** Rust Agent 配置文件必须包含完整的证书路径
+
+**正确的配置文件：** `/etc/aria/agent.yaml`
+```yaml
+controller_url: https://112.124.8.241:50051  # ← 必须包含端口号
+ca_cert: /etc/aria/certs/ca/ca.crt            # ← CA 证书
+client_cert: /etc/aria/certs/agents/agent-<region>.crt  # ← 客户端证书
+client_key: /etc/aria/certs/agents/agent-<region>.key   # ← 客户端私钥
+device_id: null
+private_key: <WireGuard 私钥>
+public_key: <WireGuard 公钥>
+assigned_ip: null
+interface_name: aria0
+listen_port: 51820
+mtu: 1360
+region: <region>
+advertised_routes:
+  - 2.2.2.0/24
+  - 3.3.3.0/24
+  - 8.8.8.0/24
+sync_interval: 5
+```
+
+#### 问题 2: TLS 域名验证失败
+
+**症状：** "certificate not valid for name"
+
+**原因：** Agent 代码中的 `domain_name` 与 Controller 服务器证书的 CN/SAN 不匹配
+
+**解决方案：**
+检查 `agent-rust/agent/src/grpc_client.rs` 中的配置：
+```rust
+let tls_config = ClientTlsConfig::new()
+    .ca_certificate(ca)
+    .identity(identity)
+    .domain_name("aria-controller");  // ← 必须与服务器证书匹配
+```
+
+**验证证书：**
+```bash
+# 查看服务器证书的 CN 和 SAN
+openssl x509 -in /etc/aria/certs/grpc-server.crt -text -noout | grep -E '(Subject:|DNS:)'
+
+# 测试 TLS 连接
+openssl s_client -connect 112.124.8.241:50051 \
+    -CAfile /etc/aria/certs/ca/ca.crt \
+    -cert /etc/aria/certs/agents/agent-sh.crt \
+    -key /etc/aria/certs/agents/agent-sh.key
+```
+
+#### 问题 3: 客户端证书被拒绝
+
+**症状：** "peer closed connection without sending TLS close_notify"
+
+**可能原因：**
+1. 客户端证书 CN 不在 Controller 的白名单中
+2. Controller 不信任该客户端证书
+3. 证书过期或无效
+
+**排查方法：**
+```bash
+# 查看 Controller 日志
+docker logs aria_controller 2>&1 | grep -E '(TLS|certificate|client)'
+
+# 使用 strace 跟踪 Agent
+strace -s 500 -e trace=network,openat \
+    /usr/local/bin/aria up --interface=eth0 --config=/etc/aria/agent.yaml 2>&1 \
+    | grep -E '(connect|cert|TLS)'
+```
+
+---
+
+### 13.4 编译和部署问题
+
+#### 问题 1: glibc 版本不兼容
+
+**症状：** 
+```
+/lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found
+```
+
+**原因：** 编译节点的 glibc 版本高于目标节点（如 Ubuntu 24.04 → 22.04）
+
+**解决方案：**
+- **方案一（推荐）：** 在目标节点上编译
+  ```bash
+  # 在每个目标节点上编译
+  ssh root@<node> "source ~/.cargo/env && cd /root/agent-rust && cargo build --release"
+  ```
+
+- **方案二：** 使用静态链接
+  ```bash
+  # 修改 Cargo.toml
+  [target.x86_64-unknown-linux-musl]
+  linker = "rust-lld"
+  
+  # 编译
+  cargo build --release --target x86_64-unknown-linux-musl
+  ```
+
+#### 问题 2: 端口冲突
+
+**症状：** 
+```
+Error: Failed to initialize metrics
+Caused by: Address already in use (os error 98)
+```
+
+**原因：** 9090 端口被其他 aria 服务占用
+
+**解决方案：**
+```bash
+# 查找占用进程
+netstat -tlnp | grep :9090
+
+# 停止冲突服务
+systemctl stop aria-rust aria-ebpf
+systemctl disable aria-rust aria-ebpf
+
+# 或杀掉占用进程
+pkill -9 -f 'aria-rust'
+```
+
+#### 问题 3: 数据库脏数据导致启动失败（⚠️ 最常见）
+
+**症状：**
+```
+Error: Failed to connect to Controller
+Caused by: Permission denied (os error 13)
+```
+
+或
+
+```
+Error: status: Unknown, message: "sync failed: node not found: sql: Scan error on column index 8, name \"vpc_id\": converting NULL to string is unsupported"
+```
+
+**根本原因：**
+1. **数据库中存储了错误的公钥**：之前的部署在数据库中留下了旧的公钥记录，与配置文件中的新公钥不匹配
+2. **NULL字段导致扫描失败**：`vpc_id` 或 `tenant_id` 等字段为NULL，Controller的Go代码无法正确扫描
+
+**检查方法：**
+```bash
+# 1. 检查数据库中的公钥是否与配置文件一致
+docker exec aria_postgres psql -U aria -d aria -c \
+  "SELECT region, public_key, assigned_ip FROM nodes;"
+
+# 2. 检查配置文件中的公钥
+cat /etc/aria/agent.yaml | grep public_key
+
+# 3. 比较两者是否一致
+```
+
+**解决方案：**
+```bash
+# 1. 删除脏数据
+docker exec aria_postgres psql -U aria -d aria -c \
+  "DELETE FROM nodes WHERE region = '<region>' AND public_key = '<错误的公钥>';"
+
+# 2. 使用正确的公钥插入新记录
+docker exec aria_postgres psql -U aria -d aria -c \
+  "INSERT INTO nodes (id, public_key, machine_id, region, assigned_ip, endpoint, private_ip, public_ip, hostname, last_seen, registered_at, role, runtime_mode, status, advertised_routes, vpc_id, tenant_id) VALUES (gen_random_uuid(), '<正确的公钥>', '<region>-node', '<region>', '<IP>', '<endpoint>', '<IP>', '<IP>', '<hostname>', EXTRACT(EPOCH FROM NOW())::bigint, EXTRACT(EPOCH FROM NOW())::bigint, 'agent', 'kernel', 'online', ARRAY['2.2.2.0/24'], 'default', '00000000-0000-0000-0000-000000000001');"
+
+# 3. 验证插入结果
+docker exec aria_postgres psql -U aria -d aria -c \
+  "SELECT region, public_key, vpc_id, tenant_id FROM nodes;"
+```
+
+**预防措施：**
+- ✅ 每次重新部署前，先检查数据库中是否有该节点的旧记录
+- ✅ 如果有旧记录，先删除再部署
+- ✅ 确保所有必需字段（`vpc_id`, `tenant_id`）都有有效值
+- ❌ 不要直接修改配置文件中的密钥而不更新数据库
+
+#### 问题 4: systemd 安全限制导致证书访问失败（⚠️ 必坑）
+
+**症状：**
+- 手动运行 `aria up` 成功
+- systemd 启动服务失败：`Permission denied (os error 13)`
+- 日志显示在 gRPC 连接阶段失败
+
+**根本原因：**
+systemd 的安全限制（`ProtectSystem=strict`, `ProtectHome=true`）过于严格，导致进程无法读取 `/etc/aria/certs/` 下的证书文件
+
+**❌ 错误配置：**
+```ini
+[Service]
+# 过于严格的安全限制
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/aria /var/log/aria /etc/wireguard /etc/aria /run
+```
+
+**✅ 正确配置：**
+```ini
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/aria up --interface=eth0 --config=/etc/aria/agent.yaml
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# 环境变量
+Environment=RUST_LOG=info
+
+# 资源限制
+LimitNOFILE=65535
+LimitNPROC=4096
+
+# 安全加固 - 放宽限制以允许证书访问
+NoNewPrivileges=false
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_BPF CAP_PERFMON
+```
+
+**验证方法：**
+```bash
+# 如果手动运行成功但服务启动失败，说明是 systemd 配置问题
+# 1. 手动运行测试
+/usr/local/bin/aria up --interface=eth0 --config=/etc/aria/agent.yaml
+
+# 2. 如果手动成功，对比 systemd 配置
+cat /etc/systemd/system/aria.service
+
+# 3. 使用参考节点的配置
+# 从正常运行的节点复制 systemd 配置
+```
+
+**关键要点：**
+- ✅ 参考 sh 节点（146.56.196.231）的 systemd 配置
+- ❌ 不要使用 `ProtectSystem=strict` 和 `ProtectHome=true`
+- ✅ 只使用必要的 `AmbientCapabilities`
+
+#### 问题 5: 手动测试留下残留进程
+
+**症状：**
+```
+Error: Failed to initialize metrics
+Caused by: failed to create HTTP listener: Address already in use (os error 98)
+```
+
+**原因：** 手动运行 `aria up` 测试后，进程没有正确停止，占用了 9090 端口
+
+**解决方案：**
+```bash
+# 1. 查找所有 aria 进程
+ps aux | grep aria
+
+# 2. 杀掉所有 aria 进程
+pkill -9 -f 'aria'
+
+# 3. 验证端口已释放
+netstat -tlnp | grep :9090
+
+# 4. 重启服务
+systemctl restart aria
+```
+
+**预防措施：**
+- ✅ 手动测试完成后，务必用 `pkill` 清理进程
+- ✅ 在重启 systemd 服务前，先检查是否有残留进程
+- ❌ 不要用 `Ctrl+C` 后直接重启服务（可能留下僵尸进程）
+
+---
+
+### 13.5 Agent 更新注意事项（⚠️ 重要）
+
+**在更新 Agent 前，必须按以下步骤检查，避免部署失败：**
+
+#### 步骤 1: 检查数据库中的节点记录
+
+```bash
+# 查询数据库中的节点信息
+docker exec aria_postgres psql -U aria -d aria -c \
+  "SELECT region, public_key, assigned_ip, vpc_id, tenant_id FROM nodes;"
+```
+
+**检查要点：**
+- ✅ 公钥是否与配置文件一致
+- ✅ `vpc_id` 和 `tenant_id` 是否为有效值（不是NULL）
+- ✅ `assigned_ip` 是否正确
+
+#### 步骤 2: 对比配置文件中的公钥
+
+```bash
+# 检查配置文件中的公钥
+cat /etc/aria/agent.yaml | grep public_key
+
+# 比较数据库和配置文件
+# 如果不一致，需要更新数据库
+```
+
+#### 步骤 3: 如果公钥不匹配，更新数据库
+
+```bash
+# 1. 删除旧记录
+docker exec aria_postgres psql -U aria -d aria -c \
+  "DELETE FROM nodes WHERE region = '<region>' AND public_key = '<旧的错误公钥>';"
+
+# 2. 插入新记录（使用配置文件中的正确公钥）
+docker exec aria_postgres psql -U aria -d aria -c \
+  "INSERT INTO nodes (id, public_key, machine_id, region, assigned_ip, endpoint, private_ip, public_ip, hostname, last_seen, registered_at, role, runtime_mode, status, advertised_routes, vpc_id, tenant_id) VALUES (gen_random_uuid(), '<配置文件中的公钥>', '<region>-node', '<region>', '<IP>', '<endpoint>', '<IP>', '<IP>', '<hostname>', EXTRACT(EPOCH FROM NOW())::bigint, EXTRACT(EPOCH FROM NOW())::bigint, 'agent', 'kernel', 'online', ARRAY['2.2.2.0/24'], 'default', '00000000-0000-0000-0000-000000000001');"
+```
+
+#### 步骤 4: 清理残留进程
+
+```bash
+# 在更新前，清理所有aria进程
+pkill -9 -f 'aria'
+
+# 验证端口已释放
+netstat -tlnp | grep :9090
+```
+
+#### 步骤 5: 验证 systemd 配置
+
+```bash
+# 确保 systemd 配置正确（不要使用过于严格的安全限制）
+cat /etc/systemd/system/aria.service
+
+# 参考 sh 节点的配置
+# 如果不一致，从 sh 节点复制配置
+```
+
+#### 步骤 6: 更新并重启
+
+```bash
+# 原子替换二进制
+rsync -avz /path/to/aria-agent root@<node>:/usr/local/bin/aria.new
+ssh root@<node> "chmod +x /usr/local/bin/aria.new && mv -f /usr/local/bin/aria.new /usr/local/bin/aria"
+
+# 重启服务
+systemctl restart aria
+
+# 验证服务状态
+systemctl status aria
+
+# 查看日志
+journalctl -u aria -n 50
+```
+
+**常见更新失败原因：**
+1. ❌ 数据库中有旧的错误公钥记录
+2. ❌ `vpc_id` 或 `tenant_id` 为NULL
+3. ❌ systemd 安全限制太严格（`ProtectSystem=strict`）
+4. ❌ 手动测试留下的进程占用端口
+
+**最佳实践：**
+- ✅ 每次更新前，先查询数据库确认数据正确
+- ✅ 如果修改了配置文件中的密钥，必须同步更新数据库
+- ✅ 更新前清理所有残留进程
+- ✅ 使用经过验证的 systemd 配置（参考 sh 节点）
+- ✅ 更新后立即验证服务状态和日志
+
+---
+
+### 13.6 更新流程（避免重建）
+
+#### Controller 更新（只更新二进制，不重建容器）
+
+```bash
+# ❌ 错误：删除重建容器
+docker rm -f aria_controller
+docker run -d --name aria_controller ...  # 会导致配置丢失
+
+# ✅ 正确：只更新镜像并重启
+docker buildx build --platform linux/amd64 \
+    -t aria-controller:latest \
+    -f Dockerfile.controller . --load
+
+docker restart aria_controller  # 重启容器，配置保持不变
+```
+
+**只有在以下情况才重建容器：**
+1. 需要修改环境变量
+2. 需要修改卷挂载
+3. 需要修改端口映射
+4. 需要修改网络配置
+
+#### Agent 更新（原子替换）
+
+```bash
+# ✅ 推荐：原子替换，无需停止服务
+rsync -avz /path/to/aria-agent root@<node>:/usr/local/bin/aria.new
+ssh root@<node> "chmod +x /usr/local/bin/aria.new && mv -f /usr/local/bin/aria.new /usr/local/bin/aria"
+
+# 重启服务
+ssh root@<node> "systemctl restart aria"
+```
+
+---
+
+### 13.7 完整部署检查清单
+
+**Controller 部署前：**
+- [ ] gRPC 端口已映射（50051:50051）
+- [ ] gRPC 证书环境变量已设置：
+  - `ARIA_GRPC_SERVER_CERT=/etc/aria/certs/grpc-server.crt`
+  - `ARIA_GRPC_SERVER_KEY=/etc/aria/certs/grpc-server.key`
+  - `ARIA_GRPC_CA_CERT=/etc/aria/certs/ca.crt`
+- [ ] 证书文件存在且可读
+- [ ] 容器已加入 `aria_shared_net` 网络
+
+**Agent 部署前：**
+- [ ] 配置文件完整（包含所有必需字段）
+- [ ] 证书路径正确（ca_cert, client_cert, client_key）
+- [ ] controller_url 包含端口号（:50051）
+- [ ] 证书文件存在且可读
+- [ ] 9090 端口未被占用
+- [ ] glibc 版本兼容（或本地编译）
+
+**部署后验证：**
+- [ ] 服务状态正常：`systemctl status aria`
+- [ ] 日志无错误：`journalctl -u aria -n 50`
+- [ ] WireGuard 接口存在：`ip addr show aria0`
+- [ ] 可以 ping 通其他节点：`ping 100.64.0.x`
+
+---
+
+### 13.8 快速故障排查
+
+**Agent 启动失败：**
+```bash
+# 1. 查看详细日志
+journalctl -u aria -n 100 --no-pager
+
+# 2. 检查配置文件
+cat /etc/aria/agent.yaml | grep -E '(controller_url|ca_cert|client_cert)'
+
+# 3. 测试网络连接
+telnet 112.124.8.241 50051
+
+# 4. 测试 TLS 连接
+openssl s_client -connect 112.124.8.241:50051 \
+    -CAfile /etc/aria/certs/ca/ca.crt \
+    -cert /etc/aria/certs/agents/agent-<region>.crt \
+    -key /etc/aria/certs/agents/agent-<region>.key
+
+# 5. 验证证书
+openssl verify -CAfile /etc/aria/certs/ca/ca.crt \
+    /etc/aria/certs/agents/agent-<region>.crt
+```
+
+**Controller 连接失败：**
+```bash
+# 1. 检查容器状态
+docker ps | grep aria_controller
+
+# 2. 检查端口映射
+docker port aria_controller
+
+# 3. 查看 Controller 日志
+docker logs aria_controller 2>&1 | grep -E '(gRPC|TLS|50051)'
+
+# 4. 进入容器检查
+docker exec -it aria_controller sh
+netstat -tlnp | grep 50051
+cat /etc/aria/certs/grpc-server.crt | openssl x509 -text -noout | grep Subject
+```
+
+---
+
+**最后更新**: 2026-03-04  
+**版本**: 0.2.26-test-11  
+**维护者**: Aria Team
