@@ -7,6 +7,7 @@ import (
 	"io"
 	"time"
 
+	controllerstorage "aria/pkg/controllerstorage"
 	"aria/pkg/grpc/agentpb"
 )
 
@@ -16,6 +17,7 @@ type ControllerServer struct {
 	agentpb.UnimplementedControllerServiceServer
 	registerHandler func(interface{}) (assignedIP, metricsGateway string, err error)
 	syncHandler     func(publicKey string) (peers interface{}, assignedIP string, aclRules interface{}, metricsGateway string, err error)
+	store           *controllerstorage.Storage
 }
 
 // NewControllerServer 创建新的 gRPC 服务端
@@ -23,10 +25,12 @@ type ControllerServer struct {
 func NewControllerServer(
 	registerHandler func(interface{}) (string, string, error),
 	syncHandler func(string) (interface{}, string, interface{}, string, error),
+	store *controllerstorage.Storage,
 ) *ControllerServer {
 	return &ControllerServer{
 		registerHandler: registerHandler,
 		syncHandler:     syncHandler,
+		store:           store,
 	}
 }
 

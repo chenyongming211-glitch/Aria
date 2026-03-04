@@ -468,6 +468,7 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	grpcController := grpcserver.NewControllerServer(
 		controller.createRegisterAdapter(),
 		controller.createSyncAdapter(),
+		controller.store,
 	)
 	agentpb.RegisterControllerServiceServer(grpcSrv, grpcController)
 
