@@ -672,9 +672,21 @@ impl WireGuardManager {
         let device = wg.get_device(DeviceInterface::from_name(&self.interface_name))
             .context("Failed to get device info")?;
         
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        
         let peers = device.peers.into_iter().map(|p| {
             let last_hs = if p.last_handshake_time.as_secs() > 0 {
-                Some(p.last_handshake_time.as_secs())
+                // 计算距离上次握手的时间（秒）
+                let handshake_time = p.last_handshake_time.as_secs();
+                let elapsed = if now > handshake_time {
+                    now - handshake_time
+                } else {
+                    0
+                };
+                Some(elapsed)
             } else {
                 None
             };
@@ -712,9 +724,21 @@ impl WireGuardManager {
             ))
             .unwrap_or_default();
         
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        
         let peers = device.peers.into_iter().map(|p| {
             let last_hs = if p.last_handshake_time.as_secs() > 0 {
-                Some(p.last_handshake_time.as_secs())
+                // 计算距离上次握手的时间（秒）
+                let handshake_time = p.last_handshake_time.as_secs();
+                let elapsed = if now > handshake_time {
+                    now - handshake_time
+                } else {
+                    0
+                };
+                Some(elapsed)
             } else {
                 None
             };
