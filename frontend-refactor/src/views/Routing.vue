@@ -253,36 +253,36 @@ const confirmRouteAction = async () => {
       return
     }
 
-    // 添加新路由到现有路由列表
-    const newRoutes = [...node.routes, currentRoute.value.cidr]
-    
-    // 调用 API 更新路由
-    await useRouteApi.updateRoutes(node.id, newRoutes)
+    // 调用 API 添加路由
+    await useRouteApi.addRoute(node.id, currentRoute.value.cidr, node.routes)
     
     ElMessage.success('路由添加成功')
     await loadNodes() // 重新加载数据
     closeRouteDialog()
   } catch (error) {
     console.error('[Routing] 添加路由失败:', error)
-    ElMessage.error('添加路由失败: ' + error.message)
+    const errorMsg = error.response?.data?.message || error.message || '添加路由失败'
+    ElMessage.error(errorMsg)
   }
 }
 
 // 确认删除路由
 const confirmDeleteRoute = async () => {
   try {
-    // 从节点的路由列表中移除指定路由
-    const newRoutes = currentDeleteNode.value.routes.filter(r => r !== currentDeleteCidr.value)
-    
-    // 调用 API 更新路由
-    await useRouteApi.updateRoutes(currentDeleteNode.value.id, newRoutes)
+    // 调用 API 删除路由
+    await useRouteApi.deleteRoute(
+      currentDeleteNode.value.id,
+      currentDeleteCidr.value,
+      currentDeleteNode.value.routes
+    )
     
     ElMessage.success('路由删除成功')
     await loadNodes() // 重新加载数据
     deleteDialogVisible.value = false
   } catch (error) {
     console.error('[Routing] 删除路由失败:', error)
-    ElMessage.error('删除路由失败: ' + error.message)
+    const errorMsg = error.response?.data?.message || error.message || '删除路由失败'
+    ElMessage.error(errorMsg)
   }
 }
 

@@ -435,6 +435,85 @@ func (t *TenantManagementAPI) GetTenantNodes(w http.ResponseWriter, r *http.Requ
 	WriteSuccess(w, nodes, fmt.Sprintf("%d nodes retrieved", len(nodes)))
 }
 
+// UpdateNodeRoutes 更新节点的路由信息
+func (t *TenantManagementAPI) UpdateNodeRoutes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "Method not allowed", nil)
+		return
+	}
+
+	// 获取当前用户的租户 ID
+	userTenantID, exists := middleware.GetTenantID(r.Context())
+	if !exists {
+		WriteError(w, http.StatusUnauthorized, CodeTenantContextNotFound, "请先选择租户：当前未设置租户上下文", nil)
+		return
+	}
+
+	// 从路径中提取节点 ID
+	// 路径格式: /api/v1/tenant-management/nodes/{id}
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 6 {
+		WriteError(w, http.StatusBadRequest, CodeInvalidPath, "Invalid path: missing node ID", nil)
+		return
+	}
+	nodeIDStr := pathParts[5]
+
+	// 解析节点 ID
+	nodeID, err := uuid.Parse(nodeIDStr)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeInvalidRequest, "Invalid node ID format", nil)
+		return
+	}
+
+	// 解析请求体
+	var req struct {
+		AdvertisedRoutes string `json:"advertised_routes"`
+	}
+	if err := ParseRequestJSON(r, &req); err != nil {
+		WriteError(w, http.StatusBadRequest, CodeInvalidRequest, "Invalid request body", nil)
+		return
+	}
+
+	// 验证节点是否属于当前租户
+	var nodeTenantID uuid.UUID
+	err = t.store.DB().QueryRow(
+		"SELECT tenant_id FROM nodes WHERE id = $1",
+		nodeID,
+	).Scan(&nodeTenantID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			WriteError(w, http.StatusNotFound, CodeNodeNotFound, "Node not found", nil)
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, CodeGetNodesFailed, "Failed to verify node", nil)
+		return
+	}
+
+	// 检查租户权限
+	if nodeTenantID != userTenantID {
+		WriteError(w, http.StatusForbidden, CodeAccessDenied, "You don't have permission to update this node", nil)
+		return
+	}
+
+	// 更新节点的 advertised_routes
+	_, err = t.store.DB().Exec(
+		"UPDATE nodes SET advertised_routes = $1, updated_at = NOW() WHERE id = $2",
+		req.AdvertisedRoutes,
+		nodeID,
+	)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeUpdateNodeFailed, "Failed to update node routes", nil)
+		return
+	}
+
+	// 返回成功响应
+	response := map[string]interface{}{
+		"id":                nodeID.String(),
+		"advertised_routes": req.AdvertisedRoutes,
+	}
+	WriteSuccess(w, response, "Node routes updated successfully")
+}
+
 // ========================
 // ✅ 阶段1：新增的 ACL 生命周期 CRUD 接口
 // ========================
@@ -929,6 +1008,23 @@ func (t *TenantManagementAPI) HandleTenantManagement(w http.ResponseWriter, r *h
 			return
 
 		case "nodes":
+			// 检查是否有节点 ID（/api/v1/tenant-management/nodes/{id}）
+			if len(pathParts) >= 6 {
+				nodeID := pathParts[5]
+				// 重写路径以调用 UpdateNodeRoutes
+				originalPath := r.URL.Path
+				r.URL.Path = fmt.Sprintf("/api/v1/tenant-management/nodes/%s", nodeID)
+				switch r.Method {
+				case http.MethodPut:
+					t.UpdateNodeRoutes(w, r)
+				default:
+					WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "Method not allowed", nil)
+				}
+				r.URL.Path = originalPath
+				return
+			}
+
+			// 没有节点 ID，处理集合请求
 			switch r.Method {
 			case http.MethodGet:
 				t.GetTenantNodes(w, r)
