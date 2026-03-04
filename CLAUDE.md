@@ -473,13 +473,14 @@ rsync -avz --delete agent-rust/agent/src/ root@146.56.196.231:/root/agent-rust/a
 rsync -avz --delete agent-rust/agent/src/ root@118.195.135.16:/root/agent-rust/agent/src/
 ```
 
-**第二步：在每个节点上编译**
+**第二步：在每个节点上完全重新编译**
 ```bash
+# ⚠️ 重要：必须先清理，再编译，避免增量编译问题
 # sh 节点编译
-ssh root@146.56.196.231 "source ~/.cargo/env && cd /root/agent-rust && cargo build --release"
+ssh root@146.56.196.231 "source ~/.cargo/env && cd /root/agent-rust && cargo clean && cargo build --release"
 
 # bj 节点编译
-ssh root@118.195.135.16 "source ~/.cargo/env && cd /root/agent-rust && cargo build --release"
+ssh root@118.195.135.16 "source ~/.cargo/env && cd /root/agent-rust && cargo clean && cargo build --release"
 ```
 
 **第三步：原子替换并重启**
@@ -512,9 +513,37 @@ ssh root@118.195.135.16 "aria --version && aria status && aria peers"
 /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found
 ```
 
+#### 为什么必须 cargo clean？
+
+**重要原因：**
+- ✅ **避免增量编译问题**：Rust 增量编译可能导致某些代码更改未生效
+- ✅ **确保完全重新编译**：清理所有中间产物，保证编译结果正确
+- ✅ **避免奇怪的运行时错误**：增量编译有时会导致不可预测的行为
+
+**增量编译问题示例：**
+- 新增的代码逻辑未生效
+- 输出格式未更新
+- 运行时出现莫名其妙的错误
+
+**正确做法：**
+```bash
+# ❌ 错误：增量编译
+cargo build --release
+
+# ✅ 正确：完全重新编译
+cargo clean && cargo build --release
+```
+- ✅ **依赖库差异**：不同系统的系统库版本可能不同
+
+**错误示例：**
+```
+/lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found
+```
+
 #### 关键规则
 
 * **必须在每个节点编译**：禁止跨节点复制二进制文件
+* **必须先清理再编译**：使用 `cargo clean && cargo build --release`，避免增量编译问题
 * **原子替换**：使用 `mv -f` 原子替换，无需停止服务
 * **先替换后重启**：必须先替换二进制文件，再通过 systemctl 重启
 * **验证部署**：每次部署后必须验证版本和状态
@@ -538,10 +567,10 @@ rsync -avz --delete agent-rust/agent/src/ root@146.56.196.231:/root/agent-rust/a
 rsync -avz --delete agent-rust/agent/src/ root@118.195.135.16:/root/agent-rust/agent/src/
 
 echo "=== Step 2: Building on sh node ==="
-ssh root@146.56.196.231 "source ~/.cargo/env && cd /root/agent-rust && cargo build --release"
+ssh root@146.56.196.231 "source ~/.cargo/env && cd /root/agent-rust && cargo clean && cargo build --release"
 
 echo "=== Step 3: Building on bj node ==="
-ssh root@118.195.135.16 "source ~/.cargo/env && cd /root/agent-rust && cargo build --release"
+ssh root@118.195.135.16 "source ~/.cargo/env && cd /root/agent-rust && cargo clean && cargo build --release"
 
 echo "=== Step 4: Deploying to sh node ==="
 ssh root@146.56.196.231 "cp /root/agent-rust/target/release/aria-agent /usr/local/bin/aria.new && chmod +x /usr/local/bin/aria.new && mv -f /usr/local/bin/aria.new /usr/local/bin/aria && systemctl restart aria"
