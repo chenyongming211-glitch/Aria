@@ -170,3 +170,14 @@ pub struct AclRule {
     pub min_port: u32,
     pub max_port: u32,
 }
+
+/// QoS 规则
+#[derive(Debug, Clone)]
+pub struct QoSRule {
+    pub src_ip: String,
+    pub dst_ip: String,
+    pub src_port: u32,
+    pub dst_port: u32,
+    pub protocol: u32,
+    pub bandwidth_mbps: u64,
+}
