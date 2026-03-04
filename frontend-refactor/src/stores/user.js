@@ -12,13 +12,19 @@ export default defineStore('user', () => {
     try {
       // 调用真实的登录 API
       const response = await api.post(API_ENDPOINTS.AUTH.LOGIN, credentials)
+      
+      console.log('[Login] Response:', response.data)
 
-      if (response.data && response.data.token) {
+      // 后端返回格式: { success, data: { token, user }, message, code }
+      const token = response.data?.data?.token || response.data?.token
+      const userData = response.data?.data?.user || response.data?.user
+
+      if (token) {
         // 存储 token 到 sessionStorage
-        sessionStorage.setItem('aria_token', response.data.token)
+        sessionStorage.setItem('aria_token', token)
 
         // 设置用户数据
-        user.value = response.data.user || {
+        user.value = userData || {
           id: 'user-1',
           name: credentials.username,
           initials: credentials.username.substring(0, 2).toUpperCase(),
@@ -31,18 +37,18 @@ export default defineStore('user', () => {
         sessionStorage.setItem('aria_user', JSON.stringify(user.value))
 
         // 存储租户 ID 到 localStorage（用于 API 请求）
-        if (response.data.user?.tenant_id) {
+        if (userData?.tenant_id) {
           localStorage.setItem('aria-current-tenant', JSON.stringify({
-            id: response.data.user.tenant_id
+            id: userData.tenant_id
           }))
         }
 
-        return { success: true, token: response.data.token }
+        return { success: true, token }
       } else {
-        throw new Error('Invalid login response')
+        throw new Error('Invalid login response: no token found')
       }
     } catch (error) {
-      console.error('Login error:', error)
+      console.error('[Login] Error:', error)
       
       // 如果是认证错误，返回错误消息
       if (error.response?.status === 401) {
