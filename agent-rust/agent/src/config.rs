@@ -24,6 +24,8 @@ pub struct AgentConfig {
     pub hostname: Option<String>,
     #[serde(default = "default_sync_interval", with = "serde_duration")]
     pub sync_interval: Duration,
+    #[serde(default = "default_multi_tunnel")]
+    pub multi_tunnel: bool,
 }
 
 fn default_interface() -> String {
@@ -32,6 +34,10 @@ fn default_interface() -> String {
 
 fn default_sync_interval() -> Duration {
     Duration::from_secs(5)
+}
+
+fn default_multi_tunnel() -> bool {
+    true
 }
 
 mod serde_duration {
@@ -74,6 +80,7 @@ impl Default for AgentConfig {
             advertised_routes: None,
             hostname: None,
             sync_interval: Duration::from_secs(5),
+            multi_tunnel: true,
         }
     }
 }

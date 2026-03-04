@@ -235,19 +235,35 @@ impl RoutingManager {
         Ok(())
     }
 
-    pub fn add_ecmp_route(&self, destination: &str, interfaces: &[&str]) -> Result<()> {
+    pub fn add_ecmp_route(&self, destination: &str, interfaces: &[&str], table: Option<u32>) -> Result<()> {
         if interfaces.is_empty() {
             return Err(RouteError::AddRoute("No interfaces for ECMP route".to_string()).into());
         }
 
-        let mut args = vec!["route", "replace", destination, "proto", "static"];
+        let mut args: Vec<String> = vec![
+            "route".to_string(),
+            "replace".to_string(),
+            destination.to_string(),
+        ];
+        
+        // table 参数必须在 nexthop 之前
+        if let Some(tbl) = table {
+            args.push("table".to_string());
+            args.push(tbl.to_string());
+        }
         
         for iface in interfaces {
-            args.extend_from_slice(&["nexthop", "dev", iface, "weight", "1"]);
+            args.push("nexthop".to_string());
+            args.push("dev".to_string());
+            args.push(iface.to_string());
+            args.push("weight".to_string());
+            args.push("1".to_string());
         }
 
+        let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        
         let output = std::process::Command::new("ip")
-            .args(&args)
+            .args(&args_str)
             .output()
             .context("Failed to add ECMP route")?;
 
@@ -263,8 +279,8 @@ impl RoutingManager {
             return Err(RouteError::AddRoute(stderr).into());
         }
 
-        tracing::info!("Routing Manager: added ECMP route {} via {} interfaces", 
-            destination, interfaces.len());
+        tracing::info!("Routing Manager: added ECMP route {} via {} interfaces (table {:?})", 
+            destination, interfaces.len(), table);
         Ok(())
     }
 

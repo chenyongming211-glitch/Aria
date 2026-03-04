@@ -6,6 +6,7 @@ pub mod wireguard;
 pub mod routing;
 pub mod config;
 pub mod metrics;
+pub mod system_optimization;
 
 pub use acl::{AclManager, AclError, PolicyKey, PolicyValue, ACTION_DROP, ACTION_PASS};
 pub use qos::{QoSManager, QoSError, BucketState, ServiceQoSKey, PairQoSKey};
@@ -15,3 +16,4 @@ pub use wireguard::{WireGuardManager, WireGuardError};
 pub use routing::{RoutingManager, RouteError, RouteEntry};
 pub use config::{ConfigManager, AgentConfig};
 pub use metrics::{MetricsCounters, record_agent_uptime};
+pub use system_optimization::{SystemOptimizer, OptimizationResult};

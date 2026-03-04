@@ -32,6 +32,7 @@ mod unified_agent;
 mod grpc_client;
 mod wireguard;
 mod routing;
+mod system_optimization;
 
 const SOCKET_PATH: &str = "/run/aria-agent.sock";
 const BPF_FS_PATH: &str = "/sys/fs/bpf/aria";
@@ -264,6 +265,11 @@ struct Response {
 }
 
 fn main() -> Result<()> {
+    // 安装 rustls CryptoProvider (必须在任何 TLS 操作之前)
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls provider");
+    
     let cli = Cli::parse();
 
     match cli.command {
@@ -672,6 +678,7 @@ fn run_init(server: &str, token: &str, region: Option<&str>, interface: Option<&
         advertised_routes: advertise_routes.map(|s| s.split(',').map(|r| r.trim().to_string()).collect()),
         hostname: None,
         sync_interval: std::time::Duration::from_secs(5),
+        multi_tunnel: true,
     };
 
     let config_manager = config::ConfigManager::new("/etc/aria/agent.yaml");

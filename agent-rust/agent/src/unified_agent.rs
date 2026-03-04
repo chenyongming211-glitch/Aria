@@ -110,40 +110,82 @@ impl UnifiedAgent {
         Arc<Mutex<QoSManager>>,
         Arc<StdMutex<IdentityManager>>,
     )> {
-        if !std::path::Path::new(BPF_FS_PATH).exists() {
-            std::fs::create_dir_all(BPF_FS_PATH)
-                .context("Failed to create bpffs directory")?;
-        }
-        
+        tracing::info!("Step 1: Loading eBPF bytecodes...");
         let acl_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/acl"));
         let qos_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/qos"));
+        tracing::info!("Step 2: eBPF bytecodes loaded successfully");
         
+        tracing::info!("Step 3: Creating ACL EbpfLoader...");
         let mut acl_ebpf = EbpfLoader::new()
-            .map_pin_path(BPF_FS_PATH)
-            .load(acl_bytes)?;
+            .load(acl_bytes)
+            .context("Failed to load ACL eBPF bytecode")?;
+        tracing::info!("Step 4: ACL eBPF loaded into memory");
         
-        let program: &mut Xdp = acl_ebpf.program_mut("xdp_ingress_acl")
-            .context("XDP program not found")?
-            .try_into()?;
+        tracing::info!("Step 4.1: Getting mutable program reference...");
+        let program_ref = acl_ebpf.program_mut("xdp_ingress_acl")
+            .context("XDP program not found in eBPF object")?;
+        tracing::info!("Step 4.2: Program reference obtained");
+        
+        tracing::info!("Step 4.3: Converting to XDP type...");
+        let program: &mut Xdp = program_ref.try_into()
+            .context("Failed to convert program to XDP type")?;
+        tracing::info!("Step 5: XDP program converted successfully");
+        
+        tracing::info!("Step 7: Loading XDP program into kernel...");
         program.load()?;
+        tracing::info!("Step 8: XDP program loaded");
+        
+        tracing::info!("Step 9: Attaching XDP program to {}...", interface);
         program.attach(interface, XdpFlags::default())?;
+        tracing::info!("Step 10: XDP program attached");
         
+        // 确认 XDP 真的附加成功了
+        tracing::info!("Step 10.5: Verifying XDP attachment...");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        
+        tracing::info!("Step 11: Creating IdentityManager...");
         let identity_mgr = IdentityManager::new(&mut acl_ebpf)?;
+        tracing::info!("Step 12: IdentityManager created");
+        
         let identity_mgr = Arc::new(StdMutex::new(identity_mgr));
+        tracing::info!("Step 13: IdentityManager wrapped in Arc");
         
+        tracing::info!("Step 14: Creating AclManager...");
         let acl_mgr = AclManager::new(&mut acl_ebpf, identity_mgr.clone())?;
+        tracing::info!("Step 15: AclManager created");
+        
         let acl_mgr = Arc::new(Mutex::new(acl_mgr));
+        tracing::info!("Step 16: AclManager wrapped in Arc");
         
+        tracing::info!("Step 17: Creating QoS EbpfLoader...");
         let mut qos_ebpf = EbpfLoader::new()
-            .map_pin_path(BPF_FS_PATH)
             .load(qos_bytes)?;
+        tracing::info!("Step 18: QoS eBPF loaded into memory");
         
+        tracing::info!("Step 19: Getting TC program...");
         let program: &mut SchedClassifier = qos_ebpf.program_mut("tc_egress_qos")
             .context("TC program not found")?
             .try_into()?;
+        tracing::info!("Step 20: TC program obtained");
+        
+        tracing::info!("Step 21: Loading TC program into kernel...");
         program.load()?;
+        tracing::info!("Step 22: TC program loaded");
+        
+        tracing::info!("Step 23: Preparing clsact qdisc for {}...", interface);
+        // 先删除旧的 clsact qdisc（忽略错误）
+        let _ = std::process::Command::new("tc")
+            .args(&["qdisc", "del", "dev", interface, "clsact"])
+            .output();
+        tracing::info!("Step 23.5: Old clsact removed (if existed)");
+        
+        // 添加新的 clsact qdisc
         tc::qdisc_add_clsact(interface)?;
+        tracing::info!("Step 24: clsact qdisc added");
+        
+        tracing::info!("Step 25: Attaching TC program to {} egress...", interface);
         program.attach(interface, TcAttachType::Egress)?;
+        tracing::info!("Step 26: TC program attached");
         
         let qos_mgr = QoSManager::new(&mut qos_ebpf, identity_mgr.clone())?;
         let qos_mgr = Arc::new(Mutex::new(qos_mgr));
@@ -154,11 +196,69 @@ impl UnifiedAgent {
     pub async fn start(&mut self) -> Result<()> {
         tracing::info!("Starting UnifiedAgent...");
         
+        // Step 1: 创建 WireGuard 接口（aria0）
         self.ensure_interface().await?;
+        tracing::info!("✅ WireGuard interface created/verified");
         
+        // ========================================
+        // Step 2: 系统优化（P0 + P1）- 在接口创建后执行
+        // ========================================
+        tracing::info!("Step 2: Applying system optimizations...");
+        
+        // 优化主接口
+        let optimizer = crate::system_optimization::SystemOptimizer::new(
+            51820,                  // WireGuard 默认端口
+            "eth0".to_string(),     // 物理网卡
+            self.config.interface_name.clone(), // 隧道网卡（如 aria0）
+        );
+        
+        match optimizer.optimize(true) { // true = 优化隧道接口
+            Ok(result) => {
+                tracing::info!("✅ System optimizations applied for {}", self.config.interface_name);
+                if !result.warnings.is_empty() {
+                    tracing::warn!("⚠️  Some optimizations had warnings: {:?}", result.warnings);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("⚠️  System optimizations failed for {}: {}", self.config.interface_name, e);
+            }
+        }
+        
+        // 如果启用了多隧道，优化额外的接口
+        if self.config.multi_tunnel {
+            let base_name = self.config.interface_name.clone();
+            let base_name = base_name.trim_end_matches(|c: char| c.is_numeric());
+            
+            for i in 1..4 {
+                let interface_name = format!("{}{}", base_name, i);
+                let port = 51820 + i as u16;
+                
+                tracing::info!("Optimizing additional interface {}...", interface_name);
+                let optimizer_extra = crate::system_optimization::SystemOptimizer::new(
+                    port,
+                    "eth0".to_string(),
+                    interface_name.clone(),
+                );
+                
+                match optimizer_extra.optimize(true) {
+                    Ok(result) => {
+                        tracing::info!("✅ Optimized interface {}", interface_name);
+                        if !result.warnings.is_empty() {
+                            tracing::warn!("⚠️  Warnings for {}: {:?}", interface_name, result.warnings);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("⚠️  Failed to optimize {}: {}", interface_name, e);
+                    }
+                }
+            }
+        }
+        
+        // Step 3: 初始化路由
         self.routing_manager.init()
             .context("Failed to initialize routing manager")?;
         
+        // Step 4: 首次同步
         self.sync().await?;
         tracing::info!("✅ Initial sync completed");
         
@@ -170,27 +270,39 @@ impl UnifiedAgent {
     async fn ensure_interface(&self) -> Result<()> {
         let mut wg = self.wg_manager.lock().await;
         
-        match wg.list_peers() {
-            Ok(_) => {
-                tracing::info!("WireGuard interface {} already exists, adopting it", 
-                    self.config.interface_name);
-                Ok(())
-            }
-            Err(_) => {
-                tracing::info!("Creating WireGuard interface {}", self.config.interface_name);
+        // 使用 ensure_interface 确保主接口存在且配置正确
+        tracing::info!("Ensuring WireGuard interface {}", self.config.interface_name);
+        wg.ensure_interface(
+            self.config.private_key.clone(),
+            self.config.address.clone(),
+            self.config.listen_port,
+            self.config.mtu,
+        ).context("Failed to ensure main interface")?;
+        
+        // 如果启用了多隧道模式，创建额外的接口
+        if self.config.multi_tunnel {
+            let base_name = self.config.interface_name.clone();
+            let base_name = base_name.trim_end_matches(|c: char| c.is_numeric());
+            
+            for i in 1..4 {
+                let interface_name = format!("{}{}", base_name, i);
+                let port = self.config.listen_port + i as u16;
                 
-                let iface_config = InterfaceConfig {
-                    name: self.config.interface_name.clone(),
-                    private_key: self.config.private_key.clone(),
-                    listen_port: self.config.listen_port,
-                    mtu: self.config.mtu,
-                    address: self.config.address.clone(),
-                };
+                tracing::info!("Ensuring additional WireGuard interface {} on port {}", interface_name, port);
                 
-                wg.create_interface(iface_config)
-                    .context("Failed to create WireGuard interface")
+                let mut wg_extra = WireGuardManager::new(&interface_name);
+                wg_extra.ensure_interface(
+                    self.config.private_key.clone(),
+                    self.config.address.clone(),
+                    port,
+                    self.config.mtu,
+                ).context(format!("Failed to ensure interface {}", interface_name))?;
+                
+                tracing::info!("✅ Additional interface {} ready on port {}", interface_name, port);
             }
         }
+        
+        Ok(())
     }
     
     async fn run_main_loop(&mut self) -> Result<()> {
@@ -910,63 +1022,113 @@ impl UnifiedAgent {
     }
     
     async fn sync_peers(&mut self, new_peers: &[GrpcPeerInfo]) -> Result<()> {
-        let wg_manager = self.wg_manager.clone();
         let new_peers = new_peers.to_vec();
-        let interface_name = self.config.interface_name.clone();
+        let multi_tunnel = self.config.multi_tunnel;
         
         let result = tokio::task::spawn_blocking(move || -> Result<(usize, usize, usize, usize)> {
-            let mut wg = wg_manager.blocking_lock();
+            // 确定要配置的接口列表
+            let interfaces = if multi_tunnel {
+                vec!["aria0", "aria1", "aria2", "aria3"]
+            } else {
+                vec!["aria0"]
+            };
+            let interface_count = interfaces.len();
             
-            let current_peers = wg.list_peers()
-                .context("Failed to list current peers")?;
+            let mut total_added = 0;
+            let mut total_removed = 0;
+            let mut total_updated = 0;
             
-            // 计算 peer 差异
-            let (to_add, to_remove, to_update) = Self::diff_peers_static(&current_peers, &new_peers);
-            
-            // 删除 peer
-            for peer in &to_remove {
-                tracing::info!("Removing peer: {}...", &peer[..16.min(peer.len())]);
-                wg.remove_peer(&peer)
-                    .context("Failed to remove peer")?;
-                metrics::record_wireguard_peer_change("remove");
+            for iface in interfaces {
+                let iface_wg_manager = Arc::new(Mutex::new(WireGuardManager::new(iface)));
+                let mut wg = iface_wg_manager.blocking_lock();
+                
+                let current_peers = wg.list_peers()
+                    .context("Failed to list current peers")?;
+                
+                let (to_add, to_remove, to_update) = Self::diff_peers_static(&current_peers, &new_peers);
+                
+                // 删除 peer
+                for peer in &to_remove {
+                    if iface == "aria0" {
+                        tracing::info!("Removing peer {} from {}...", &peer[..16.min(peer.len())], iface);
+                    }
+                    wg.remove_peer(&peer)
+                        .context("Failed to remove peer")?;
+                    if iface == "aria0" {
+                        metrics::record_wireguard_peer_change("remove");
+                    }
+                }
+                total_removed += to_remove.len();
+                
+                // 添加 peer
+                for peer in &to_add {
+                    if iface == "aria0" {
+                        tracing::info!("Adding peer {} to {}...", &peer.public_key[..16.min(peer.public_key.len())], iface);
+                    }
+                    
+                    let mut allowed_ips = vec![format!("{}/32", peer.assigned_ip)];
+                    allowed_ips.extend(peer.advertised_routes.clone());
+                    
+                    // 根据 iface 编号调整 endpoint 端口
+                    let endpoint = if !peer.endpoint.is_empty() {
+                        let adjusted_endpoint = Self::adjust_endpoint_port(&peer.endpoint, iface);
+                        Some(adjusted_endpoint)
+                    } else {
+                        None
+                    };
+                    
+                    let peer_config = PeerConfig {
+                        public_key: peer.public_key.clone(),
+                        endpoint,
+                        allowed_ips,
+                        persistent_keepalive: 25,
+                    };
+                    
+                    wg.add_peer(peer_config)
+                        .context("Failed to add peer")?;
+                    if iface == "aria0" {
+                        metrics::record_wireguard_peer_change("add");
+                    }
+                }
+                total_added += to_add.len();
+                
+                // 更新 peer
+                for peer in &to_update {
+                    if iface == "aria0" {
+                        tracing::debug!("Updating peer {} on {}...", &peer.public_key[..16.min(peer.public_key.len())], iface);
+                    }
+                    
+                    wg.remove_peer(&peer.public_key)
+                        .context("Failed to remove peer for update")?;
+                    
+                    let mut allowed_ips = vec![format!("{}/32", peer.assigned_ip)];
+                    allowed_ips.extend(peer.advertised_routes.clone());
+                    
+                    // 根据 iface 编号调整 endpoint 端口
+                    let endpoint = if !peer.endpoint.is_empty() {
+                        let adjusted_endpoint = Self::adjust_endpoint_port(&peer.endpoint, iface);
+                        Some(adjusted_endpoint)
+                    } else {
+                        None
+                    };
+                    
+                    let peer_config = PeerConfig {
+                        public_key: peer.public_key.clone(),
+                        endpoint,
+                        allowed_ips,
+                        persistent_keepalive: 25,
+                    };
+                    
+                    wg.add_peer(peer_config)
+                        .context("Failed to add updated peer")?;
+                    if iface == "aria0" {
+                        metrics::record_wireguard_peer_change("update");
+                    }
+                }
+                total_updated += to_update.len();
             }
             
-            // 添加 peer
-            for peer in &to_add {
-                tracing::info!("Adding peer: {}...", &peer.public_key[..16.min(peer.public_key.len())]);
-                
-                let peer_config = PeerConfig {
-                    public_key: peer.public_key.clone(),
-                    endpoint: if peer.endpoint.is_empty() { None } else { Some(peer.endpoint.clone()) },
-                    allowed_ips: vec![format!("{}/32", peer.assigned_ip)],
-                    persistent_keepalive: 25,
-                };
-                
-                wg.add_peer(peer_config)
-                    .context("Failed to add peer")?;
-                metrics::record_wireguard_peer_change("add");
-            }
-            
-            // 更新 peer
-            for peer in &to_update {
-                tracing::debug!("Updating peer: {}...", &peer.public_key[..16.min(peer.public_key.len())]);
-                
-                wg.remove_peer(&peer.public_key)
-                    .context("Failed to remove peer for update")?;
-                
-                let peer_config = PeerConfig {
-                    public_key: peer.public_key.clone(),
-                    endpoint: if peer.endpoint.is_empty() { None } else { Some(peer.endpoint.clone()) },
-                    allowed_ips: vec![format!("{}/32", peer.assigned_ip)],
-                    persistent_keepalive: 25,
-                };
-                
-                wg.add_peer(peer_config)
-                    .context("Failed to add updated peer")?;
-                metrics::record_wireguard_peer_change("update");
-            }
-            
-            Ok((to_add.len(), to_remove.len(), to_update.len(), new_peers.len()))
+            Ok((total_added / interface_count, total_removed / interface_count, total_updated / interface_count, new_peers.len()))
         }).await?;
         
         match result {
@@ -986,6 +1148,26 @@ impl UnifiedAgent {
         }
         
         Ok(())
+    }
+    
+    fn adjust_endpoint_port(endpoint: &str, iface: &str) -> String {
+        // aria0:51820, aria1:51821, aria2:51822, aria3:51823
+        let port_offset = match iface {
+            "aria0" => 0,
+            "aria1" => 1,
+            "aria2" => 2,
+            "aria3" => 3,
+            _ => 0,
+        };
+        
+        if let Some(colon_pos) = endpoint.rfind(':') {
+            let host = &endpoint[..colon_pos];
+            let base_port = 51820u16;
+            let new_port = base_port + port_offset;
+            format!("{}:{}", host, new_port)
+        } else {
+            endpoint.to_string()
+        }
     }
     
     fn diff_peers_static(
@@ -1027,15 +1209,30 @@ impl UnifiedAgent {
     async fn sync_advertised_routes(&mut self, peers: &[GrpcPeerInfo]) -> Result<()> {
         use std::collections::HashSet as StdHashSet;
         
-        // 收集期望的所有路由（所有 peer 宣告的非 /32 路由）
+        // 收集期望的所有路由
+        // 1. peer 的 VPN IP 路由（/32）
+        // 2. peer 宣告的非 /32 路由
         let mut desired_routes = StdHashSet::new();
         for peer in peers {
+            // 添加 peer 的 VPN IP 路由
+            desired_routes.insert(format!("{}/32", peer.assigned_ip));
+            
+            // 添加 peer 宣告的非 /32 路由
             for route in &peer.advertised_routes {
                 if !route.ends_with("/32") {
                     desired_routes.insert(route.clone());
                 }
             }
         }
+        
+        // 确定要使用的接口列表（多隧道模式使用所有接口）
+        let interfaces: Vec<String> = if self.config.multi_tunnel {
+            vec!["aria0".to_string(), "aria1".to_string(), "aria2".to_string(), "aria3".to_string()]
+        } else {
+            vec![self.config.interface_name.clone()]
+        };
+        
+        let multi_tunnel = self.config.multi_tunnel;
         
         // 在单个阻塞任务中完成所有路由操作，保证原子性和性能
         let routing_manager = self.routing_manager.clone();
@@ -1051,24 +1248,38 @@ impl UnifiedAgent {
             let mut added_count = 0;
             let mut removed_count = 0;
             
-            // 添加缺失的路由
-            for route in to_add {
-                if let Err(e) = routing_manager.add_vpn_route(&route) {
-                    tracing::error!("Failed to add advertised route {}: {:?}", route, e);
-                } else {
-                    added_count += 1;
-                    tracing::info!("Added advertised route: {}", route);
-                }
-            }
-            
             // 删除多余的路由
-            for route in to_remove {
-                if let Err(e) = routing_manager.remove_vpn_route(&route) {
+            for route in &to_remove {
+                if let Err(e) = routing_manager.remove_vpn_route(route) {
                     tracing::error!("Failed to remove stale route {}: {:?}", route, e);
                 } else {
                     removed_count += 1;
                     tracing::info!("Removed stale route: {}", route);
                 }
+            }
+            
+            // 添加或更新所有期望的路由（使用 replace，会自动替换旧路由）
+            for route in &desired_routes {
+                if multi_tunnel {
+                    // 多隧道模式：使用 ECMP 路由（replace 会自动替换旧路由）
+                    let interfaces_str: Vec<&str> = interfaces.iter().map(|s| s.as_str()).collect();
+                    if let Err(e) = routing_manager.add_ecmp_route(route, &interfaces_str, Some(100)) {
+                        tracing::error!("Failed to add ECMP route {}: {:?}", route, e);
+                    } else {
+                        added_count += 1;
+                    }
+                } else {
+                    // 单隧道模式：使用普通路由
+                    if let Err(e) = routing_manager.add_vpn_route(route) {
+                        tracing::error!("Failed to add route {}: {:?}", route, e);
+                    } else {
+                        added_count += 1;
+                    }
+                }
+            }
+            
+            if multi_tunnel && added_count > 0 {
+                tracing::info!("Added/updated {} ECMP routes via {} interfaces", added_count, interfaces.len());
             }
             
             Ok((added_count, removed_count, desired_routes.len()))
@@ -1078,7 +1289,7 @@ impl UnifiedAgent {
             Ok((added_count, removed_count, total_count)) => {
                 if added_count > 0 || removed_count > 0 {
                     tracing::info!(
-                        "Route sync completed: {} routes added, {} routes removed, {} routes total",
+                        "Route sync completed: {} routes added/updated, {} routes removed, {} routes total",
                         added_count, removed_count, total_count
                     );
                 }
