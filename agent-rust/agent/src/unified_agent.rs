@@ -1019,8 +1019,10 @@ impl UnifiedAgent {
             .sync(self.config.public_key.clone())
             .await?;
         
-        tracing::debug!("Sync received: {} peers, {} ACL rules", 
-            sync_result.peers.len(), sync_result.acl_rules.len());
+        tracing::debug!("Sync received: {} peers, {} ACL rules, {} QoS rules", 
+            sync_result.peers.len(), 
+            sync_result.acl_rules.len(),
+            sync_result.qos_rules.len());
         
         self.sync_peers(&sync_result.peers).await?;
         self.sync_advertised_routes(&sync_result.peers).await?;
@@ -1029,6 +1031,10 @@ impl UnifiedAgent {
             if let Err(e) = self.sync_acl_rules(&sync_result.acl_rules).await {
                 tracing::error!("Failed to sync ACL rules: {:?}", e);
             }
+        }
+        
+        if let Err(e) = self.sync_qos_rules(&sync_result.qos_rules).await {
+            tracing::error!("Failed to sync QoS rules: {:?}", e);
         }
         
         *self.last_sync_peers.lock().unwrap() = sync_result.peers;
