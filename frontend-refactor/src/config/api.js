@@ -68,6 +68,13 @@ export const API_ENDPOINTS = {
     DELETE: (id) => `/v1/tenant-management/acl-rules/${id}`
   },
 
+  // Agent 代理 API
+  AGENT: {
+    COMMAND: (nodeId) => `/v1/agent/${nodeId}/command`,
+    STATUS: (nodeId) => `/v1/agent/${nodeId}/status`,
+    BATCH_COMMAND: '/v1/agents/command'
+  },
+
   // 节点管理 API
   NODES: {
     LIST: '/nodes',
