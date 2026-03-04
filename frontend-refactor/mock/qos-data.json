@@ -1,0 +1,102 @@
+{
+  "qos": {
+    "rules": [
+      {
+        "id": "svc-1",
+        "type": "service",
+        "name": "数据库连接限速",
+        "srcIp": "192.168.1.100",
+        "dstIp": "192.168.1.200",
+        "srcPort": 0,
+        "dstPort": 3306,
+        "protocol": "tcp",
+        "bandwidth": 50,
+        "priority": 1,
+        "status": "active",
+        "createdAt": "2026-02-10T10:00:00Z",
+        "updatedAt": "2026-02-10T10:00:00Z"
+      },
+      {
+        "id": "port-1",
+        "type": "port",
+        "name": "HTTP流量限制",
+        "targetPort": 80,
+        "targetIp": "",
+        "bandwidth": 100,
+        "priority": 50,
+        "status": "active",
+        "createdAt": "2026-02-11T14:30:00Z",
+        "updatedAt": "2026-02-11T14:30:00Z"
+      },
+      {
+        "id": "peer-1",
+        "type": "peer",
+        "name": "数据中心同步",
+        "srcIp": "10.0.1.10",
+        "dstIp": "10.0.2.10",
+        "bandwidth": 500,
+        "priority": 25,
+        "status": "active",
+        "createdAt": "2026-02-12T09:15:00Z",
+        "updatedAt": "2026-02-12T09:15:00Z"
+      },
+      {
+        "id": "ip-1",
+        "type": "ip",
+        "name": "用户带宽限制",
+        "targetIp": "192.168.1.100",
+        "bandwidth": 50,
+        "priority": 75,
+        "status": "active",
+        "createdAt": "2026-02-13T16:45:00Z",
+        "updatedAt": "2026-02-13T16:45:00Z"
+      },
+      {
+        "id": "svc-2",
+        "type": "service",
+        "name": "视频流媒体限制",
+        "srcIp": "10.0.0.0/8",
+        "dstIp": "0.0.0.0/0",
+        "srcPort": "any",
+        "dstPort": "any",
+        "protocol": "tcp",
+        "bandwidth": 50,
+        "priority": 10,
+        "status": "active",
+        "createdAt": "2026-02-14T11:20:00Z",
+        "updatedAt": "2026-02-14T11:20:00Z"
+      },
+      {
+        "id": "port-2",
+        "type": "port",
+        "name": "SSH端口限制",
+        "targetPort": 22,
+        "targetIp": "",
+        "bandwidth": 10,
+        "priority": 40,
+        "status": "inactive",
+        "createdAt": "2026-02-15T08:30:00Z",
+        "updatedAt": "2026-02-15T08:30:00Z"
+      }
+    ],
+    "stats": {
+      "totalRules": 6,
+      "serviceRules": 2,
+      "portRules": 2,
+      "peerRules": 1,
+      "ipRules": 1,
+      "totalBandwidth": 710,
+      "utilization": 64
+    }
+  },
+  "ebpf": {
+    "status": {
+      "isEnabled": true,
+      "programsLoaded": 4,
+      "mapsActive": 8,
+      "uptime": "2 days, 14:32:45",
+      "memoryUsage": "12.4 MB",
+      "cpuUsage": "2.3%"
+    }
+  }
+}
