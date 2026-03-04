@@ -65,11 +65,23 @@ export default defineStore('node', () => {
     }
   }
 
-  // 格式化时间戳
+  // 格式化时间戳（转换为北京时间 UTC+8）
   function formatTimestamp(timestamp) {
     if (!timestamp) return 'N/A'
     const date = new Date(timestamp * 1000)
-    return date.toISOString().slice(0, 19).replace('T', ' ')
+    
+    // 转换为北京时间（UTC+8）
+    const beijingTime = new Date(date.getTime() + 8 * 60 * 60 * 1000)
+    
+    // 格式化为 YYYY-MM-DD HH:mm:ss
+    const year = beijingTime.getUTCFullYear()
+    const month = String(beijingTime.getUTCMonth() + 1).padStart(2, '0')
+    const day = String(beijingTime.getUTCDate()).padStart(2, '0')
+    const hours = String(beijingTime.getUTCHours()).padStart(2, '0')
+    const minutes = String(beijingTime.getUTCMinutes()).padStart(2, '0')
+    const seconds = String(beijingTime.getUTCSeconds()).padStart(2, '0')
+    
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
   }
 
   // 格式化运行时间
