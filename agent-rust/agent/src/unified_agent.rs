@@ -52,7 +52,7 @@ pub struct UnifiedAgent {
     unix_socket_path: String,
     config_update_tx: broadcast::Sender<()>,
     
-    last_sync_peers: Vec<GrpcPeerInfo>,
+    last_sync_peers: Arc<StdMutex<Vec<GrpcPeerInfo>>>,
     
     cancel_token: CancellationToken,
     log_handle: Arc<StdMutex<Option<reload::Handle<EnvFilter, Registry>>>>,
@@ -87,6 +87,7 @@ impl UnifiedAgent {
         let (config_update_tx, _) = broadcast::channel(16);
         let cancel_token = CancellationToken::new();
         let current_log_level = Arc::new(StdMutex::new("info".to_string()));
+        let last_sync_peers = Arc::new(StdMutex::new(Vec::new()));
         
         Ok(Self {
             config,
@@ -98,7 +99,7 @@ impl UnifiedAgent {
             routing_manager,
             unix_socket_path: "/run/aria-agent.sock".to_string(),
             config_update_tx,
-            last_sync_peers: Vec::new(),
+            last_sync_peers,
             cancel_token,
             log_handle,
             current_log_level,
@@ -319,7 +320,7 @@ impl UnifiedAgent {
                         tracing::error!("Sync failed: {:?}", e);
                         metrics::record_sync_failure();
                     } else {
-                        metrics::record_sync_success(self.last_sync_peers.len());
+                        metrics::record_sync_success(self.last_sync_peers.lock().unwrap().len());
                     }
                 }
                 
@@ -360,6 +361,7 @@ impl UnifiedAgent {
         let cancel_token = self.cancel_token.clone();
         let log_handle = self.log_handle.clone();
         let current_log_level = self.current_log_level.clone();
+        let last_sync_peers = self.last_sync_peers.clone();
         
         if std::path::Path::new(&socket_path).exists() {
             let _ = std::fs::remove_file(&socket_path);
@@ -386,6 +388,7 @@ impl UnifiedAgent {
                                 let wg_manager = wg_manager.clone();
                                 let log_handle = log_handle.clone();
                                 let current_log_level = current_log_level.clone();
+                                let last_sync_peers = last_sync_peers.clone();
                                 
                                 tokio::spawn(async move {
                                     let (reader, mut writer) = stream.into_split();
@@ -401,6 +404,9 @@ impl UnifiedAgent {
                                             continue;
                                         }
                                         
+                                        // 获取 last_sync_peers 的快照
+                                        let peers_snapshot = last_sync_peers.lock().unwrap().clone();
+                                        
                                         let response = match serde_json::from_str::<UnixRequest>(&line) {
                                             Ok(req) => {
                                                 Self::handle_unix_command(
@@ -410,6 +416,7 @@ impl UnifiedAgent {
                                                     &wg_manager,
                                                     &log_handle,
                                                     &current_log_level,
+                                                    &peers_snapshot,
                                                 ).await
                                             }
                                             Err(e) => {
@@ -444,7 +451,6 @@ impl UnifiedAgent {
             tracing::info!("Unix socket server stopped");
         });
         
-        tracing::info!("Unix socket server started");
         Ok(())
     }
     
@@ -455,6 +461,7 @@ impl UnifiedAgent {
         wg_manager: &Arc<Mutex<WireGuardManager>>,
         log_handle: &Arc<StdMutex<Option<reload::Handle<EnvFilter, Registry>>>>,
         current_log_level: &Arc<StdMutex<String>>,
+        last_sync_peers: &[GrpcPeerInfo],
     ) -> String {
         let response = match req.cmd.as_str() {
             // ===== 状态查询 =====
@@ -465,16 +472,24 @@ impl UnifiedAgent {
             },
             "peers" | "get_peers" => {
                 let wg = wg_manager.lock().await;
+                let last_sync = last_sync_peers.to_vec();
                 match wg.list_peers() {
                     Ok(peers) => {
                         let peers_json: Vec<serde_json::Value> = peers
                             .into_iter()
                             .map(|p| {
+                                // 从 last_sync_peers 中查找 region
+                                let region = last_sync.iter()
+                                    .find(|sync_peer| sync_peer.public_key == p.public_key)
+                                    .map(|sync_peer| sync_peer.region.clone())
+                                    .unwrap_or_else(|| "unknown".to_string());
+                                
                                 serde_json::json!({
                                     "public_key": p.public_key,
                                     "endpoint": p.endpoint,
                                     "allowed_ips": p.allowed_ips,
                                     "last_handshake_secs": p.last_handshake,
+                                    "region": region,
                                 })
                             })
                             .collect();
@@ -1016,7 +1031,7 @@ impl UnifiedAgent {
             }
         }
         
-        self.last_sync_peers = sync_result.peers;
+        *self.last_sync_peers.lock().unwrap() = sync_result.peers;
         tracing::debug!("Sync completed");
         Ok(())
     }

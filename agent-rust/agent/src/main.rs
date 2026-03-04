@@ -742,7 +742,29 @@ fn send_peers_command() -> Result<()> {
     
     if resp.success {
         if let Some(data) = resp.data {
-            println!("{}", serde_json::to_string_pretty(&data)?);
+            let peers = data["peers"].as_array().ok_or_else(|| anyhow::anyhow!("Invalid peers data"))?;
+            let total = data["total"].as_u64().unwrap_or(0);
+            
+            println!("Total peers: {}", total);
+            println!("{:-<80}", "");
+            
+            for peer in peers {
+                let public_key = peer["public_key"].as_str().unwrap_or("unknown");
+                let endpoint = peer["endpoint"].as_str().unwrap_or("N/A");
+                let region = peer["region"].as_str().unwrap_or("unknown");
+                let allowed_ips = peer["allowed_ips"].as_array()
+                    .map(|ips| ips.iter().filter_map(|ip| ip.as_str()).collect::<Vec<_>>().join(", "))
+                    .unwrap_or_else(|| "N/A".to_string());
+                let last_handshake = peer["last_handshake_secs"].as_u64().unwrap_or(0);
+                
+                println!("Region:      {}", region);
+                println!("Public Key:  {}...{}", &public_key[..16.min(public_key.len())], 
+                    if public_key.len() > 16 { &public_key[public_key.len()-8..] } else { "" });
+                println!("Endpoint:    {}", endpoint);
+                println!("Allowed IPs: {}", allowed_ips);
+                println!("Handshake:   {} seconds ago", last_handshake);
+                println!("{:-<80}", "");
+            }
         }
     } else {
         eprintln!("Error: {}", resp.message.unwrap_or_else(|| "Unknown error".to_string()));
@@ -773,7 +795,33 @@ fn send_route_command() -> Result<()> {
     
     if resp.success {
         if let Some(data) = resp.data {
-            println!("{}", serde_json::to_string_pretty(&data)?);
+            let routes = data["routes"].as_array().ok_or_else(|| anyhow::anyhow!("Invalid routes data"))?;
+            let total = data["total"].as_u64().unwrap_or(0);
+            let table = data["table"].as_u64().unwrap_or(100);
+            
+            println!("VPN Routes (table {}):", table);
+            println!("Total: {} routes", total);
+            println!("{:-<80}", "");
+            
+            for route in routes {
+                let route_str = route.as_str().unwrap_or("unknown");
+                // 检查是否是 ECMP 路由（包含 nexthop）
+                if route_str.contains("nexthop") {
+                    // ECMP 路由格式化
+                    let lines: Vec<&str> = route_str.lines().collect();
+                    if !lines.is_empty() {
+                        println!("{}", lines[0].trim());
+                        for line in &lines[1..] {
+                            println!("  {}", line.trim());
+                        }
+                        println!("{:-<80}", "");
+                    }
+                } else {
+                    // 普通路由
+                    println!("{}", route_str);
+                    println!("{:-<40}", "");
+                }
+            }
         }
     } else {
         eprintln!("Error: {}", resp.message.unwrap_or_else(|| "Unknown error".to_string()));
