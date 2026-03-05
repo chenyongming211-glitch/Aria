@@ -1078,9 +1078,9 @@ impl UnifiedAgent {
                     mgr.limit_service(
                         &rule.src_ip,
                         &rule.dst_ip,
-                        rule.src_port,
-                        rule.dst_port,
-                        rule.protocol,
+                        rule.src_port as u16,
+                        rule.dst_port as u16,
+                        rule.protocol as u8,
                         rule.bandwidth_mbps,
                     ).map_err(|e| anyhow::anyhow!(e))
                 };
