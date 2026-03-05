@@ -1051,7 +1051,7 @@ impl UnifiedAgent {
         let new_rules = new_rules.to_vec();
         
         let result = tokio::task::spawn_blocking(move || -> Result<()> {
-            let mut mgr = qos_mgr.lock().unwrap();
+            let mut mgr = qos_mgr.blocking_lock();
             
             let mut success_count = 0;
             let mut fail_count = 0;
