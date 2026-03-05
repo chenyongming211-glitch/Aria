@@ -1044,20 +1044,14 @@ impl UnifiedAgent {
     
     /// 同步 QoS 规则
     async fn sync_qos_rules(&mut self, new_rules: &[GrpcQoSRule]) -> Result<()> {
-        use crate::qos::QoSManager;
-        
         tracing::info!("Syncing {} QoS rules", new_rules.len());
         
-        // 在阻塞任务中执行 QoS 操作（因为 QoS Manager 不是异步的）
+        // 克隆 Arc 以便在 spawn_blocking 中使用
+        let qos_mgr = self.qos_mgr.clone();
         let new_rules = new_rules.to_vec();
+        
         let result = tokio::task::spawn_blocking(move || -> Result<()> {
-            let mut qos_mgr = match QoSManager::new("eth0") {
-                Ok(mgr) => mgr,
-                Err(e) => {
-                    tracing::error!("Failed to create QoS manager: {:?}", e);
-                    return Err(e);
-                }
-            };
+            let mut mgr = qos_mgr.lock().unwrap();
             
             let mut success_count = 0;
             let mut fail_count = 0;
@@ -1075,20 +1069,20 @@ impl UnifiedAgent {
                     } else {
                         &rule.dst_ip
                     };
-                    qos_mgr.limit_ip(ip, rule.bandwidth_mbps)
+                    mgr.limit_ip(ip, rule.bandwidth_mbps).map_err(|e| anyhow::anyhow!(e))
                 } else if rule.src_port == 0 && rule.dst_port == 0 {
                     // Peer 级规则（只有 IP 对）
-                    qos_mgr.limit_peer_pair(&rule.src_ip, &rule.dst_ip, rule.bandwidth_mbps)
+                    mgr.limit_peer_pair(&rule.src_ip, &rule.dst_ip, rule.bandwidth_mbps).map_err(|e| anyhow::anyhow!(e))
                 } else {
                     // 服务级规则（五元组）
-                    qos_mgr.limit_service(
+                    mgr.limit_service(
                         &rule.src_ip,
                         &rule.dst_ip,
                         rule.src_port,
                         rule.dst_port,
                         rule.protocol,
                         rule.bandwidth_mbps,
-                    )
+                    ).map_err(|e| anyhow::anyhow!(e))
                 };
                 
                 match result {
