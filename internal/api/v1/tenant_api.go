@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/google/uuid"
 
 	"aria/internal/api/middleware"
@@ -129,8 +131,14 @@ func (t *TenantAPI) ListTenants(w http.ResponseWriter, r *http.Request) {
 	}
 
 	role, exists := middleware.GetUserRole(r.Context())
-	if !exists || role != "admin" {
-		WriteError(w, http.StatusForbidden, CodeAccessDenied, "Access denied: super admin only", nil)
+	if !exists {
+		WriteError(w, http.StatusForbidden, CodeAccessDenied, "Access denied", nil)
+		return
+	}
+
+	// super_admin 可以查看所有租户，admin 只能查看自己所在的租户
+	if role != "super_admin" && role != "admin" && role != "owner" {
+		WriteError(w, http.StatusForbidden, CodeAccessDenied, "Access denied: admin or super_admin only", nil)
 		return
 	}
 
@@ -253,8 +261,229 @@ func (t *TenantAPI) HandleTenants(w http.ResponseWriter, r *http.Request) {
 func SetupTenantAPIRoutes(mux *http.ServeMux, store *controllerstorage.Storage) {
 	api := NewTenantAPI(store)
 	withJWT := middleware.JWTAuthMiddleware
+	withTenantAdmin := middleware.RequireTenantAdmin
 
 	mux.HandleFunc("/api/v1/tenants", withJWT(api.HandleTenants))
-	mux.HandleFunc("/api/v1/tenants/", withJWT(api.HandleTenants))
+	mux.HandleFunc("/api/v1/tenants/", withJWT(withTenantAdmin(api.HandleTenantUsers)))
 	mux.HandleFunc("/api/v1/nodes", withJWT(api.GetTenantNodes))
+}
+
+// ==================== 用户管理 ====================
+
+type UserResponse struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Email    string `json:"email,omitempty"`
+	Role     string `json:"role"`
+}
+
+// checkTenantAccess 校验用户是否有权访问目标租户
+func (t *TenantAPI) checkTenantAccess(w http.ResponseWriter, r *http.Request, targetTenantID string) error {
+	userTenantID, exists := middleware.GetTenantID(r.Context())
+	if !exists {
+		WriteError(w, http.StatusUnauthorized, CodeUnauthorized, "Unauthorized", nil)
+		return fmt.Errorf("unauthorized")
+	}
+
+	if userTenantID.String() != targetTenantID {
+		WriteError(w, http.StatusForbidden, CodeAccessDenied, "Permission denied: cannot access other tenant", nil)
+		return fmt.Errorf("permission denied: cross-tenant access")
+	}
+
+	role, exists := middleware.GetUserRole(r.Context())
+	if !exists || (role != "admin" && role != "owner") {
+		WriteError(w, http.StatusForbidden, CodeAccessDenied, "Permission denied: admin role required", nil)
+		return fmt.Errorf("permission denied: insufficient role")
+	}
+
+	return nil
+}
+
+func (t *TenantAPI) HandleTenantUsers(w http.ResponseWriter, r *http.Request) {
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 5 {
+		WriteError(w, http.StatusBadRequest, CodeInvalidRequest, "Invalid path", nil)
+		return
+	}
+
+	tenantID := pathParts[4]
+	if tenantID == "" {
+		WriteError(w, http.StatusBadRequest, CodeTenantIDRequired, "Tenant ID is required", nil)
+		return
+	}
+
+	if err := t.checkTenantAccess(w, r, tenantID); err != nil {
+		return
+	}
+
+	if len(pathParts) >= 7 && pathParts[6] != "" {
+		userID := pathParts[6]
+		switch r.Method {
+		case http.MethodPut:
+			t.UpdateUser(w, r, tenantID, userID)
+		case http.MethodDelete:
+			t.DeleteUser(w, r, tenantID, userID)
+		default:
+			WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "Method not allowed", nil)
+		}
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		t.ListUsers(w, r, tenantID)
+	case http.MethodPost:
+		t.CreateUser(w, r, tenantID)
+	default:
+		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "Method not allowed", nil)
+	}
+}
+
+func (t *TenantAPI) ListUsers(w http.ResponseWriter, r *http.Request, tenantID string) {
+	tenantUUID, err := uuid.Parse(tenantID)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeInvalidTenantID, "Invalid tenant ID", nil)
+		return
+	}
+
+	query := `SELECT id, username, email, role FROM users WHERE tenant_id = $1 ORDER BY created_at DESC`
+	rows, err := t.store.DB().Query(query, tenantUUID)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeListUsersFailed, "Failed to list users", nil)
+		return
+	}
+	defer rows.Close()
+
+	var users []UserResponse
+	for rows.Next() {
+		var u UserResponse
+		var email sql.NullString
+		if err := rows.Scan(&u.ID, &u.Username, &email, &u.Role); err != nil {
+			continue
+		}
+		if email.Valid {
+			u.Email = email.String
+		}
+		users = append(users, u)
+	}
+
+	WriteSuccess(w, users, fmt.Sprintf("%d users retrieved", len(users)))
+}
+
+func (t *TenantAPI) CreateUser(w http.ResponseWriter, r *http.Request, tenantID string) {
+	var req CreateUserRequest
+	if err := ParseRequestJSON(r, &req); err != nil {
+		WriteError(w, http.StatusBadRequest, CodeInvalidRequest, "Invalid request body", nil)
+		return
+	}
+
+	if req.Username == "" || req.Password == "" {
+		WriteError(w, http.StatusBadRequest, CodeInvalidRequest, "Username and password are required", nil)
+		return
+	}
+
+	if req.Role == "" {
+		req.Role = "member"
+	}
+	if req.Role != "admin" && req.Role != "member" {
+		req.Role = "member"
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeCreateUserFailed, "Failed to hash password", nil)
+		return
+	}
+
+	userID := uuid.New()
+	tenantUUID, _ := uuid.Parse(tenantID)
+
+	query := `INSERT INTO users (id, username, password_hash, tenant_id, role, email, created_at) 
+			  VALUES ($1, $2, $3, $4, $5, $6, NOW())`
+	_, err = t.store.DB().Exec(query, userID, req.Username, string(hashedPassword), tenantUUID, req.Role, req.Email)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeCreateUserFailed, "Failed to create user: "+err.Error(), nil)
+		return
+	}
+
+	resp := UserResponse{
+		ID:       userID.String(),
+		Username: req.Username,
+		Email:    req.Email,
+		Role:     req.Role,
+	}
+
+	WriteSuccess(w, resp, "User created successfully")
+}
+
+func (t *TenantAPI) UpdateUser(w http.ResponseWriter, r *http.Request, tenantID, userID string) {
+	var req UpdateUserRequest
+	if err := ParseRequestJSON(r, &req); err != nil {
+		WriteError(w, http.StatusBadRequest, CodeInvalidRequest, "Invalid request body", nil)
+		return
+	}
+
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeInvalidUserID, "Invalid user ID", nil)
+		return
+	}
+
+	tenantUUID, _ := uuid.Parse(tenantID)
+
+	var existingPassword string
+	query := `SELECT password_hash FROM users WHERE id = $1 AND tenant_id = $2`
+	err = t.store.DB().QueryRow(query, userUUID, tenantUUID).Scan(&existingPassword)
+	if err != nil {
+		WriteError(w, http.StatusNotFound, CodeUserNotFound, "User not found", nil)
+		return
+	}
+
+	if req.Role != "" && req.Role != "admin" && req.Role != "member" {
+		req.Role = "member"
+	}
+
+	if req.Password != "" {
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, CodeUpdateUserFailed, "Failed to hash password", nil)
+			return
+		}
+		query = `UPDATE users SET password_hash = $1, role = COALESCE(NULLIF($2, ''), role), email = COALESCE(NULLIF($3, ''), email), updated_at = NOW() WHERE id = $4 AND tenant_id = $5`
+		_, err = t.store.DB().Exec(query, string(hashedPassword), req.Role, req.Email, userUUID, tenantUUID)
+	} else {
+		query = `UPDATE users SET role = COALESCE(NULLIF($1, ''), role), email = COALESCE(NULLIF($2, ''), email), updated_at = NOW() WHERE id = $3 AND tenant_id = $4`
+		_, err = t.store.DB().Exec(query, req.Role, req.Email, userUUID, tenantUUID)
+	}
+
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeUpdateUserFailed, "Failed to update user: "+err.Error(), nil)
+		return
+	}
+
+	WriteSuccess(w, map[string]string{"id": userID}, "User updated successfully")
+}
+
+func (t *TenantAPI) DeleteUser(w http.ResponseWriter, r *http.Request, tenantID, userID string) {
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeInvalidUserID, "Invalid user ID", nil)
+		return
+	}
+
+	tenantUUID, _ := uuid.Parse(tenantID)
+
+	result, err := t.store.DB().Exec(`DELETE FROM users WHERE id = $1 AND tenant_id = $2`, userUUID, tenantUUID)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeDeleteUserFailed, "Failed to delete user", nil)
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		WriteError(w, http.StatusNotFound, CodeUserNotFound, "User not found", nil)
+		return
+	}
+
+	WriteSuccess(w, nil, "User deleted successfully")
 }

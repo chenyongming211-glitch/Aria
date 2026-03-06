@@ -76,3 +76,13 @@ deployments/controller-web/ui-dist/
 ebpf_demo
 test_multitenant.html
 frontend_patches/
+
+# ===================
+# Ansible 部署配置
+# ===================
+deployments/ansible/inventory.yaml
+deployments/ansible/group_vars/vault.yml
+*.vault
+!.ansible/vault_pass.txt.example
+~/.aria_vault_pass.txt
+

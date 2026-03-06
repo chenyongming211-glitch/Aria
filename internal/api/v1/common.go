@@ -116,6 +116,14 @@ const (
 	CodeUpdateNodeFailed   = "UPDATE_NODE_FAILED"
 	CodeScanNodeFailed     = "SCAN_NODE_FAILED"
 
+	// 用户相关错误码
+	CodeListUsersFailed  = "LIST_USERS_FAILED"
+	CodeCreateUserFailed = "CREATE_USER_FAILED"
+	CodeUpdateUserFailed = "UPDATE_USER_FAILED"
+	CodeDeleteUserFailed = "DELETE_USER_FAILED"
+	CodeInvalidUserID    = "INVALID_USER_ID"
+	CodeUserNotFound     = "USER_NOT_FOUND"
+
 	// 带宽相关错误码
 	CodeInvalidBandwidth = "INVALID_BANDWIDTH"
 	CodeLimitApplyFailed = "LIMIT_APPLY_FAILED"

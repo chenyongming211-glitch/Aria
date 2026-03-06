@@ -1,0 +1,62 @@
+---
+# Controller 部署 Playbook
+
+- name: Deploy Aria Controller
+  hosts: controller
+  gather_facts: yes
+  become: yes
+
+  vars:
+    aria_grpc_tls_mode: server
+    version: "0.2.35-test"
+
+  tasks:
+    - name: Ensure remote directory exists
+      ansible.builtin.file:
+        path: /root/aria-controller/bin/images
+        state: directory
+        mode: '0755'
+
+    - name: Sync image to remote
+      ansible.posix.synchronize:
+        src: /Users/chen/Aria/bin/images/aria-controller-{{ version }}.tar
+        dest: /root/aria-controller/bin/images/aria-controller-latest.tar
+      delegate_to: localhost
+      become: no
+
+    - name: Load Docker image
+      ansible.builtin.shell: docker load -i /root/aria-controller/bin/images/aria-controller-latest.tar
+
+    - name: Remove old container
+      ansible.builtin.shell: docker rm -f aria_controller || true
+
+    - name: Start Controller container
+      ansible.builtin.shell: |
+        docker run -d \
+            --name aria_controller \
+            --network aria_shared_net \
+            -p 50051:50051 \
+            -v /root/aria-controller/config/controller.yaml:/etc/aria/controller.yaml:ro \
+            -v /var/log/aria:/var/log/aria \
+            -v /root/aria-controller/certs:/etc/aria/certs:ro \
+            -e POSTGRES_HOST=aria-postgres \
+            -e POSTGRES_PORT=5432 \
+            -e POSTGRES_USER=aria \
+            -e POSTGRES_PASSWORD=aria-local-password \
+            -e POSTGRES_DATABASE=aria \
+            -e REDIS_ADDR=aria-redis:6379 \
+            -e ARIA_GRPC_SERVER_CERT=/etc/aria/certs/grpc-server.crt \
+            -e ARIA_GRPC_SERVER_KEY=/etc/aria/certs/grpc-server.key \
+            -e ARIA_GRPC_TLS_MODE={{ aria_grpc_tls_mode }} \
+            -e ARIA_GRPC_CA_CERT=/etc/aria/certs/ca.crt \
+            -e DEEPSEEK_API_KEY="sk-44fc7def9839422390f8d2018967081f" \
+            -e DEEPSEEK_BASE_URL="https://api.deepseek.com" \
+            -e DEEPSEEK_MODEL="deepseek-chat" \
+            -e DEEPSEEK_SYSTEM_PROMPT='You are Aria'\''s intelligent operations assistant.' \
+            -e FEISHU_APP_ID="cli_a9f4b69ae5b8dbb3" \
+            -e FEISHU_APP_SECRET="TSbiUWpalWbbIZ7t6Je3IfUgcqtWOBvF" \
+            -e FEISHU_ENCRYPT_KEY="" \
+            -e FEISHU_VERIFY_TOKEN="X12NiE0nKEQltttec2p7ynlNHrBkjDvx" \
+            --restart unless-stopped \
+            aria-controller:latest \
+            controller serve --config=/etc/aria/controller.yaml

@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"aria/internal/auth"
+
+	"github.com/google/uuid"
 )
 
 // contextKey 用于上下文键的类型安全
@@ -20,6 +22,17 @@ const (
 	UserRoleKey contextKey = "user_role"
 	TenantIDKey contextKey = "tenant_id"
 )
+
+var mcpWhitelist = []string{"/v1/auth/force-change-password", "/v1/auth/login", "/v1/auth/refresh", "/v1/auth/logout"}
+
+func containsPath(paths []string, path string) bool {
+	for _, p := range paths {
+		if p == path {
+			return true
+		}
+	}
+	return false
+}
 
 // JWTAuthMiddleware 创建JWT认证中间件
 func JWTAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -52,12 +65,24 @@ func JWTAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
+		if claims.MustChangePassword && !containsPath(mcpWhitelist, r.URL.Path) {
+			WriteForbiddenError(w, "You must change your password before proceeding")
+			return
+		}
+
 		ctx := r.Context()
 		ctx = context.WithValue(ctx, UserIDKey, claims.UserID)
 		ctx = context.WithValue(ctx, UsernameKey, claims.Username)
 		ctx = context.WithValue(ctx, UserRoleKey, claims.Role)
 
-		if claims.TenantID != "" {
+		// 支持前端切换租户：优先使用 X-Tenant-ID 头
+		if tenantIDHeader := r.Header.Get("X-Tenant-ID"); tenantIDHeader != "" {
+			if _, err := uuid.Parse(tenantIDHeader); err == nil {
+				ctx = context.WithValue(ctx, TenantIDKey, tenantIDHeader)
+			} else if claims.TenantID != "" {
+				ctx = context.WithValue(ctx, TenantIDKey, claims.TenantID)
+			}
+		} else if claims.TenantID != "" {
 			ctx = context.WithValue(ctx, TenantIDKey, claims.TenantID)
 		}
 
@@ -137,4 +162,45 @@ func WriteForbiddenError(w http.ResponseWriter, message string) {
 		},
 	}
 	json.NewEncoder(w).Encode(response)
+}
+
+func RequireTenantAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		role, exists := GetUserRole(ctx)
+		if !exists {
+			WriteUnauthorizedError(w, "User not authenticated")
+			return
+		}
+
+		tenantIDVal := ctx.Value(TenantIDKey)
+		var tenantID string
+		if tenantIDVal != nil {
+			switch v := tenantIDVal.(type) {
+			case string:
+				tenantID = v
+			case uuid.UUID:
+				tenantID = v.String()
+			}
+		}
+
+		targetTenantID := r.PathValue("tenant_id")
+
+		if role == "super_admin" {
+			next(w, r)
+			return
+		}
+
+		if role == "member" || role == "viewer" {
+			WriteForbiddenError(w, "user management requires admin role")
+			return
+		}
+
+		if targetTenantID != "" && tenantID != "" && tenantID != targetTenantID {
+			WriteForbiddenError(w, "cross-tenant access prohibited")
+			return
+		}
+
+		next(w, r)
+	}
 }

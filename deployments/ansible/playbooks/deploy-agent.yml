@@ -1,0 +1,47 @@
+---
+# Agent 部署 Playbook
+
+- name: Deploy Aria Agent
+  hosts: agent
+  gather_facts: yes
+  become: yes
+
+  vars:
+    agent_source_dir: /Users/chen/Aria/agent-rust
+    agent_deploy_dir: /root/agent-rust
+    agent_binary_path: /usr/local/bin/aria
+
+  tasks:
+    - name: Install build dependencies
+      ansible.builtin.apt:
+        pkg:
+          - pkg-config
+          - libssl-dev
+        state: present
+      ignore_errors: yes
+
+    - name: Sync source code to remote
+      ansible.posix.synchronize:
+        src: "{{ agent_source_dir }}/"
+        dest: "{{ agent_deploy_dir }}/"
+      delegate_to: localhost
+      become: no
+
+    - name: Build Agent on remote server
+      ansible.builtin.shell: |
+        export PATH="/root/.cargo/bin:/usr/local/cargo/bin:$PATH" && \
+        cd {{ agent_deploy_dir }} && \
+        cargo clean && \
+        cargo build --release --bin aria-agent
+
+    - name: Deploy new binary atomically
+      ansible.builtin.shell: |
+        cp {{ agent_deploy_dir }}/target/release/aria-agent {{ agent_binary_path }}.new && \
+        chmod +x {{ agent_binary_path }}.new && \
+        mv -f {{ agent_binary_path }}.new {{ agent_binary_path }}
+
+    - name: Restart Agent service
+      ansible.builtin.systemd:
+        name: aria
+        state: restarted
+        daemon_reload: yes

@@ -266,9 +266,18 @@ struct Response {
 
 fn main() -> Result<()> {
     // 安装 rustls CryptoProvider (必须在任何 TLS 操作之前)
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .expect("Failed to install rustls provider");
+    #[cfg(feature = "ring")]
+    {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .expect("Failed to install rustls ring provider");
+    }
+    #[cfg(not(feature = "ring"))]
+    {
+        rustls::crypto::aws_lc_rs::default_provider()
+            .install_default()
+            .expect("Failed to install rustls aws_lc provider");
+    }
     
     let cli = Cli::parse();
 

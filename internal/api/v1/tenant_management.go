@@ -2,6 +2,7 @@ package v1
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -65,6 +66,12 @@ type CreateUserRequest struct {
 	Password string `json:"password"`
 	Role     string `json:"role"`
 	Email    string `json:"email"`
+}
+
+type UpdateUserRequest struct {
+	Password string `json:"password,omitempty"`
+	Email    string `json:"email,omitempty"`
+	Role     string `json:"role,omitempty"`
 }
 
 type CreateTokenRequest struct {
@@ -398,6 +405,40 @@ func (t *TenantManagementAPI) GetTenantNodes(w http.ResponseWriter, r *http.Requ
 			return
 		}
 
+		// 将 advertised_routes 转换为 PostgreSQL 数组文本格式的 base64 编码字符串
+		var advertisedRoutesEncoded string
+		if advertisedRoutes != nil {
+			// 将 interface{} 转换为 PostgreSQL 数组文本格式 {elem1,elem2,...}
+			var routeStrs []string
+			switch v := advertisedRoutes.(type) {
+			case []interface{}:
+				for _, r := range v {
+					if r != nil {
+						routeStrs = append(routeStrs, fmt.Sprintf("%v", r))
+					}
+				}
+			case []string:
+				routeStrs = v
+			case string:
+				routeStrs = []string{v}
+			case []uint8:
+				// PostgreSQL text[] 扫描为 []uint8，格式如 {1.1.1.0/24,2.2.2.0/24}
+				str := string(v)
+				// 解析 {elem1,elem2,...} 格式
+				if len(str) > 2 && str[0] == '{' && str[len(str)-1] == '}' {
+					inner := str[1 : len(str)-1]
+					if inner != "" {
+						routeStrs = strings.Split(inner, ",")
+					}
+				}
+			}
+
+			if len(routeStrs) > 0 {
+				routesStr := "{" + strings.Join(routeStrs, ",") + "}"
+				advertisedRoutesEncoded = base64.StdEncoding.EncodeToString([]byte(routesStr))
+			}
+		}
+
 		nodeMap := map[string]interface{}{
 			"id":                  node.ID.String(),
 			"public_key":          node.PublicKey,
@@ -419,7 +460,7 @@ func (t *TenantManagementAPI) GetTenantNodes(w http.ResponseWriter, r *http.Requ
 			"has_aesni":           node.HasAESNI,
 			"status":              node.Status,
 			"offline_since":       node.OfflineSince,
-			"advertised_routes":   advertisedRoutes,
+			"advertised_routes":   advertisedRoutesEncoded,
 			"enrolled_with_token": enrolledWithToken,
 			"created_at":          node.CreatedAt,
 			"updated_at":          node.UpdatedAt,
@@ -442,9 +483,14 @@ func (t *TenantManagementAPI) UpdateNodeRoutes(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// 获取当前用户的租户 ID
-	userTenantID, exists := middleware.GetTenantID(r.Context())
-	if !exists {
+	// 获取当前用户的租户 ID 和角色
+	userTenantID, tenantExists := middleware.GetTenantID(r.Context())
+	userRole, roleExists := middleware.GetUserRole(r.Context())
+
+	// super_admin 可以操作所有节点
+	isSuperAdmin := roleExists && userRole == "super_admin"
+
+	if !tenantExists && !isSuperAdmin {
 		WriteError(w, http.StatusUnauthorized, CodeTenantContextNotFound, "请先选择租户：当前未设置租户上下文", nil)
 		return
 	}
@@ -489,16 +535,23 @@ func (t *TenantManagementAPI) UpdateNodeRoutes(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// 检查租户权限
-	if nodeTenantID != userTenantID {
+	// 检查租户权限（super_admin 可以操作所有节点）
+	if !isSuperAdmin && nodeTenantID != userTenantID {
 		WriteError(w, http.StatusForbidden, CodeAccessDenied, "You don't have permission to update this node", nil)
 		return
 	}
 
-	// 更新节点的 advertised_routes
+	// 解码 base64 字符串
+	decodedRoutes, err := base64.StdEncoding.DecodeString(req.AdvertisedRoutes)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeInvalidRequest, "Invalid route format", nil)
+		return
+	}
+
+	// 更新节点的 advertised_routes（使用 PostgreSQL 类型转换）
 	_, err = t.store.DB().Exec(
-		"UPDATE nodes SET advertised_routes = $1, updated_at = NOW() WHERE id = $2",
-		req.AdvertisedRoutes,
+		"UPDATE nodes SET advertised_routes = $1::text[], updated_at = NOW() WHERE id = $2",
+		string(decodedRoutes),
 		nodeID,
 	)
 	if err != nil {
@@ -509,7 +562,7 @@ func (t *TenantManagementAPI) UpdateNodeRoutes(w http.ResponseWriter, r *http.Re
 	// 返回成功响应
 	response := map[string]interface{}{
 		"id":                nodeID.String(),
-		"advertised_routes": req.AdvertisedRoutes,
+		"advertised_routes": string(decodedRoutes),
 	}
 	WriteSuccess(w, response, "Node routes updated successfully")
 }
@@ -1131,6 +1184,7 @@ func SetupTenantManagementRoutes(mux *http.ServeMux, store *controllerstorage.St
 				}
 
 				userTenantID, exists := middleware.GetTenantID(r.Context())
+				log.Printf("[GetTenantNodes] userTenantID=%v, exists=%v", userTenantID, exists)
 				if !exists {
 					WriteError(w, http.StatusUnauthorized, CodeTenantContextNotFound, "请先选择租户：当前未设置租户上下文", nil)
 					return

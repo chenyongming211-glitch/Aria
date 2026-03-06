@@ -1,5 +1,5 @@
 use anyhow::Result;
-use tonic::transport::{Certificate, Channel, ClientTlsConfig, Identity, Endpoint};
+use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use std::fs;
 
 // 引入生成的 protobuf 代码
@@ -32,7 +32,7 @@ pub struct GrpcClient {
 }
 
 impl GrpcClient {
-    /// 创建新的 gRPC 客户端（带 mTLS）
+    /// 创建新的 gRPC 客户端（mTLS：双向认证）
     pub async fn new(
         controller_url: String,
         ca_cert_path: String,
@@ -44,14 +44,17 @@ impl GrpcClient {
         let client_cert = fs::read_to_string(&client_cert_path)?;
         let client_key = fs::read_to_string(&client_key_path)?;
         
-        // 创建 TLS 配置
-        let ca = Certificate::from_pem(ca_cert);
-        let identity = Identity::from_pem(client_cert, client_key);
-        
+        tracing::info!("Connecting to Controller at {} with TLS (domain: aria.yun)", controller_url);
+
+        // 创建 TLS 配置（mTLS：双向认证）
+        let ca = tonic::transport::Certificate::from_pem(ca_cert);
+        let identity = tonic::transport::Identity::from_pem(client_cert, client_key);
+
+        // 使用 aria.yun 作为域名（必须与服务器证书匹配）
         let tls_config = ClientTlsConfig::new()
             .ca_certificate(ca)
             .identity(identity)
-            .domain_name("aria-controller");
+            .domain_name("aria.yun");
         
         // 创建 Endpoint 并配置 TLS
         let endpoint = Endpoint::from_shared(controller_url)?

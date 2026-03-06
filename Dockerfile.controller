@@ -7,7 +7,7 @@
 FROM golang:1.25-alpine AS builder
 
 # Build argument for version
-ARG VERSION=0.2.26-test-7
+ARG VERSION
 
 WORKDIR /build
 

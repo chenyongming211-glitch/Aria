@@ -4,19 +4,19 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <h3>Network Monitoring</h3>
+          <h3>{{ labels.title }}</h3>
           <div class="header-actions">
             <el-date-picker
               v-model="dateRange"
               type="datetimerange"
-              range-separator="To"
-              start-placeholder="Start date"
-              end-placeholder="End date"
+              :range-separator="currentLang === 'zh' ? '至' : 'To'"
+              :start-placeholder="labels.startDate"
+              :end-placeholder="labels.endDate"
               style="width: 300px; margin-right: 10px;"
             />
             <el-button type="primary" @click="refreshData">
               <el-icon><Refresh /></el-icon>
-              Refresh
+              {{ labels.refresh }}
             </el-button>
           </div>
         </div>
@@ -27,8 +27,8 @@
           <el-card class="stat-card">
             <div class="stat-content">
               <div class="stat-value">{{ stats.totalConnections }}</div>
-              <div class="stat-label">Active Connections</div>
-              <div class="stat-change positive">+5.2% from last hour</div>
+              <div class="stat-label">{{ labels.activeConnections }}</div>
+              <div class="stat-change positive">+5.2% {{ labels.fromLastHour }}</div>
             </div>
           </el-card>
         </el-col>
@@ -36,8 +36,8 @@
           <el-card class="stat-card">
             <div class="stat-content">
               <div class="stat-value">{{ stats.avgLatency }} ms</div>
-              <div class="stat-label">Avg. Latency</div>
-              <div class="stat-change negative">+1.3% from last hour</div>
+              <div class="stat-label">{{ labels.avgLatency }}</div>
+              <div class="stat-change negative">+1.3% {{ labels.fromLastHour }}</div>
             </div>
           </el-card>
         </el-col>
@@ -45,8 +45,8 @@
           <el-card class="stat-card">
             <div class="stat-content">
               <div class="stat-value">{{ stats.packetLoss }}%</div>
-              <div class="stat-label">Packet Loss</div>
-              <div class="stat-change negative">+0.1% from last hour</div>
+              <div class="stat-label">{{ labels.packetLoss }}</div>
+              <div class="stat-change negative">+0.1% {{ labels.fromLastHour }}</div>
             </div>
           </el-card>
         </el-col>
@@ -54,73 +54,68 @@
           <el-card class="stat-card">
             <div class="stat-content">
               <div class="stat-value">{{ stats.throughput }} Gbps</div>
-              <div class="stat-label">Throughput</div>
-              <div class="stat-change positive">+3.7% from last hour</div>
+              <div class="stat-label">{{ labels.throughput }}</div>
+              <div class="stat-change positive">+3.7% {{ labels.fromLastHour }}</div>
             </div>
           </el-card>
         </el-col>
       </el-row>
 
       <el-tabs v-model="activeTab" class="monitoring-tabs">
-        <el-tab-pane label="Traffic Graph" name="traffic">
+        <el-tab-pane :label="labels.trafficGraph" name="traffic">
           <div ref="trafficChartRef" class="chart-container" />
         </el-tab-pane>
-        <el-tab-pane label="Node Health" name="health">
+        <el-tab-pane :label="labels.nodeHealth" name="health">
           <el-table
             :data="nodeHealth"
             stripe
             style="width: 100%"
             height="400"
           >
-            <el-table-column prop="hostname" label="Node" width="150" />
-            <el-table-column prop="cpu" label="CPU" width="100">
+            <el-table-column prop="hostname" :label="labels.node" width="150" />
+            <el-table-column prop="cpu" :label="labels.cpu" width="100">
               <template #default="{ row }">
                 <el-progress :percentage="row.cpu" :color="getProgressColor(row.cpu)" />
               </template>
             </el-table-column>
-            <el-table-column prop="memory" label="Memory" width="100">
+            <el-table-column prop="memory" :label="labels.memory" width="100">
               <template #default="{ row }">
                 <el-progress :percentage="row.memory" :color="getProgressColor(row.memory)" />
               </template>
             </el-table-column>
-            <el-table-column prop="disk" label="Disk" width="100">
+            <el-table-column prop="disk" :label="labels.disk" width="100">
               <template #default="{ row }">
                 <el-progress :percentage="row.disk" :color="getProgressColor(row.disk)" />
               </template>
             </el-table-column>
-            <el-table-column prop="latency" label="Latency (ms)" width="120" />
-            <el-table-column prop="connections" label="Connections" width="120" />
-            <el-table-column prop="status" label="Status" width="100">
+            <el-table-column prop="latency" :label="labels.latency" width="100">
               <template #default="{ row }">
-                <el-tag :type="getStatusType(row.status)">
-                  {{ row.status }}
-                </el-tag>
+                <span :class="getLatencyClass(row.latency)">{{ row.latency }} ms</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="connections" :label="labels.connections" width="100" />
+            <el-table-column prop="status" :label="labels.status" width="100">
+              <template #default="{ row }">
+                <el-tag :type="getStatusType(row.status)" size="small">{{ getStatusLabel(row.status) }}</el-tag>
               </template>
             </el-table-column>
           </el-table>
         </el-tab-pane>
-        <el-tab-pane label="Alerts" name="alerts">
+        <el-tab-pane :label="labels.alerts" name="alerts">
           <el-table
             :data="alerts"
             stripe
             style="width: 100%"
             height="400"
           >
-            <el-table-column prop="timestamp" label="Time" width="180" />
-            <el-table-column prop="severity" label="Severity" width="100">
+            <el-table-column prop="timestamp" :label="labels.timestamp" width="180" />
+            <el-table-column prop="severity" :label="labels.severity" width="100">
               <template #default="{ row }">
-                <el-tag :type="getAlertSeverityType(row.severity)">
-                  {{ row.severity }}
-                </el-tag>
+                <el-tag :type="getSeverityType(row.severity)" size="small">{{ row.severity }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="message" label="Message" />
-            <el-table-column prop="node" label="Node" width="120" />
-            <el-table-column label="Actions" width="150">
-              <template #default="{ row }">
-                <el-button size="small" @click="acknowledgeAlert(row)">Acknowledge</el-button>
-              </template>
-            </el-table-column>
+            <el-table-column prop="message" :label="labels.message" />
+            <el-table-column prop="node" :label="labels.node" width="150" />
           </el-table>
         </el-tab-pane>
       </el-tabs>
@@ -129,9 +124,41 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
+import { useAppStore } from '@/stores'
+
+const appStore = useAppStore()
+const currentLang = computed(() => appStore.lang)
+
+const labels = computed(() => ({
+  title: currentLang.value === 'zh' ? '网络监控' : 'Network Monitoring',
+  refresh: currentLang.value === 'zh' ? '刷新' : 'Refresh',
+  activeConnections: currentLang.value === 'zh' ? '活动连接数' : 'Active Connections',
+  avgLatency: currentLang.value === 'zh' ? '平均延迟' : 'Avg. Latency',
+  packetLoss: currentLang.value === 'zh' ? '丢包率' : 'Packet Loss',
+  throughput: currentLang.value === 'zh' ? '吞吐量' : 'Throughput',
+  trafficGraph: currentLang.value === 'zh' ? '流量图表' : 'Traffic Graph',
+  nodeHealth: currentLang.value === 'zh' ? '节点健康' : 'Node Health',
+  alerts: currentLang.value === 'zh' ? '告警' : 'Alerts',
+  node: currentLang.value === 'zh' ? '节点' : 'Node',
+  cpu: currentLang.value === 'zh' ? 'CPU' : 'CPU',
+  memory: currentLang.value === 'zh' ? '内存' : 'Memory',
+  disk: currentLang.value === 'zh' ? '磁盘' : 'Disk',
+  latency: currentLang.value === 'zh' ? '延迟' : 'Latency',
+  connections: currentLang.value === 'zh' ? '连接数' : 'Connections',
+  status: currentLang.value === 'zh' ? '状态' : 'Status',
+  healthy: currentLang.value === 'zh' ? '健康' : 'Healthy',
+  warning: currentLang.value === 'zh' ? '警告' : 'Warning',
+  critical: currentLang.value === 'zh' ? '严重' : 'Critical',
+  timestamp: currentLang.value === 'zh' ? '时间' : 'Timestamp',
+  severity: currentLang.value === 'zh' ? '级别' : 'Severity',
+  message: currentLang.value === 'zh' ? '消息' : 'Message',
+  fromLastHour: currentLang.value === 'zh' ? '较前一小时' : 'from last hour',
+  startDate: currentLang.value === 'zh' ? '开始日期' : 'Start date',
+  endDate: currentLang.value === 'zh' ? '结束日期' : 'End date',
+}))
 
 // Mock data
 const dateRange = ref([new Date(2024, 0, 15, 0, 0, 0), new Date()])
@@ -178,6 +205,15 @@ const getStatusType = (status) => {
     case 'critical': return 'danger'
     default: return 'info'
   }
+}
+
+const getStatusLabel = (status) => {
+  const map = {
+    healthy: labels.value.healthy,
+    warning: labels.value.warning,
+    critical: labels.value.critical
+  }
+  return map[status] || status
 }
 
 const getAlertSeverityType = (severity) => {

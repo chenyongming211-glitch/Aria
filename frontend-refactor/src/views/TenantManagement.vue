@@ -4,11 +4,11 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <h3>Tenant Management</h3>
+          <h3>租户管理</h3>
           <div class="header-actions">
             <el-input
               v-model="searchQuery"
-              placeholder="Search tenants..."
+              placeholder="搜索租户..."
               style="width: 200px; margin-right: 10px;"
               clearable
             >
@@ -18,11 +18,11 @@
             </el-input>
             <el-button type="primary" @click="refreshTenants">
               <el-icon><Refresh /></el-icon>
-              Refresh
+              刷新
             </el-button>
             <el-button type="primary" @click="createTenant">
               <el-icon><Plus /></el-icon>
-              Create Tenant
+              创建租户
             </el-button>
           </div>
         </div>
@@ -36,7 +36,7 @@
         row-key="id"
         :tree-props="{children: 'children', hasChildren: 'hasChildren'}"
       >
-        <el-table-column prop="name" label="Name" width="200">
+        <el-table-column prop="name" label="名称" width="200">
           <template #default="{ row }">
             <div class="tenant-name-cell">
               <el-icon v-if="row.icon" :class="row.icon" class="tenant-icon" />
@@ -44,39 +44,39 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="code" label="Code" width="150" />
-        <el-table-column prop="status" label="Status" width="120">
+        <el-table-column prop="code" label="编码" width="150" />
+        <el-table-column prop="status" label="状态" width="120">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">
-              {{ row.status }}
+              {{ getStatusText(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="nodeCount" label="Nodes" width="100" />
-        <el-table-column prop="tokenCount" label="Tokens" width="100" />
-        <el-table-column prop="createdAt" label="Created At" width="180" />
-        <el-table-column prop="description" label="Description" show-overflow-tooltip />
-        <el-table-column label="Actions" width="250">
+        <el-table-column prop="nodeCount" label="节点数" width="100" />
+        <el-table-column prop="tokenCount" label="Token数" width="100" />
+        <el-table-column prop="createdAt" label="创建时间" width="180" />
+        <el-table-column prop="description" label="描述" show-overflow-tooltip />
+        <el-table-column label="操作" width="280">
           <template #default="{ row }">
-            <el-button size="small" @click="viewTenantDetails(row)">View</el-button>
-            <el-button size="small" type="primary" @click="editTenant(row)">Edit</el-button>
-            <el-button size="small" type="info" @click="manageAccess(row)">Manage Access</el-button>
+            <el-button size="small" @click="viewTenantDetails(row)">查看</el-button>
+            <el-button size="small" type="primary" @click="editTenant(row)">编辑</el-button>
+            <el-button size="small" type="info" @click="manageAccess(row)">管理访问</el-button>
             <el-popconfirm
-              :title="`Are you sure to ${row.status === 'active' ? 'suspend' : 'activate'} tenant ${row.name}?`"
+              :title="`确定要${row.status === 'active' ? '暂停' : '激活'}租户 ${row.name} 吗?`"
               @confirm="toggleTenantStatus(row)"
             >
               <template #reference>
                 <el-button size="small" :type="row.status === 'active' ? 'warning' : 'success'">
-                  {{ row.status === 'active' ? 'Suspend' : 'Activate' }}
+                  {{ row.status === 'active' ? '暂停' : '激活' }}
                 </el-button>
               </template>
             </el-popconfirm>
             <el-popconfirm
-              title="Are you sure to delete this tenant? This action cannot be undone."
+              title="确定要删除此租户吗？此操作无法撤销。"
               @confirm="deleteTenant(row.id)"
             >
               <template #reference>
-                <el-button size="small" type="danger">Delete</el-button>
+                <el-button size="small" type="danger">删除</el-button>
               </template>
             </el-popconfirm>
           </template>
@@ -100,7 +100,7 @@
     <el-dialog
       v-model="detailDialogVisible"
       :title="dialogTitle"
-      width="60%"
+      width="50%"
       :before-close="closeDetailDialog"
     >
       <el-form
@@ -108,54 +108,28 @@
         :model="editingTenant"
         :rules="tenantRules"
         ref="tenantFormRef"
-        label-width="120px"
+        label-width="100px"
       >
-        <el-form-item label="Name" prop="name">
-          <el-input v-model="editingTenant.name" :disabled="isEditingExisting" />
+        <el-form-item label="名称" prop="name">
+          <el-input v-model="editingTenant.name" :disabled="isEditingExisting" placeholder="请输入租户名称" />
         </el-form-item>
-        <el-form-item label="Code" prop="code">
-          <el-input v-model="editingTenant.code" :disabled="isEditingExisting" />
+        <el-form-item label="编码" prop="code">
+          <el-input v-model="editingTenant.code" :disabled="isEditingExisting" placeholder="请输入租户编码" />
         </el-form-item>
-        <el-form-item label="Status" prop="status">
-          <el-select v-model="editingTenant.status" placeholder="Select status">
-            <el-option label="Active" value="active" />
-            <el-option label="Inactive" value="inactive" />
-            <el-option label="Suspended" value="suspended" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="Description" prop="description">
+        <el-form-item label="描述" prop="description">
           <el-input
             v-model="editingTenant.description"
             type="textarea"
-            :rows="4"
-            placeholder="Enter tenant description"
+            :rows="3"
+            placeholder="请输入租户描述"
           />
-        </el-form-item>
-        <el-form-item label="Resource Limits">
-          <el-row :gutter="10">
-            <el-col :span="8">
-              <el-form-item label="Max Nodes">
-                <el-input-number v-model="editingTenant.limits.maxNodes" :min="0" :max="10000" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="8">
-              <el-form-item label="Max Tokens">
-                <el-input-number v-model="editingTenant.limits.maxTokens" :min="0" :max="1000" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="8">
-              <el-form-item label="Max Bandwidth (Mbps)">
-                <el-input-number v-model="editingTenant.limits.maxBandwidth" :min="0" :max="10000" />
-              </el-form-item>
-            </el-col>
-          </el-row>
         </el-form-item>
       </el-form>
 
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="closeDetailDialog">Cancel</el-button>
-          <el-button type="primary" @click="saveTenant">Confirm</el-button>
+          <el-button @click="closeDetailDialog">取消</el-button>
+          <el-button type="primary" @click="saveTenant">确认</el-button>
         </span>
       </template>
     </el-dialog>
@@ -163,35 +137,34 @@
     <!-- Access Management Dialog -->
     <el-dialog
       v-model="accessDialogVisible"
-      title="Manage Tenant Access"
+      title="管理访问"
       width="70%"
     >
       <div v-if="selectedTenant">
         <el-tabs v-model="accessTab">
-          <el-tab-pane label="Users" name="users">
+          <el-tab-pane label="用户" name="users">
             <el-button type="primary" @click="addUserToTenant" style="margin-bottom: 15px;">
               <el-icon><Plus /></el-icon>
-              Add User
+              添加用户
             </el-button>
 
             <el-table :data="selectedTenant.users" style="width: 100%">
-              <el-table-column prop="name" label="User Name" width="150" />
-              <el-table-column prop="email" label="Email" width="200" />
-              <el-table-column prop="role" label="Role" width="120">
+              <el-table-column prop="username" label="用户名" width="150" />
+              <el-table-column prop="email" label="邮箱" width="200" />
+              <el-table-column prop="role" label="角色" width="120">
                 <template #default="{ row }">
-                  <el-tag :type="getRoleType(row.role)">{{ row.role }}</el-tag>
+                  <el-tag :type="getRoleType(row.role)">{{ row.role === 'admin' ? '管理员' : '成员' }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column prop="joinedAt" label="Joined At" width="180" />
-              <el-table-column label="Actions" width="150">
+              <el-table-column label="操作" width="150">
                 <template #default="{ row }">
-                  <el-button size="small" type="primary" @click="editUserRole(row)">Edit Role</el-button>
+                  <el-button size="small" type="primary" @click="editUserRole(row)">编辑</el-button>
                   <el-popconfirm
-                    title="Are you sure to remove this user from tenant?"
+                    title="确定要删除此用户吗？"
                     @confirm="removeUserFromTenant(row.id)"
                   >
                     <template #reference>
-                      <el-button size="small" type="danger">Remove</el-button>
+                      <el-button size="small" type="danger">删除</el-button>
                     </template>
                   </el-popconfirm>
                 </template>
@@ -226,75 +199,41 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, onMounted } from 'vue'
 import { Search, Refresh, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import api from '@/composables/useApi'
 
-// Mock data
-const tenants = ref([
-  {
-    id: 'tenant-1',
-    name: 'Acme Corporation',
-    code: 'acme',
-    status: 'active',
-    nodeCount: 12,
-    tokenCount: 5,
-    createdAt: '2024-01-15 10:30:25',
-    description: 'Main corporate tenant',
-    limits: { maxNodes: 50, maxTokens: 20, maxBandwidth: 1000 },
-    users: [
-      { id: 'user-1', name: 'John Doe', email: 'john@acme.com', role: 'admin', joinedAt: '2024-01-15' },
-      { id: 'user-2', name: 'Jane Smith', email: 'jane@acme.com', role: 'member', joinedAt: '2024-01-16' }
-    ],
-    permissions: ['view_nodes', 'manage_nodes', 'view_topology', 'manage_tokens', 'view_monitoring']
-  },
-  {
-    id: 'tenant-2',
-    name: 'Beta Startup',
-    code: 'beta',
-    status: 'active',
-    nodeCount: 5,
-    tokenCount: 2,
-    createdAt: '2024-02-20 14:22:10',
-    description: 'Development tenant',
-    limits: { maxNodes: 20, maxTokens: 10, maxBandwidth: 500 },
-    users: [
-      { id: 'user-3', name: 'Bob Johnson', email: 'bob@beta.com', role: 'admin', joinedAt: '2024-02-20' }
-    ],
-    permissions: ['view_nodes', 'view_topology', 'view_monitoring']
-  },
-  {
-    id: 'tenant-3',
-    name: 'Gamma LLC',
-    code: 'gamma',
-    status: 'suspended',
-    nodeCount: 8,
-    tokenCount: 3,
-    createdAt: '2024-03-10 09:15:42',
-    description: 'Partner tenant',
-    limits: { maxNodes: 30, maxTokens: 15, maxBandwidth: 800 },
-    users: [
-      { id: 'user-4', name: 'Alice Williams', email: 'alice@gamma.com', role: 'admin', joinedAt: '2024-03-10' },
-      { id: 'user-5', name: 'Charlie Brown', email: 'charlie@gamma.com', role: 'member', joinedAt: '2024-03-11' }
-    ],
-    permissions: ['view_nodes', 'view_monitoring']
-  },
-  {
-    id: 'tenant-4',
-    name: 'Delta Operations',
-    code: 'delta',
-    status: 'inactive',
-    nodeCount: 0,
-    tokenCount: 0,
-    createdAt: '2024-04-05 16:45:18',
-    description: 'Legacy tenant',
-    limits: { maxNodes: 10, maxTokens: 5, maxBandwidth: 200 },
-    users: [],
-    permissions: []
-  }
-])
-
+const tenants = ref([])
 const loading = ref(false)
+
+onMounted(() => {
+  loadTenants()
+})
+
+const loadTenants = async () => {
+  loading.value = true
+  try {
+    const response = await api.get('/v1/tenants')
+    const tenantList = response.data?.data || response.data || []
+    tenants.value = tenantList.map(t => ({
+      ...t,
+      status: 'active',
+      nodeCount: 0,
+      tokenCount: 0,
+      createdAt: t.created_at || new Date().toISOString(),
+      description: t.description || '',
+      users: [],
+      permissions: []
+    }))
+  } catch (error) {
+    console.error('Failed to load tenants:', error)
+    ElMessage.error('Failed to load tenants')
+  } finally {
+    loading.value = false
+  }
+}
+
 const searchQuery = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
@@ -319,7 +258,7 @@ const filteredTenants = computed(() => {
 })
 
 const dialogTitle = computed(() => {
-  return editingTenant.value?.id ? 'Edit Tenant' : 'Create New Tenant'
+  return editingTenant.value?.id ? '编辑租户' : '创建新租户'
 })
 
 const getStatusType = (status) => {
@@ -328,6 +267,15 @@ const getStatusType = (status) => {
     case 'suspended': return 'warning'
     case 'inactive': return 'info'
     default: return 'info'
+  }
+}
+
+const getStatusText = (status) => {
+  switch(status) {
+    case 'active': return '激活'
+    case 'suspended': return '已暂停'
+    case 'inactive': return '未激活'
+    default: return status
   }
 }
 
@@ -353,12 +301,7 @@ const tenantRules = reactive({
 })
 
 const refreshTenants = () => {
-  loading.value = true
-  // Simulate API call
-  setTimeout(() => {
-    loading.value = false
-    ElMessage.success('Tenants refreshed')
-  }, 1000)
+  loadTenants()
 }
 
 const createTenant = () => {
@@ -371,19 +314,19 @@ const createTenant = () => {
     users: [],
     permissions: []
   }
-  isEditingExisting = false
+  isEditingExisting.value = false
   detailDialogVisible.value = true
 }
 
 const viewTenantDetails = (tenant) => {
   editingTenant.value = { ...tenant }
-  isEditingExisting = true
+  isEditingExisting.value = true
   detailDialogVisible.value = true
 }
 
 const editTenant = (tenant) => {
   editingTenant.value = { ...tenant }
-  isEditingExisting = true
+  isEditingExisting.value = true
   detailDialogVisible.value = true
 }
 
@@ -395,9 +338,15 @@ const toggleTenantStatus = (tenant) => {
   ElMessage.success(`Tenant ${tenant.name} has been ${action}`)
 }
 
-const deleteTenant = (id) => {
-  tenants.value = tenants.value.filter(tenant => tenant.id !== id)
-  ElMessage.success('Tenant deleted')
+const deleteTenant = async (id) => {
+  try {
+    await api.delete(`/v1/tenants?id=${id}`)
+    tenants.value = tenants.value.filter(tenant => tenant.id !== id)
+    ElMessage.success('Tenant deleted')
+  } catch (error) {
+    console.error('Failed to delete tenant:', error)
+    ElMessage.error('Failed to delete tenant')
+  }
 }
 
 const saveTenant = async () => {
@@ -406,84 +355,120 @@ const saveTenant = async () => {
   try {
     await tenantFormRef.value.validate()
 
+    const tenantData = {
+      name: editingTenant.value.name,
+      code: editingTenant.value.code || '',
+      description: editingTenant.value.description || ''
+    }
+
     if (isEditingExisting.value) {
-      // Update existing tenant
+      await api.put(`/v1/tenants?id=${editingTenant.value.id}`, tenantData)
       const index = tenants.value.findIndex(t => t.id === editingTenant.value.id)
       if (index !== -1) {
-        tenants.value[index] = { ...editingTenant.value }
+        tenants.value[index] = { ...tenants.value[index], ...tenantData }
       }
       ElMessage.success('Tenant updated successfully')
     } else {
-      // Create new tenant
-      editingTenant.value.id = `tenant-${Date.now()}`
-      editingTenant.value.nodeCount = 0
-      editingTenant.value.tokenCount = 0
-      editingTenant.value.createdAt = new Date().toLocaleString()
-      tenants.value.push({ ...editingTenant.value })
+      const response = await api.post('/v1/tenants', tenantData)
+      const newTenant = {
+        ...response.data?.data || tenantData,
+        status: 'active',
+        nodeCount: 0,
+        tokenCount: 0,
+        createdAt: new Date().toISOString(),
+        users: [],
+        permissions: []
+      }
+      tenants.value.push(newTenant)
       ElMessage.success('Tenant created successfully')
     }
 
     detailDialogVisible.value = false
   } catch (error) {
-    ElMessage.error('Please fill in all required fields correctly')
+    console.error('Failed to save tenant:', error)
+    ElMessage.error('Failed to save tenant')
   }
 }
 
-const manageAccess = (tenant) => {
-  selectedTenant.value = { ...tenant }
+const manageAccess = async (tenant) => {
+  selectedTenant.value = { ...tenant, users: [] }
   accessDialogVisible.value = true
+  
+  try {
+    const response = await api.get(`/v1/tenants/${tenant.id}/users`)
+    selectedTenant.value.users = response.data?.data || response.data || []
+  } catch (error) {
+    console.error('Failed to load users:', error)
+    ElMessage.error('加载用户列表失败')
+  }
 }
 
 const addUserToTenant = () => {
-  ElMessageBox.prompt('Please enter user email', 'Add User', {
-    confirmButtonText: 'Add',
-    cancelButtonText: 'Cancel',
-    inputPattern: /\S+@\S+\.\S+/,
-    inputErrorMessage: 'Invalid email format'
-  }).then(({ value }) => {
-    // Add user to tenant's user list
-    const newUser = {
-      id: `user-${Date.now()}`,
-      name: value.split('@')[0],
-      email: value,
-      role: 'member',
-      joinedAt: new Date().toISOString().split('T')[0]
-    }
-    selectedTenant.value.users.push(newUser)
-    ElMessage.success(`User ${value} added to tenant`)
-  }).catch(() => {
-    // Cancelled
-  })
+  ElMessageBox.confirm('请输入用户信息', '添加用户', {
+    confirmButtonText: '添加',
+    cancelButtonText: '取消',
+    inputPattern: /\S+/,
+    inputErrorMessage: '请输入用户名'
+  }).then(async ({ value }) => {
+    const username = value
+    ElMessageBox.prompt('请输入密码', '设置密码', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputPattern: /.{6,}/,
+      inputErrorMessage: '密码至少6位'
+    }).then(async ({ value: password }) => {
+      try {
+        await api.post(`/v1/tenants/${selectedTenant.value.id}/users`, {
+          username,
+          password,
+          role: 'member',
+          email: ''
+        })
+        ElMessage.success('用户添加成功')
+        manageAccess(selectedTenant.value)
+      } catch (error) {
+        console.error('Failed to add user:', error)
+        ElMessage.error('添加用户失败')
+      }
+    }).catch(() => {})
+  }).catch(() => {})
 }
 
 const editUserRole = (user) => {
   ElMessageBox({
-    title: 'Change User Role',
-    message: `Select new role for ${user.name}`,
+    title: '修改用户角色',
+    message: `选择 ${user.username} 的新角色`,
     showCancelButton: true,
-    confirmButtonText: 'Update',
+    confirmButtonText: '更新',
     inputType: 'select',
     inputOptions: [
-      { value: 'viewer', label: 'Viewer' },
-      { value: 'member', label: 'Member' },
-      { value: 'admin', label: 'Administrator' }
+      { value: 'member', label: '成员(Member)' },
+      { value: 'admin', label: '管理员(Admin)' }
     ],
-    inputValue: user.role,
-    inputValidator: (value) => {
-      if (!value) return 'Please select a role'
-      return true
+    inputValue: user.role
+  }).then(async ({ value }) => {
+    try {
+      await api.put(`/v1/tenants/${selectedTenant.value.id}/users/${user.id}`, {
+        role: value
+      })
+      ElMessage.success('角色更新成功')
+      manageAccess(selectedTenant.value)
+    } catch (error) {
+      console.error('Failed to update user:', error)
+      ElMessage.error('更新用户失败')
     }
-  }).then(({ value }) => {
-    user.role = value
-    ElMessage.success(`Role updated for ${user.name}`)
-  }).catch(() => {
-    // Cancelled
-  })
+  }).catch(() => {})
 }
 
-const removeUserFromTenant = (userId) => {
-  selectedTenant.value.users = selectedTenant.value.users.filter(u => u.id !== userId)
-  ElMessage.success('User removed from tenant')
+const removeUserFromTenant = async (userId) => {
+  try {
+    await api.delete(`/v1/tenants/${selectedTenant.value.id}/users/${userId}`)
+    ElMessage.success('用户删除成功')
+    manageAccess(selectedTenant.value)
+  } catch (error) {
+    console.error('Failed to delete user:', error)
+    ElMessage.error('删除用户失败')
+  }
 }
 
 const saveAccessChanges = () => {

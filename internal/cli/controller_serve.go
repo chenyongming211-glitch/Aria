@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
+	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"gopkg.in/yaml.v3"
@@ -258,6 +260,10 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	defer store.Close()
 	logger.Info("Storage initialized successfully")
 
+	if err := ensureSuperAdmin(store.DB(), logger); err != nil {
+		return fmt.Errorf("failed to ensure super admin: %w", err)
+	}
+
 	// Create token store
 	tokenStore := token.NewStore(store.DB())
 	if err := tokenStore.Migrate(); err != nil {
@@ -330,6 +336,7 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	http.HandleFunc("/v1/monitor/stats", HandleMonitorStats)
 	http.HandleFunc("/v1/monitor/node/", HandleNodeDetail)
 	http.HandleFunc("/version", handleVersion)
+	http.HandleFunc("/api/v1/version", handleVersion)
 
 	// Bandwidth Management API handlers - now with tenant awareness
 	v1.SetupBandwidthManagementRoutes(http.DefaultServeMux, store)
@@ -416,14 +423,14 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to listen on gRPC port %d: %w", grpcPort, err)
 	}
 
-	// Load TLS configuration for mTLS
+	// Load TLS configuration for gRPC
 	var grpcServerOpts []grpc.ServerOption
 
-	// Check if mTLS is enabled (default: enabled for production)
-	mtlsEnabled := getEnvOrDefault("ARIA_GRPC_MTLS_ENABLED", "true")
+	// TLS mode: disabled (plaintext), server (one-way TLS), mutual (mTLS)
+	tlsMode := getEnvOrDefault("ARIA_GRPC_TLS_MODE", "server")
 
-	if mtlsEnabled == "true" {
-		logger.Info("gRPC mTLS enabled, loading certificates...")
+	if tlsMode == "mutual" {
+		logger.Info("gRPC mTLS (mutual TLS) enabled, loading certificates...")
 
 		// Load server certificate
 		serverCertPath := getEnvOrDefault("ARIA_GRPC_SERVER_CERT", "/etc/aria/certs/server.crt")
@@ -446,12 +453,12 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to parse CA certificate")
 		}
 
-		// Create TLS config with mTLS
+		// Create TLS config with mTLS (mutual TLS)
 		tlsConfig := &tls.Config{
-			Certificates: []tls.Certificate{serverCert},
-			ClientAuth:   tls.RequireAndVerifyClientCert,
-			ClientCAs:    caCertPool,
-			MinVersion:   tls.VersionTLS12,
+			Certificates:       []tls.Certificate{serverCert},
+			ClientAuth:         tls.RequestClientCert,
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: false,
 		}
 
 		// Create gRPC credentials
@@ -459,8 +466,32 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 		grpcServerOpts = append(grpcServerOpts, grpc.Creds(creds))
 
 		logger.Info("gRPC mTLS configured with server cert: %s, CA: %s", serverCertPath, caCertPath)
+	} else if tlsMode == "server" {
+		logger.Info("gRPC one-way TLS enabled, loading server certificate...")
+
+		// Load server certificate only (one-way TLS)
+		serverCertPath := getEnvOrDefault("ARIA_GRPC_SERVER_CERT", "/etc/aria/certs/grpc-server.crt")
+		serverKeyPath := getEnvOrDefault("ARIA_GRPC_SERVER_KEY", "/etc/aria/certs/grpc-server.key")
+
+		serverCert, err := tls.LoadX509KeyPair(serverCertPath, serverKeyPath)
+		if err != nil {
+			return fmt.Errorf("failed to load server certificate: %w", err)
+		}
+
+		// Create TLS config without client certificate verification
+		tlsConfig := &tls.Config{
+			Certificates: []tls.Certificate{serverCert},
+			ClientAuth:   tls.NoClientCert,
+			MinVersion:   tls.VersionTLS12,
+		}
+
+		// Create gRPC credentials
+		creds := credentials.NewTLS(tlsConfig)
+		grpcServerOpts = append(grpcServerOpts, grpc.Creds(creds))
+
+		logger.Info("gRPC one-way TLS configured with server cert: %s", serverCertPath)
 	} else {
-		logger.Warn("⚠️  gRPC mTLS disabled - using plaintext (not recommended for production)")
+		logger.Warn("⚠️  gRPC TLS disabled - using plaintext (not recommended for production)")
 	}
 
 	// Create gRPC server with TLS
@@ -474,7 +505,7 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 
 	// Start gRPC server in goroutine
 	go func() {
-		logger.Info("gRPC server listening on :%d (mTLS: %s)", grpcPort, mtlsEnabled)
+		logger.Info("gRPC server listening on :%d (TLS: %s)", grpcPort, tlsMode)
 		if err := grpcSrv.Serve(grpcListener); err != nil {
 			logger.Error("gRPC server error: %v", err)
 		}
@@ -1998,4 +2029,42 @@ func ipInRoutes(ipStr string, routes []string) (bool, string) {
 		}
 	}
 	return false, ""
+}
+
+func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'super_admin'").Scan(&count)
+	if err != nil {
+		logger.Warn("Failed to check super admin: %v", err)
+		return nil
+	}
+
+	if count > 0 {
+		logger.Info("Super admin already exists")
+		return nil
+	}
+
+	username := os.Getenv("ARIA_SUPER_ADMIN")
+	password := os.Getenv("ARIA_SUPER_ADMIN_PASSWORD")
+
+	if username == "" {
+		username = "admin"
+	}
+	if password == "" {
+		password = "admin123"
+	}
+
+	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	_, err = db.Exec(`INSERT INTO users (username, password_hash, role, tenant_id, must_change_password) VALUES ($1, $2, 'super_admin', NULL, TRUE)`,
+		username, string(hashedPwd))
+	if err != nil {
+		return fmt.Errorf("failed to create super admin: %w", err)
+	}
+
+	logger.Info("Default super admin created: %s (password must be changed on first login)", username)
+	return nil
 }

@@ -1,0 +1,46 @@
+# Aria Controller Docker Compose
+# 使用: docker compose up -d
+
+version: '3.8'
+
+services:
+  aria-controller:
+    image: aria-controller:latest
+    container_name: aria_controller
+    restart: unless-stopped
+    user: "root"
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./config/controller.yaml:/etc/aria/controller.yaml:ro
+      - ./certs:/etc/aria/certs:ro
+    environment:
+      - POSTGRES_HOST=${POSTGRES_HOST:-aria-postgres}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_USER=${POSTGRES_USER:-aria}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-aria-local-password}
+      - POSTGRES_DATABASE=${POSTGRES_DATABASE:-aria}
+      - REDIS_ADDR=${REDIS_ADDR:-aria-redis:6379}
+      - ARIA_GRPC_TLS_MODE=${ARIA_GRPC_TLS_MODE:-disabled}
+      - ARIA_GRPC_SERVER_CERT=${ARIA_GRPC_SERVER_CERT:-/etc/aria/certs/grpc-server.crt}
+      - ARIA_GRPC_SERVER_KEY=${ARIA_GRPC_SERVER_KEY:-/etc/aria/certs/grpc-server.key}
+      - ARIA_GRPC_CA_CERT=${ARIA_GRPC_CA_CERT:-/etc/aria/certs/ca.crt}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
+      - FEISHU_APP_ID=${FEISHU_APP_ID}
+      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET}
+      - FEISHU_ENCRYPT_KEY=${FEISHU_ENCRYPT_KEY:-}
+      - FEISHU_VERIFY_TOKEN=${FEISHU_VERIFY_TOKEN}
+    networks:
+      - aria_shared_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/nodes"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  aria_shared_net:
+    name: aria_shared_net
+    external: true

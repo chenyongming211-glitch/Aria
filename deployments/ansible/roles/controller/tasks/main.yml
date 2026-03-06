@@ -1,0 +1,8 @@
+---
+# Controller Role - Main Tasks
+# 此文件作为参考，实际逻辑在 playbooks/deploy-controller.yml 中
+# 保留此文件是为了未来可以将任务拆分成更细的模块
+
+- name: Include deployment variables
+  ansible.builtin.import_tasks: tasks/include_vars.yml
+  tags: always

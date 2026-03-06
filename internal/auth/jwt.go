@@ -18,23 +18,30 @@ var JWTSecret = []byte("aria-jwt-secret-key-32-bytes-long!")
 
 // Claims 定义JWT声明
 type Claims struct {
-	UserID   string `json:"uid"`
-	Username string `json:"unm"`
-	Role     string `json:"rol"`
-	TenantID string `json:"tid,omitempty"`
+	UserID             string `json:"uid"`
+	Username           string `json:"unm"`
+	Role               string `json:"rol"`
+	TenantID           string `json:"tid,omitempty"`
+	MustChangePassword bool   `json:"mcp,omitempty"`
 	jwt.RegisteredClaims
 }
 
 // GenerateToken 生成JWT令牌
-func GenerateToken(userID, username, role, tenantID string) (string, error) {
+func GenerateToken(userID, username, role, tenantID string, mustChangePassword ...bool) (string, error) {
 	// 设置令牌过期时间（2小时）
 	expirationTime := time.Now().Add(2 * time.Hour)
 
+	mcp := false
+	if len(mustChangePassword) > 0 {
+		mcp = mustChangePassword[0]
+	}
+
 	claims := &Claims{
-		UserID:   userID,
-		Username: username,
-		Role:     role,
-		TenantID: tenantID,
+		UserID:             userID,
+		Username:           username,
+		Role:               role,
+		TenantID:           tenantID,
+		MustChangePassword: mcp,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

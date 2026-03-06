@@ -9,134 +9,140 @@
       </template>
 
       <el-tabs v-model="activeTab" class="settings-tabs">
-        <el-tab-pane label="General" name="general">
+        <el-tab-pane :label="labels.general" name="general">
           <el-form :model="generalForm" label-width="120px" style="max-width: 600px;">
-            <el-form-item label="System Name">
+            <el-form-item :label="labels.systemName">
               <el-input v-model="generalForm.systemName" />
             </el-form-item>
-            <el-form-item label="Default Region">
-              <el-select v-model="generalForm.defaultRegion" placeholder="Select region">
+            <el-form-item :label="labels.language">
+              <el-radio-group v-model="generalForm.language" @change="handleLanguageChange">
+                <el-radio label="zh">简体中文</el-radio>
+                <el-radio label="en">English</el-radio>
+              </el-radio-group>
+            </el-form-item>
+            <el-form-item :label="labels.defaultRegion">
+              <el-select v-model="generalForm.defaultRegion" :placeholder="currentLang === 'zh' ? '选择区域' : 'Select region'">
                 <el-option label="Shanghai (sh)" value="sh" />
                 <el-option label="Beijing (bj)" value="bj" />
                 <el-option label="Guangzhou (gz)" value="gz" />
                 <el-option label="Hong Kong (hk)" value="hk" />
               </el-select>
             </el-form-item>
-            <el-form-item label="Timezone">
-              <el-select v-model="generalForm.timezone" placeholder="Select timezone">
-                <el-option label="UTC+8 (China Standard Time)" value="CST" />
+            <el-form-item :label="labels.timezone">
+              <el-select v-model="generalForm.timezone" :placeholder="currentLang === 'zh' ? '选择时区' : 'Select timezone'">
+                <el-option label="UTC+8 (中国标准时间)" value="CST" />
                 <el-option label="UTC+0 (GMT)" value="GMT" />
                 <el-option label="UTC-5 (EST)" value="EST" />
               </el-select>
             </el-form-item>
-            <el-form-item label="Theme">
+            <el-form-item :label="labels.theme">
               <el-radio-group v-model="generalForm.theme">
-                <el-radio label="light">Light</el-radio>
-                <el-radio label="dark">Dark</el-radio>
-                <el-radio label="auto">Auto</el-radio>
+                <el-radio label="light">{{ labels.light }}</el-radio>
+                <el-radio label="dark">{{ labels.dark }}</el-radio>
+                <el-radio label="auto">{{ labels.auto }}</el-radio>
               </el-radio-group>
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="saveGeneralSettings">Save</el-button>
-              <el-button @click="resetGeneralSettings">Reset</el-button>
+              <el-button type="primary" @click="saveGeneralSettings">{{ labels.save }}</el-button>
+              <el-button @click="resetGeneralSettings">{{ labels.reset }}</el-button>
             </el-form-item>
           </el-form>
         </el-tab-pane>
 
-        <el-tab-pane label="Network" name="network">
+        <el-tab-pane :label="labels.network" name="network">
           <el-form :model="networkForm" label-width="150px" style="max-width: 600px;">
-            <el-form-item label="Listen Port">
+            <el-form-item :label="labels.listenPort">
               <el-input-number v-model="networkForm.listenPort" :min="1" :max="65535" />
             </el-form-item>
-            <el-form-item label="MTU Size">
+            <el-form-item :label="labels.mtuSize">
               <el-input-number v-model="networkForm.mtu" :min="576" :max="9000" />
             </el-form-item>
-            <el-form-item label="Encryption">
+            <el-form-item :label="labels.encryption">
               <el-switch v-model="networkForm.encryption" />
             </el-form-item>
-            <el-form-item label="Compression">
+            <el-form-item :label="labels.compression">
               <el-switch v-model="networkForm.compression" />
             </el-form-item>
-            <el-form-item label="Enable NAT Traversal">
+            <el-form-item :label="labels.enableNatTraversal">
               <el-switch v-model="networkForm.enableNatTraversal" />
             </el-form-item>
-            <el-form-item label="STUN Server">
+            <el-form-item :label="labels.stunServer">
               <el-input v-model="networkForm.stunServer" placeholder="stun:stun.example.com:19302" />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="saveNetworkSettings">Save</el-button>
-              <el-button @click="resetNetworkSettings">Reset</el-button>
+              <el-button type="primary" @click="saveNetworkSettings">{{ labels.save }}</el-button>
+              <el-button @click="resetNetworkSettings">{{ labels.reset }}</el-button>
             </el-form-item>
           </el-form>
         </el-tab-pane>
 
-        <el-tab-pane label="Security" name="security">
+        <el-tab-pane :label="labels.security" name="security">
           <el-form :model="securityForm" label-width="150px" style="max-width: 600px;">
-            <el-form-item label="Enable Firewall">
+            <el-form-item :label="labels.enableFirewall">
               <el-switch v-model="securityForm.enableFirewall" />
             </el-form-item>
-            <el-form-item label="Enable DDOS Protection">
+            <el-form-item :label="labels.enableDdosProtection">
               <el-switch v-model="securityForm.enableDdosProtection" />
             </el-form-item>
-            <el-form-item label="Connection Limit">
+            <el-form-item :label="labels.connectionLimit">
               <el-slider v-model="securityForm.connectionLimit" :min="1" :max="10000" show-input />
             </el-form-item>
-            <el-form-item label="Rate Limit (requests/min)">
+            <el-form-item :label="labels.rateLimit">
               <el-slider v-model="securityForm.rateLimit" :min="10" :max="10000" show-input />
             </el-form-item>
-            <el-form-item label="Block Suspicious IPs">
+            <el-form-item :label="labels.blockSuspiciousIps">
               <el-switch v-model="securityForm.blockSuspiciousIps" />
             </el-form-item>
-            <el-form-item label="Two-factor Auth">
+            <el-form-item :label="labels.twoFactorAuth">
               <el-switch v-model="securityForm.twoFactorAuth" />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="saveSecuritySettings">Save</el-button>
-              <el-button @click="resetSecuritySettings">Reset</el-button>
+              <el-button type="primary" @click="saveSecuritySettings">{{ labels.save }}</el-button>
+              <el-button @click="resetSecuritySettings">{{ labels.reset }}</el-button>
             </el-form-item>
           </el-form>
         </el-tab-pane>
 
-        <el-tab-pane label="Notifications" name="notifications">
+        <el-tab-pane :label="labels.notifications" name="notifications">
           <el-form :model="notificationForm" label-width="150px" style="max-width: 600px;">
-            <el-form-item label="Email Notifications">
+            <el-form-item :label="currentLang === 'zh' ? '邮件通知' : 'Email Notifications'">
               <el-switch v-model="notificationForm.emailEnabled" />
             </el-form-item>
-            <el-form-item label="Email Address">
+            <el-form-item :label="labels.emailAddress">
               <el-input v-model="notificationForm.emailAddress" :disabled="!notificationForm.emailEnabled" />
             </el-form-item>
-            <el-form-item label="Webhook Notifications">
+            <el-form-item :label="currentLang === 'zh' ? 'Webhook 通知' : 'Webhook Notifications'">
               <el-switch v-model="notificationForm.webhookEnabled" />
             </el-form-item>
-            <el-form-item label="Webhook URL">
+            <el-form-item :label="labels.webhookUrl">
               <el-input v-model="notificationForm.webhookUrl" :disabled="!notificationForm.webhookEnabled" />
             </el-form-item>
-            <el-form-item label="Notification Types">
+            <el-form-item :label="labels.alertTypes">
               <el-checkbox-group v-model="notificationForm.notificationTypes">
-                <el-checkbox label="alerts">Alerts</el-checkbox>
-                <el-checkbox label="warnings">Warnings</el-checkbox>
-                <el-checkbox label="maintenance">Maintenance Events</el-checkbox>
-                <el-checkbox label="security">Security Events</el-checkbox>
+                <el-checkbox :label="labels.nodeOffline">{{ currentLang === 'zh' ? '节点离线' : 'Node Offline' }}</el-checkbox>
+                <el-checkbox :label="labels.highLatency">{{ currentLang === 'zh' ? '高延迟' : 'High Latency' }}</el-checkbox>
+                <el-checkbox :label="labels.packetLoss">{{ currentLang === 'zh' ? '丢包' : 'Packet Loss' }}</el-checkbox>
+                <el-checkbox :label="currentLang === 'zh' ? '安全事件' : 'Security Events'">Security Events</el-checkbox>
               </el-checkbox-group>
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="saveNotificationSettings">Save</el-button>
-              <el-button @click="resetNotificationSettings">Reset</el-button>
-              <el-button @click="testNotifications" style="float: right;">Test Notifications</el-button>
+              <el-button type="primary" @click="saveNotificationSettings">{{ labels.save }}</el-button>
+              <el-button @click="resetNotificationSettings">{{ labels.reset }}</el-button>
+              <el-button @click="testNotifications" style="float: right;">{{ currentLang === 'zh' ? '测试通知' : 'Test Notifications' }}</el-button>
             </el-form-item>
           </el-form>
         </el-tab-pane>
 
-        <el-tab-pane label="Backup & Restore" name="backup">
+        <el-tab-pane :label="labels.backup" name="backup">
           <el-card class="backup-card">
             <template #header>
               <div class="card-header">
-                <span>Configuration Backup</span>
+                <span>{{ currentLang === 'zh' ? '配置备份' : 'Configuration Backup' }}</span>
               </div>
             </template>
-            <p>Create a backup of your system configuration:</p>
+            <p>{{ currentLang === 'zh' ? '创建系统配置备份：' : 'Create a backup of your system configuration:' }}</p>
             <el-button type="primary" @click="createBackup" icon="Document">
-              Create Backup
+              {{ labels.backupNow }}
             </el-button>
           </el-card>
 
@@ -197,15 +203,74 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { useAppStore } from '@/stores'
+
+const appStore = useAppStore()
+
+const currentLang = computed(() => appStore.lang)
+
+const labels = computed(() => ({
+  general: currentLang.value === 'zh' ? '通用设置' : 'General',
+  network: currentLang.value === 'zh' ? '网络' : 'Network',
+  security: currentLang.value === 'zh' ? '安全' : 'Security',
+  notifications: currentLang.value === 'zh' ? '通知' : 'Notifications',
+  backup: currentLang.value === 'zh' ? '备份与恢复' : 'Backup & Recovery',
+  systemName: currentLang.value === 'zh' ? '系统名称' : 'System Name',
+  defaultRegion: currentLang.value === 'zh' ? '默认区域' : 'Default Region',
+  timezone: currentLang.value === 'zh' ? '时区' : 'Timezone',
+  theme: currentLang.value === 'zh' ? '主题' : 'Theme',
+  language: currentLang.value === 'zh' ? '语言' : 'Language',
+  light: currentLang.value === 'zh' ? '浅色' : 'Light',
+  dark: currentLang.value === 'zh' ? '深色' : 'Dark',
+  auto: currentLang.value === 'zh' ? '自动' : 'Auto',
+  save: currentLang.value === 'zh' ? '保存' : 'Save',
+  reset: currentLang.value === 'zh' ? '重置' : 'Reset',
+  listenPort: currentLang.value === 'zh' ? '监听端口' : 'Listen Port',
+  mtuSize: currentLang.value === 'zh' ? 'MTU 大小' : 'MTU Size',
+  encryption: currentLang.value === 'zh' ? '加密' : 'Encryption',
+  compression: currentLang.value === 'zh' ? '压缩' : 'Compression',
+  enableNatTraversal: currentLang.value === 'zh' ? '启用 NAT 穿透' : 'Enable NAT Traversal',
+  stunServer: currentLang.value === 'zh' ? 'STUN 服务器' : 'STUN Server',
+  enableFirewall: currentLang.value === 'zh' ? '启用防火墙' : 'Enable Firewall',
+  enableDdosProtection: currentLang.value === 'zh' ? '启用 DDoS 防护' : 'Enable DDOS Protection',
+  connectionLimit: currentLang.value === 'zh' ? '连接数限制' : 'Connection Limit',
+  rateLimit: currentLang.value === 'zh' ? '速率限制 (请求/分)' : 'Rate Limit (requests/min)',
+  blockSuspiciousIps: currentLang.value === 'zh' ? '阻止可疑 IP' : 'Block Suspicious IPs',
+  twoFactorAuth: currentLang.value === 'zh' ? '双因素认证' : 'Two-factor Auth',
+  emailEnabled: currentLang.value === 'zh' ? '启用邮件通知' : 'Enable Email',
+  emailAddress: currentLang.value === 'zh' ? '邮箱地址' : 'Email Address',
+  webhookEnabled: currentLang.value === 'zh' ? '启用 Webhook' : 'Enable Webhook',
+  webhookUrl: currentLang.value === 'zh' ? 'Webhook URL' : 'Webhook URL',
+  slackEnabled: currentLang.value === 'zh' ? '启用 Slack' : 'Enable Slack',
+  slackWebhook: currentLang.value === 'zh' ? 'Slack Webhook' : 'Slack Webhook',
+  alertTypes: currentLang.value === 'zh' ? '告警类型' : 'Alert Types',
+  nodeOffline: currentLang.value === 'zh' ? '节点离线' : 'Node Offline',
+  highLatency: currentLang.value === 'zh' ? '高延迟' : 'High Latency',
+  packetLoss: currentLang.value === 'zh' ? '丢包' : 'Packet Loss',
+  backupNow: currentLang.value === 'zh' ? '立即备份' : 'Backup Now',
+  restore: currentLang.value === 'zh' ? '恢复' : 'Restore',
+  delete: currentLang.value === 'zh' ? '删除' : 'Delete',
+  download: currentLang.value === 'zh' ? '下载' : 'Download',
+  filename: currentLang.value === 'zh' ? '文件名' : 'Filename',
+  size: currentLang.value === 'zh' ? '大小' : 'Size',
+  createdAt: currentLang.value === 'zh' ? '创建时间' : 'Created At',
+  actions: currentLang.value === 'zh' ? '操作' : 'Actions',
+}))
+
+const handleLanguageChange = (lang) => {
+  appStore.setLang(lang)
+  ElMessage.success(currentLang.value === 'zh' ? '语言已切换' : 'Language changed')
+}
 
 const activeTab = ref('general')
 
 // Form models
 const generalForm = ref({
   systemName: 'Aria Controller',
+  language: localStorage.getItem('aria-lang') || 'zh',
   defaultRegion: 'sh',
   timezone: 'CST',
   theme: 'light'

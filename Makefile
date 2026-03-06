@@ -311,7 +311,7 @@ release-deploy: release
 # 构建 Controller Docker 镜像
 docker-build-controller:
 	@echo "Building Controller Docker image..."
-	docker build -t aria-controller:latest -t aria-controller:$(VERSION) -f Dockerfile.controller .
+	docker build -t aria-controller:latest -t aria-controller:$(VERSION) --build-arg VERSION=$(VERSION) -f Dockerfile.controller .
 	@echo "Image built: aria-controller:latest"
 
 # 准备 Sidecar 容器化 Web 部署包

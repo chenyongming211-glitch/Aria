@@ -14,6 +14,7 @@ import '@fontsource-variable/plus-jakarta-sans'
 
 import App from './App.vue'
 import router from './router'
+import useAppStore from './stores/app'
 
 const app = createApp(App)
 const pinia = createPinia()
@@ -28,6 +29,10 @@ app.use(router)
 app.use(ElementPlus)
 
 app.mount('#app')
+
+// Fetch version from API
+const appStore = useAppStore()
+appStore.fetchVersion()
 
 // Add global styles for Element Plus components override (浅色主题)
 const style = document.createElement('style')

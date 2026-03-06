@@ -57,11 +57,11 @@ rand = "0.8"
 ipnetwork = "0.20"
 
 # gRPC 客户端
-tonic = { version = "0.12", features = ["tls", "tls-roots"] }
-rustls = { version = "0.23", features = ["ring"] }
+tonic = { version = "0.13", features = ["tls-aws-lc"] }
+rustls = "0.23"
 prost = "0.13"
 tokio-stream = "0.1"
 
 [build-dependencies]
 aya-build = "0.1"
-tonic-build = "0.12"
+tonic-build = "0.13"

@@ -9,8 +9,8 @@ import (
 
 var (
 	cfgFile string
-	Version = "0.2.26-test-7" // 导出的版本号，通过 ldflags 注入
-	commit  = "unknown"       // Will be set by ldflags during build
+	Version = "dev"     // 导出的版本号，通过 ldflags 注入
+	commit  = "unknown" // Will be set by ldflags during build
 )
 
 // rootCmd represents the base command when called without any subcommands

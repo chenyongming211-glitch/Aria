@@ -2,6 +2,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/composables/useApi'
+import { API_ENDPOINTS } from '@/config/api'
 
 export default defineStore('tenant', () => {
   const currentTenant = ref(null)
@@ -11,9 +12,9 @@ export default defineStore('tenant', () => {
   async function loadTenants() {
     loading.value = true
     try {
-      // Fetch tenants from API
-      const response = await api.get('/tenants')
-      tenants.value = response.data
+      const response = await api.get(API_ENDPOINTS.TENANT.LIST)
+      console.log('[Tenant] API response:', response.data)
+      tenants.value = response.data?.data || response.data || []
 
       // Restore from localStorage
       const saved = localStorage.getItem('aria-current-tenant')
