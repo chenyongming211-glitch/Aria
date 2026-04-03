@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -109,6 +110,8 @@ func (r *Router) HandleTenantScoped(w http.ResponseWriter, req *http.Request) {
 	switch {
 	case rest == "":
 		r.handleSingleTenant(w, req, tenantID, role)
+	case strings.HasPrefix(rest, "policies"):
+		r.handleTenantPolicies(w, req, tenantID)
 	case strings.HasPrefix(rest, "users"):
 		r.handleTenantUsers(w, req, tenantID, role)
 	case strings.HasPrefix(rest, "tokens"):
@@ -123,6 +126,19 @@ func (r *Router) HandleTenantScoped(w http.ResponseWriter, req *http.Request) {
 		r.handleTenantAI(w, req, tenantID)
 	default:
 		v1.WriteError(w, http.StatusNotFound, v1.CodeEndpointNotFound, "Unknown endpoint", nil)
+	}
+}
+
+func (r *Router) handleTenantPolicies(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
+	if !r.authorizeTenant(w, req, tenantID, false) {
+		return
+	}
+
+	switch req.Method {
+	case http.MethodGet:
+		r.listTenantPolicies(w, req, tenantID)
+	default:
+		v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
 	}
 }
 
@@ -269,6 +285,268 @@ func (r *Router) handleTenantNodes(w http.ResponseWriter, req *http.Request, ten
 	}
 
 	v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid node path", nil)
+}
+
+func (r *Router) listTenantPolicies(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
+	nodes, err := r.store.GetNodesByTenant(tenantID)
+	if err != nil {
+		v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetNodesFailed, "Failed to load tenant nodes", nil)
+		return
+	}
+
+	query := req.URL.Query()
+	kindFilter := strings.TrimSpace(query.Get("kind"))
+	nodeFilter := strings.TrimSpace(query.Get("node_id"))
+	enabledFilter := strings.TrimSpace(query.Get("enabled"))
+
+	var enabledPtr *bool
+	if enabledFilter != "" {
+		enabled, err := strconv.ParseBool(enabledFilter)
+		if err != nil {
+			v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, "enabled must be true or false", nil)
+			return
+		}
+		enabledPtr = &enabled
+	}
+
+	policies := make([]map[string]interface{}, 0)
+	for _, node := range nodes {
+		if nodeFilter != "" && node.ID.String() != nodeFilter {
+			continue
+		}
+
+		if kindFilter == "" || kindFilter == "acl" {
+			items, err := r.buildTenantNodeACLPolicies(tenantID, node)
+			if err != nil {
+				v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetACLRulesFailed, "Failed to load ACL policies", nil)
+				return
+			}
+			policies = append(policies, items...)
+		}
+
+		if kindFilter == "" || kindFilter == "qos" {
+			items, err := r.buildTenantNodeQoSPolicies(tenantID, node)
+			if err != nil {
+				v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetLimitsFailed, "Failed to load QoS policies", nil)
+				return
+			}
+			policies = append(policies, items...)
+		}
+
+		if kindFilter == "" || kindFilter == "route" {
+			items, err := r.buildTenantNodeRoutePolicies(tenantID, node)
+			if err != nil {
+				v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetNodesFailed, "Failed to load route policies", nil)
+				return
+			}
+			policies = append(policies, items...)
+		}
+	}
+
+	if enabledPtr != nil {
+		filtered := make([]map[string]interface{}, 0, len(policies))
+		for _, policy := range policies {
+			if enabled, ok := policy["enabled"].(bool); ok && enabled == *enabledPtr {
+				filtered = append(filtered, policy)
+			}
+		}
+		policies = filtered
+	}
+
+	sort.Slice(policies, func(i, j int) bool {
+		leftKind := stringifyPolicyValue(policies[i]["kind"])
+		rightKind := stringifyPolicyValue(policies[j]["kind"])
+		if leftKind != rightKind {
+			return leftKind < rightKind
+		}
+
+		leftNode := stringifyPolicyValue(policies[i]["node_name"])
+		rightNode := stringifyPolicyValue(policies[j]["node_name"])
+		if leftNode != rightNode {
+			return leftNode < rightNode
+		}
+
+		leftName := stringifyPolicyValue(policies[i]["name"])
+		rightName := stringifyPolicyValue(policies[j]["name"])
+		if leftName != rightName {
+			return leftName < rightName
+		}
+
+		return stringifyPolicyValue(policies[i]["policy_id"]) < stringifyPolicyValue(policies[j]["policy_id"])
+	})
+
+	v1.WriteSuccess(w, policies, fmt.Sprintf("%d unified policies retrieved", len(policies)))
+}
+
+func (r *Router) buildTenantNodeACLPolicies(tenantID uuid.UUID, node *controllerstorage.Node) ([]map[string]interface{}, error) {
+	rows, err := r.store.DB().Query(
+		`SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
+		        COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
+		   FROM acl_rules
+		  WHERE tenant_id = $1 AND (src_node = $2 OR dst_node = $2)
+		  ORDER BY priority ASC, id ASC`,
+		tenantID, node.PublicKey,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		var rule controllerstorage.ACLRule
+		if err := rows.Scan(
+			&rule.ID, &rule.Name, &rule.SrcNode, &rule.SrcNet, &rule.DstNode, &rule.DstNet, &rule.Protocol,
+			&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Enabled, &rule.Priority,
+			&rule.Description, &rule.CreatedAt, &rule.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		policyRef := strconv.Itoa(rule.ID)
+		items = append(items, map[string]interface{}{
+			"policy_id":    fmt.Sprintf("acl:%s:%s", node.ID.String(), policyRef),
+			"policy_ref":   policyRef,
+			"tenant_id":    tenantID.String(),
+			"node_id":      node.ID.String(),
+			"node_name":    firstNonEmpty(node.Hostname, node.PublicKey, node.ID.String()),
+			"target_nodes": []string{node.ID.String()},
+			"scope":        "node",
+			"kind":         "acl",
+			"name":         firstNonEmpty(rule.Name, rule.Description, fmt.Sprintf("%s -> %s", rule.SrcNet, rule.DstNet)),
+			"enabled":      rule.Enabled,
+			"priority":     rule.Priority,
+			"status":       "idle",
+			"version":      "",
+			"spec": map[string]interface{}{
+				"src_node":    rule.SrcNode,
+				"src_net":     rule.SrcNet,
+				"dst_node":    rule.DstNode,
+				"dst_net":     rule.DstNet,
+				"protocol":    rule.Protocol,
+				"min_port":    rule.MinPort,
+				"max_port":    rule.MaxPort,
+				"action":      rule.Action,
+				"description": rule.Description,
+			},
+			"created_at": rule.CreatedAt,
+			"updated_at": rule.UpdatedAt,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "acl", items, "policy_ref"); err != nil {
+		return nil, err
+	}
+
+	finalizePolicyItems(items)
+	return items, nil
+}
+
+func (r *Router) buildTenantNodeQoSPolicies(tenantID uuid.UUID, node *controllerstorage.Node) ([]map[string]interface{}, error) {
+	items := make([]map[string]interface{}, 0)
+	for _, category := range []string{
+		controllerstorage.QoSCategoryService,
+		controllerstorage.QoSCategoryPeers,
+		controllerstorage.QoSCategoryIP,
+	} {
+		rules, err := r.store.ListTenantNodeQoSRules(tenantID, node.ID, category)
+		if err != nil {
+			return nil, err
+		}
+		for _, rule := range rules {
+			policyRef := rule.ID.String()
+			items = append(items, map[string]interface{}{
+				"policy_id":    fmt.Sprintf("qos:%s:%s", node.ID.String(), policyRef),
+				"policy_ref":   policyRef,
+				"tenant_id":    tenantID.String(),
+				"node_id":      node.ID.String(),
+				"node_name":    firstNonEmpty(node.Hostname, node.PublicKey, node.ID.String()),
+				"target_nodes": []string{node.ID.String()},
+				"scope":        "node",
+				"kind":         "qos",
+				"name":         firstNonEmpty(rule.Description, fmt.Sprintf("%s %s -> %s", category, firstNonEmpty(rule.SrcCIDR, "*"), firstNonEmpty(rule.DstCIDR, "*"))),
+				"enabled":      rule.Enabled,
+				"priority":     100,
+				"status":       "idle",
+				"version":      "",
+				"spec": map[string]interface{}{
+					"category":       category,
+					"src_ip":         rule.SrcCIDR,
+					"dst_ip":         rule.DstCIDR,
+					"src_port":       rule.SrcPort,
+					"dst_port":       rule.DstPort,
+					"protocol":       rule.Protocol,
+					"bandwidth_mbps": rule.BandwidthMbps,
+					"description":    rule.Description,
+				},
+				"created_at": rule.CreatedAt,
+				"updated_at": rule.UpdatedAt,
+			})
+		}
+	}
+
+	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "qos", items, "policy_ref"); err != nil {
+		return nil, err
+	}
+
+	finalizePolicyItems(items)
+	return items, nil
+}
+
+func (r *Router) buildTenantNodeRoutePolicies(tenantID uuid.UUID, node *controllerstorage.Node) ([]map[string]interface{}, error) {
+	items := make([]map[string]interface{}, 0, len(node.AdvertisedRoutes))
+	for _, route := range node.AdvertisedRoutes {
+		route = strings.TrimSpace(route)
+		if route == "" {
+			continue
+		}
+
+		items = append(items, map[string]interface{}{
+			"policy_id":    fmt.Sprintf("route:%s:%s", node.ID.String(), route),
+			"policy_ref":   route,
+			"tenant_id":    tenantID.String(),
+			"node_id":      node.ID.String(),
+			"node_name":    firstNonEmpty(node.Hostname, node.PublicKey, node.ID.String()),
+			"target_nodes": []string{node.ID.String()},
+			"scope":        "node",
+			"kind":         "route",
+			"name":         route,
+			"enabled":      true,
+			"priority":     100,
+			"status":       "idle",
+			"version":      "",
+			"spec": map[string]interface{}{
+				"cidr": route,
+			},
+			"created_at": node.UpdatedAt,
+			"updated_at": node.UpdatedAt,
+		})
+	}
+
+	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "route", items, "policy_ref"); err != nil {
+		return nil, err
+	}
+
+	finalizePolicyItems(items)
+	return items, nil
+}
+
+func finalizePolicyItems(items []map[string]interface{}) {
+	for _, item := range items {
+		if status := stringifyPolicyValue(item["policy_status"]); status != "" {
+			item["status"] = status
+		}
+
+		if lastDelivery, ok := item["last_delivery"].(map[string]interface{}); ok {
+			if version := stringifyPolicyValue(lastDelivery["id"]); version != "" {
+				item["version"] = version
+			}
+		}
+	}
 }
 
 func (r *Router) handleTenantAI(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {

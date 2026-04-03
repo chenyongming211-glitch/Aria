@@ -94,6 +94,7 @@ export const API_ENDPOINTS = {
     USER_DETAIL: (tenantId, userId) => buildTenantPath(tenantId, `/users/${userId}`),
     TOKENS: (tenantId) => buildTenantPath(tenantId, '/tokens'),
     TOKEN_DETAIL: (tenantId, tokenId) => buildTenantPath(tenantId, `/tokens/${tokenId}`),
+    POLICIES: (tenantId) => buildTenantPath(tenantId, '/policies'),
     NODES: (tenantId) => buildTenantPath(tenantId, '/nodes'),
     NODE_DETAIL: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}`),
     NODE_ROUTES: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}/routes`),
@@ -137,11 +138,7 @@ export const API_ENDPOINTS = {
 
   // 网络策略 API（旧版）
   POLICIES: {
-    LIST: '/policies',
-    CREATE: '/policies',
-    GET: (id) => `/policies/${id}`,
-    UPDATE: (id) => `/policies/${id}`,
-    DELETE: (id) => `/policies/${id}`
+    LIST: (tenantId) => buildTenantPath(tenantId, '/policies')
   },
 
   // 监控 API

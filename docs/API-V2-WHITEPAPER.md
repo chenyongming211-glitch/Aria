@@ -145,7 +145,21 @@ SD-WAN 核心物理与逻辑网络资产管理。
 
 注：QoS 所有接口均需租户隔离，增删操作需 `admin` 权限。
 
-## 7. AI 智能运维域 (AIOps Domain)
+## 7. Policy Center（统一策略读模型）
+
+提供租户作用域下统一的策略查询视图，用于将 `ACL`、`QoS`、`Route` 收敛到同一个读模型里。
+
+说明：
+
+- `Policy Center` 是统一读模型，不强制替代各子域自己的写接口
+- 具体创建、更新、删除操作仍由 `ACL`、`QoS`、`Route` 子资源接口负责
+- 返回结果应包含规则本身、目标节点、最近交付状态、交付历史与版本信息
+
+| 方法 | URL | 权限说明 |
+|---|---|---|
+| `GET` | `/api/v2/tenants/{tenant_id}/policies` | 租户隔离（Admin/Member） |
+
+## 8. AI 智能运维域 (AIOps Domain)
 
 注入了 Tenant Context 的安全 AI 助手。
 
@@ -154,7 +168,7 @@ SD-WAN 核心物理与逻辑网络资产管理。
 | `POST` | `/api/v2/tenants/{tenant_id}/ai/chat` | 提交对话与意图识别 |
 | `POST` | `/api/v2/tenants/{tenant_id}/ai/confirm` | AI 敏感工具调用二次确认 |
 
-## 8. 运维域 (Operations Domain)
+## 9. 运维域 (Operations Domain)
 
 提供租户作用域的监控视图与节点远程操作入口。
 
@@ -173,7 +187,7 @@ SD-WAN 核心物理与逻辑网络资产管理。
 | `GET` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/agent/status` | 租户隔离（Admin/Member） |
 | `POST` | `/api/v2/tenants/{tenant_id}/agents/command` | 租户管理员 |
 
-## 9. API 总览统计
+## 10. API 总览统计
 
 | 域 (Domain) | 端点数量 | 核心职责 |
 |---|---:|---|
@@ -183,11 +197,12 @@ SD-WAN 核心物理与逻辑网络资产管理。
 | 拓扑域 | 8 | Agent 节点纳管、静态/策略路由下发 |
 | 安全控制域 | 12 | eBPF 四层安全防火墙、出入向黑白名单 |
 | QoS 域 | 9 | eBPF 三层级精细化流量整形 |
+| Policy Center | 1 | 租户统一策略读模型与交付状态视图 |
 | AI 域 | 2 | 智能网络运维与 Agent 会话交互 |
 | 运维域 | 5 | 监控视图、节点状态与远程命令 |
-| 总计 | 53 | 覆盖现代 SD-WAN Controller 核心能力 |
+| 总计 | 54 | 覆盖现代 SD-WAN Controller 核心能力 |
 
-## 10. 统一响应格式
+## 11. 统一响应格式
 
 所有 `v2` API 严格使用统一的 JSON 格式封装：
 
@@ -209,12 +224,13 @@ SD-WAN 核心物理与逻辑网络资产管理。
 }
 ```
 
-## 11. 实施说明
+## 12. 实施说明
 
 当前仓库中已落地的是 `v1` 与部分旧接口混用状态。`v2` 白皮书作为目标规范，后续将采用以下方式逐步推进：
 
 - 先搭建 `/api/v2` 命名空间与最小可用骨架
 - 优先实现 `auth`、`tenants`、`users`、`tokens`、`nodes`
+- 逐步补齐 `Policy Center` 这种统一读模型，让前端按工作流组织而不是按旧页面碎片化取数
 - 复用现有 `v1` 能力时保持统一响应格式
 - 已被 `v2` 替代的 `v1` 北向管理接口应逐步下线并删除，不再作为长期兼容层保留
 - 前端逐步从 `v1`/旧接口迁移到 `v2`
