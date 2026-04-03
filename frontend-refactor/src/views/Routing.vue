@@ -1,4 +1,3 @@
-<!-- src/views/Routing.vue -->
 <template>
   <div class="routing">
     <el-card>
@@ -6,7 +5,13 @@
         <div class="card-header">
           <h3>路由管理</h3>
           <div class="header-actions">
-            <el-button type="primary" @click="loadNodes">
+            <el-input
+              v-model="searchQuery"
+              placeholder="搜索节点、区域或 CIDR"
+              style="width: 240px"
+              clearable
+            />
+            <el-button type="primary" @click="loadRoutes">
               <el-icon><Refresh /></el-icon>
               刷新
             </el-button>
@@ -19,28 +24,37 @@
       </template>
 
       <el-table
-        :data="filteredRoutes"
+        :data="paginatedRoutes"
         stripe
         style="width: 100%"
         v-loading="loading"
       >
-        <el-table-column prop="hostname" label="节点名称" width="150" />
-        <el-table-column prop="publicIp" label="公网IP" width="140" />
-        <el-table-column prop="region" label="区域" width="100" />
-        <el-table-column prop="routes" label="发布的路由" width="200">
+        <el-table-column prop="nodeName" label="节点名称" width="180" />
+        <el-table-column prop="publicIp" label="公网IP" width="160" />
+        <el-table-column prop="region" label="区域" width="120" />
+        <el-table-column prop="cidr" label="路由网段" min-width="220" />
+        <el-table-column label="下发状态" width="120">
           <template #default="{ row }">
-            <el-tag
-              v-for="route in row.routes"
-              :key="route"
-              type="success"
-              style="margin-right: 5px; margin-bottom: 5px;"
-            >
-              {{ route }}
+            <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">
+              {{ formatPolicyStatus(row.policyStatus) }}
             </el-tag>
-            <el-tag v-if="row.routes.length === 0" type="info" size="small">无</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="actions" label="操作" width="200">
+        <el-table-column prop="pendingCmds" label="待执行" width="90" />
+        <el-table-column label="最近命令" width="150">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.lastDeliveryCommandId"
+              :content="row.lastDeliveryCommandId"
+              placement="top"
+            >
+              <span>{{ shortCommandId(row.lastDeliveryCommandId) }}</span>
+            </el-tooltip>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="lastCommandError" label="失败原因" min-width="220" show-overflow-tooltip />
+        <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
             <el-button size="small" type="primary" @click="showEditRouteDialog(row)">编辑</el-button>
             <el-button size="small" type="danger" @click="showDeleteRouteDialog(row)">删除</el-button>
@@ -61,28 +75,27 @@
       </div>
     </el-card>
 
-    <!-- 添加/编辑路由对话框 -->
     <el-dialog
       v-model="routeDialogVisible"
       :title="dialogMode === 'add' ? '添加路由' : '编辑路由'"
-      width="500px"
+      width="520px"
       :before-close="closeRouteDialog"
     >
       <el-form :model="currentRoute" label-width="100px">
-        <el-form-item label="节点名称">
-          <el-select v-model="currentRoute.hostname" placeholder="请选择节点" style="width: 100%">
+        <el-form-item label="目标节点">
+          <el-select v-model="currentRoute.nodeId" placeholder="请选择节点" style="width: 100%" :disabled="dialogMode === 'edit'">
             <el-option
-              v-for="node in allNodes"
-              :key="node.hostname"
-              :label="`${node.hostname} (${node.region})`"
-              :value="node.hostname"
+              v-for="node in tenantNodes"
+              :key="node.id"
+              :label="`${node.hostname || node.public_key || node.id} (${node.region || 'unknown'})`"
+              :value="node.id"
             />
           </el-select>
         </el-form-item>
         <el-form-item label="路由网段">
           <el-input
             v-model="currentRoute.cidr"
-            placeholder="请输入CIDR格式的路由网段，如 192.168.1.0/24"
+            placeholder="请输入 CIDR 格式，如 192.168.1.0/24"
           />
         </el-form-item>
       </el-form>
@@ -96,13 +109,18 @@
       </template>
     </el-dialog>
 
-    <!-- 删除确认对话框 -->
     <el-dialog
       v-model="deleteDialogVisible"
       title="删除路由"
-      width="400px"
+      width="420px"
     >
-      <p>确定要从节点 <strong>{{ currentDeleteNode?.hostname }}</strong> 删除路由 <strong>{{ currentDeleteCidr }}</strong> 吗？</p>
+      <p>
+        确定要从节点
+        <strong>{{ currentDeleteRoute?.nodeName }}</strong>
+        删除路由
+        <strong>{{ currentDeleteRoute?.cidr }}</strong>
+        吗？
+      </p>
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="deleteDialogVisible = false">取消</el-button>
@@ -114,171 +132,137 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, h } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Refresh, Plus } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox, ElOption, ElSelect } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { useRouteApi } from '@/composables/useRouteApi'
+import { useTenantApi } from '@/composables/useTenantApi'
 
-// 响应式数据
 const loading = ref(false)
 const searchQuery = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
 
-// 路由数据
-const allNodes = ref([])
+const allRoutes = ref([])
+const tenantNodes = ref([])
 const routeDialogVisible = ref(false)
 const deleteDialogVisible = ref(false)
-const dialogMode = ref('add') // 'add' or 'edit'
-const currentRoute = ref({
-  hostname: '',
-  cidr: ''
-})
-const currentDeleteNode = ref(null)
-const currentDeleteCidr = ref('')
+const dialogMode = ref('add')
 
-// 分页计算
+const currentRoute = ref({
+  nodeId: '',
+  cidr: '',
+  originalCidr: ''
+})
+
+const currentDeleteRoute = ref(null)
+
+const filteredRoutes = computed(() => {
+  if (!searchQuery.value) {
+    return allRoutes.value
+  }
+
+  const keyword = searchQuery.value.toLowerCase()
+  return allRoutes.value.filter((route) =>
+    String(route.nodeName || '').toLowerCase().includes(keyword) ||
+    String(route.publicIp || '').toLowerCase().includes(keyword) ||
+    String(route.region || '').toLowerCase().includes(keyword) ||
+    String(route.cidr || '').toLowerCase().includes(keyword)
+  )
+})
+
 const paginatedRoutes = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
   return filteredRoutes.value.slice(start, start + pageSize.value)
 })
 
-// 过滤计算
-const filteredRoutes = computed(() => {
-  if (!searchQuery.value) {
-    return allNodes.value
-  }
-
-  return allNodes.value.filter(node =>
-    node.hostname.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-    node.publicIp.includes(searchQuery.value) ||
-    node.region.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-    node.routes.some(route => route.includes(searchQuery.value))
-  )
-})
-
-// 加载节点数据
-const loadNodes = async () => {
+const loadRoutes = async () => {
   loading.value = true
   try {
-    allNodes.value = await useRouteApi.getRoutes()
-    console.log('[Routing] Loaded routes:', allNodes.value)
+    const [routes, nodes] = await Promise.all([
+      useRouteApi.getRoutes(),
+      useTenantApi.getTenantNodes()
+    ])
+    allRoutes.value = routes
+    tenantNodes.value = nodes
+    if (!currentRoute.value.nodeId && nodes.length > 0) {
+      currentRoute.value.nodeId = nodes[0].id
+    }
   } catch (error) {
     console.error('[Routing] 加载路由失败:', error)
-    ElMessage.error('加载路由失败: ' + error.message)
-    allNodes.value = []
+    ElMessage.error('加载路由失败: ' + (error.message || '未知错误'))
+    allRoutes.value = []
   } finally {
     loading.value = false
   }
 }
 
-// 显示添加路由对话框
 const showAddRouteDialog = () => {
   dialogMode.value = 'add'
-  currentRoute.value = { hostname: '', cidr: '' }
+  currentRoute.value = {
+    nodeId: tenantNodes.value[0]?.id || '',
+    cidr: '',
+    originalCidr: ''
+  }
   routeDialogVisible.value = true
 }
 
-// 显示编辑路由对话框
-const showEditRouteDialog = (node) => {
-  currentRoute.value = { hostname: node.hostname, cidr: '' }
+const showEditRouteDialog = (route) => {
+  dialogMode.value = 'edit'
+  currentRoute.value = {
+    nodeId: route.nodeId,
+    cidr: route.cidr,
+    originalCidr: route.cidr
+  }
   routeDialogVisible.value = true
 }
 
-// 显示删除路由对话框
-const showDeleteRouteDialog = (node) => {
-  if (node.routes.length === 0) {
-    ElMessage.warning('该节点没有可删除的路由')
-    return
-  }
-
-  if (node.routes.length === 1) {
-    // 如果只有一个路由，直接设置并打开确认对话框
-    currentDeleteNode.value = node
-    currentDeleteCidr.value = node.routes[0]
-    deleteDialogVisible.value = true
-  } else {
-    // 如果有多个路由，创建一个自定义的选择对话框
-    const routeOptions = node.routes.map(route =>
-      h(ElOption, { key: route, value: route, label: route })
-    );
-
-    const selectVNode = h(ElSelect, {
-      modelValue: node.routes[0],
-      'onUpdate:modelValue': (value) => {
-        currentDeleteCidr.value = value;
-      },
-      style: 'width: 100%; margin-top: 10px;'
-    }, { default: () => routeOptions });
-
-    ElMessageBox({
-      title: '选择要删除的路由',
-      message: h('div', null, [
-        h('p', { style: 'margin-bottom: 10px;' }, `请选择要从节点 ${node.hostname} 删除的路由:`),
-        selectVNode
-      ]),
-      showCancelButton: true,
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-      customClass: 'custom-message-box'
-    }).then(() => {
-      currentDeleteNode.value = node;
-      // currentDeleteCidr.value 已经通过 onUpdate:modelValue 更新
-      deleteDialogVisible.value = true;
-    }).catch(() => {
-      // 用户取消
-    });
-  }
+const showDeleteRouteDialog = (route) => {
+  currentDeleteRoute.value = route
+  deleteDialogVisible.value = true
 }
 
-// 确认路由操作
 const confirmRouteAction = async () => {
-  if (!currentRoute.value.hostname || !currentRoute.value.cidr) {
+  if (!currentRoute.value.nodeId || !currentRoute.value.cidr) {
     ElMessage.error('请填写完整的路由信息')
     return
   }
 
-  // 验证CIDR格式
   const cidrPattern = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/
   if (!cidrPattern.test(currentRoute.value.cidr)) {
-    ElMessage.error('请输入有效的CIDR格式，如 192.168.1.0/24')
+    ElMessage.error('请输入有效的 CIDR 格式，如 192.168.1.0/24')
     return
   }
 
   try {
-    // 查找目标节点
-    const node = allNodes.value.find(n => n.hostname === currentRoute.value.hostname)
-    if (!node) {
-      ElMessage.error('未找到目标节点')
-      return
+    if (dialogMode.value === 'add') {
+      await useRouteApi.addRoute(currentRoute.value.nodeId, currentRoute.value.cidr)
+      ElMessage.success('路由添加成功')
+    } else {
+      await useRouteApi.updateRoute(
+        currentRoute.value.nodeId,
+        currentRoute.value.originalCidr,
+        currentRoute.value.cidr
+      )
+      ElMessage.success('路由更新成功')
     }
 
-    // 调用 API 添加路由
-    await useRouteApi.addRoute(node.id, currentRoute.value.cidr, node.routes)
-    
-    ElMessage.success('路由添加成功')
-    await loadNodes() // 重新加载数据
+    await loadRoutes()
     closeRouteDialog()
   } catch (error) {
-    console.error('[Routing] 添加路由失败:', error)
-    const errorMsg = error.response?.data?.message || error.message || '添加路由失败'
+    console.error('[Routing] 路由操作失败:', error)
+    const errorMsg = error.response?.data?.message || error.message || '路由操作失败'
     ElMessage.error(errorMsg)
   }
 }
 
-// 确认删除路由
 const confirmDeleteRoute = async () => {
   try {
-    // 调用 API 删除路由
-    await useRouteApi.deleteRoute(
-      currentDeleteNode.value.id,
-      currentDeleteCidr.value,
-      currentDeleteNode.value.routes
-    )
-    
+    await useRouteApi.deleteRoute(currentDeleteRoute.value.nodeId, currentDeleteRoute.value.cidr)
     ElMessage.success('路由删除成功')
-    await loadNodes() // 重新加载数据
+    await loadRoutes()
     deleteDialogVisible.value = false
+    currentDeleteRoute.value = null
   } catch (error) {
     console.error('[Routing] 删除路由失败:', error)
     const errorMsg = error.response?.data?.message || error.message || '删除路由失败'
@@ -286,13 +270,15 @@ const confirmDeleteRoute = async () => {
   }
 }
 
-// 关闭对话框
 const closeRouteDialog = () => {
   routeDialogVisible.value = false
-  currentRoute.value = { hostname: '', cidr: '' }
+  currentRoute.value = {
+    nodeId: tenantNodes.value[0]?.id || '',
+    cidr: '',
+    originalCidr: ''
+  }
 }
 
-// 分页处理
 const handleSizeChange = (size) => {
   pageSize.value = size
   currentPage.value = 1
@@ -302,9 +288,36 @@ const handleCurrentChange = (page) => {
   currentPage.value = page
 }
 
-// 初始化数据
+const shortCommandId = (commandId) => {
+  if (!commandId) {
+    return '-'
+  }
+  return commandId.slice(0, 8)
+}
+
+const formatPolicyStatus = (status) => {
+  const map = {
+    applied: '已应用',
+    pending: '待下发',
+    in_progress: '下发中',
+    error: '失败',
+    idle: '空闲'
+  }
+  return map[status] || status || '未知'
+}
+
+const getPolicyTagType = (status) => {
+  switch (status) {
+    case 'applied': return 'success'
+    case 'pending':
+    case 'in_progress': return 'warning'
+    case 'error': return 'danger'
+    default: return 'info'
+  }
+}
+
 onMounted(() => {
-  loadNodes()
+  loadRoutes()
 })
 </script>
 
@@ -322,6 +335,7 @@ onMounted(() => {
 .header-actions {
   display: flex;
   gap: 10px;
+  align-items: center;
 }
 
 .pagination-container {

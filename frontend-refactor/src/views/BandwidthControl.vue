@@ -43,6 +43,7 @@
             style="width: 100%"
             v-loading="loading"
           >
+            <el-table-column prop="nodeName" label="节点" width="160" />
             <el-table-column prop="id" label="ID" width="100" />
             <el-table-column prop="type" label="类型" width="150">
               <template #default="{ row }">
@@ -87,6 +88,27 @@
                 </el-tag>
               </template>
             </el-table-column>
+            <el-table-column label="下发状态" width="120">
+              <template #default="{ row }">
+                <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">
+                  {{ formatPolicyStatus(row.policyStatus) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="pendingCmds" label="待执行" width="90" />
+            <el-table-column label="最近命令" width="150">
+              <template #default="{ row }">
+                <el-tooltip
+                  v-if="row.lastDeliveryCommandId"
+                  :content="row.lastDeliveryCommandId"
+                  placement="top"
+                >
+                  <span>{{ shortCommandId(row.lastDeliveryCommandId) }}</span>
+                </el-tooltip>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="lastCommandError" label="失败原因" min-width="180" show-overflow-tooltip />
             <el-table-column label="操作" width="250">
               <template #default="{ row }">
                 <el-button size="small" @click="editRule(row)">编辑</el-button>
@@ -294,6 +316,17 @@
           <el-input v-model="editingRule.name" />
         </el-form-item>
 
+        <el-form-item label="目标节点">
+          <el-select v-model="editingRule.nodeId" placeholder="选择节点" style="width: 100%">
+            <el-option
+              v-for="node in tenantNodes"
+              :key="node.id"
+              :label="node.hostname || node.public_key || node.id"
+              :value="node.id"
+            />
+          </el-select>
+        </el-form-item>
+
         <!-- Application-level specific fields -->
         <template v-if="editingRule.type === 'app'">
           <el-form-item label="源 IP (Src IP)">
@@ -385,7 +418,7 @@ import { ref, onMounted, nextTick, onUnmounted } from 'vue'
 import { Plus, Refresh, QuestionFilled, VideoPlay, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useQosApi } from '@/composables/useQosApi'
-import { API_ENDPOINTS } from '@/config/api'
+import { useTenantApi } from '@/composables/useTenantApi'
 
 // Rule types mapping
 const ruleTypes = {
@@ -403,6 +436,7 @@ const ruleTypeDescriptions = {
 
 // All rules combined
 const allRules = ref([])
+const tenantNodes = ref([])
 
 // Stats data
 const stats = ref({
@@ -419,6 +453,7 @@ const loading = ref(false)
 const activeTab = ref('rules')
 const ruleDialogVisible = ref(false)
 const editingRule = ref({
+  nodeId: '',
   type: 'app',
   name: '',
   srcIp: '',
@@ -607,7 +642,46 @@ const getStatusType = (status) => {
   }
 }
 
+const formatPolicyStatus = (status) => {
+  const map = {
+    applied: '已应用',
+    pending: '待下发',
+    in_progress: '下发中',
+    error: '失败',
+    idle: '空闲'
+  }
+  return map[status] || status || '未知'
+}
+
+const getPolicyTagType = (status) => {
+  switch (status) {
+    case 'applied': return 'success'
+    case 'pending':
+    case 'in_progress': return 'warning'
+    case 'error': return 'danger'
+    default: return 'info'
+  }
+}
+
+const shortCommandId = (commandId) => {
+  if (!commandId) {
+    return '-'
+  }
+  return commandId.slice(0, 8)
+}
+
 // Fetch all rules from API
+const loadNodes = async () => {
+  try {
+    tenantNodes.value = await useTenantApi.getTenantNodes()
+    if (!editingRule.value.nodeId && tenantNodes.value.length > 0) {
+      editingRule.value.nodeId = tenantNodes.value[0].id
+    }
+  } catch (error) {
+    console.error('加载节点失败:', error)
+  }
+}
+
 const fetchRules = async () => {
   try {
     loading.value = true
@@ -686,6 +760,7 @@ const refreshData = async () => {
 // Show add dialog
 const showAddDialog = () => {
   editingRule.value = {
+    nodeId: tenantNodes.value[0]?.id || '',
     type: 'app',
     name: '',
     srcIp: '',
@@ -736,6 +811,11 @@ const viewRule = (rule) => {
 
 // Validate rule before saving
 const validateRule = (rule) => {
+  if (!rule.nodeId) {
+    ElMessage.error('请选择目标节点')
+    return false
+  }
+
   if (!rule.name) {
     ElMessage.error('规则名称不能为空')
     return false
@@ -795,7 +875,12 @@ const saveRule = async () => {
 
       const index = allRules.value.findIndex(r => r.id === editingRule.value.id)
       if (index !== -1) {
-        allRules.value[index] = { ...editingRule.value }
+        const selectedNode = tenantNodes.value.find((node) => node.id === editingRule.value.nodeId)
+        allRules.value[index] = {
+          ...editingRule.value,
+          id: updateResult?.id || editingRule.value.id,
+          nodeName: selectedNode?.hostname || editingRule.value.nodeName || editingRule.value.nodeId
+        }
       }
       ElMessage.success(`${ruleTypes[editingRule.value.type]}规则已更新`)
     } else {
@@ -815,9 +900,11 @@ const saveRule = async () => {
       }
 
       const newId = createResult?.id || `${editingRule.value.type}-${Date.now()}`
+      const selectedNode = tenantNodes.value.find((node) => node.id === editingRule.value.nodeId)
       allRules.value.push({
         ...editingRule.value,
-        id: newId
+        id: newId,
+        nodeName: selectedNode?.hostname || editingRule.value.nodeName || editingRule.value.nodeId
       })
       ElMessage.success(`${ruleTypes[editingRule.value.type]}规则已创建`)
     }
@@ -940,6 +1027,7 @@ const onTabChange = (tabName) => {
 
 // On component mounted
 onMounted(() => {
+  loadNodes()
   fetchRules()
 })
 

@@ -35,13 +35,49 @@ const ENV = getEnvironment();
 export const API_BASE_URL = API_CONFIG[ENV].baseURL;
 export const AUTH_ENABLED = API_CONFIG[ENV].authEnabled;
 
-// API endpoints - 与后端 v1 API 对接
+const readCurrentTenant = () => {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  const raw = localStorage.getItem('aria-current-tenant')
+  if (!raw) {
+    return null
+  }
+
+  try {
+    return JSON.parse(raw)
+  } catch (error) {
+    console.warn('Failed to parse current tenant from localStorage:', error)
+    return null
+  }
+}
+
+export const getCurrentTenant = () => readCurrentTenant()
+
+export const getCurrentTenantId = () => readCurrentTenant()?.id || null
+
+export const requireCurrentTenantId = () => {
+  const tenantId = getCurrentTenantId()
+  if (!tenantId) {
+    throw new Error('No tenant selected')
+  }
+  return tenantId
+}
+
+export const buildTenantPath = (tenantId, suffix = '') => {
+  const normalizedSuffix = suffix.startsWith('/') || suffix === '' ? suffix : `/${suffix}`
+  return `/v2/tenants/${tenantId}${normalizedSuffix}`
+}
+
+// API endpoints - 与后端 v2 API 对接
 export const API_ENDPOINTS = {
   // 认证相关
   AUTH: {
-    LOGIN: '/v1/auth/login',
-    REFRESH: '/v1/auth/refresh',
-    LOGOUT: '/v1/auth/logout'
+    LOGIN: '/v2/auth/login',
+    REFRESH: '/v2/auth/refresh',
+    LOGOUT: '/v2/auth/logout',
+    FORCE_CHANGE_PASSWORD: '/v2/auth/force-change-password'
   },
 
   // 用户相关
@@ -52,33 +88,36 @@ export const API_ENDPOINTS = {
 
   // 租户管理 API
   TENANT: {
-    LIST: '/v1/tenants',
-    CURRENT: '/v1/tenant-management',
-    TENANTS: '/v1/system/tenants',
-    NODES: '/v1/tenant-management/nodes',
-    ACL_RULES: '/v1/tenant-management/acl-rules'
-  },
-
-  // ACL 规则管理 API
-  ACL: {
-    LIST: '/v1/tenant-management/acl-rules',
-    CREATE: '/v1/tenant-management/acl-rules',
-    GET: (id) => `/v1/tenant-management/acl-rules/${id}`,
-    UPDATE: (id) => `/v1/tenant-management/acl-rules/${id}`,
-    DELETE: (id) => `/v1/tenant-management/acl-rules/${id}`
+    LIST: '/v2/tenants',
+    DETAIL: (tenantId) => buildTenantPath(tenantId),
+    USERS: (tenantId) => buildTenantPath(tenantId, '/users'),
+    USER_DETAIL: (tenantId, userId) => buildTenantPath(tenantId, `/users/${userId}`),
+    TOKENS: (tenantId) => buildTenantPath(tenantId, '/tokens'),
+    TOKEN_DETAIL: (tenantId, tokenId) => buildTenantPath(tenantId, `/tokens/${tokenId}`),
+    NODES: (tenantId) => buildTenantPath(tenantId, '/nodes'),
+    NODE_DETAIL: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}`),
+    NODE_ROUTES: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}/routes`),
+    NODE_ROUTE: (tenantId, nodeId, routeId) => buildTenantPath(tenantId, `/nodes/${nodeId}/routes/${encodeURIComponent(routeId)}`),
+    NODE_ACLS: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}/security/acls`),
+    NODE_ACL: (tenantId, nodeId, ruleId) => buildTenantPath(tenantId, `/nodes/${nodeId}/security/acls/${ruleId}`),
+    NODE_QOS: (tenantId, nodeId, category) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos/${category}`),
+    NODE_QOS_RULE: (tenantId, nodeId, category, ruleId) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos/${category}/${ruleId}`),
+    AI_CHAT: (tenantId) => buildTenantPath(tenantId, '/ai/chat'),
+    AI_CONFIRM: (tenantId) => buildTenantPath(tenantId, '/ai/confirm')
   },
 
   // Agent 代理 API
   AGENT: {
-    COMMAND: (nodeId) => `/v1/agent/${nodeId}/command`,
-    STATUS: (nodeId) => `/v1/agent/${nodeId}/status`,
-    BATCH_COMMAND: '/v1/agents/command'
+    COMMAND: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}/agent/command`),
+    COMMANDS: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}/agent/commands`),
+    STATUS: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}/agent/status`),
+    BATCH_COMMAND: (tenantId) => buildTenantPath(tenantId, '/agents/command')
   },
 
   // 节点管理 API
   NODES: {
-    LIST: '/nodes',
-    DETAIL: (id) => `/nodes/${id}`,
+    LIST: (tenantId) => buildTenantPath(tenantId, '/nodes'),
+    DETAIL: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}`),
     SYNC: '/sync'
   },
 
@@ -90,31 +129,10 @@ export const API_ENDPOINTS = {
     TOKENS: '/tokens'
   },
 
-  // Token 管理 API（后端实际路径是 /tokens）
-  TOKENS: {
-    LIST: '/tokens',
-    CREATE: '/tokens',
-    DELETE: (id) => `/tokens/${id}`,
-    DETAIL: '/tokens/detail',
-    REVOKE: '/tokens/revoke'
-  },
-
   // 带宽管理 API
   BANDWIDTH: {
-    // 带宽限制
-    LIMITS: {
-      LIST: '/v1/bandwidth/limits',
-      CREATE: '/v1/bandwidth/limits',
-      DELETE: (id) => `/v1/bandwidth/limits/${id}`
-    },
-    // 策略管理
-    POLICIES: {
-      LIST: '/v1/bandwidth/policies',
-      CREATE: '/v1/bandwidth/policies',
-      GET: (id) => `/v1/bandwidth/policies/${id}`,
-      UPDATE: (id) => `/v1/bandwidth/policies/${id}`,
-      DELETE: (id) => `/v1/bandwidth/policies/${id}`
-    }
+    CATEGORY: (tenantId, nodeId, category) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos/${category}`),
+    RULE: (tenantId, nodeId, category, ruleId) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos/${category}/${ruleId}`)
   },
 
   // 网络策略 API（旧版）
@@ -128,14 +146,14 @@ export const API_ENDPOINTS = {
 
   // 监控 API
   MONITOR: {
-    STATS: '/v1/monitor/stats',
-    NODE_DETAIL: (id) => `/v1/monitor/node/${id}`
+    STATS: (tenantId) => buildTenantPath(tenantId, '/monitoring/stats'),
+    NODE_DETAIL: (tenantId, nodeId) => buildTenantPath(tenantId, `/monitoring/nodes/${nodeId}`)
   },
 
   // AI 聊天 API
   AI: {
-    CHAT: '/v1/ai/chat',
-    CONFIRM: '/v1/ai/confirm'
+    CHAT: (tenantId) => buildTenantPath(tenantId, '/ai/chat'),
+    CONFIRM: (tenantId) => buildTenantPath(tenantId, '/ai/confirm')
   },
 
   // 即时通讯 Webhook

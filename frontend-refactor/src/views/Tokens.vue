@@ -229,7 +229,7 @@ const createToken = () => {
 const viewToken = async (token) => {
   try {
     // Get detailed information about token
-    const tokenDetails = await useTokenApi.getTokenDetail(token.token)
+    const tokenDetails = await useTokenApi.getTokenDetail(token.id)
     currentToken.value = { ...token, ...tokenDetails }
   } catch (error) {
     // If detailed info fails, show basic token info

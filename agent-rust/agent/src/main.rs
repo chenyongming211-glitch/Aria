@@ -1,8 +1,10 @@
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::io::{BufReader, BufWriter, BufRead, Write};
+use std::net::UdpSocket;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use aya::{
@@ -36,6 +38,7 @@ mod system_optimization;
 
 const SOCKET_PATH: &str = "/run/aria-agent.sock";
 const BPF_FS_PATH: &str = "/sys/fs/bpf/aria";
+const DEFAULT_CONFIG_PATH: &str = "/etc/aria/agent.yaml";
 
 static RUNNING: AtomicBool = AtomicBool::new(true);
 
@@ -67,9 +70,21 @@ enum Commands {
         #[arg(long)]
         token: String,
         #[arg(long)]
+        hostname: Option<String>,
+        #[arg(long)]
         region: Option<String>,
         #[arg(long)]
         interface: Option<String>,
+        #[arg(long)]
+        ca_cert: Option<String>,
+        #[arg(long)]
+        client_cert: Option<String>,
+        #[arg(long)]
+        client_key: Option<String>,
+        #[arg(long)]
+        tls_server_name: Option<String>,
+        #[arg(long)]
+        config: Option<String>,
         #[arg(long)]
         advertise_routes: Option<String>,
     },
@@ -287,8 +302,32 @@ fn main() -> Result<()> {
                 .context("Failed to create tokio runtime")?;
             rt.block_on(run_unified_agent(&interface, &log_level, &metrics_addr, config.as_deref()))?;
         }
-        Commands::Init { server, token, region, interface, advertise_routes } => {
-            run_init(&server, &token, region.as_deref(), interface.as_deref(), advertise_routes.as_deref())?
+        Commands::Init {
+            server,
+            token,
+            hostname,
+            region,
+            interface,
+            ca_cert,
+            client_cert,
+            client_key,
+            tls_server_name,
+            config,
+            advertise_routes,
+        } => {
+            run_init(
+                &server,
+                &token,
+                hostname.as_deref(),
+                region.as_deref(),
+                interface.as_deref(),
+                ca_cert.as_deref(),
+                client_cert.as_deref(),
+                client_key.as_deref(),
+                tls_server_name.as_deref(),
+                config.as_deref(),
+                advertise_routes.as_deref(),
+            )?
         }
         Commands::Status => send_status_command()?,
         Commands::Peers => send_peers_command()?,
@@ -663,40 +702,252 @@ fn get_agent_status() -> Result<StatusInfo> {
     })
 }
 
-fn run_init(server: &str, token: &str, region: Option<&str>, interface: Option<&str>, advertise_routes: Option<&str>) -> Result<()> {
+fn run_init(
+    server: &str,
+    token: &str,
+    hostname: Option<&str>,
+    region: Option<&str>,
+    interface: Option<&str>,
+    ca_cert: Option<&str>,
+    client_cert: Option<&str>,
+    client_key: Option<&str>,
+    tls_server_name: Option<&str>,
+    config_path: Option<&str>,
+    advertise_routes: Option<&str>,
+) -> Result<()> {
     println!("Initializing Aria Agent...");
     println!("  Server: {}", server);
     println!("  Token: {}...", &token[..16.min(token.len())]);
     
     let iface = interface.unwrap_or("aria0");
-    let config = config::AgentConfig {
+    let hostname = hostname
+        .map(|value| value.to_string())
+        .or_else(detect_hostname)
+        .unwrap_or_else(|| "aria-agent".to_string());
+    let device_id = detect_machine_id().unwrap_or_else(|| generate_fallback_device_id(&hostname));
+    let (private_key, public_key) = wireguard::WireGuardManager::generate_keypair()
+        .context("Failed to generate WireGuard keypair")?;
+
+    let bootstrap = config::BootstrapConfig {
         controller_url: server.to_string(),
-        ca_cert: String::new(),
-        client_cert: String::new(),
-        client_key: String::new(),
-        device_id: None,
-        private_key: String::new(),
-        public_key: String::new(),
-        assigned_ip: None,
-        address: None,
+        ca_cert: ca_cert.unwrap_or_default().to_string(),
+        client_cert: client_cert.unwrap_or_default().to_string(),
+        client_key: client_key.unwrap_or_default().to_string(),
+        tls_server_name: tls_server_name.map(|value| value.to_string()),
+        enrollment_token: Some(token.to_string()),
         interface_name: iface.to_string(),
         listen_port: 51820,
         mtu: 1360,
         region: region.map(|s| s.to_string()),
         customer_id: None,
-        advertised_routes: advertise_routes.map(|s| s.split(',').map(|r| r.trim().to_string()).collect()),
-        hostname: None,
-        sync_interval: std::time::Duration::from_secs(5),
+        advertised_routes: parse_advertised_routes(advertise_routes),
+        hostname: Some(hostname),
+        sync_interval: Duration::from_secs(5),
         multi_tunnel: true,
     };
+    let state = config::AgentState {
+        device_id: Some(device_id),
+        private_key,
+        public_key,
+        ..Default::default()
+    };
 
-    let config_manager = config::ConfigManager::new("/etc/aria/agent.yaml");
-    config_manager.save(&config)?;
+    let config_path = config_path.unwrap_or(DEFAULT_CONFIG_PATH);
+    let config_manager = config::ConfigManager::new(config_path);
+    config_manager.save_bootstrap(&bootstrap)?;
+    config_manager.save_state(&state)?;
     
-    println!("Config saved to /etc/aria/agent.yaml");
+    println!("Bootstrap config saved to {}", config_manager.bootstrap_path());
+    println!("Runtime state saved to {}", config_manager.state_path());
     println!("Run 'aria-agent up' to start the agent.");
     
     Ok(())
+}
+
+fn parse_advertised_routes(advertise_routes: Option<&str>) -> Option<Vec<String>> {
+    advertise_routes.and_then(|routes| {
+        let routes = routes
+            .split(',')
+            .map(|route| route.trim())
+            .filter(|route| !route.is_empty())
+            .map(|route| route.to_string())
+            .collect::<Vec<_>>();
+        if routes.is_empty() {
+            None
+        } else {
+            Some(routes)
+        }
+    })
+}
+
+fn detect_hostname() -> Option<String> {
+    if let Ok(hostname) = std::env::var("HOSTNAME") {
+        let hostname = hostname.trim();
+        if !hostname.is_empty() {
+            return Some(hostname.to_string());
+        }
+    }
+
+    for path in ["/etc/hostname", "/proc/sys/kernel/hostname"] {
+        if let Ok(hostname) = std::fs::read_to_string(path) {
+            let hostname = hostname.trim();
+            if !hostname.is_empty() {
+                return Some(hostname.to_string());
+            }
+        }
+    }
+
+    if let Ok(output) = std::process::Command::new("hostname").output() {
+        if output.status.success() {
+            let hostname = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !hostname.is_empty() {
+                return Some(hostname);
+            }
+        }
+    }
+
+    None
+}
+
+fn detect_machine_id() -> Option<String> {
+    for path in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+        if let Ok(machine_id) = std::fs::read_to_string(path) {
+            let machine_id = machine_id.trim();
+            if !machine_id.is_empty() {
+                return Some(machine_id.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+fn generate_fallback_device_id(hostname: &str) -> String {
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    format!("{}-{}", hostname.replace(' ', "-"), ts)
+}
+
+fn detect_primary_ipv4() -> Option<String> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let local_addr = socket.local_addr().ok()?;
+    match local_addr.ip() {
+        std::net::IpAddr::V4(ip) if !ip.is_loopback() => Some(ip.to_string()),
+        _ => None,
+    }
+}
+
+fn ensure_local_identity(
+    bootstrap: &mut config::BootstrapConfig,
+    state: &mut config::AgentState,
+) -> Result<(bool, bool)> {
+    let mut bootstrap_changed = false;
+    let mut state_changed = false;
+
+    if state.private_key.trim().is_empty() {
+        let (private_key, public_key) = wireguard::WireGuardManager::generate_keypair()
+            .context("Failed to generate missing WireGuard keypair")?;
+        state.private_key = private_key;
+        state.public_key = public_key;
+        state_changed = true;
+    } else {
+        let derived_public_key = wireguard::WireGuardManager::derive_public_key(&state.private_key)
+            .context("Failed to derive public key from private key")?;
+        if state.public_key != derived_public_key {
+            state.public_key = derived_public_key;
+            state_changed = true;
+        }
+    }
+
+    if bootstrap.hostname.as_deref().map(|value| value.trim().is_empty()).unwrap_or(true) {
+        bootstrap.hostname = detect_hostname().or_else(|| Some("aria-agent".to_string()));
+        bootstrap_changed = true;
+    }
+
+    if state.device_id.as_deref().map(|value| value.trim().is_empty()).unwrap_or(true) {
+        let hostname = bootstrap.hostname.as_deref().unwrap_or("aria-agent");
+        state.device_id = Some(
+            detect_machine_id().unwrap_or_else(|| generate_fallback_device_id(hostname)),
+        );
+        state_changed = true;
+    }
+
+    if state.address.is_none() {
+        if let Some(assigned_ip) = state.assigned_ip.as_deref() {
+            if !assigned_ip.trim().is_empty() {
+                state.address = Some(format!("{}/32", assigned_ip));
+                state_changed = true;
+            }
+        }
+    }
+
+    Ok((bootstrap_changed, state_changed))
+}
+
+async fn bootstrap_register(
+    bootstrap: &config::BootstrapConfig,
+    state: &mut config::AgentState,
+) -> Result<bool> {
+    if state.assigned_ip.as_deref().map(|value| !value.trim().is_empty()).unwrap_or(false) {
+        return Ok(false);
+    }
+
+    let token = bootstrap
+        .enrollment_token
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .context("enrollment_token is required for first-time registration")?;
+
+    let hostname = bootstrap
+        .hostname
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "aria-agent".to_string());
+    let machine_id = state
+        .device_id
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| generate_fallback_device_id(&hostname));
+    let public_ip = detect_primary_ipv4().unwrap_or_default();
+    let endpoint = if public_ip.is_empty() {
+        tracing::warn!("Unable to detect primary IPv4 address, registering endpoint without host");
+        format!(":{}", bootstrap.listen_port)
+    } else {
+        format!("{}:{}", public_ip, bootstrap.listen_port)
+    };
+
+    let grpc_client = grpc_client::GrpcClient::new_with_options(
+        bootstrap.controller_url.clone(),
+        bootstrap.ca_cert.clone(),
+        bootstrap.client_cert.clone(),
+        bootstrap.client_key.clone(),
+        bootstrap.tls_server_name.clone(),
+    )
+    .await
+    .context("Failed to connect to Controller for bootstrap registration")?;
+
+    let assigned_ip = grpc_client
+        .register_with_details(
+            state.public_key.clone(),
+            endpoint,
+            public_ip,
+            hostname,
+            token,
+            bootstrap.region.clone().unwrap_or_else(|| "default".to_string()),
+            machine_id.clone(),
+            bootstrap.advertised_routes.clone().unwrap_or_default(),
+        )
+        .await
+        .context("Failed to register agent with Controller")?;
+
+    state.device_id = Some(machine_id);
+    state.assigned_ip = Some(assigned_ip.clone());
+    state.address = Some(format!("{}/32", assigned_ip));
+    state.last_sync_status = Some("registered".to_string());
+    Ok(true)
 }
 
 fn send_status_command() -> Result<()> {
@@ -923,15 +1174,38 @@ async fn run_unified_agent(
         .context("Failed to initialize metrics")?;
     info!("Metrics server started on {}", metrics_addr);
     
-    let config = if let Some(path) = config_path {
-        let config_manager = config::ConfigManager::new(path);
-        config_manager.load()?
-    } else {
-        let config_manager = config::ConfigManager::new("/etc/aria/agent.yaml");
-        config_manager.load_or_init(false)?.unwrap_or_default()
-    };
-    
-    let mut agent = unified_agent::UnifiedAgent::new(config, interface, log_handle).await?;
+    let config_path = config_path.unwrap_or(DEFAULT_CONFIG_PATH);
+    let config_manager = config::ConfigManager::new(config_path);
+    let (mut bootstrap, mut state) = config_manager
+        .load_parts_or_init(false)?
+        .context("Agent is not initialized. Run 'aria-agent init' first.")?;
+
+    let (bootstrap_changed, mut state_changed) = ensure_local_identity(&mut bootstrap, &mut state)?;
+
+    if state.assigned_ip.as_deref().map(|value| value.trim().is_empty()).unwrap_or(true) {
+        info!("No assigned IP found, starting bootstrap registration");
+        if bootstrap_register(&bootstrap, &mut state).await? {
+            state_changed = true;
+        }
+    }
+
+    if bootstrap_changed {
+        config_manager.save_bootstrap(&bootstrap)?;
+        info!("Bootstrap config saved to {}", config_manager.bootstrap_path());
+    }
+
+    if state_changed {
+        config_manager.save_state(&state)?;
+        info!("Runtime state saved to {}", config_manager.state_path());
+    }
+
+    let config = config::AgentConfig::from_parts(bootstrap, state);
+    let mut agent = unified_agent::UnifiedAgent::new(
+        config,
+        config_path.to_string(),
+        interface,
+        log_handle,
+    ).await?;
     agent.start().await
 }
 
@@ -939,4 +1213,3 @@ async fn run_unified_agent(
 
 // Unix Socket 服务器已集成到 unified_agent.rs 中的 UnifiedAgent
 // 使用 UnifiedAgent::start_unix_socket_server() 启动
-

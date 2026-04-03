@@ -26,7 +26,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"aria/internal/api/middleware"
-	"aria/internal/api/v1"
+	v2 "aria/internal/api/v2"
 	grpcserver "aria/internal/controller/grpc"
 	"aria/internal/im"
 	"aria/internal/service"
@@ -44,9 +44,8 @@ var controllerServeCmd = &cobra.Command{
 The controller provides:
   - /register   - Agent registration endpoint
   - /unregister - Agent unregistration endpoint
-  - /sync       - Peer list synchronization
-  - /nodes      - List all registered nodes
-  - /config     - Network configuration
+  - /api/v2/auth/*    - Authentication APIs
+  - /api/v2/tenants/* - Tenant-scoped management APIs
 
 Examples:
   aria controller serve
@@ -310,60 +309,23 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	// Start cleanup routine
 	controller.StartCleanupRoutine()
 
-	// Initialize monitor handlers
-	InitMonitorHandlers(logger, store)
-
 	// Initialize AI Simple handler (MVP) - 使用独立的 MVP 实现
 
 	// Initialize Bandwidth Management API with tenant awareness
-	bandwidthAPI, err := v1.NewBandwidthManagementAPI(store)
-	if err != nil {
-		logger.Error("Failed to initialize bandwidth management API: %v", err)
-	} else {
-		defer bandwidthAPI.Close()
-		logger.Info("Bandwidth management API initialized")
-	}
-
 	// Set up HTTP handlers
 	http.HandleFunc("/register", controller.HandleRegister)
 	http.HandleFunc("/unregister", controller.HandleUnregister)
-	http.HandleFunc("/nodes", controller.HandleListNodes) // 公开API，无需认证
-	http.HandleFunc("/config", controller.HandleConfig)
-	http.HandleFunc("/tokens", controller.HandleTokens)
-	http.HandleFunc("/tokens/revoke", controller.HandleTokenRevoke)
-	http.HandleFunc("/tokens/detail", controller.HandleTokenDetail)
 	http.HandleFunc("/network/manage", controller.HandleNetworkManage)
-	http.HandleFunc("/v1/monitor/stats", HandleMonitorStats)
-	http.HandleFunc("/v1/monitor/node/", HandleNodeDetail)
 	http.HandleFunc("/version", handleVersion)
 	http.HandleFunc("/api/v1/version", handleVersion)
 
-	// Bandwidth Management API handlers - now with tenant awareness
-	v1.SetupBandwidthManagementRoutes(http.DefaultServeMux, store)
-
-	// Initialize Tenant Management API (enhanced multi-tenant features)
-	v1.SetupTenantManagementRoutes(http.DefaultServeMux, store)
-
-	// Initialize Tenant API (basic tenant features) - required for frontend
-	v1.SetupTenantAPIRoutes(http.DefaultServeMux, store)
-
-	// Initialize Authentication API (JWT-based)
-	v1.SetupAuthRoutes(http.DefaultServeMux, store)
-
-	// Initialize Agent Proxy API (Controller -> Agent commands)
-	v1.SetupAgentProxyRoutes(http.DefaultServeMux, store)
+	// Initialize API v2 skeleton
+	v2.SetupRoutes(http.DefaultServeMux, store)
 
 	// AI handlers (Production)
 	if cfg.AI.Enabled {
 		// 初始化 AI Service (生产级架构，注入真实数据源)
 		aiService := service.NewAIService(store)
-
-		// 注册 AI Chat Handler
-		chatHandler := v1.NewChatHandler(aiService)
-
-		// 注册路由
-		http.HandleFunc("/v1/ai/chat", chatHandler.HandleChat)
-		http.HandleFunc("/v1/ai/confirm", chatHandler.HandleConfirm)
 
 		// DingTalk Integration
 		if cfg.DingTalk.Enabled {
@@ -387,21 +349,9 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	logger.Info("Available endpoints:")
 	logger.Info("  POST /register          - Register new node (requires token)")
 	logger.Info("  POST /unregister        - Unregister node")
-	logger.Info("  GET  /nodes             - List all nodes")
-	logger.Info("  GET  /config            - Get network config")
-	logger.Info("  POST /config            - Update network config")
-	logger.Info("  GET  /tokens            - List tokens")
-	logger.Info("  POST /tokens            - Create token")
-	logger.Info("  POST /tokens/revoke     - Revoke token")
-	logger.Info("  GET  /tokens/detail     - Get token details and usage")
 	logger.Info("  POST /network/manage    - Manage advertised routes")
-	logger.Info("  GET  /v1/monitor/stats  - Get monitoring statistics")
-	logger.Info("  GET  /v1/monitor/node/{host_id} - Get node detail")
-	if cfg.AI.Enabled {
-		logger.Info("  POST /v1/ai/chat       - AI chat")
-		logger.Info("  POST /v1/ai/confirm    - Confirm and execute AI tool")
-		logger.Info("  GET  /v1/ai/history    - Get chat history")
-	}
+	logger.Info("  /api/v2/auth/*          - JWT authentication APIs")
+	logger.Info("  /api/v2/tenants/*       - Tenant-scoped management plane APIs")
 	logger.Info("========================================")
 	logger.Info("Controller ready")
 	logger.Info("========================================")
@@ -571,6 +521,7 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	// 检查是否为已注册节点（重新注册以同步配置）
 	existingNode, _ := c.store.GetNode(req.PublicKey)
 	isReRegistration := (existingNode != nil)
+	var requestedTenantID uuid.UUID
 
 	// 已注册节点可以无 token 重新注册
 	if !isReRegistration {
@@ -604,8 +555,31 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 			tokenPreview = tokenPreview[:12]
 		}
 		c.logger.Debug("Token validated: %s (tag: %s)", tokenPreview, tkn.Tag)
+
+		resolvedTenantID, err := c.store.GetTenantIDByToken(req.Token)
+		if err != nil {
+			c.logger.Error("Failed to get tenant ID by token: %v", err)
+			http.Error(w, "Failed to get tenant ID from token", http.StatusInternalServerError)
+			return
+		}
+		requestedTenantID = resolvedTenantID
 	} else {
 		c.logger.Debug("Re-registration from existing node: %s", req.PublicKey[:8])
+		if req.Token != "" {
+			resolvedTenantID, err := c.store.GetTenantIDByToken(req.Token)
+			if err != nil {
+				c.logger.Error("Failed to get tenant ID by token: %v", err)
+				http.Error(w, "Failed to get tenant ID from token", http.StatusInternalServerError)
+				return
+			}
+			requestedTenantID = resolvedTenantID
+			if requestedTenantID != existingNode.TenantID {
+				c.logger.Warn("Registration rejected: node %s attempted to switch tenant from %s to %s",
+					req.PublicKey[:8], existingNode.TenantID, requestedTenantID)
+				http.Error(w, "Node tenant ownership is immutable", http.StatusForbidden)
+				return
+			}
+		}
 	}
 
 	// ========== Normal Registration Flow ==========
@@ -640,6 +614,10 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		allNodes, _ := c.store.GetAllNodes()
 		for _, node := range allNodes {
 			if node.Hostname == req.Hostname {
+				if requestedTenantID != uuid.Nil && node.TenantID != requestedTenantID {
+					c.logger.Warn("Skipping hostname reuse for %s: existing node belongs to another tenant", req.Hostname)
+					continue
+				}
 				c.logger.Info("Found existing node with same hostname: %s, reusing IP: %s",
 					req.Hostname, node.AssignedIP)
 				assignedIP = node.AssignedIP
@@ -679,25 +657,17 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 
 	// Get tenant ID from token
 	var tenantID uuid.UUID
-	if req.Token != "" {
-		tenantID, err = c.store.GetTenantIDByToken(req.Token)
-		if err != nil {
-			c.logger.Error("Failed to get tenant ID by token: %v", err)
-			http.Error(w, "Failed to get tenant ID from token", http.StatusInternalServerError)
-			return
-		}
+	if existingNode != nil {
+		tenantID = existingNode.TenantID
+	} else if requestedTenantID != uuid.Nil {
+		tenantID = requestedTenantID
 	} else {
-		// For re-registration, preserve the existing tenant ID
-		if existingNode != nil {
-			tenantID = existingNode.TenantID
-		} else {
-			// Default to system tenant if no token provided (should not happen)
-			tenantID, err = c.store.GetOrCreateTenant("default")
-			if err != nil {
-				c.logger.Error("Failed to get default tenant: %v", err)
-				http.Error(w, "Failed to assign tenant", http.StatusInternalServerError)
-				return
-			}
+		// Default to system tenant if no token provided (should not happen)
+		tenantID, err = c.store.GetOrCreateTenant("default")
+		if err != nil {
+			c.logger.Error("Failed to get default tenant: %v", err)
+			http.Error(w, "Failed to assign tenant", http.StatusInternalServerError)
+			return
 		}
 	}
 
@@ -729,9 +699,11 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ========== Consume Token ==========
-	if err := c.tokenValidator.ConsumeToken(req.Token, req.PublicKey); err != nil {
-		c.logger.Warn("Failed to consume token: %v", err)
-		// Don't fail the registration, just log
+	if req.Token != "" && !isReRegistration {
+		if err := c.tokenValidator.ConsumeToken(req.Token, req.PublicKey); err != nil {
+			c.logger.Warn("Failed to consume token: %v", err)
+			// Don't fail the registration, just log
+		}
 	}
 
 	c.syncNode(&req, assignedIP, w)
@@ -1752,6 +1724,7 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 	// Token Validation
 	existingNode, _ := c.store.GetNode(req.PublicKey)
 	isReRegistration := (existingNode != nil)
+	var requestedTenantID uuid.UUID
 
 	if !isReRegistration {
 		if req.Token == "" {
@@ -1763,6 +1736,19 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 			return "", fmt.Errorf("invalid token: %w", err)
 		}
 		c.logger.Debug("Token validated: %s (tag: %s)", tkn.Token[:12], tkn.Tag)
+		requestedTenantID, err = c.store.GetTenantIDByToken(req.Token)
+		if err != nil {
+			return "", fmt.Errorf("failed to get tenant ID by token: %w", err)
+		}
+	} else if req.Token != "" {
+		var err error
+		requestedTenantID, err = c.store.GetTenantIDByToken(req.Token)
+		if err != nil {
+			return "", fmt.Errorf("failed to get tenant ID by token: %w", err)
+		}
+		if requestedTenantID != existingNode.TenantID {
+			return "", fmt.Errorf("node tenant ownership is immutable")
+		}
 	}
 
 	// Use provided public IP or empty
@@ -1786,6 +1772,10 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 		allNodes, _ := c.store.GetAllNodes()
 		for _, node := range allNodes {
 			if node.Hostname == req.Hostname {
+				if requestedTenantID != uuid.Nil && node.TenantID != requestedTenantID {
+					c.logger.Warn("Skipping hostname reuse for %s: existing node belongs to another tenant", req.Hostname)
+					continue
+				}
 				c.logger.Info("Found existing node with same hostname: %s, reusing IP: %s",
 					req.Hostname, node.AssignedIP)
 				assignedIP = node.AssignedIP
@@ -1813,16 +1803,10 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 
 	// Extract tenant ID from token
 	var tenantID uuid.UUID
-	if req.Token != "" {
-		var err error
-		tenantID, err = c.store.GetTenantIDByToken(req.Token)
-		if err != nil {
-			c.logger.Warn("Failed to get tenant ID by token: %v, using default", err)
-			tenantID, _ = c.store.GetOrCreateTenant("default")
-		}
-	} else if existingNode != nil {
-		// For re-registration, preserve existing tenant ID
+	if existingNode != nil {
 		tenantID = existingNode.TenantID
+	} else if requestedTenantID != uuid.Nil {
+		tenantID = requestedTenantID
 	} else {
 		// Default to system tenant
 		tenantID, _ = c.store.GetOrCreateTenant("default")

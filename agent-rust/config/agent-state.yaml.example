@@ -1,0 +1,14 @@
+# Aria Agent 运行时状态示例
+#
+# 该文件由 Agent 自动维护，不建议手工编辑。
+# 默认路径: /var/lib/aria/agent-state.yaml
+
+node_id: ""
+device_id: "machine-id-or-generated-id"
+private_key: "<generated-private-key>"
+public_key: "<generated-public-key>"
+assigned_ip: "100.64.0.10"
+address: "100.64.0.10/32"
+current_credential: ""
+last_applied_version: ""
+last_sync_status: "registered"

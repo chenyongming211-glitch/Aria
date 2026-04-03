@@ -3,24 +3,23 @@
 # Controller 地址
 controller_url: "https://controller.example.com:50051"
 
-# mTLS 证书路径
-ca_cert: "/etc/aria/certs/ca.crt"
-client_cert: "/etc/aria/certs/client.crt"
-client_key: "/etc/aria/certs/client.key"
+# 首次接入凭据（仅首次注册使用）
+enrollment_token: "aria-enroll-token"
 
-# WireGuard 配置
+# TLS 配置（自助接入时可只提供 ca_cert；托管模式可继续使用 mTLS）
+ca_cert: "/etc/aria/certs/ca.crt"
+client_cert: ""
+client_key: ""
+tls_server_name: "controller.example.com"
+
+# WireGuard / 接口配置
 interface_name: "aria0"
 listen_port: 51820
 mtu: 1360
 
-# 节点标识
-public_key: ""  # 由 aria-agent init 生成
-private_key: "" # 由 aria-agent init 生成
+# 节点展示属性
 hostname: "node-1"
 region: "cn-east"
-
-# VPN IP 地址（由 Controller 分配）
-assigned_ip: "100.64.0.1"
 
 # 路由广播（可选）
 advertised_routes:
@@ -29,3 +28,7 @@ advertised_routes:
 
 # 同步间隔（秒）
 sync_interval: 5
+
+# 运行时状态会由 Agent 自动写入独立的 state 文件：
+# 默认路径: /var/lib/aria/agent-state.yaml
+# 包含 device_id / WireGuard 密钥 / assigned_ip / address 等字段

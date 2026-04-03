@@ -53,6 +53,7 @@ func (s *ControllerServer) Register(ctx context.Context, req *agentpb.RegisterRe
 		"runtime_mode":      req.RuntimeMode,
 		"kernel_version":    req.KernelVersion,
 		"has_aesni":         req.HasAesni,
+		"machine_id":        req.MachineId,
 	}
 
 	// 调用 REST API handler
@@ -132,13 +133,20 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 		qosRules = []*agentpb.QoSRule{} // 空列表
 	}
 
+	blacklistRules, err := s.getBlacklistRules(ctx, req.PublicKey)
+	if err != nil {
+		fmt.Printf("[WARN] Failed to get blacklist rules: %v\n", err)
+		blacklistRules = []*agentpb.BlacklistRule{}
+	}
+
 	return &agentpb.SyncResponse{
 		Peers:              peers,
 		AssignedIp:         assignedIP,
 		LastUpdate:         time.Now().Unix(),
 		AclRules:           aclRules,
 		MetricsPushGateway: metricsGateway,
-		QosRules:           qosRules, // 新增
+		QosRules:           qosRules,
+		BlacklistRules:     blacklistRules,
 	}, nil
 }
 
@@ -287,60 +295,58 @@ func getUint32(m map[string]interface{}, key string) uint32 {
 // getQoSRules 查询适用于该 Agent 的 QoS 规则
 func (s *ControllerServer) getQoSRules(ctx context.Context, publicKey string) ([]*agentpb.QoSRule, error) {
 	var qosRules []*agentpb.QoSRule
+	_ = ctx
 
 	// 防御性编程：确保 store 存在
 	if s.store == nil {
 		return qosRules, nil // 返回空列表
 	}
 
-	// 查询 tenant_id
-	var tenantID string
-	err := s.store.DB().QueryRowContext(ctx,
-		"SELECT tenant_id FROM nodes WHERE public_key = $1",
-		publicKey,
-	).Scan(&tenantID)
-
+	rules, err := s.store.GetNodeQoSRulesByPublicKey(publicKey)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// 节点不存在，返回空列表
 			return qosRules, nil
 		}
-		// 记录错误但继续
-		fmt.Printf("[WARN] Failed to query tenant_id for %s: %v\n", publicKey, err)
 		return qosRules, nil
 	}
 
-	// 查询 QoS 规则
-	query := `
-		SELECT src_ip, dst_ip, src_port, dst_port, protocol, bandwidth_mbps
-		FROM bandwidth_limits
-		WHERE tenant_id = $1
-		ORDER BY created_at DESC
-	`
-	rows, err := s.store.DB().QueryContext(ctx, query, tenantID)
-	if err != nil {
-		fmt.Printf("[WARN] Failed to query QoS rules: %v\n", err)
-		return qosRules, nil
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var rule agentpb.QoSRule
-		err := rows.Scan(
-			&rule.SrcIp,
-			&rule.DstIp,
-			&rule.SrcPort,
-			&rule.DstPort,
-			&rule.Protocol,
-			&rule.BandwidthMbps,
-		)
-		if err != nil {
-			fmt.Printf("[WARN] Failed to scan QoS rule: %v\n", err)
-			continue
-		}
-		qosRules = append(qosRules, &rule)
+	for _, rule := range rules {
+		qosRules = append(qosRules, &agentpb.QoSRule{
+			SrcIp:         rule.SrcCIDR,
+			DstIp:         rule.DstCIDR,
+			SrcPort:       uint32(rule.SrcPort),
+			DstPort:       uint32(rule.DstPort),
+			Protocol:      uint32(rule.Protocol),
+			BandwidthMbps: uint64(rule.BandwidthMbps),
+		})
 	}
 
-	fmt.Printf("[INFO] Retrieved %d QoS rules for tenant %s\n", len(qosRules), tenantID)
 	return qosRules, nil
+}
+
+func (s *ControllerServer) getBlacklistRules(ctx context.Context, publicKey string) ([]*agentpb.BlacklistRule, error) {
+	var blacklistRules []*agentpb.BlacklistRule
+	_ = ctx
+
+	if s.store == nil {
+		return blacklistRules, nil
+	}
+
+	rules, err := s.store.GetNodeBlacklistRulesByPublicKey(publicKey)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return blacklistRules, nil
+		}
+		return blacklistRules, nil
+	}
+
+	for _, rule := range rules {
+		blacklistRules = append(blacklistRules, &agentpb.BlacklistRule{
+			Scope: rule.Scope,
+			Cidr:  rule.CIDR,
+			Port:  uint32(rule.Port),
+		})
+	}
+
+	return blacklistRules, nil
 }

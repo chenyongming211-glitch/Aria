@@ -160,8 +160,35 @@ func (s *Storage) UpdateAgentCommandStatus(commandID, status, message string, re
 		WHERE id = $1
 	`
 
-	_, err = s.db.Exec(query, commandID, status, message, resultJSON)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(query, commandID, status, message, resultJSON); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`
+		UPDATE policy_deliveries
+		SET command_status = $2,
+		    last_error = CASE
+		        WHEN $2 = 'failed' THEN $3
+		        WHEN $2 = 'completed' THEN ''
+		        ELSE last_error
+		    END,
+		    updated_at = NOW(),
+		    completed_at = CASE
+		        WHEN $2 IN ('completed', 'failed') THEN NOW()
+		        ELSE completed_at
+		    END
+		WHERE command_id = $1
+	`, commandID, status, message); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (s *Storage) CountIncompleteAgentCommands(nodePublicKey string) (int, error) {
@@ -194,6 +221,61 @@ func (s *Storage) GetLastAgentCommandID(nodePublicKey string) (string, error) {
 		return "", nil
 	}
 	return commandID, err
+}
+
+func (s *Storage) GetLastAgentCommand(nodePublicKey string) (*AgentCommand, error) {
+	row := s.db.QueryRow(`
+		SELECT id, node_public_key, command, params, status, COALESCE(message, ''), priority, timeout_seconds,
+		       created_at, updated_at, sent_at, acknowledged_at, completed_at, result
+		FROM agent_commands
+		WHERE node_public_key = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, nodePublicKey)
+
+	cmd, err := scanAgentCommandRow(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return cmd, nil
+}
+
+func (s *Storage) ListRecentAgentCommands(nodePublicKey string, limit int) ([]*AgentCommand, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	rows, err := s.db.Query(`
+		SELECT id, node_public_key, command, params, status, COALESCE(message, ''), priority, timeout_seconds,
+		       created_at, updated_at, sent_at, acknowledged_at, completed_at, result
+		FROM agent_commands
+		WHERE node_public_key = $1
+		ORDER BY created_at DESC
+		LIMIT $2
+	`, nodePublicKey, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	commands := make([]*AgentCommand, 0, limit)
+	for rows.Next() {
+		cmd, err := scanAgentCommandRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		commands = append(commands, cmd)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return commands, nil
 }
 
 func scanAgentCommandRow(row interface {

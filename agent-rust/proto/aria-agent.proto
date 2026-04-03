@@ -62,6 +62,7 @@ message RegisterRequest {
   string runtime_mode = 11;           // "kernel" or "ebpf"
   string kernel_version = 12;         // 内核版本
   bool has_aesni = 13;                // 是否支持 AES-NI
+  string machine_id = 14;             // 机器稳定标识
 }
 
 message RegisterResponse {
@@ -82,8 +83,8 @@ message SyncResponse {
   repeated ACLRule acl_rules = 4;     // 防火墙 ACL 规则
   string metrics_push_gateway = 5;    // Prometheus Push Gateway URL
   
-  // 未来扩展字段
-  repeated QoSRule qos_rules = 6;     // QoS 限速规则（预留）
+  repeated QoSRule qos_rules = 6;            // QoS 限速规则
+  repeated BlacklistRule blacklist_rules = 7; // 黑名单规则
 }
 
 message PeerInfo {
@@ -116,12 +117,19 @@ message QoSRule {
   uint64 bandwidth_mbps = 6;          // 带宽限制
 }
 
+message BlacklistRule {
+  string scope = 1;                   // src, dst, ports
+  string cidr = 2;                    // CIDR for src/dst blacklist
+  uint32 port = 3;                    // Port for port blacklist
+}
+
 // ============ 配置下发（推模式，预留） ============
 
 message SyncConfigRequest {
   repeated PeerConfig peers = 1;      // Peer 配置
   repeated ACLRule acl_rules = 2;     // ACL 规则
   repeated QoSRule qos_rules = 3;     // QoS 规则
+  repeated BlacklistRule blacklist_rules = 4; // 黑名单规则
 }
 
 message SyncConfigResponse {

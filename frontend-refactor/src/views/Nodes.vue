@@ -113,6 +113,14 @@
             </span>
           </template>
         </el-table-column>
+        <el-table-column label="Config" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" :type="getConfigTagType(row.configurationStatus)">
+              {{ formatConfigStatus(row.configurationStatus) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="pendingCmds" label="Pending" width="90" />
         <el-table-column prop="lastSeen" label="Last Seen" width="150" />
         <el-table-column label="Actions" width="180" fixed="right">
           <template #default="{ row }">
@@ -173,6 +181,18 @@
       class="node-detail-dialog"
     >
       <div v-if="selectedNode" class="node-detail-content">
+        <div class="detail-toolbar">
+          <el-button size="small" type="primary" :loading="commandLoading" @click="runQuickCommand('sync')">
+            Sync
+          </el-button>
+          <el-button size="small" :loading="commandLoading" @click="runQuickCommand('health_check')">
+            Health Check
+          </el-button>
+          <el-button size="small" :loading="commandLoading" @click="runQuickCommand('config_reload')">
+            Reload Config
+          </el-button>
+        </div>
+
         <!-- 基本信息 -->
         <div class="detail-section">
           <h4 class="section-title">
@@ -218,6 +238,24 @@
             </el-descriptions-item>
             <el-descriptions-item label="Uptime" :span="2">
               {{ selectedNode.uptime }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Config Status">
+              <el-tag size="small" :type="getConfigTagType(selectedNode.configurationStatus)">
+                {{ formatConfigStatus(selectedNode.configurationStatus) }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="Pending Commands">
+              {{ selectedNode.pendingCmds }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Last Sync">
+              {{ selectedNode.lastSyncAt }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Last Command Status">
+              <span v-if="selectedNode.lastCommandStatus">{{ selectedNode.lastCommandStatus }}</span>
+              <span v-else>N/A</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="Last Command Error" :span="2">
+              {{ selectedNode.lastCommandError || 'N/A' }}
             </el-descriptions-item>
           </el-descriptions>
         </div>
@@ -278,6 +316,27 @@
             </el-tag>
           </div>
         </div>
+
+        <div class="detail-section">
+          <h4 class="section-title">
+            <el-icon><Timer /></el-icon>
+            Recent Commands
+          </h4>
+          <el-table
+            :data="selectedNode.recentCommands || []"
+            size="small"
+            empty-text="No commands yet"
+          >
+            <el-table-column prop="command" label="Command" min-width="120" />
+            <el-table-column prop="status" label="Status" width="120" />
+            <el-table-column prop="message" label="Message" min-width="220" />
+            <el-table-column label="Created" width="180">
+              <template #default="{ row }">
+                {{ formatCommandTime(row.created_at) }}
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
       </div>
     </el-dialog>
   </div>
@@ -305,6 +364,7 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import useNodeStore from '../stores/node'
+import { useAgentProxyApi } from '../composables/useAgentProxyApi'
 
 // 使用节点 store
 const nodeStore = useNodeStore()
@@ -318,6 +378,7 @@ const currentPage = ref(1)
 const pageSize = ref(10)
 const detailDialogVisible = ref(false)
 const selectedNode = ref(null)
+const commandLoading = ref(false)
 
 // 计算属性
 const onlineCount = computed(() => nodes.value.filter(n => n.status === 'online').length)
@@ -355,9 +416,14 @@ const addNode = () => {
   })
 }
 
-const viewNodeDetails = (node) => {
-  selectedNode.value = node
-  detailDialogVisible.value = true
+const viewNodeDetails = async (node) => {
+  try {
+    selectedNode.value = await nodeStore.loadNodeDetail(node.id)
+    detailDialogVisible.value = true
+  } catch (error) {
+    console.error('Failed to load node detail:', error)
+    ElMessage.error('Failed to load node details')
+  }
 }
 
 const editNode = (node) => {
@@ -385,6 +451,63 @@ const handleCurrentChange = (page) => {
   currentPage.value = page
 }
 
+const reloadSelectedNode = async () => {
+  if (!selectedNode.value?.id) return
+  selectedNode.value = await nodeStore.loadNodeDetail(selectedNode.value.id)
+}
+
+const runQuickCommand = async (command) => {
+  if (!selectedNode.value?.id) return
+
+  commandLoading.value = true
+  try {
+    await useAgentProxyApi.sendAgentCommand(selectedNode.value.id, {
+      command,
+      params: {},
+      timeout: 30
+    })
+    ElMessage.success(`${command} queued`)
+    await reloadSelectedNode()
+  } catch (error) {
+    console.error(`Failed to queue ${command}:`, error)
+    ElMessage.error(`Failed to queue ${command}`)
+  } finally {
+    commandLoading.value = false
+  }
+}
+
+const formatConfigStatus = (status) => {
+  const map = {
+    applied: 'Applied',
+    pending: 'Pending',
+    in_progress: 'In Progress',
+    error: 'Error',
+    idle: 'Idle'
+  }
+  return map[status] || status || 'Unknown'
+}
+
+const getConfigTagType = (status) => {
+  switch (status) {
+    case 'applied':
+      return 'success'
+    case 'pending':
+    case 'in_progress':
+      return 'warning'
+    case 'error':
+      return 'danger'
+    default:
+      return 'info'
+  }
+}
+
+const formatCommandTime = (value) => {
+  if (!value) return 'N/A'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'N/A'
+  return date.toLocaleString()
+}
+
 onMounted(() => {
   refreshNodes()
 })
@@ -398,6 +521,13 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+.detail-toolbar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
 }
 
 /* ============================================

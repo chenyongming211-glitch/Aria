@@ -113,6 +113,7 @@ const (
 	CodeListTenantsFailed  = "LIST_TENANTS_FAILED"
 	CodeScanTenantFailed   = "SCAN_TENANT_FAILED"
 	CodeGetNodesFailed     = "GET_NODES_FAILED"
+	CodeNodeNotFound       = "NODE_NOT_FOUND"
 	CodeUpdateNodeFailed   = "UPDATE_NODE_FAILED"
 	CodeScanNodeFailed     = "SCAN_NODE_FAILED"
 

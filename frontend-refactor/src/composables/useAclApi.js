@@ -1,45 +1,114 @@
 import api from './useApi'
+import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
+
+const aclRuleNodeMap = new Map()
+
+function applyFilters(rules, filters = {}) {
+  return rules.filter((rule) => {
+    if (filters.name && !String(rule.name || '').toLowerCase().includes(String(filters.name).toLowerCase())) {
+      return false
+    }
+    if (filters.action && rule.action !== filters.action) {
+      return false
+    }
+    if (filters.enabled !== undefined && rule.enabled !== filters.enabled) {
+      return false
+    }
+    if (filters.priority && Number(rule.priority) !== Number(filters.priority)) {
+      return false
+    }
+    if (filters.node_id && rule.node_id !== filters.node_id) {
+      return false
+    }
+    return true
+  })
+}
+
+function normalizeRulePayload(rule) {
+  const payload = {
+    name: rule.name,
+    src_net: rule.src_net,
+    dst_net: rule.dst_net,
+    protocol: Number(rule.protocol || 0),
+    min_port: Number(rule.min_port || 0),
+    max_port: Number(rule.max_port || 65535),
+    action: rule.action,
+    enabled: rule.enabled !== false,
+    priority: Number(rule.priority || 100),
+    description: rule.description || ''
+  }
+
+  if (rule.src_node) {
+    payload.src_node = rule.src_node
+  }
+  if (rule.dst_node) {
+    payload.dst_node = rule.dst_node
+  }
+
+  return payload
+}
+
+function normalizeDeliveryFields(rule, nodeState = {}) {
+  return {
+    policy_status: rule.policy_status || nodeState.configuration_status || 'idle',
+    pending_cmds: typeof rule.pending_cmds === 'number' ? rule.pending_cmds : (nodeState.pending_cmds || 0),
+    last_command_error: rule.last_delivery_error || rule.last_command_error || nodeState.last_command_error || '',
+    last_sync_at: rule.last_delivery_at || rule.last_sync_at || nodeState.last_sync_at || null,
+    last_delivery: rule.last_delivery || null,
+    delivery_history: Array.isArray(rule.delivery_history) ? rule.delivery_history : [],
+    last_delivery_command_id: rule.last_delivery_command_id || rule.last_delivery?.command_id || '',
+    last_delivery_action: rule.last_delivery_action || rule.last_delivery?.action || ''
+  }
+}
 
 /**
  * ACL 规则管理 API
  */
 export const useAclApi = {
-  /**
-   * 获取 ACL 规则列表（支持分页和过滤）
-   * @param {Object} filters - 过滤参数
-   * @returns {Promise<Array>} ACL 规则列表
-   */
   getACLRules: async (filters = {}) => {
     try {
-      const queryParams = new URLSearchParams()
-      
-      if (filters.name) queryParams.append('name', filters.name)
-      if (filters.action) queryParams.append('action', filters.action)
-      if (filters.enabled !== undefined) queryParams.append('enabled', filters.enabled)
-      if (filters.priority) queryParams.append('priority', filters.priority)
-      if (filters.page) queryParams.append('page', filters.page)
-      if (filters.page_size) queryParams.append('page_size', filters.page_size)
-      
-      const url = queryParams.toString()
-        ? `/v1/tenant-management/acl-rules?${queryParams}`
-        : '/v1/tenant-management/acl-rules'
-      
-      const response = await api.get(url)
-      return response.data?.data || response.data || []
+      const tenantId = requireCurrentTenantId()
+      const nodesResponse = await api.get(API_ENDPOINTS.TENANT.NODES(tenantId))
+      const nodes = nodesResponse.data?.data || nodesResponse.data || []
+      const nodeStateMap = new Map(nodes.map((node) => [node.id, node]))
+
+      const ruleGroups = await Promise.all(
+        nodes.map(async (node) => {
+          const response = await api.get(API_ENDPOINTS.TENANT.NODE_ACLS(tenantId, node.id))
+          const rules = response.data?.data || response.data || []
+
+          return rules.map((rule) => {
+            const nodeState = nodeStateMap.get(node.id) || {}
+            const normalizedRule = {
+              ...rule,
+              node_id: node.id,
+              node_name: node.hostname || node.public_key || node.id,
+              ...normalizeDeliveryFields(rule, nodeState)
+            }
+            aclRuleNodeMap.set(normalizedRule.id, { nodeId: node.id, rule: normalizedRule })
+            return normalizedRule
+          })
+        })
+      )
+
+      return applyFilters(ruleGroups.flat(), filters)
     } catch (error) {
       console.error('获取 ACL 规则失败:', error)
       throw error
     }
   },
 
-  /**
-   * 创建 ACL 规则
-   * @param {Object} rule - ACL 规则对象
-   * @returns {Promise<Object>} 创建的规则
-   */
   createACLRule: async (rule) => {
     try {
-      const response = await api.post('/v1/tenant-management/acl-rules', rule)
+      const tenantId = requireCurrentTenantId()
+      if (!rule.node_id) {
+        throw new Error('node_id is required for ACL rule creation')
+      }
+
+      const response = await api.post(
+        API_ENDPOINTS.TENANT.NODE_ACLS(tenantId, rule.node_id),
+        normalizeRulePayload(rule)
+      )
       return response.data?.data || response.data
     } catch (error) {
       console.error('创建 ACL 规则失败:', error)
@@ -47,15 +116,21 @@ export const useAclApi = {
     }
   },
 
-  /**
-   * 更新 ACL 规则
-   * @param {number} ruleId - 规则 ID
-   * @param {Object} rule - ACL 规则对象
-   * @returns {Promise<Object>} 更新后的规则
-   */
   updateACLRule: async (ruleId, rule) => {
     try {
-      const response = await api.put(`/v1/tenant-management/acl-rules/${ruleId}`, rule)
+      const tenantId = requireCurrentTenantId()
+      const mapping = aclRuleNodeMap.get(ruleId)
+      const nodeId = rule.node_id || mapping?.nodeId
+
+      if (!nodeId) {
+        throw new Error('node_id is required for ACL rule update')
+      }
+
+      await api.delete(API_ENDPOINTS.TENANT.NODE_ACL(tenantId, nodeId, ruleId))
+      const response = await api.post(
+        API_ENDPOINTS.TENANT.NODE_ACLS(tenantId, nodeId),
+        normalizeRulePayload({ ...mapping?.rule, ...rule, node_id: nodeId })
+      )
       return response.data?.data || response.data
     } catch (error) {
       console.error('更新 ACL 规则失败:', error)
@@ -63,14 +138,18 @@ export const useAclApi = {
     }
   },
 
-  /**
-   * 删除 ACL 规则
-   * @param {number} ruleId - 规则 ID
-   * @returns {Promise<Object>} 删除结果
-   */
-  deleteACLRule: async (ruleId) => {
+  deleteACLRule: async (ruleId, nodeId) => {
     try {
-      const response = await api.delete(`/v1/tenant-management/acl-rules/${ruleId}`)
+      const tenantId = requireCurrentTenantId()
+      const mapping = aclRuleNodeMap.get(ruleId)
+      const resolvedNodeId = nodeId || mapping?.nodeId
+
+      if (!resolvedNodeId) {
+        throw new Error('node_id is required for ACL rule deletion')
+      }
+
+      const response = await api.delete(API_ENDPOINTS.TENANT.NODE_ACL(tenantId, resolvedNodeId, ruleId))
+      aclRuleNodeMap.delete(ruleId)
       return response.data?.data || response.data
     } catch (error) {
       console.error('删除 ACL 规则失败:', error)

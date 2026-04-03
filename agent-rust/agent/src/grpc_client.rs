@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
@@ -40,6 +41,55 @@ pub struct GrpcClient {
 }
 
 impl GrpcClient {
+    pub async fn new_with_options(
+        controller_url: String,
+        ca_cert_path: String,
+        client_cert_path: String,
+        client_key_path: String,
+        tls_server_name: Option<String>,
+    ) -> Result<Self> {
+        let uses_tls = controller_url.starts_with("https://");
+        let mut endpoint = Endpoint::from_shared(controller_url.clone())?;
+
+        if uses_tls {
+            let mut tls_config = ClientTlsConfig::new();
+
+            if let Some(ca_cert) = read_optional_file(&ca_cert_path)? {
+                tls_config = tls_config.ca_certificate(tonic::transport::Certificate::from_pem(ca_cert));
+            }
+
+            let client_cert = read_optional_file(&client_cert_path)?;
+            let client_key = read_optional_file(&client_key_path)?;
+            match (client_cert, client_key) {
+                (Some(cert), Some(key)) => {
+                    tls_config = tls_config.identity(tonic::transport::Identity::from_pem(cert, key));
+                }
+                (None, None) => {}
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "client_cert and client_key must be provided together for mTLS"
+                    ));
+                }
+            }
+
+            let domain_name = tls_server_name
+                .or_else(|| infer_tls_server_name(&controller_url))
+                .unwrap_or_else(|| "localhost".to_string());
+            tracing::info!(
+                "Connecting to Controller at {} with TLS (domain: {})",
+                controller_url,
+                domain_name
+            );
+            tls_config = tls_config.domain_name(domain_name);
+            endpoint = endpoint.tls_config(tls_config)?;
+        } else {
+            tracing::info!("Connecting to Controller at {} without TLS", controller_url);
+        }
+
+        let channel = endpoint.connect().await?;
+        Ok(Self { channel })
+    }
+
     /// 创建新的 gRPC 客户端（mTLS：双向认证）
     pub async fn new(
         controller_url: String,
@@ -47,31 +97,14 @@ impl GrpcClient {
         client_cert_path: String,
         client_key_path: String,
     ) -> Result<Self> {
-        // 加载证书
-        let ca_cert = fs::read_to_string(&ca_cert_path)?;
-        let client_cert = fs::read_to_string(&client_cert_path)?;
-        let client_key = fs::read_to_string(&client_key_path)?;
-        
-        tracing::info!("Connecting to Controller at {} with TLS (domain: aria.yun)", controller_url);
-
-        // 创建 TLS 配置（mTLS：双向认证）
-        let ca = tonic::transport::Certificate::from_pem(ca_cert);
-        let identity = tonic::transport::Identity::from_pem(client_cert, client_key);
-
-        // 使用 aria.yun 作为域名（必须与服务器证书匹配）
-        let tls_config = ClientTlsConfig::new()
-            .ca_certificate(ca)
-            .identity(identity)
-            .domain_name("aria.yun");
-        
-        // 创建 Endpoint 并配置 TLS
-        let endpoint = Endpoint::from_shared(controller_url)?
-            .tls_config(tls_config)?;
-        
-        // 连接服务器
-        let channel = endpoint.connect().await?;
-        
-        Ok(Self { channel })
+        Self::new_with_options(
+            controller_url,
+            ca_cert_path,
+            client_cert_path,
+            client_key_path,
+            None,
+        )
+        .await
     }
     
     /// 注册到 Controller
@@ -83,6 +116,30 @@ impl GrpcClient {
         hostname: String,
         token: String,
         region: String,
+    ) -> Result<String> {
+        self.register_with_details(
+            public_key,
+            endpoint,
+            public_ip,
+            hostname,
+            token,
+            region,
+            String::new(),
+            Vec::new(),
+        )
+        .await
+    }
+
+    pub async fn register_with_details(
+        &self,
+        public_key: String,
+        endpoint: String,
+        public_ip: String,
+        hostname: String,
+        token: String,
+        region: String,
+        machine_id: String,
+        advertised_routes: Vec<String>,
     ) -> Result<String> {
         let kernel_version = get_kernel_version();
         let has_aesni = has_aesni_support();
@@ -98,12 +155,13 @@ impl GrpcClient {
                 .unwrap_or_default()
                 .as_secs() as i64,
             token,
-            advertised_routes: vec![],
+            advertised_routes,
             region,
             customer_id: String::new(),
             runtime_mode: "ebpf".to_string(),
             kernel_version,
             has_aesni,
+            machine_id,
         });
 
         let mut client = ControllerServiceClient::new(self.channel.clone());
@@ -152,6 +210,11 @@ impl GrpcClient {
                 protocol: r.protocol,
                 bandwidth_mbps: r.bandwidth_mbps,
             }).collect(),
+            blacklist_rules: resp.blacklist_rules.into_iter().map(|r| BlacklistRule {
+                scope: r.scope,
+                cidr: r.cidr,
+                port: r.port,
+            }).collect(),
         })
     }
 
@@ -182,12 +245,52 @@ impl GrpcClient {
     }
 }
 
+fn read_optional_file(path: &str) -> Result<Option<String>> {
+    if path.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let file_path = Path::new(path);
+    if !file_path.exists() {
+        return Err(anyhow::anyhow!("certificate file not found: {}", path));
+    }
+
+    fs::read_to_string(file_path)
+        .map(Some)
+        .with_context(|| format!("failed to read certificate file: {}", path))
+}
+
+fn infer_tls_server_name(controller_url: &str) -> Option<String> {
+    let host_port = controller_url
+        .split("://")
+        .nth(1)
+        .unwrap_or(controller_url)
+        .split('/')
+        .next()
+        .unwrap_or(controller_url);
+
+    if host_port.is_empty() {
+        return None;
+    }
+
+    if host_port.starts_with('[') {
+        return host_port
+            .trim_start_matches('[')
+            .split(']')
+            .next()
+            .map(|host| host.to_string());
+    }
+
+    Some(host_port.split(':').next().unwrap_or(host_port).to_string())
+}
+
 /// 同步结果
 pub struct SyncResult {
     pub peers: Vec<PeerInfo>,
     pub assigned_ip: String,
     pub acl_rules: Vec<AclRule>,
     pub qos_rules: Vec<QoSRule>,
+    pub blacklist_rules: Vec<BlacklistRule>,
 }
 
 /// Peer 信息
@@ -224,4 +327,11 @@ pub struct QoSRule {
     pub dst_port: u32,
     pub protocol: u32,
     pub bandwidth_mbps: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct BlacklistRule {
+    pub scope: String,
+    pub cidr: String,
+    pub port: u32,
 }

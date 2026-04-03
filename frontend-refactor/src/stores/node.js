@@ -2,7 +2,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/composables/useApi'
-import { API_ENDPOINTS } from '@/config/api'
+import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
+import { useAgentProxyApi } from '@/composables/useAgentProxyApi'
 
 export default defineStore('node', () => {
   const nodes = ref([])
@@ -15,7 +16,8 @@ export default defineStore('node', () => {
       console.log('[Node Store] Loading nodes...')
       
       // 使用租户节点 API
-      const response = await api.get(API_ENDPOINTS.TENANT.NODES)
+      const tenantId = requireCurrentTenantId()
+      const response = await api.get(API_ENDPOINTS.TENANT.NODES(tenantId))
       console.log('[Node Store] Response:', response.data)
       
       let nodeData = []
@@ -41,12 +43,20 @@ export default defineStore('node', () => {
           publicIp: node.public_ip || 'N/A',
           vpnIp: node.assigned_ip || 'N/A',
           region: node.region || 'unknown',
-          status: node.status || 'offline',
+          status: node.availability_status || node.status || 'offline',
+          rawStatus: node.status || 'offline',
           version: node.kernel_version || '0.2.26',
           mode: node.runtime_mode || 'kernel',
           lastSeen: node.last_seen ? formatTimestamp(node.last_seen) : 'N/A',
           uptime: node.last_seen ? formatUptime(node.last_seen) : '0 days',
           routes: node.advertised_routes || [],
+          pendingCmds: node.pending_cmds || 0,
+          configurationStatus: node.configuration_status || 'idle',
+          lastSyncAt: node.last_sync_at ? formatTimestamp(node.last_sync_at) : 'N/A',
+          lastCommand: node.last_command || null,
+          lastCommandStatus: node.last_command_status || '',
+          lastCommandError: node.last_command_error || '',
+          recentCommands: Array.isArray(node.recent_commands) ? node.recent_commands : [],
           bandwidth: { upload: 0, download: 0 },
           latency: 0
         }))
@@ -63,6 +73,47 @@ export default defineStore('node', () => {
     } finally {
       loading.value = false
     }
+  }
+
+  async function loadNodeDetail(id) {
+    const tenantId = requireCurrentTenantId()
+    const [detailResponse, statusResponse, commandsResponse] = await Promise.all([
+      api.get(API_ENDPOINTS.TENANT.NODE_DETAIL(tenantId, id)),
+      useAgentProxyApi.getAgentStatus(id),
+      useAgentProxyApi.getAgentCommands(id, 10)
+    ])
+
+    const detail = detailResponse.data?.data || detailResponse.data || {}
+    const status = statusResponse || {}
+    const commands = commandsResponse?.items || []
+
+    const node = {
+      id: detail.id || id,
+      hostname: detail.hostname || 'unknown',
+      ip: detail.assigned_ip || detail.private_ip || detail.public_ip || 'N/A',
+      publicIp: detail.public_ip || 'N/A',
+      vpnIp: detail.assigned_ip || 'N/A',
+      region: detail.region || 'unknown',
+      status: status.availability_status || detail.availability_status || detail.status || 'offline',
+      rawStatus: detail.status || 'offline',
+      version: detail.kernel_version || '0.2.26',
+      mode: detail.runtime_mode || 'kernel',
+      lastSeen: detail.last_seen ? formatTimestamp(detail.last_seen) : 'N/A',
+      uptime: status.uptime ? formatDurationSeconds(status.uptime) : (detail.last_seen ? formatUptime(detail.last_seen) : '0 days'),
+      routes: detail.advertised_routes || [],
+      pendingCmds: status.pending_cmds || detail.pending_cmds || 0,
+      configurationStatus: status.configuration_status || detail.configuration_status || 'idle',
+      lastSyncAt: status.last_sync_at ? formatTimestamp(status.last_sync_at) : (detail.last_sync_at ? formatTimestamp(detail.last_sync_at) : 'N/A'),
+      lastCommand: status.last_command || detail.last_command || null,
+      lastCommandStatus: status.last_command_status || detail.last_command_status || '',
+      lastCommandError: status.last_command_error || detail.last_command_error || '',
+      recentCommands: Array.isArray(commands) ? commands : [],
+      bandwidth: { upload: 0, download: 0 },
+      latency: 0
+    }
+
+    currentNode.value = node
+    return node
   }
 
   // 格式化时间戳（转换为北京时间 UTC+8）
@@ -95,6 +146,14 @@ export default defineStore('node', () => {
     return `${Math.floor(diff / 86400)} days`
   }
 
+  function formatDurationSeconds(seconds) {
+    if (!seconds || seconds <= 0) return '0 minutes'
+    if (seconds < 60) return `${seconds} seconds`
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes`
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours`
+    return `${Math.floor(seconds / 86400)} days`
+  }
+
   function getNodeById(id) {
     return nodes.value.find(node => node.id === id)
   }
@@ -119,6 +178,7 @@ export default defineStore('node', () => {
     currentNode,
     loading,
     loadNodes,
+    loadNodeDetail,
     getNodeById,
     updateNode,
     deleteNode,

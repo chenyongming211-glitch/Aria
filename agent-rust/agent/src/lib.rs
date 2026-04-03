@@ -14,6 +14,6 @@ pub use identity::{IdentityManager, IdentityError, CidrEntry, ID_WILDCARD};
 pub use grpc_client::{GrpcClient, SyncResult, PeerInfo, AclRule};
 pub use wireguard::{WireGuardManager, WireGuardError};
 pub use routing::{RoutingManager, RouteError, RouteEntry};
-pub use config::{ConfigManager, AgentConfig};
+pub use config::{ConfigManager, AgentConfig, BootstrapConfig, AgentState};
 pub use metrics::{MetricsCounters, record_agent_uptime};
 pub use system_optimization::{SystemOptimizer, OptimizationResult};

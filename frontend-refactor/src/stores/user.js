@@ -79,7 +79,7 @@ export default defineStore('user', () => {
 
   const changePassword = async (oldPassword, newPassword) => {
     try {
-      const response = await api.post('/v1/auth/force-change-password', {
+      const response = await api.post(API_ENDPOINTS.AUTH.FORCE_CHANGE_PASSWORD, {
         old_password: oldPassword,
         new_password: newPassword
       })
@@ -134,8 +134,9 @@ export default defineStore('user', () => {
   const refreshToken = async () => {
     try {
       const response = await api.post(API_ENDPOINTS.AUTH.REFRESH)
-      if (response.data && response.data.token) {
-        sessionStorage.setItem('aria_token', response.data.token)
+      const token = response.data?.data?.token || response.data?.token
+      if (token) {
+        sessionStorage.setItem('aria_token', token)
         return { success: true }
       }
       return { success: false }

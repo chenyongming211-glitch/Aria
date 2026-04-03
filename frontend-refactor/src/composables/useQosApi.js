@@ -1,9 +1,9 @@
 import api from './useApi'
-import { API_ENDPOINTS } from '@/config/api'
+import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
+import { useAgentProxyApi } from './useAgentProxyApi'
 
-/**
- * 协议编号转换为名称
- */
+const qosRuleCache = new Map()
+
 function getProtocolName(protocol) {
   switch (protocol) {
     case 6: return 'tcp'
@@ -14,9 +14,6 @@ function getProtocolName(protocol) {
   }
 }
 
-/**
- * 协议名称转换为编号
- */
 function getProtocolNumber(name) {
   switch (name) {
     case 'tcp': return 6
@@ -27,442 +24,306 @@ function getProtocolNumber(name) {
   }
 }
 
+function categoryFromType(type) {
+  switch (type) {
+    case 'app': return 'service'
+    case 'peer': return 'peers'
+    case 'global': return 'ip'
+    default: return 'service'
+  }
+}
+
+function typeFromCategory(category) {
+  switch (category) {
+    case 'service': return 'app'
+    case 'peers': return 'peer'
+    case 'ip': return 'global'
+    default: return 'app'
+  }
+}
+
+function normalizeDeliveryFields(rule, node = {}) {
+  return {
+    policyStatus: rule.policy_status || node.configuration_status || 'idle',
+    pendingCmds: typeof rule.pending_cmds === 'number' ? rule.pending_cmds : (node.pending_cmds || 0),
+    lastCommandError: rule.last_delivery_error || rule.last_command_error || node.last_command_error || '',
+    lastSyncAt: rule.last_delivery_at || rule.last_sync_at || node.last_sync_at || null,
+    lastDelivery: rule.last_delivery || null,
+    deliveryHistory: Array.isArray(rule.delivery_history) ? rule.delivery_history : [],
+    lastDeliveryCommandId: rule.last_delivery_command_id || rule.last_delivery?.command_id || '',
+    lastDeliveryAction: rule.last_delivery_action || rule.last_delivery?.action || ''
+  }
+}
+
+function normalizeQoSRule(category, node, rule) {
+  const type = typeFromCategory(category)
+  const normalized = {
+    id: rule.id,
+    nodeId: node.id,
+    nodeName: node.hostname || node.public_key || node.id,
+    type,
+    bandwidth: rule.bandwidth_mbps || rule.bandwidth || 100,
+    priority: rule.priority || 50,
+    status: rule.enabled === false ? 'inactive' : 'active',
+    name: rule.description || `${node.hostname || 'node'}-${category}`,
+    srcIp: rule.src_ip || '',
+    dstIp: rule.dst_ip || '',
+    srcPort: rule.src_port || '',
+    dstPort: rule.dst_port || '',
+    protocol: getProtocolName(rule.protocol),
+    targetIp: rule.src_ip || rule.dst_ip || '',
+    ...normalizeDeliveryFields(rule, node)
+  }
+
+  qosRuleCache.set(normalized.id, { nodeId: node.id, category, rule: normalized })
+  return normalized
+}
+
+async function listTenantNodes() {
+  const tenantId = requireCurrentTenantId()
+  const response = await api.get(API_ENDPOINTS.TENANT.NODES(tenantId))
+  return { tenantId, nodes: response.data?.data || response.data || [] }
+}
+
+async function fetchCategoryRules(tenantId, node, category) {
+  const response = await api.get(API_ENDPOINTS.BANDWIDTH.CATEGORY(tenantId, node.id, category))
+  const rules = response.data?.data || response.data || []
+  return rules.map((rule) => normalizeQoSRule(category, node, rule))
+}
+
+async function createCategoryRule(type, rule) {
+  const tenantId = requireCurrentTenantId()
+  if (!rule.nodeId) {
+    throw new Error('nodeId is required')
+  }
+
+  const category = categoryFromType(type)
+  const payload = {
+    bandwidth_mbps: Number(rule.bandwidth || 0)
+  }
+
+  if (type === 'app') {
+    payload.src_ip = rule.srcIp || ''
+    payload.dst_ip = rule.dstIp || ''
+    payload.src_port = parseInt(rule.srcPort, 10) || 0
+    payload.dst_port = parseInt(rule.dstPort, 10) || 0
+    payload.protocol = getProtocolNumber(rule.protocol)
+  } else if (type === 'peer') {
+    payload.src_ip = rule.srcIp || ''
+    payload.dst_ip = rule.dstIp || ''
+  } else {
+    payload.src_ip = rule.targetIp || rule.srcIp || ''
+  }
+
+  const response = await api.post(API_ENDPOINTS.BANDWIDTH.CATEGORY(tenantId, rule.nodeId, category), payload)
+  return response.data?.data || response.data
+}
+
+async function deleteCategoryRule(id, nodeId, category) {
+  const tenantId = requireCurrentTenantId()
+  const response = await api.delete(API_ENDPOINTS.BANDWIDTH.RULE(tenantId, nodeId, category, id))
+  qosRuleCache.delete(id)
+  return response.data?.data || response.data
+}
+
 /**
- * 带宽管理API接口
- * 与后端 /api/v1/bandwidth/* API 对接
+ * QoS API
  */
 export const useQosApi = {
-  /**
-   * 获取所有带宽限制
-   */
   getBandwidthLimits: async () => {
-    try {
-      const response = await api.get(API_ENDPOINTS.BANDWIDTH.LIMITS.LIST)
-      // 后端返回格式: { success: true, data: [...], message: "..." }
-      return response.data?.data || response.data || []
-    } catch (error) {
-      console.error('获取带宽限制失败:', error)
-      throw error
-    }
+    const { tenantId, nodes } = await listTenantNodes()
+    const results = await Promise.all(nodes.map((node) => fetchCategoryRules(tenantId, node, 'service')))
+    return results.flat()
   },
 
-  /**
-   * 创建带宽限制
-   * @param {Object} params - 带宽限制参数
-   *  {
-   *    src_ip?: string,      // 源IP（可选）
-   *    dst_ip?: string,      // 目标IP（可选）
-   *    src_port?: number,    // 源端口（可选）
-   *    dst_port?: number,    // 目标端口（可选）
-   *    protocol?: number,     // 协议 6=TCP, 17=UDP（可选）
-   *    bandwidth: number,     // 带宽（Mbps，必填）
-   *    direction?: string     // 方向 "upload", "download", "both"（可选）
-   *  }
-   */
   createBandwidthLimit: async (params) => {
-    try {
-      const response = await api.post(API_ENDPOINTS.BANDWIDTH.LIMITS.CREATE, params)
-      return response.data?.data || response.data
-    } catch (error) {
-      console.error('创建带宽限制失败:', error)
-      throw error
-    }
+    return createCategoryRule('app', {
+      nodeId: params.nodeId,
+      bandwidth: params.bandwidth || params.bandwidth_mbps,
+      srcIp: params.src_ip,
+      dstIp: params.dst_ip,
+      srcPort: params.src_port,
+      dstPort: params.dst_port,
+      protocol: getProtocolName(params.protocol)
+    })
   },
 
-  /**
-   * 删除带宽限制
-   * @param {string} limitId - 限制ID
-   */
-  deleteBandwidthLimit: async (limitId) => {
-    try {
-      const response = await api.delete(API_ENDPOINTS.BANDWIDTH.LIMITS.DELETE(limitId))
-      return response.data?.data || response.data
-    } catch (error) {
-      console.error('删除带宽限制失败:', error)
-      throw error
-    }
+  deleteBandwidthLimit: async (limitId, nodeId) => {
+    const mapping = qosRuleCache.get(limitId)
+    return deleteCategoryRule(limitId, nodeId || mapping?.nodeId, mapping?.category || 'service')
   },
 
-  /**
-   * 获取所有策略
-   */
-  getPolicies: async (filters = {}) => {
-    try {
-      // 构建查询参数
-      const queryParams = new URLSearchParams()
-      if (filters.name) queryParams.append('name', filters.name)
-      if (filters.action) queryParams.append('action', filters.action)
-      if (filters.enabled !== undefined) queryParams.append('enabled', filters.enabled)
-
-      const url = queryParams.toString()
-        ? `${API_ENDPOINTS.BANDWIDTH.POLICIES.LIST}?${queryParams}`
-        : API_ENDPOINTS.BANDWIDTH.POLICIES.LIST
-
-      const response = await api.get(url)
-      return response.data?.data || response.data || []
-    } catch (error) {
-      console.error('获取策略列表失败:', error)
-      throw error
-    }
+  getPolicies: async () => {
+    return useQosApi.getAllRules()
   },
 
-  /**
-   * 创建策略
-   * @param {Object} policy - 策略参数
-   *  {
-   *    name: string,              // 策略名称（必填）
-   *    description?: string,       // 描述
-   *    enabled: boolean,          // 是否启用（必填）
-   *    priority: number,          // 优先级（必填）
-   *    action: string,            // 动作 "allow", "deny", "limit"（必填）
-   *    src_ip?: string,          // 源IP
-   *    src_port?: number,        // 源端口
-   *    src_region?: string,      // 源区域
-   *    dst_ip?: string,          // 目标IP
-   *    dst_port?: number,        // 目标端口
-   *    dst_region?: string,      // 目标区域
-   *    protocol?: number,        // 协议
-   *    protocol_name?: string,    // 协议名称
-   *    limit_bandwidth?: number, // 限速带宽（action=limit 时必填）
-   *    limit_type?: string       // 限速类型 "absolute", "relative"
-   *  }
-   */
   createPolicy: async (policy) => {
-    try {
-      const response = await api.post(API_ENDPOINTS.BANDWIDTH.POLICIES.CREATE, policy)
-      return response.data?.data || response.data
-    } catch (error) {
-      console.error('创建策略失败:', error)
-      throw error
-    }
+    const type = policy.type || 'app'
+    return createCategoryRule(type, {
+      nodeId: policy.nodeId,
+      bandwidth: policy.limit_bandwidth || policy.bandwidth,
+      srcIp: policy.src_ip,
+      dstIp: policy.dst_ip,
+      srcPort: policy.src_port,
+      dstPort: policy.dst_port,
+      protocol: policy.protocol_name || getProtocolName(policy.protocol),
+      targetIp: policy.targetIp || policy.src_ip
+    })
   },
 
-  /**
-   * 获取策略详情
-   * @param {string} policyId - 策略ID
-   */
   getPolicy: async (policyId) => {
-    try {
-      const response = await api.get(API_ENDPOINTS.BANDWIDTH.POLICIES.GET(policyId))
-      return response.data?.data || response.data
-    } catch (error) {
-      console.error('获取策略详情失败:', error)
-      throw error
-    }
+    const mapping = qosRuleCache.get(policyId)
+    return mapping?.rule || null
   },
 
-  /**
-   * 更新策略
-   * @param {string} policyId - 策略ID
-   * @param {Object} policy - 策略参数
-   */
   updatePolicy: async (policyId, policy) => {
-    try {
-      const response = await api.put(API_ENDPOINTS.BANDWIDTH.POLICIES.UPDATE(policyId), policy)
-      return response.data?.data || response.data
-    } catch (error) {
-      console.error('更新策略失败:', error)
-      throw error
+    const mapping = qosRuleCache.get(policyId)
+    const existing = mapping?.rule
+    if (!existing) {
+      throw new Error('Rule not found')
     }
+
+    await deleteCategoryRule(policyId, existing.nodeId, mapping.category)
+    return createCategoryRule(policy.type || existing.type, {
+      ...existing,
+      ...policy,
+      nodeId: policy.nodeId || existing.nodeId
+    })
   },
 
-  /**
-   * 删除策略
-   * @param {string} policyId - 策略ID
-   */
   deletePolicy: async (policyId) => {
-    try {
-      const response = await api.delete(API_ENDPOINTS.BANDWIDTH.POLICIES.DELETE(policyId))
-      return response.data?.data || response.data
-    } catch (error) {
-      console.error('删除策略失败:', error)
-      throw error
+    const mapping = qosRuleCache.get(policyId)
+    if (!mapping) {
+      throw new Error('Rule not found')
     }
+    return deleteCategoryRule(policyId, mapping.nodeId, mapping.category)
   },
 
-  // ========== 旧版 QoS API（向后兼容） ==========
-
-  /**
-   * 获取所有QoS规则（旧版兼容）
-   * 将 limits 和 policies 转换为前端统一格式
-   */
   getAllRules: async () => {
     try {
-      const [limits, policies] = await Promise.all([
-        useQosApi.getBandwidthLimits(),
-        useQosApi.getPolicies()
-      ])
-
-      const allRules = []
-
-      // 转换 bandwidth limits 为统一格式
-      limits.forEach(limit => {
-        const rule = {
-          id: limit.id || `limit-${Date.now()}-${Math.random()}`,
-          bandwidth: limit.bandwidth || limit.bandwidth_mbps || 100,
-          priority: limit.priority || 50,
-          status: limit.enabled !== false ? 'active' : 'inactive',
-          name: limit.name || 'Bandwidth Limit'
-        }
-
-        // 判断规则类型
-        if (limit.src_ip && limit.dst_ip && (limit.src_port || limit.dst_port)) {
-          // 应用级规则（五元组）
-          rule.type = 'app'
-          rule.srcIp = limit.src_ip
-          rule.dstIp = limit.dst_ip
-          rule.srcPort = limit.src_port || 'any'
-          rule.dstPort = limit.dst_port || 'any'
-          rule.protocol = getProtocolName(limit.protocol)
-        } else if (limit.src_ip && limit.dst_ip) {
-          // Peer 级规则（IP 对）
-          rule.type = 'peer'
-          rule.srcIp = limit.src_ip
-          rule.dstIp = limit.dst_ip
-        } else if (limit.src_ip || limit.dst_ip) {
-          // 全局 IP 级规则
-          rule.type = 'global'
-          rule.targetIp = limit.src_ip || limit.dst_ip
-        } else {
-          // 默认为应用级
-          rule.type = 'app'
-        }
-
-        allRules.push(rule)
-      })
-
-      // 转换 policies 为统一格式
-      policies.forEach(policy => {
-        if (policy.action === 'limit') {
-          const rule = {
-            id: policy.id || `policy-${Date.now()}-${Math.random()}`,
-            bandwidth: policy.limit_bandwidth || 100,
-            priority: policy.priority || 50,
-            status: policy.enabled ? 'active' : 'inactive',
-            name: policy.name || 'Policy Rule'
-          }
-
-          // 根据 policy 字段判断类型
-          if (policy.src_ip && policy.dst_ip && (policy.src_port || policy.dst_port)) {
-            rule.type = 'app'
-            rule.srcIp = policy.src_ip
-            rule.dstIp = policy.dst_ip
-            rule.srcPort = policy.src_port || 'any'
-            rule.dstPort = policy.dst_port || 'any'
-            rule.protocol = policy.protocol_name || getProtocolName(policy.protocol)
-          } else if (policy.src_ip && policy.dst_ip) {
-            rule.type = 'peer'
-            rule.srcIp = policy.src_ip
-            rule.dstIp = policy.dst_ip
-          } else if (policy.src_ip || policy.dst_ip) {
-            rule.type = 'global'
-            rule.targetIp = policy.src_ip || policy.dst_ip
-          } else {
-            rule.type = 'global'
-          }
-
-          allRules.push(rule)
-        }
-      })
-
-      return allRules
+      const { tenantId, nodes } = await listTenantNodes()
+      const results = await Promise.all(
+        nodes.flatMap((node) => [
+          fetchCategoryRules(tenantId, node, 'service'),
+          fetchCategoryRules(tenantId, node, 'peers'),
+          fetchCategoryRules(tenantId, node, 'ip')
+        ])
+      )
+      return results.flat()
     } catch (error) {
       console.error('获取所有规则失败:', error)
-      // 返回空数组而不是抛出错误，让前端可以显示空状态
       return []
     }
   },
 
-  /**
-   * 获取服务级规则（旧版兼容）
-   */
   getServiceRules: async () => {
-    console.warn('getServiceRules 已弃用，请使用 getBandwidthLimits')
-    return await useQosApi.getBandwidthLimits()
+    const { tenantId, nodes } = await listTenantNodes()
+    const results = await Promise.all(nodes.map((node) => fetchCategoryRules(tenantId, node, 'service')))
+    return results.flat()
   },
 
-  /**
-   * 创建服务级规则（旧版兼容）
-   * @param {Object} rule - 五元组规则
-   */
   createServiceRule: async (rule) => {
-    // 前端规则转换为后端格式
-    const params = {
-      bandwidth: rule.bandwidth,
-      bandwidth_mbps: rule.bandwidth  // 兼容两个字段名
-    }
-
-    if (rule.srcIp) params.src_ip = rule.srcIp
-    if (rule.dstIp) params.dst_ip = rule.dstIp
-    if (rule.srcPort) params.src_port = parseInt(rule.srcPort) || 0
-    if (rule.dstPort) params.dst_port = parseInt(rule.dstPort) || 0
-    if (rule.protocol) params.protocol = getProtocolNumber(rule.protocol)
-    if (rule.direction) params.direction = rule.direction
-
-    return await useQosApi.createBandwidthLimit(params)
+    return createCategoryRule('app', rule)
   },
 
-  /**
-   * 获取端口级规则（旧版兼容）
-   */
   getPortRules: async () => {
-    console.warn('getPortRules 已弃用，请使用 getBandwidthLimits')
-    return await useQosApi.getBandwidthLimits()
+    return useQosApi.getServiceRules()
   },
 
-  /**
-   * 创建端口级规则（旧版兼容）
-   * @param {Object} rule - 端口规则
-   */
   createPortRule: async (rule) => {
-    return await useQosApi.createBandwidthLimit({
-      dst_port: parseInt(rule.port) || 0,
-      bandwidth: rule.bandwidth,
-      bandwidth_mbps: rule.bandwidth
-    })
-  },
-
-  /**
-   * 获取Peer级规则（旧版兼容）
-   */
-  getPeerRules: async () => {
-    console.warn('getPeerRules 已弃用，请使用 getBandwidthLimits')
-    return await useQosApi.getBandwidthLimits()
-  },
-
-  /**
-   * 创建Peer级规则（旧版兼容）
-   * @param {Object} rule - Peer规则
-   */
-  createPeerRule: async (rule) => {
-    return await useQosApi.createBandwidthLimit({
-      src_ip: rule.srcIp,
-      dst_ip: rule.dstIp,
-      bandwidth: rule.bandwidth,
-      bandwidth_mbps: rule.bandwidth
-    })
-  },
-
-  /**
-   * 获取IP级规则（旧版兼容）
-   */
-  getIpRules: async () => {
-    console.warn('getIpRules 已弃用，请使用 getBandwidthLimits')
-    return await useQosApi.getBandwidthLimits()
-  },
-
-  /**
-   * 创建IP级规则（旧版兼容）
-   * @param {Object} rule - IP规则
-   */
-  createIpRule: async (rule) => {
-    return await useQosApi.createBandwidthLimit({
-      src_ip: rule.targetIp || rule.ip,
-      bandwidth: rule.bandwidth,
-      bandwidth_mbps: rule.bandwidth,
-      direction: rule.direction
-    })
-  },
-
-  /**
-   * 更新规则（旧版兼容）
-   */
-  updateServiceRule: async (id, rule) => {
-    return await useQosApi.updatePolicy(id, {
+    return createCategoryRule('app', {
       ...rule,
-      name: rule.name || 'Service Rule',
-      action: 'limit',
-      limit_bandwidth: rule.bandwidth
+      dstPort: rule.port
     })
+  },
+
+  getPeerRules: async () => {
+    const { tenantId, nodes } = await listTenantNodes()
+    const results = await Promise.all(nodes.map((node) => fetchCategoryRules(tenantId, node, 'peers')))
+    return results.flat()
+  },
+
+  createPeerRule: async (rule) => {
+    return createCategoryRule('peer', rule)
+  },
+
+  getIpRules: async () => {
+    const { tenantId, nodes } = await listTenantNodes()
+    const results = await Promise.all(nodes.map((node) => fetchCategoryRules(tenantId, node, 'ip')))
+    return results.flat()
+  },
+
+  createIpRule: async (rule) => {
+    return createCategoryRule('global', rule)
+  },
+
+  updateServiceRule: async (id, rule) => {
+    return useQosApi.updatePolicy(id, { ...rule, type: 'app' })
   },
 
   updatePortRule: async (id, rule) => {
-    return await useQosApi.updatePolicy(id, {
-      ...rule,
-      name: rule.name || 'Port Rule',
-      action: 'limit',
-      limit_bandwidth: rule.bandwidth
-    })
+    return useQosApi.updatePolicy(id, { ...rule, type: 'app' })
   },
 
   updatePeerRule: async (id, rule) => {
-    return await useQosApi.updatePolicy(id, {
-      ...rule,
-      name: rule.name || 'Peer Rule',
-      action: 'limit',
-      limit_bandwidth: rule.bandwidth
-    })
+    return useQosApi.updatePolicy(id, { ...rule, type: 'peer' })
   },
 
   updateIpRule: async (id, rule) => {
-    return await useQosApi.updatePolicy(id, {
-      ...rule,
-      name: rule.name || 'IP Rule',
-      action: 'limit',
-      limit_bandwidth: rule.bandwidth
-    })
+    return useQosApi.updatePolicy(id, { ...rule, type: 'global' })
   },
 
-  /**
-   * 删除规则（旧版兼容）
-   */
   deleteServiceRule: async (id) => {
-    return await useQosApi.deleteBandwidthLimit(id)
+    const mapping = qosRuleCache.get(id)
+    return deleteCategoryRule(id, mapping?.nodeId, 'service')
   },
 
   deletePortRule: async (id) => {
-    return await useQosApi.deleteBandwidthLimit(id)
+    const mapping = qosRuleCache.get(id)
+    return deleteCategoryRule(id, mapping?.nodeId, 'service')
   },
 
   deletePeerRule: async (id) => {
-    return await useQosApi.deleteBandwidthLimit(id)
+    const mapping = qosRuleCache.get(id)
+    return deleteCategoryRule(id, mapping?.nodeId, 'peers')
   },
 
   deleteIpRule: async (id) => {
-    return await useQosApi.deleteBandwidthLimit(id)
+    const mapping = qosRuleCache.get(id)
+    return deleteCategoryRule(id, mapping?.nodeId, 'ip')
   },
 
-  /**
-   * 应用所有规则（实际在后端创建时已自动应用）
-   * 这个方法用于前端显示成功消息
-   */
   applyAllRules: async () => {
-    try {
-      // 后端在创建规则时已经应用，这里只返回成功状态
-      const rules = await useQosApi.getAllRules()
-      return {
-        success: true,
-        message: `已应用 ${rules.length} 条规则`,
-        count: rules.length
-      }
-    } catch (error) {
-      console.error('应用规则失败:', error)
-      throw error
+    const rules = await useQosApi.getAllRules()
+    const nodeIds = [...new Set(rules.map((rule) => rule.nodeId).filter(Boolean))]
+    if (nodeIds.length > 0) {
+      await useAgentProxyApi.sendBatchCommand({
+        node_ids: nodeIds,
+        command: {
+          command: 'sync',
+          params: {},
+          timeout: 60,
+          priority: 1
+        }
+      })
+    }
+    return {
+      success: true,
+      message: `已为 ${nodeIds.length} 个节点排队同步 ${rules.length} 条规则`,
+      count: rules.length,
+      nodeCount: nodeIds.length
     }
   },
 
-  /**
-   * 清空所有规则
-   */
   clearAllRules: async () => {
-    try {
-      const rules = await useQosApi.getAllRules()
-      
-      // 删除所有规则
-      const deletePromises = rules.map(rule => 
-        useQosApi.deleteBandwidthLimit(rule.id)
-      )
-      
-      await Promise.all(deletePromises)
-      
-      return {
-        success: true,
-        message: `已清空 ${rules.length} 条规则`,
-        count: rules.length
-      }
-    } catch (error) {
-      console.error('清空规则失败:', error)
-      throw error
+    const rules = await useQosApi.getAllRules()
+    await Promise.all(
+      rules.map((rule) => deleteCategoryRule(rule.id, rule.nodeId, categoryFromType(rule.type)))
+    )
+    return {
+      success: true,
+      message: `已清空 ${rules.length} 条规则`,
+      count: rules.length
     }
   }
 }

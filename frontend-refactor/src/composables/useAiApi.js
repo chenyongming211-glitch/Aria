@@ -1,5 +1,5 @@
 import api from './useApi'
-import { API_ENDPOINTS } from '@/config/api'
+import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 
 /**
  * AI聊天API接口
@@ -18,7 +18,8 @@ export const useAiApi = {
    */
   chat: async (params) => {
     try {
-      const response = await api.post(API_ENDPOINTS.AI.CHAT, params)
+      const tenantId = requireCurrentTenantId()
+      const response = await api.post(API_ENDPOINTS.AI.CHAT(tenantId), params)
       return response.data?.data || response.data
     } catch (error) {
       console.error('AI对话失败:', error)
@@ -39,7 +40,8 @@ export const useAiApi = {
    */
   confirm: async (params) => {
     try {
-      const response = await api.post(API_ENDPOINTS.AI.CONFIRM, params)
+      const tenantId = requireCurrentTenantId()
+      const response = await api.post(API_ENDPOINTS.AI.CONFIRM(tenantId), params)
       return response.data?.data || response.data
     } catch (error) {
       console.error('工具执行确认失败:', error)

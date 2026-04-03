@@ -1,5 +1,5 @@
 import api from './useApi'
-import { API_ENDPOINTS } from '@/config/api'
+import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 
 /**
  * 租户管理API接口
@@ -12,10 +12,9 @@ export const useTenantApi = {
    */
   getCurrentTenant: async () => {
     try {
-      const response = await api.get(API_ENDPOINTS.TENANT.CURRENT)
-      const data = response.data?.data || response.data
-      // 返回数组，取第一个元素
-      return Array.isArray(data) ? data[0] : data
+      const tenantId = requireCurrentTenantId()
+      const response = await api.get(API_ENDPOINTS.TENANT.DETAIL(tenantId))
+      return response.data?.data || response.data
     } catch (error) {
       console.error('获取当前租户失败:', error)
       throw error
@@ -48,7 +47,7 @@ export const useTenantApi = {
    */
   createTenant: async (tenant) => {
     try {
-      const response = await api.post(API_ENDPOINTS.TENANT.TENANTS, tenant)
+      const response = await api.post(API_ENDPOINTS.TENANT.LIST, tenant)
       return response.data?.data || response.data
     } catch (error) {
       console.error('创建租户失败:', error)
@@ -62,7 +61,8 @@ export const useTenantApi = {
    */
   getTenantNodes: async () => {
     try {
-      const response = await api.get(API_ENDPOINTS.TENANT.NODES)
+      const tenantId = requireCurrentTenantId()
+      const response = await api.get(API_ENDPOINTS.TENANT.NODES(tenantId))
       return response.data?.data || response.data || []
     } catch (error) {
       console.error('获取租户节点失败:', error)
@@ -76,8 +76,23 @@ export const useTenantApi = {
    */
   getTenantACLRules: async () => {
     try {
-      const response = await api.get(API_ENDPOINTS.TENANT.ACL_RULES)
-      return response.data?.data || response.data || []
+      const tenantId = requireCurrentTenantId()
+      const nodesResponse = await api.get(API_ENDPOINTS.TENANT.NODES(tenantId))
+      const nodes = nodesResponse.data?.data || nodesResponse.data || []
+
+      const ruleResponses = await Promise.all(
+        nodes.map(async (node) => {
+          const aclResponse = await api.get(API_ENDPOINTS.TENANT.NODE_ACLS(tenantId, node.id))
+          const rules = aclResponse.data?.data || aclResponse.data || []
+          return rules.map((rule) => ({
+            ...rule,
+            node_id: node.id,
+            node_name: node.hostname || node.public_key || node.id
+          }))
+        })
+      )
+
+      return ruleResponses.flat()
     } catch (error) {
       console.error('获取 ACL 规则失败:', error)
       throw error

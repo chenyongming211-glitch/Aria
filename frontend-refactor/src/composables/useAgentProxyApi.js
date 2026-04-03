@@ -1,4 +1,5 @@
 import api from './useApi'
+import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 
 /**
  * Agent 代理 API
@@ -13,7 +14,8 @@ export const useAgentProxyApi = {
    */
   sendAgentCommand: async (nodeId, command) => {
     try {
-      const response = await api.post(`/v1/agent/${nodeId}/command`, command)
+      const tenantId = requireCurrentTenantId()
+      const response = await api.post(API_ENDPOINTS.AGENT.COMMAND(tenantId, nodeId), command)
       return response.data?.data || response.data
     } catch (error) {
       console.error('发送 Agent 命令失败:', error)
@@ -28,10 +30,24 @@ export const useAgentProxyApi = {
    */
   getAgentStatus: async (nodeId) => {
     try {
-      const response = await api.get(`/v1/agent/${nodeId}/status`)
+      const tenantId = requireCurrentTenantId()
+      const response = await api.get(API_ENDPOINTS.AGENT.STATUS(tenantId, nodeId))
       return response.data?.data || response.data
     } catch (error) {
       console.error('获取 Agent 状态失败:', error)
+      throw error
+    }
+  },
+
+  getAgentCommands: async (nodeId, limit = 10) => {
+    try {
+      const tenantId = requireCurrentTenantId()
+      const response = await api.get(API_ENDPOINTS.AGENT.COMMANDS(tenantId, nodeId), {
+        params: { limit }
+      })
+      return response.data?.data || response.data
+    } catch (error) {
+      console.error('获取 Agent 命令历史失败:', error)
       throw error
     }
   },
@@ -43,7 +59,8 @@ export const useAgentProxyApi = {
    */
   sendBatchCommand: async (batchCommand) => {
     try {
-      const response = await api.post('/v1/agents/command', batchCommand)
+      const tenantId = requireCurrentTenantId()
+      const response = await api.post(API_ENDPOINTS.AGENT.BATCH_COMMAND(tenantId), batchCommand)
       return response.data?.data || response.data
     } catch (error) {
       console.error('批量发送命令失败:', error)

@@ -430,4 +430,35 @@ impl AclManager {
         
         Ok(())
     }
+
+    pub fn clear_all_blacklists(&mut self) -> Result<(), AclError> {
+        let src_ids: Vec<u32> = self
+            .block_src_id_map
+            .iter()
+            .filter_map(|entry| entry.ok().map(|(key, _)| key))
+            .collect();
+        for id in src_ids {
+            let _ = self.block_src_id_map.remove(&id);
+        }
+
+        let dst_ids: Vec<u32> = self
+            .block_dst_id_map
+            .iter()
+            .filter_map(|entry| entry.ok().map(|(key, _)| key))
+            .collect();
+        for id in dst_ids {
+            let _ = self.block_dst_id_map.remove(&id);
+        }
+
+        let ports: Vec<u16> = self
+            .block_port_map
+            .iter()
+            .filter_map(|entry| entry.ok().map(|(key, _)| key))
+            .collect();
+        for port in ports {
+            let _ = self.block_port_map.remove(&port);
+        }
+
+        Ok(())
+    }
 }

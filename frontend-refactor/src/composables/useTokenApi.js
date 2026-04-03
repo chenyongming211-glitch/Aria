@@ -1,5 +1,5 @@
 import api from './useApi'
-import { API_ENDPOINTS } from '@/config/api'
+import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 
 /**
  * 令牌管理API接口
@@ -12,7 +12,8 @@ export const useTokenApi = {
    */
   getAllTokens: async () => {
     try {
-      const response = await api.get(API_ENDPOINTS.TOKENS.LIST)
+      const tenantId = requireCurrentTenantId()
+      const response = await api.get(API_ENDPOINTS.TENANT.TOKENS(tenantId))
       // 后端返回的统一响应格式: { success, data, message }
       return response.data?.data || response.data || []
     } catch (error) {
@@ -32,7 +33,14 @@ export const useTokenApi = {
    */
   createToken: async (params) => {
     try {
-      const response = await api.post(API_ENDPOINTS.TOKENS.CREATE, params)
+      const tenantId = requireCurrentTenantId()
+      const payload = { ...params }
+      if (payload.ttl_hours && !payload.ttl) {
+        payload.ttl = `${payload.ttl_hours}h`
+      }
+      delete payload.ttl_hours
+
+      const response = await api.post(API_ENDPOINTS.TENANT.TOKENS(tenantId), payload)
       // 后端返回: { success: true, data: { id, token, ... }, message: "..." }
       return response.data?.data || response.data
     } catch (error) {
@@ -47,7 +55,8 @@ export const useTokenApi = {
    */
   deleteToken: async (tokenId) => {
     try {
-      const response = await api.delete(API_ENDPOINTS.TOKENS.DELETE(tokenId))
+      const tenantId = requireCurrentTenantId()
+      const response = await api.delete(API_ENDPOINTS.TENANT.TOKEN_DETAIL(tenantId, tokenId))
       return response.data?.data || response.data
     } catch (error) {
       console.error('删除令牌失败:', error)
@@ -59,9 +68,10 @@ export const useTokenApi = {
    * 获取令牌详情（查询参数方式）
    * @param {string} token - 令牌值
    */
-  getTokenDetail: async (token) => {
+  getTokenDetail: async (tokenId) => {
     try {
-      const response = await api.get(`${API_ENDPOINTS.TOKENS.DETAIL}?token=${encodeURIComponent(token)}`)
+      const tenantId = requireCurrentTenantId()
+      const response = await api.get(API_ENDPOINTS.TENANT.TOKEN_DETAIL(tenantId, tokenId))
       return response.data?.data || response.data
     } catch (error) {
       console.error('获取令牌详情失败:', error)
@@ -77,19 +87,7 @@ export const useTokenApi = {
    */
   revokeToken: async (tokenId) => {
     console.warn('revokeToken 已弃用，请使用 deleteToken')
-    // 尝试使用新版 API
-    try {
-      return await useTokenApi.deleteToken(tokenId)
-    } catch (error) {
-      // 如果新版失败，尝试旧版
-      try {
-        const response = await api.post(API_ENDPOINTS.TOKENS.REVOKE, { id: tokenId })
-        return response.data?.data || response.data
-      } catch (oldError) {
-        console.error('吊销令牌失败（旧版）:', oldError)
-        throw error
-      }
-    }
+    return await useTokenApi.deleteToken(tokenId)
   },
 
   /**
@@ -98,8 +96,15 @@ export const useTokenApi = {
    */
   getTokenNodes: async (token) => {
     try {
-      const response = await api.get(`/tokens/detail?token=${encodeURIComponent(token)}`)
-      return response.data?.data?.nodes || []
+      const tenantId = requireCurrentTenantId()
+      const detail = await useTokenApi.getTokenDetail(token)
+      if (!detail?.token) {
+        return []
+      }
+      const response = await api.get(API_ENDPOINTS.TENANT.TOKENS(tenantId))
+      const tokens = response.data?.data || response.data || []
+      const current = tokens.find((item) => item.id === token)
+      return current?.nodes || detail?.nodes || []
     } catch (error) {
       console.error('获取令牌使用节点失败:', error)
       throw error

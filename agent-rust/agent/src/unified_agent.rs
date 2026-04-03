@@ -17,6 +17,7 @@ use tracing_subscriber::{EnvFilter, Registry, reload};
 
 use crate::grpc_client::{
     AclRule,
+    BlacklistRule as GrpcBlacklistRule,
     GrpcClient,
     GrpcCommandRequest,
     GrpcCommandResponse,
@@ -60,6 +61,7 @@ fn current_unix_timestamp() -> i64 {
 
 pub struct UnifiedAgent {
     config: AgentConfig,
+    config_path: String,
     
     acl_mgr: Arc<Mutex<AclManager>>,
     qos_mgr: Arc<Mutex<QoSManager>>,
@@ -82,6 +84,7 @@ pub struct UnifiedAgent {
 impl UnifiedAgent {
     pub async fn new(
         config: AgentConfig,
+        config_path: String,
         interface: &str,
         log_handle: Arc<StdMutex<Option<reload::Handle<EnvFilter, Registry>>>>,
     ) -> Result<Self> {
@@ -90,11 +93,12 @@ impl UnifiedAgent {
         let (acl_mgr, qos_mgr, identity_mgr) = Self::load_ebpf_programs(interface)?;
         tracing::info!("✅ eBPF programs loaded");
         
-        let grpc_client = GrpcClient::new(
+        let grpc_client = GrpcClient::new_with_options(
             config.controller_url.clone(),
             config.ca_cert.clone(),
             config.client_cert.clone(),
             config.client_key.clone(),
+            config.tls_server_name.clone(),
         ).await.context("Failed to connect to Controller")?;
         tracing::info!("✅ gRPC client connected");
         
@@ -111,6 +115,7 @@ impl UnifiedAgent {
         
         Ok(Self {
             config,
+            config_path,
             acl_mgr,
             qos_mgr,
             identity_mgr,
@@ -1324,18 +1329,21 @@ impl UnifiedAgent {
             .sync(self.config.public_key.clone())
             .await?;
         
-        tracing::debug!("Sync received: {} peers, {} ACL rules, {} QoS rules", 
+        tracing::debug!("Sync received: {} peers, {} ACL rules, {} blacklist rules, {} QoS rules", 
             sync_result.peers.len(), 
             sync_result.acl_rules.len(),
+            sync_result.blacklist_rules.len(),
             sync_result.qos_rules.len());
         
         self.sync_peers(&sync_result.peers).await?;
         self.sync_advertised_routes(&sync_result.peers).await?;
         
-        if !sync_result.acl_rules.is_empty() {
-            if let Err(e) = self.sync_acl_rules(&sync_result.acl_rules).await {
-                tracing::error!("Failed to sync ACL rules: {:?}", e);
-            }
+        if let Err(e) = self.sync_acl_rules(&sync_result.acl_rules).await {
+            tracing::error!("Failed to sync ACL rules: {:?}", e);
+        }
+
+        if let Err(e) = self.sync_blacklist_rules(&sync_result.blacklist_rules).await {
+            tracing::error!("Failed to sync blacklist rules: {:?}", e);
         }
         
         if let Err(e) = self.sync_qos_rules(&sync_result.qos_rules).await {
@@ -1357,6 +1365,7 @@ impl UnifiedAgent {
         
         let result = tokio::task::spawn_blocking(move || -> Result<()> {
             let mut mgr = qos_mgr.blocking_lock();
+            mgr.clear_all_rules().map_err(|e| anyhow::anyhow!(e))?;
             
             let mut success_count = 0;
             let mut fail_count = 0;
@@ -1419,6 +1428,48 @@ impl UnifiedAgent {
             Ok(())
         }).await?;
         
+        result
+    }
+
+    async fn sync_blacklist_rules(&mut self, new_rules: &[GrpcBlacklistRule]) -> Result<()> {
+        tracing::info!("Syncing {} blacklist rules", new_rules.len());
+
+        let acl_mgr = self.acl_mgr.clone();
+        let new_rules = new_rules.to_vec();
+
+        let result = tokio::task::spawn_blocking(move || -> Result<()> {
+            let mut mgr = acl_mgr.blocking_lock();
+            mgr.clear_all_blacklists().map_err(|e| anyhow::anyhow!(e))?;
+
+            let mut success_count = 0;
+            let mut fail_count = 0;
+
+            for rule in &new_rules {
+                let apply_result = match rule.scope.as_str() {
+                    "src" if !rule.cidr.is_empty() => mgr.block_src_cidr(&rule.cidr).map(|_| ()).map_err(|e| anyhow::anyhow!(e)),
+                    "dst" if !rule.cidr.is_empty() => mgr.block_dst_cidr(&rule.cidr).map(|_| ()).map_err(|e| anyhow::anyhow!(e)),
+                    "ports" if rule.port > 0 => mgr.block_port(rule.port as u16).map_err(|e| anyhow::anyhow!(e)),
+                    _ => Err(anyhow::anyhow!("invalid blacklist rule payload")),
+                };
+
+                match apply_result {
+                    Ok(_) => success_count += 1,
+                    Err(e) => {
+                        fail_count += 1;
+                        tracing::error!("Failed to apply blacklist rule {:?}: {:?}", rule, e);
+                    }
+                }
+            }
+
+            tracing::info!(
+                "Blacklist sync completed: {} success, {} failed",
+                success_count,
+                fail_count
+            );
+
+            Ok(())
+        }).await?;
+
         result
     }
     
@@ -1826,11 +1877,12 @@ impl UnifiedAgent {
     async fn reconnect_grpc(&mut self) -> Result<()> {
         tracing::info!("Reconnecting to Controller at {}...", self.config.controller_url);
         
-        let new_client = GrpcClient::new(
+        let new_client = GrpcClient::new_with_options(
             self.config.controller_url.clone(),
             self.config.ca_cert.clone(),
             self.config.client_cert.clone(),
             self.config.client_key.clone(),
+            self.config.tls_server_name.clone(),
         ).await.context("Failed to reconnect to Controller")?;
         
         self.grpc_client = new_client;
@@ -1841,7 +1893,7 @@ impl UnifiedAgent {
     async fn reload_config(&mut self) -> Result<()> {
         tracing::info!("Reloading configuration...");
         
-        let config_manager = crate::config::ConfigManager::new("/etc/aria/agent.yaml");
+        let config_manager = crate::config::ConfigManager::new(&self.config_path);
         let new_config = config_manager.load()?;
         
         // 1. 检测 sync_interval 变更
@@ -1861,12 +1913,14 @@ impl UnifiedAgent {
             let old_ca = self.config.ca_cert.clone();
             let old_cert = self.config.client_cert.clone();
             let old_key = self.config.client_key.clone();
+            let old_tls_server_name = self.config.tls_server_name.clone();
             
             // 更新配置
             self.config.controller_url = new_config.controller_url.clone();
             self.config.ca_cert = new_config.ca_cert.clone();
             self.config.client_cert = new_config.client_cert.clone();
             self.config.client_key = new_config.client_key.clone();
+            self.config.tls_server_name = new_config.tls_server_name.clone();
             
             // 尝试重连
             if let Err(e) = self.reconnect_grpc().await {
@@ -1877,6 +1931,7 @@ impl UnifiedAgent {
                 self.config.ca_cert = old_ca;
                 self.config.client_cert = old_cert;
                 self.config.client_key = old_key;
+                self.config.tls_server_name = old_tls_server_name;
                 
                 metrics::record_grpc_error();
                 metrics::record_config_reload_failure();
@@ -1886,18 +1941,21 @@ impl UnifiedAgent {
         // 3. 检测证书路径变更
         else if new_config.ca_cert != self.config.ca_cert ||
                 new_config.client_cert != self.config.client_cert ||
-                new_config.client_key != self.config.client_key {
+                new_config.client_key != self.config.client_key ||
+                new_config.tls_server_name != self.config.tls_server_name {
             tracing::warn!("Certificate paths changed, reconnecting gRPC client");
             
             // 备份旧证书路径
             let old_ca = self.config.ca_cert.clone();
             let old_cert = self.config.client_cert.clone();
             let old_key = self.config.client_key.clone();
+            let old_tls_server_name = self.config.tls_server_name.clone();
             
             // 更新证书路径
             self.config.ca_cert = new_config.ca_cert.clone();
             self.config.client_cert = new_config.client_cert.clone();
             self.config.client_key = new_config.client_key.clone();
+            self.config.tls_server_name = new_config.tls_server_name.clone();
             
             // 尝试重连
             if let Err(e) = self.reconnect_grpc().await {
@@ -1907,6 +1965,7 @@ impl UnifiedAgent {
                 self.config.ca_cert = old_ca;
                 self.config.client_cert = old_cert;
                 self.config.client_key = old_key;
+                self.config.tls_server_name = old_tls_server_name;
                 
                 metrics::record_grpc_error();
                 metrics::record_config_reload_failure();

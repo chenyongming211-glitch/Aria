@@ -39,6 +39,7 @@
     </div>
 
     <el-table :data="rules" v-loading="loading" style="width: 100%">
+      <el-table-column prop="node_name" label="节点" width="160" />
       <el-table-column prop="priority" label="优先级" width="80" sortable />
       <el-table-column prop="name" label="名称" width="150" />
       <el-table-column prop="src_net" label="源网络" width="150" />
@@ -65,6 +66,27 @@
           <el-switch v-model="row.enabled" @change="handleToggleEnabled(row)" />
         </template>
       </el-table-column>
+      <el-table-column label="下发状态" width="120">
+        <template #default="{ row }">
+          <el-tag size="small" :type="getPolicyTagType(row.policy_status)">
+            {{ formatPolicyStatus(row.policy_status) }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="pending_cmds" label="待执行" width="90" />
+      <el-table-column label="最近命令" width="150">
+        <template #default="{ row }">
+          <el-tooltip
+            v-if="row.last_delivery_command_id"
+            :content="row.last_delivery_command_id"
+            placement="top"
+          >
+            <span>{{ shortCommandId(row.last_delivery_command_id) }}</span>
+          </el-tooltip>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="last_command_error" label="失败原因" min-width="180" show-overflow-tooltip />
       <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="handleEdit(row)">编辑</el-button>
@@ -87,6 +109,17 @@
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="600px" @closed="resetForm">
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="120px">
+        <el-form-item label="目标节点" prop="node_id">
+          <el-select v-model="form.node_id" placeholder="请选择节点" style="width: 100%">
+            <el-option
+              v-for="node in tenantNodes"
+              :key="node.id"
+              :label="node.hostname || node.public_key || node.id"
+              :value="node.id"
+            />
+          </el-select>
+        </el-form-item>
+
         <el-form-item label="规则名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入规则名称" />
         </el-form-item>
@@ -156,9 +189,11 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 import { useAclApi } from '@/composables/useAclApi'
+import { useTenantApi } from '@/composables/useTenantApi'
 
 const loading = ref(false)
 const rules = ref([])
+const tenantNodes = ref([])
 const dialogVisible = ref(false)
 const submitting = ref(false)
 const formRef = ref(null)
@@ -176,6 +211,8 @@ const pagination = reactive({
 })
 
 const form = reactive({
+  node_id: '',
+  node_name: '',
   id: null,
   name: '',
   src_net: '',
@@ -190,6 +227,9 @@ const form = reactive({
 })
 
 const formRules = {
+  node_id: [
+    { required: true, message: '请选择目标节点', trigger: 'change' }
+  ],
   name: [
     { required: true, message: '请输入规则名称', trigger: 'blur' },
     { min: 1, max: 50, message: '长度在 1 到 50 个字符', trigger: 'blur' }
@@ -215,6 +255,17 @@ const formRules = {
 
 const dialogTitle = computed(() => form.id ? '编辑规则' : '新建规则')
 
+const loadNodes = async () => {
+  try {
+    tenantNodes.value = await useTenantApi.getTenantNodes()
+    if (!form.node_id && tenantNodes.value.length > 0) {
+      form.node_id = tenantNodes.value[0].id
+    }
+  } catch (error) {
+    console.error('加载节点失败:', error)
+  }
+}
+
 const loadRules = async () => {
   loading.value = true
   try {
@@ -224,14 +275,8 @@ const loadRules = async () => {
     })
     
     const response = await useAclApi.getACLRules(params)
-    
-    if (Array.isArray(response)) {
-      rules.value = response
-      pagination.total = response.length
-    } else if (response.data) {
-      rules.value = response.data
-      pagination.total = response.meta?.total || response.data.length
-    }
+    rules.value = Array.isArray(response) ? response : response?.data || []
+    pagination.total = rules.value.length
   } catch (error) {
     ElMessage.error('加载规则失败: ' + (error.message || '未知错误'))
   } finally {
@@ -254,7 +299,7 @@ const handleCreate = () => {
 }
 
 const handleEdit = (row) => {
-  Object.assign(form, row)
+  Object.assign(form, row, { node_id: row.node_id })
   dialogVisible.value = true
 }
 
@@ -266,7 +311,7 @@ const handleDelete = async (row) => {
       type: 'warning'
     })
     
-    await useAclApi.deleteACLRule(row.id)
+    await useAclApi.deleteACLRule(row.id, row.node_id)
     ElMessage.success('删除成功')
     loadRules()
   } catch (error) {
@@ -278,7 +323,7 @@ const handleDelete = async (row) => {
 
 const handleToggleEnabled = async (row) => {
   try {
-    await useAclApi.updateACLRule(row.id, { enabled: row.enabled })
+    await useAclApi.updateACLRule(row.id, { ...row, enabled: row.enabled, node_id: row.node_id })
     ElMessage.success(row.enabled ? '已启用' : '已禁用')
   } catch (error) {
     row.enabled = !row.enabled
@@ -323,6 +368,8 @@ const handleSubmit = async () => {
 
 const resetForm = () => {
   Object.assign(form, {
+    node_id: tenantNodes.value[0]?.id || '',
+    node_name: '',
     id: null, name: '', src_net: '', dst_net: '',
     protocol: 6, min_port: null, max_port: null,
     action: 'allow', enabled: true, priority: 100, description: ''
@@ -345,7 +392,37 @@ const getActionType = (action) => {
   return map[action] || ''
 }
 
+const formatPolicyStatus = (status) => {
+  const map = {
+    applied: '已应用',
+    pending: '待下发',
+    in_progress: '下发中',
+    error: '失败',
+    idle: '空闲'
+  }
+  return map[status] || status || '未知'
+}
+
+const getPolicyTagType = (status) => {
+  const map = {
+    applied: 'success',
+    pending: 'warning',
+    in_progress: 'warning',
+    error: 'danger',
+    idle: 'info'
+  }
+  return map[status] || 'info'
+}
+
+const shortCommandId = (commandId) => {
+  if (!commandId) {
+    return '-'
+  }
+  return commandId.slice(0, 8)
+}
+
 onMounted(() => {
+  loadNodes()
   loadRules()
 })
 </script>

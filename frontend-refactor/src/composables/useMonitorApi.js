@@ -1,9 +1,9 @@
 import api from './useApi'
-import { API_ENDPOINTS } from '@/config/api'
+import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 
 /**
  * 监控API接口
- * 与后端 /v1/monitor/* API 对接
+ * 与后端 /api/v2/tenants/{tenant_id}/monitoring/* API 对接
  */
 export const useMonitorApi = {
   /**
@@ -12,7 +12,8 @@ export const useMonitorApi = {
    */
   getStats: async () => {
     try {
-      const response = await api.get(API_ENDPOINTS.MONITOR.STATS)
+      const tenantId = requireCurrentTenantId()
+      const response = await api.get(API_ENDPOINTS.MONITOR.STATS(tenantId))
       return response.data?.data || response.data
     } catch (error) {
       console.error('获取监控统计失败:', error)
@@ -26,7 +27,8 @@ export const useMonitorApi = {
    */
   getNodeDetail: async (nodeId) => {
     try {
-      const response = await api.get(API_ENDPOINTS.MONITOR.NODE_DETAIL(nodeId))
+      const tenantId = requireCurrentTenantId()
+      const response = await api.get(API_ENDPOINTS.MONITOR.NODE_DETAIL(tenantId, nodeId))
       return response.data?.data || response.data
     } catch (error) {
       console.error('获取节点详情失败:', error)

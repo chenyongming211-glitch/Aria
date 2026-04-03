@@ -15,19 +15,19 @@ import (
 
 // TenantInfo 定义租户信息结构体
 type TenantInfo struct {
-	ID             uuid.UUID
-	Name           string
-	Code           string
-	Status         string
-	ResourceQuota  string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID            uuid.UUID
+	Name          string
+	Code          string
+	Status        string
+	ResourceQuota string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 const (
 	// Optimized connection pool settings for high concurrency
-	defaultMaxOpenConns    = 200 // Increased from 100 for better concurrency
-	defaultMaxIdleConns    = 50  // Increased from 10 to maintain warm connections
+	defaultMaxOpenConns    = 200              // Increased from 100 for better concurrency
+	defaultMaxIdleConns    = 50               // Increased from 10 to maintain warm connections
 	defaultConnMaxLifetime = 30 * time.Minute // Reduced from 1 hour to prevent stale connections
 	defaultConnMaxIdleTime = 5 * time.Minute  // Close idle connections after 5 minutes
 )
@@ -264,6 +264,38 @@ func (s *Storage) Migrate() error {
 			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
 
+		`CREATE TABLE IF NOT EXISTS qos_rules (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			tenant_id UUID NOT NULL REFERENCES tenants(id),
+			node_id UUID NOT NULL REFERENCES nodes(id),
+			category VARCHAR(16) NOT NULL,
+			src_cidr CIDR,
+			dst_cidr CIDR,
+			src_port INTEGER,
+			dst_port INTEGER,
+			protocol SMALLINT,
+			bandwidth_mbps INTEGER NOT NULL,
+			enabled BOOLEAN DEFAULT true,
+			description TEXT,
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			updated_at TIMESTAMPTZ DEFAULT NOW(),
+			CHECK (category IN ('service', 'peers', 'ip'))
+		)`,
+
+		`CREATE TABLE IF NOT EXISTS blacklist_rules (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			tenant_id UUID NOT NULL REFERENCES tenants(id),
+			node_id UUID NOT NULL REFERENCES nodes(id),
+			scope VARCHAR(16) NOT NULL,
+			cidr CIDR,
+			port INTEGER,
+			enabled BOOLEAN DEFAULT true,
+			description TEXT,
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			updated_at TIMESTAMPTZ DEFAULT NOW(),
+			CHECK (scope IN ('src', 'dst', 'ports'))
+		)`,
+
 		`CREATE INDEX IF NOT EXISTS idx_nodes_public_key ON nodes(public_key)`,
 		`CREATE INDEX IF NOT EXISTS idx_nodes_tenant_id ON nodes(tenant_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_nodes_last_seen ON nodes(last_seen)`,
@@ -295,6 +327,10 @@ func (s *Storage) Migrate() error {
 		// Add indexes for tenant isolation
 		`CREATE INDEX IF NOT EXISTS idx_tokens_tenant_id ON tokens(tenant_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_tenant_id ON acl_rules(tenant_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_qos_rules_tenant_node_category ON qos_rules(tenant_id, node_id, category)`,
+		`CREATE INDEX IF NOT EXISTS idx_qos_rules_enabled ON qos_rules(enabled)`,
+		`CREATE INDEX IF NOT EXISTS idx_blacklist_rules_tenant_node_scope ON blacklist_rules(tenant_id, node_id, scope)`,
+		`CREATE INDEX IF NOT EXISTS idx_blacklist_rules_enabled ON blacklist_rules(enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id)`,
 
@@ -331,8 +367,27 @@ func (s *Storage) Migrate() error {
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		`CREATE TABLE IF NOT EXISTS policy_deliveries (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			tenant_id UUID NOT NULL REFERENCES tenants(id),
+			node_id UUID NOT NULL REFERENCES nodes(id),
+			policy_domain VARCHAR(16) NOT NULL,
+			policy_ref VARCHAR(255) NOT NULL,
+			policy_name VARCHAR(255),
+			action VARCHAR(32) NOT NULL,
+			command_id UUID NOT NULL REFERENCES agent_commands(id) ON DELETE CASCADE,
+			command_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			last_error TEXT,
+			metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+			completed_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			updated_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_commands_node_status ON agent_commands(node_public_key, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_commands_created_at ON agent_commands(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_policy_deliveries_tenant_node_domain_ref ON policy_deliveries(tenant_id, node_id, policy_domain, policy_ref)`,
+		`CREATE INDEX IF NOT EXISTS idx_policy_deliveries_command_id ON policy_deliveries(command_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_policy_deliveries_created_at ON policy_deliveries(created_at)`,
 	}
 
 	for i, migration := range migrations {

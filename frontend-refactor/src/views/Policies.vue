@@ -86,6 +86,27 @@
                 </el-tag>
               </template>
             </el-table-column>
+            <el-table-column label="下发状态" width="120">
+              <template #default="{ row }">
+                <el-tag size="small" :type="getPolicyDeliveryTagType(row.policyStatus)">
+                  {{ formatPolicyDeliveryStatus(row.policyStatus) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="pendingCmds" label="待执行" width="90" />
+            <el-table-column label="最近命令" width="150">
+              <template #default="{ row }">
+                <el-tooltip
+                  v-if="row.lastDeliveryCommandId"
+                  :content="row.lastDeliveryCommandId"
+                  placement="top"
+                >
+                  <span>{{ shortCommandId(row.lastDeliveryCommandId) }}</span>
+                </el-tooltip>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="lastCommandError" label="失败原因" min-width="180" show-overflow-tooltip />
             <el-table-column label="操作" width="250">
               <template #default="{ row }">
                 <el-button size="small" @click="editPolicy(row)">编辑</el-button>
@@ -521,6 +542,34 @@ const getStatusType = (status) => {
     case 'inactive': return 'info'
     default: return 'info'
   }
+}
+
+const formatPolicyDeliveryStatus = (status) => {
+  const names = {
+    applied: '已应用',
+    pending: '待下发',
+    in_progress: '下发中',
+    error: '失败',
+    idle: '空闲'
+  }
+  return names[status] || status || '未知'
+}
+
+const getPolicyDeliveryTagType = (status) => {
+  switch (status) {
+    case 'applied': return 'success'
+    case 'pending':
+    case 'in_progress': return 'warning'
+    case 'error': return 'danger'
+    default: return 'info'
+  }
+}
+
+const shortCommandId = (commandId) => {
+  if (!commandId) {
+    return '-'
+  }
+  return commandId.slice(0, 8)
 }
 
 // Get policy explanation

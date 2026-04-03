@@ -5,6 +5,8 @@
 ## 核心文档
 
 - `README.md`：项目总览、核心能力、快速开始。
+- `docs/API-V2-WHITEPAPER.md`：API v2 目标接口白皮书，定义域边界、端点清单与统一响应格式。
+- `docs/V0.1.0-PRODUCT-BLUEPRINT.md`：v0.1.0 产品蓝图，定义前端导航、后端分层、节点接入、策略与运维闭环。
 - `docs/ARCHITECTURE-REFACTOR.md`：Go Controller + Rust Agent 的职责拆分说明。
 - `docs/DEPLOYMENT.md`：整体部署参考。
 - `docs/RUST-AGENT-DEPLOYMENT.md`：Rust Agent 部署与运行说明。

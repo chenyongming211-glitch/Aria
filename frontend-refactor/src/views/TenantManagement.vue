@@ -203,6 +203,7 @@ import { ref, computed, reactive, onMounted } from 'vue'
 import { Search, Refresh, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/composables/useApi'
+import { API_ENDPOINTS } from '@/config/api'
 
 const tenants = ref([])
 const loading = ref(false)
@@ -214,7 +215,7 @@ onMounted(() => {
 const loadTenants = async () => {
   loading.value = true
   try {
-    const response = await api.get('/v1/tenants')
+    const response = await api.get(API_ENDPOINTS.TENANT.LIST)
     const tenantList = response.data?.data || response.data || []
     tenants.value = tenantList.map(t => ({
       ...t,
@@ -340,7 +341,7 @@ const toggleTenantStatus = (tenant) => {
 
 const deleteTenant = async (id) => {
   try {
-    await api.delete(`/v1/tenants?id=${id}`)
+    await api.delete(API_ENDPOINTS.TENANT.DETAIL(id))
     tenants.value = tenants.value.filter(tenant => tenant.id !== id)
     ElMessage.success('Tenant deleted')
   } catch (error) {
@@ -362,14 +363,14 @@ const saveTenant = async () => {
     }
 
     if (isEditingExisting.value) {
-      await api.put(`/v1/tenants?id=${editingTenant.value.id}`, tenantData)
+      await api.put(API_ENDPOINTS.TENANT.DETAIL(editingTenant.value.id), tenantData)
       const index = tenants.value.findIndex(t => t.id === editingTenant.value.id)
       if (index !== -1) {
         tenants.value[index] = { ...tenants.value[index], ...tenantData }
       }
       ElMessage.success('Tenant updated successfully')
     } else {
-      const response = await api.post('/v1/tenants', tenantData)
+      const response = await api.post(API_ENDPOINTS.TENANT.LIST, tenantData)
       const newTenant = {
         ...response.data?.data || tenantData,
         status: 'active',
@@ -395,7 +396,7 @@ const manageAccess = async (tenant) => {
   accessDialogVisible.value = true
   
   try {
-    const response = await api.get(`/v1/tenants/${tenant.id}/users`)
+    const response = await api.get(API_ENDPOINTS.TENANT.USERS(tenant.id))
     selectedTenant.value.users = response.data?.data || response.data || []
   } catch (error) {
     console.error('Failed to load users:', error)
@@ -418,7 +419,7 @@ const addUserToTenant = () => {
       inputErrorMessage: '密码至少6位'
     }).then(async ({ value: password }) => {
       try {
-        await api.post(`/v1/tenants/${selectedTenant.value.id}/users`, {
+        await api.post(API_ENDPOINTS.TENANT.USERS(selectedTenant.value.id), {
           username,
           password,
           role: 'member',
@@ -448,7 +449,7 @@ const editUserRole = (user) => {
     inputValue: user.role
   }).then(async ({ value }) => {
     try {
-      await api.put(`/v1/tenants/${selectedTenant.value.id}/users/${user.id}`, {
+      await api.put(API_ENDPOINTS.TENANT.USER_DETAIL(selectedTenant.value.id, user.id), {
         role: value
       })
       ElMessage.success('角色更新成功')
@@ -462,7 +463,7 @@ const editUserRole = (user) => {
 
 const removeUserFromTenant = async (userId) => {
   try {
-    await api.delete(`/v1/tenants/${selectedTenant.value.id}/users/${userId}`)
+    await api.delete(API_ENDPOINTS.TENANT.USER_DETAIL(selectedTenant.value.id, userId))
     ElMessage.success('用户删除成功')
     manageAccess(selectedTenant.value)
   } catch (error) {
