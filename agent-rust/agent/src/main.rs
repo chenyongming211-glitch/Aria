@@ -786,7 +786,7 @@ async fn bootstrap_register(
     .await
     .context("Failed to connect to Controller for bootstrap registration")?;
 
-    let assigned_ip = grpc_client
+    let registration = grpc_client
         .register_with_details(
             state.public_key.clone(),
             endpoint,
@@ -801,8 +801,11 @@ async fn bootstrap_register(
         .context("Failed to register agent with Controller")?;
 
     state.device_id = Some(machine_id);
-    state.assigned_ip = Some(assigned_ip.clone());
-    state.address = Some(format!("{}/32", assigned_ip));
+    if let Some(node_id) = registration.node_id {
+        state.node_id = Some(node_id);
+    }
+    state.assigned_ip = Some(registration.assigned_ip.clone());
+    state.address = Some(format!("{}/32", registration.assigned_ip));
     state.last_sync_status = Some("registered".to_string());
     Ok(true)
 }

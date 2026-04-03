@@ -545,6 +545,12 @@ func (s *Storage) GetNode(publicKey string) (*Node, error) {
 	return s.scanNode(row)
 }
 
+func (s *Storage) GetNodeByID(nodeID uuid.UUID) (*Node, error) {
+	query := `SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE id = $1`
+	row := s.db.QueryRow(query, nodeID)
+	return s.scanNode(row)
+}
+
 func (s *Storage) GetNodeByHostname(hostname string) (*Node, error) {
 	query := `SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE hostname = $1`
 	row := s.db.QueryRow(query, hostname)

@@ -1556,13 +1556,16 @@ type PolicyResponse struct {
 
 // HandlePolicies manages ACL policies (CRUD operations)
 func (c *Controller) getRegionByNetwork(network string) string {
-	// Get all nodes
 	nodes, err := c.store.GetAllNodes()
 	if err != nil {
 		c.logger.Error("Failed to get nodes for region lookup: %v", err)
 		return ""
 	}
 
+	return c.getRegionByNetworkInNodes(network, nodes)
+}
+
+func (c *Controller) getRegionByNetworkInNodes(network string, nodes []*controllerstorage.Node) string {
 	// Parse the target network
 	_, targetNet, err := net.ParseCIDR(network)
 	if err != nil {
@@ -1607,6 +1610,15 @@ func (c *Controller) getTenantEnabledACLRules(ctx context.Context) ([]*controlle
 // A rule is relevant if either the source or destination network belongs to the region.
 // This supports bidirectional traffic and asymmetric routing.
 func (c *Controller) getACLRulesForRegion(region string, allRules []*controllerstorage.ACLRule) []ACLRuleJSON {
+	nodes, err := c.store.GetAllNodes()
+	if err != nil {
+		c.logger.Error("Failed to get nodes for ACL region lookup: %v", err)
+		return nil
+	}
+	return c.getACLRulesForRegionInNodes(region, allRules, nodes)
+}
+
+func (c *Controller) getACLRulesForRegionInNodes(region string, allRules []*controllerstorage.ACLRule, nodes []*controllerstorage.Node) []ACLRuleJSON {
 	if region == "" {
 		// If no region specified, return all rules (backward compatibility)
 		c.logger.Warn("Agent has no region, returning all ACL rules")
@@ -1626,8 +1638,8 @@ func (c *Controller) getACLRulesForRegion(region string, allRules []*controllers
 	var result []ACLRuleJSON
 	for _, rule := range allRules {
 		// Find regions for source and destination networks
-		srcRegion := c.getRegionByNetwork(rule.SrcNet)
-		dstRegion := c.getRegionByNetwork(rule.DstNet)
+		srcRegion := c.getRegionByNetworkInNodes(rule.SrcNet, nodes)
+		dstRegion := c.getRegionByNetworkInNodes(rule.DstNet, nodes)
 
 		// Include rule if this region is involved (source or destination)
 		// This ensures both outbound and inbound traffic are allowed
@@ -1866,13 +1878,13 @@ func (c *Controller) processSync(publicKey string) (interface{}, string, interfa
 		c.logger.Warn("Failed to update last seen for %s: %v", publicKey[:8], err)
 	}
 
-	allNodes, err := c.store.GetAllNodes()
+	tenantNodes, err := c.store.GetNodesByTenant(node.TenantID)
 	if err != nil {
 		return nil, "", nil, uuid.Nil, fmt.Errorf("failed to get nodes: %w", err)
 	}
 
 	var peers []map[string]interface{}
-	for _, n := range allNodes {
+	for _, n := range tenantNodes {
 		if n.PublicKey == publicKey {
 			continue
 		}
@@ -1890,13 +1902,20 @@ func (c *Controller) processSync(publicKey string) (interface{}, string, interfa
 		})
 	}
 
-	allACLRules, err := c.getTenantEnabledACLRules(context.Background())
+	allACLRules, err := c.store.GetACLRulesByTenant(node.TenantID)
 	if err != nil {
-		c.logger.Warn("Failed to get ACL rules: %v", err)
+		c.logger.Warn("Failed to get tenant ACL rules for %s: %v", node.TenantID, err)
 		allACLRules = []*controllerstorage.ACLRule{}
 	}
 
-	regionACLs := c.getACLRulesForRegion(node.Region, allACLRules)
+	enabledACLRules := make([]*controllerstorage.ACLRule, 0, len(allACLRules))
+	for _, rule := range allACLRules {
+		if rule.Enabled {
+			enabledACLRules = append(enabledACLRules, rule)
+		}
+	}
+
+	regionACLs := c.getACLRulesForRegionInNodes(node.Region, enabledACLRules, tenantNodes)
 	var aclRules []map[string]interface{}
 	for _, rule := range regionACLs {
 		aclRules = append(aclRules, map[string]interface{}{

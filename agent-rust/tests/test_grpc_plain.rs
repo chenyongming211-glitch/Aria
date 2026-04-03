@@ -19,6 +19,7 @@ async fn main() {
             println!("测试 2: 调用 Sync API...");
             let request = tonic::Request::new(SyncRequest {
                 public_key: "test-rust-agent-001".to_string(),
+                node_id: String::new(),
             });
             
             match client.sync(request).await {

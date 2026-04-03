@@ -68,12 +68,14 @@ message RegisterRequest {
 message RegisterResponse {
   string assigned_ip = 1;             // 分配的 VPN IP
   string metrics_push_gateway = 2;    // Prometheus Push Gateway URL
+  string node_id = 3;                 // 平台侧稳定节点身份
 }
 
 // ============ 同步相关 ============
 
 message SyncRequest {
-  string public_key = 1;              // 用于认证（替代 X-Public-Key header）
+  string public_key = 1;              // 兼容字段：运行期按 public_key 查找节点
+  string node_id = 2;                 // 优先字段：运行期按 node_id 查找节点
 }
 
 message SyncResponse {
@@ -194,12 +196,14 @@ message CommandResponse {
   string message = 3;               // 状态消息或错误信息
   map<string, string> result = 4;   // 命令执行结果
   int64 completed_at = 5;           // 命令完成时间戳
+  string node_id = 6;               // 运行期稳定节点身份
+  string public_key = 7;            // 兼容字段
 }
 
 // ============ 指标上报相关 ============
 
 message MetricsReportRequest {
-  string agent_id = 1;              // Agent ID (public_key)
+  string agent_id = 1;              // 兼容字段：历史上报身份（通常为 public_key）
   int64 timestamp = 2;              // 上报时间戳
   
   // 系统指标
@@ -227,6 +231,8 @@ message MetricsReportRequest {
   
   // 自定义指标
   map<string, double> custom_metrics = 20;  // 自定义指标键值对
+  string node_id = 21;             // 优先字段：运行期稳定节点身份
+  string public_key = 22;          // 兼容字段：当前节点 WireGuard 公钥
 }
 
 message MetricsReportResponse {

@@ -10,6 +10,7 @@ import (
 
 	controllerstorage "aria/pkg/controllerstorage"
 	"aria/pkg/grpc/agentpb"
+	"github.com/google/uuid"
 )
 
 // ControllerServer 实现 gRPC ControllerService
@@ -65,19 +66,20 @@ func (s *ControllerServer) Register(ctx context.Context, req *agentpb.RegisterRe
 	return &agentpb.RegisterResponse{
 		AssignedIp:         assignedIP,
 		MetricsPushGateway: metricsGateway,
+		NodeId:             registeredNodeID(s.store, req.PublicKey),
 	}, nil
 }
 
 // Sync 处理 Agent 定期同步请求
 // 复用 REST API 的 HandleSync 逻辑
 func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (*agentpb.SyncResponse, error) {
-	// 验证公钥
-	if req.PublicKey == "" {
-		return nil, fmt.Errorf("public_key is required")
+	node, err := s.resolveRuntimeNode(req.NodeId, req.PublicKey)
+	if err != nil {
+		return nil, err
 	}
 
 	// 调用 REST API handler
-	peersInterface, assignedIP, aclRulesInterface, metricsGateway, err := s.syncHandler(req.PublicKey)
+	peersInterface, assignedIP, aclRulesInterface, metricsGateway, err := s.syncHandler(node.PublicKey)
 	if err != nil {
 		return nil, fmt.Errorf("sync failed: %w", err)
 	}
@@ -126,14 +128,14 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 	}
 
 	// 查询 QoS 规则
-	qosRules, err := s.getQoSRules(ctx, req.PublicKey)
+	qosRules, err := s.getQoSRules(ctx, node.PublicKey)
 	if err != nil {
 		// 记录错误但继续
 		fmt.Printf("[WARN] Failed to get QoS rules: %v\n", err)
 		qosRules = []*agentpb.QoSRule{} // 空列表
 	}
 
-	blacklistRules, err := s.getBlacklistRules(ctx, req.PublicKey)
+	blacklistRules, err := s.getBlacklistRules(ctx, node.PublicKey)
 	if err != nil {
 		fmt.Printf("[WARN] Failed to get blacklist rules: %v\n", err)
 		blacklistRules = []*agentpb.BlacklistRule{}
@@ -153,7 +155,7 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 // CommandStream 处理双向流命令
 // Agent 连接后，Controller 可以推送命令，Agent 返回执行结果
 func (s *ControllerServer) CommandStream(stream agentpb.ControllerService_CommandStreamServer) error {
-	var agentID string
+	var nodePublicKey string
 
 	for {
 		// 接收来自 Agent 的响应
@@ -166,14 +168,13 @@ func (s *ControllerServer) CommandStream(stream agentpb.ControllerService_Comman
 		}
 
 		// 第一次响应用于识别 Agent
-		if agentID == "" && resp.CommandId == "init" {
-			if result, ok := resp.Result["agent_id"]; ok {
-				agentID = result
+		if nodePublicKey == "" && resp.CommandId == "init" {
+			node, err := s.resolveNodeFromCommandStream(resp)
+			if err != nil {
+				return err
 			}
-			if agentID == "" {
-				continue
-			}
-			if err := s.sendNextPendingCommand(stream, agentID); err != nil {
+			nodePublicKey = node.PublicKey
+			if err := s.sendNextPendingCommand(stream, nodePublicKey); err != nil {
 				return err
 			}
 			continue
@@ -186,7 +187,7 @@ func (s *ControllerServer) CommandStream(stream agentpb.ControllerService_Comman
 		}
 
 		if isTerminalCommandStatus(resp.Status) {
-			if err := s.sendNextPendingCommand(stream, agentID); err != nil {
+			if err := s.sendNextPendingCommand(stream, nodePublicKey); err != nil {
 				return err
 			}
 		}
@@ -231,8 +232,14 @@ func isTerminalCommandStatus(status string) bool {
 
 // ReportMetrics 处理 Agent 指标上报
 func (s *ControllerServer) ReportMetrics(ctx context.Context, req *agentpb.MetricsReportRequest) (*agentpb.MetricsReportResponse, error) {
-	if req.AgentId == "" {
-		return nil, fmt.Errorf("agent_id is required")
+	node, err := s.resolveMetricsNode(req)
+	if err != nil {
+		return nil, err
+	}
+
+	node.LastSeen = time.Now().Unix()
+	if err := s.store.SaveNode(node); err != nil {
+		return nil, fmt.Errorf("failed to update node heartbeat from metrics: %w", err)
 	}
 
 	// TODO: 将指标存储到时序数据库（如 Prometheus, VictoriaMetrics, InfluxDB）
@@ -249,6 +256,121 @@ func (s *ControllerServer) ReportMetrics(ctx context.Context, req *agentpb.Metri
 		Success: true,
 		Message: "Metrics reported successfully",
 	}, nil
+}
+
+func registeredNodeID(store *controllerstorage.Storage, publicKey string) string {
+	if store == nil || publicKey == "" {
+		return ""
+	}
+
+	node, err := store.GetNode(publicKey)
+	if err != nil || node == nil {
+		return ""
+	}
+
+	return node.ID.String()
+}
+
+func (s *ControllerServer) resolveRuntimeNode(nodeID, publicKey string) (*controllerstorage.Node, error) {
+	if s.store == nil {
+		return nil, fmt.Errorf("controller storage is not configured")
+	}
+
+	var resolvedNode *controllerstorage.Node
+	if nodeID != "" {
+		parsedNodeID, err := uuid.Parse(nodeID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid node_id: %w", err)
+		}
+		resolvedNode, err = s.store.GetNodeByID(parsedNodeID)
+		if err != nil {
+			return nil, fmt.Errorf("node not found for node_id %s: %w", nodeID, err)
+		}
+	}
+
+	if publicKey == "" {
+		if resolvedNode == nil {
+			return nil, fmt.Errorf("node_id or public_key is required")
+		}
+		return resolvedNode, nil
+	}
+
+	legacyNode, err := s.store.GetNode(publicKey)
+	if err != nil {
+		return nil, fmt.Errorf("node not found for public_key: %w", err)
+	}
+
+	if resolvedNode != nil && resolvedNode.ID != legacyNode.ID {
+		return nil, fmt.Errorf("node identity mismatch between node_id and public_key")
+	}
+
+	return legacyNode, nil
+}
+
+func (s *ControllerServer) resolveLegacyAgentIdentity(agentID string) (*controllerstorage.Node, error) {
+	if s.store == nil {
+		return nil, fmt.Errorf("controller storage is not configured")
+	}
+	if agentID == "" {
+		return nil, fmt.Errorf("agent identity is required")
+	}
+
+	if parsedNodeID, err := uuid.Parse(agentID); err == nil {
+		return s.store.GetNodeByID(parsedNodeID)
+	}
+
+	return s.store.GetNode(agentID)
+}
+
+func (s *ControllerServer) resolveNodeFromCommandStream(resp *agentpb.CommandResponse) (*controllerstorage.Node, error) {
+	if resp == nil {
+		return nil, fmt.Errorf("command stream init payload is required")
+	}
+
+	if node, err := s.resolveRuntimeNode(resp.NodeId, resp.PublicKey); err == nil {
+		return node, nil
+	}
+
+	if identity, ok := resp.Result["node_id"]; ok && identity != "" {
+		if node, err := s.resolveRuntimeNode(identity, resp.Result["public_key"]); err == nil {
+			return node, nil
+		}
+	}
+
+	if identity, ok := resp.Result["agent_id"]; ok && identity != "" {
+		node, err := s.resolveLegacyAgentIdentity(identity)
+		if err == nil {
+			return node, nil
+		}
+	}
+
+	if identity, ok := resp.Result["public_key"]; ok && identity != "" {
+		node, err := s.resolveRuntimeNode("", identity)
+		if err == nil {
+			return node, nil
+		}
+	}
+
+	return nil, fmt.Errorf("failed to resolve node identity from command stream init")
+}
+
+func (s *ControllerServer) resolveMetricsNode(req *agentpb.MetricsReportRequest) (*controllerstorage.Node, error) {
+	if req == nil {
+		return nil, fmt.Errorf("metrics request is required")
+	}
+
+	if node, err := s.resolveRuntimeNode(req.NodeId, req.PublicKey); err == nil {
+		return node, nil
+	}
+
+	if req.AgentId != "" {
+		node, err := s.resolveLegacyAgentIdentity(req.AgentId)
+		if err == nil {
+			return node, nil
+		}
+	}
+
+	return nil, fmt.Errorf("node_id or public_key is required for metrics reporting")
 }
 
 // 辅助函数：从 map 中安全获取字符串

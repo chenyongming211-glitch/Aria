@@ -17,6 +17,12 @@ use aria::controller_service_client::ControllerServiceClient;
 pub type GrpcCommandRequest = aria::CommandRequest;
 pub type GrpcCommandResponse = aria::CommandResponse;
 
+#[derive(Debug, Clone)]
+pub struct RegisterResult {
+    pub assigned_ip: String,
+    pub node_id: Option<String>,
+}
+
 /// 获取内核版本
 fn get_kernel_version() -> String {
     std::fs::read_to_string("/proc/sys/kernel/osrelease")
@@ -118,7 +124,7 @@ impl GrpcClient {
         hostname: String,
         token: String,
         region: String,
-    ) -> Result<String> {
+    ) -> Result<RegisterResult> {
         self.register_with_details(
             public_key,
             endpoint,
@@ -142,7 +148,7 @@ impl GrpcClient {
         region: String,
         machine_id: String,
         advertised_routes: Vec<String>,
-    ) -> Result<String> {
+    ) -> Result<RegisterResult> {
         let kernel_version = get_kernel_version();
         let has_aesni = has_aesni_support();
         
@@ -170,13 +176,17 @@ impl GrpcClient {
         let response = client.register(request).await?;
         let resp = response.into_inner();
         
-        Ok(resp.assigned_ip)
+        Ok(RegisterResult {
+            assigned_ip: resp.assigned_ip,
+            node_id: (!resp.node_id.trim().is_empty()).then_some(resp.node_id),
+        })
     }
     
     /// 从 Controller 同步配置
-    pub async fn sync(&self, public_key: String) -> Result<SyncResult> {
+    pub async fn sync(&self, node_id: Option<String>, public_key: String) -> Result<SyncResult> {
         let request = tonic::Request::new(aria::SyncRequest {
             public_key,
+            node_id: node_id.unwrap_or_default(),
         });
 
         let mut client = ControllerServiceClient::new(self.channel.clone());
@@ -222,12 +232,19 @@ impl GrpcClient {
 
     pub async fn connect_command_stream(
         &self,
-        agent_id: String,
+        node_id: Option<String>,
+        public_key: String,
     ) -> Result<(mpsc::Sender<GrpcCommandResponse>, Streaming<GrpcCommandRequest>)> {
         let (tx, rx) = mpsc::channel(16);
 
         let mut init_result = HashMap::new();
-        init_result.insert("agent_id".to_string(), agent_id);
+        if let Some(node_id) = node_id.clone().filter(|value| !value.trim().is_empty()) {
+            init_result.insert("agent_id".to_string(), node_id.clone());
+            init_result.insert("node_id".to_string(), node_id);
+        } else {
+            init_result.insert("agent_id".to_string(), public_key.clone());
+        }
+        init_result.insert("public_key".to_string(), public_key.clone());
 
         tx.send(GrpcCommandResponse {
             command_id: "init".to_string(),
@@ -235,6 +252,8 @@ impl GrpcClient {
             message: "agent connected".to_string(),
             result: init_result,
             completed_at: 0,
+            node_id: node_id.unwrap_or_default(),
+            public_key,
         })
         .await
         .context("failed to enqueue init message")?;

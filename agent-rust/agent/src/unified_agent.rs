@@ -389,7 +389,8 @@ impl UnifiedAgent {
     fn start_command_stream_task(&self, remote_command_tx: mpsc::Sender<RemoteCommandEnvelope>) {
         let grpc_client = self.grpc_client.clone();
         let cancel_token = self.cancel_token.clone();
-        let agent_id = self.config.public_key.clone();
+        let node_id = self.config.node_id.clone();
+        let public_key = self.config.public_key.clone();
 
         tokio::spawn(async move {
             loop {
@@ -397,7 +398,10 @@ impl UnifiedAgent {
                     break;
                 }
 
-                match grpc_client.connect_command_stream(agent_id.clone()).await {
+                match grpc_client
+                    .connect_command_stream(node_id.clone(), public_key.clone())
+                    .await
+                {
                     Ok((response_tx, mut request_stream)) => {
                         tracing::info!("Controller command stream connected");
 
@@ -431,6 +435,8 @@ impl UnifiedAgent {
                                                 message: format!("command {} queued", command_name),
                                                 result: HashMap::new(),
                                                 completed_at: 0,
+                                                node_id: node_id.clone().unwrap_or_default(),
+                                                public_key: public_key.clone(),
                                             }).await.is_err() {
                                                 tracing::warn!("Failed to send acknowledged response for {}", command_id);
                                                 break;
@@ -1202,7 +1208,17 @@ impl UnifiedAgent {
 
     async fn execute_health_check_command(&self, command_id: String) -> GrpcCommandResponse {
         let mut result = HashMap::new();
-        result.insert("agent_id".to_string(), self.config.public_key.clone());
+        let reported_agent_id = self
+            .config
+            .node_id
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| self.config.public_key.clone());
+        result.insert("agent_id".to_string(), reported_agent_id);
+        result.insert("public_key".to_string(), self.config.public_key.clone());
+        if let Some(node_id) = self.config.node_id.clone().filter(|value| !value.trim().is_empty()) {
+            result.insert("node_id".to_string(), node_id);
+        }
         result.insert("interface_name".to_string(), self.config.interface_name.clone());
         result.insert(
             "hostname".to_string(),
@@ -1317,7 +1333,7 @@ impl UnifiedAgent {
         tracing::debug!("Syncing with Controller...");
         
         let sync_result = self.grpc_client
-            .sync(self.config.public_key.clone())
+            .sync(self.config.node_id.clone(), self.config.public_key.clone())
             .await?;
         
         tracing::debug!("Sync received: {} peers, {} ACL rules, {} blacklist rules, {} QoS rules", 
@@ -2027,6 +2043,8 @@ fn build_completed_command_response(
         message,
         result,
         completed_at: current_unix_timestamp(),
+        node_id: String::new(),
+        public_key: String::new(),
     }
 }
 
@@ -2045,5 +2063,7 @@ fn build_failed_command_response_with_result(
         message,
         result,
         completed_at: current_unix_timestamp(),
+        node_id: String::new(),
+        public_key: String::new(),
     }
 }
