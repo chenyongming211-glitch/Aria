@@ -139,9 +139,8 @@ fn build_ebpf_quietly() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Message::CompilerMessage(CompilerMessage { message, .. }) => {
-                let level = message.level.to_string();
-                if (level == "warning" || level == "error") && message.rendered.is_some() {
-                    for line in message.rendered.unwrap_or_default().lines() {
+                if let Some(rendered) = message.rendered {
+                    for line in rendered.lines() {
                         if !line.trim().is_empty() {
                             println!("cargo:warning={line}");
                         }
