@@ -19,11 +19,13 @@ pub struct OptimizationResult {
     pub warnings: Vec<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct OffloadStatus {
     pub tso: bool,
     pub gso: bool,
     pub gro: bool,
+    #[allow(dead_code)]
     pub ufo: bool,
 }
 
@@ -360,6 +362,7 @@ table ip aria_raw {{
     }
 
     /// 验证优化效果
+    #[allow(dead_code)]
     pub fn verify_optimizations(&self) -> Result<()> {
         info!("Verifying optimizations...");
 

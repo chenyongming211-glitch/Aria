@@ -1,21 +1,13 @@
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::UnixStream;
 use std::io::{BufReader, BufWriter, BufRead, Write};
 use std::net::UdpSocket;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use aya::{
-    include_bytes_aligned,
-    programs::{tc, SchedClassifier, TcAttachType, Xdp, XdpFlags},
-    Ebpf,
-    EbpfLoader,
-};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
-use tracing::{info, error, warn};
+use tracing::info;
 use tracing_subscriber::{
     layer::SubscriberExt,
     util::SubscriberInitExt,
@@ -37,10 +29,7 @@ mod routing;
 mod system_optimization;
 
 const SOCKET_PATH: &str = "/run/aria-agent.sock";
-const BPF_FS_PATH: &str = "/sys/fs/bpf/aria";
 const DEFAULT_CONFIG_PATH: &str = "/etc/aria/agent.yaml";
-
-static RUNNING: AtomicBool = AtomicBool::new(true);
 
 type LogLevelHandle = Arc<Mutex<Option<reload::Handle<EnvFilter, Registry>>>>;
 
@@ -281,18 +270,9 @@ struct Response {
 
 fn main() -> Result<()> {
     // 安装 rustls CryptoProvider (必须在任何 TLS 操作之前)
-    #[cfg(feature = "ring")]
-    {
-        rustls::crypto::ring::default_provider()
-            .install_default()
-            .expect("Failed to install rustls ring provider");
-    }
-    #[cfg(not(feature = "ring"))]
-    {
-        rustls::crypto::aws_lc_rs::default_provider()
-            .install_default()
-            .expect("Failed to install rustls aws_lc provider");
-    }
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("Failed to install rustls aws_lc provider");
     
     let cli = Cli::parse();
 
@@ -577,129 +557,6 @@ fn send_log_command(level: &str) -> Result<()> {
     }
 
     Ok(())
-}
-
-#[derive(Serialize)]
-struct PeerInfo {
-    public_key: String,
-    endpoint: Option<String>,
-    allowed_ips: Vec<String>,
-    last_handshake: Option<u64>,
-    rx_bytes: u64,
-    tx_bytes: u64,
-    status: String,
-}
-
-fn get_wireguard_peers() -> Result<Vec<PeerInfo>> {
-    let output = std::process::Command::new("wg")
-        .args(&["show", "all", "dump"])
-        .output()
-        .context("Failed to execute wg show")?;
-    
-    if !output.status.success() {
-        return Err(anyhow::anyhow!("wg show failed: {}", String::from_utf8_lossy(&output.stderr)));
-    }
-
-    let lines: Vec<&str> = std::str::from_utf8(&output.stdout)?
-        .lines()
-        .collect();
-    
-    let mut peers = Vec::new();
-    
-    for line in lines.iter().skip(1) {
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 8 {
-            continue;
-        }
-
-        let public_key = fields[0].to_string();
-        let endpoint = if fields[2].is_empty() { None } else { Some(fields[2].to_string()) };
-        let allowed_ips: Vec<String> = fields[3].split(',').map(|s| s.to_string()).collect();
-        let last_handshake: Option<u64> = fields[4].parse().ok();
-        let rx_bytes: u64 = fields[5].parse().unwrap_or(0);
-        let tx_bytes: u64 = fields[6].parse().unwrap_or(0);
-
-        let status = match last_handshake {
-            Some(hs) if hs > 0 => {
-                let elapsed = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)?
-                    .as_secs() - hs;
-                if elapsed < 180 { "online".to_string() } else { "offline".to_string() }
-            },
-            _ => "never".to_string(),
-        };
-
-        peers.push(PeerInfo {
-            public_key,
-            endpoint,
-            allowed_ips,
-            last_handshake,
-            rx_bytes,
-            tx_bytes,
-            status,
-        });
-    }
-
-    Ok(peers)
-}
-
-#[derive(Serialize)]
-struct RouteInfo {
-    destination: String,
-    interface: String,
-    gateway: Option<String>,
-    metric: Option<u32>,
-}
-
-fn get_routing_table() -> Result<Vec<RouteInfo>> {
-    let output = std::process::Command::new("ip")
-        .args(&["route", "show", "table", "100"])
-        .output()
-        .context("Failed to execute ip route")?;
-    
-    if !output.status.success() {
-        return Err(anyhow::anyhow!("ip route failed: {}", String::from_utf8_lossy(&output.stderr)));
-    }
-
-    let routes_str = std::str::from_utf8(&output.stdout)?;
-    let mut routes = Vec::new();
-
-    for line in routes_str.lines() {
-        if line.is_empty() {
-            continue;
-        }
-
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if let Some(dest) = parts.first() {
-            routes.push(RouteInfo {
-                destination: dest.to_string(),
-                interface: "aria0".to_string(),
-                gateway: None,
-                metric: None,
-            });
-        }
-    }
-
-    Ok(routes)
-}
-
-#[derive(Serialize)]
-struct StatusInfo {
-    version: String,
-    interface: String,
-    status: String,
-    peer_count: usize,
-}
-
-fn get_agent_status() -> Result<StatusInfo> {
-    let peers = get_wireguard_peers()?;
-    
-    Ok(StatusInfo {
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        interface: "aria0".to_string(),
-        status: "running".to_string(),
-        peer_count: peers.len(),
-    })
 }
 
 fn run_init(
@@ -1121,41 +978,9 @@ fn send_route_command() -> Result<()> {
     Ok(())
 }
 
-fn send_up_command() -> Result<()> {
-    println!("Starting agent daemon...");
-    println!("Use: systemctl start aria-agent");
-    Ok(())
-}
-
 fn send_down_command() -> Result<()> {
     println!("Stopping agent daemon...");
     println!("Use: systemctl stop aria-agent");
-    Ok(())
-}
-
-fn attach_xdp(ebpf: &mut Ebpf, interface: &str) -> Result<()> {
-    let program: &mut Xdp = ebpf.program_mut("xdp_ingress_acl")
-        .context("XDP program not found")?
-        .try_into()?;
-    
-    program.load()?;
-    program.attach(interface, XdpFlags::default())?;
-    
-    info!("XDP program attached to {}", interface);
-    Ok(())
-}
-
-fn attach_tc(ebpf: &mut Ebpf, interface: &str) -> Result<()> {
-    let program: &mut SchedClassifier = ebpf.program_mut("tc_egress_qos")
-        .context("TC program not found")?
-        .try_into()?;
-    
-    program.load()?;
-    
-    tc::qdisc_add_clsact(interface)?;
-    program.attach(interface, TcAttachType::Egress)?;
-    
-    info!("TC program attached to {} (egress)", interface);
     Ok(())
 }
 

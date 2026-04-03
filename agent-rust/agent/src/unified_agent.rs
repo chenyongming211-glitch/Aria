@@ -2,10 +2,9 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
-use std::sync::atomic::{AtomicU8, Ordering};
 use tokio::signal;
 use tokio::signal::unix::{signal, SignalKind};
-use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use aya::{
     include_bytes_aligned,
@@ -24,7 +23,7 @@ use crate::grpc_client::{
     PeerInfo as GrpcPeerInfo,
     QoSRule as GrpcQoSRule,
 };
-use crate::wireguard::{WireGuardManager, PeerConfig, InterfaceConfig};
+use crate::wireguard::{WireGuardManager, PeerConfig};
 use crate::routing::RoutingManager;
 use crate::acl::AclManager;
 use crate::qos::QoSManager;
@@ -65,14 +64,11 @@ pub struct UnifiedAgent {
     
     acl_mgr: Arc<Mutex<AclManager>>,
     qos_mgr: Arc<Mutex<QoSManager>>,
-    identity_mgr: Arc<StdMutex<IdentityManager>>,
-    
     grpc_client: GrpcClient,
     wg_manager: Arc<Mutex<WireGuardManager>>,
     routing_manager: RoutingManager,
     
     unix_socket_path: String,
-    config_update_tx: broadcast::Sender<()>,
     
     last_sync_peers: Arc<StdMutex<Vec<GrpcPeerInfo>>>,
     
@@ -90,7 +86,7 @@ impl UnifiedAgent {
     ) -> Result<Self> {
         tracing::info!("Creating UnifiedAgent...");
         
-        let (acl_mgr, qos_mgr, identity_mgr) = Self::load_ebpf_programs(interface)?;
+        let (acl_mgr, qos_mgr, _identity_mgr) = Self::load_ebpf_programs(interface)?;
         tracing::info!("✅ eBPF programs loaded");
         
         let grpc_client = GrpcClient::new_with_options(
@@ -108,7 +104,6 @@ impl UnifiedAgent {
         let routing_manager = RoutingManager::new(&config.interface_name);
         tracing::info!("✅ Routing manager created");
         
-        let (config_update_tx, _) = broadcast::channel(16);
         let cancel_token = CancellationToken::new();
         let current_log_level = Arc::new(StdMutex::new("info".to_string()));
         let last_sync_peers = Arc::new(StdMutex::new(Vec::new()));
@@ -118,12 +113,10 @@ impl UnifiedAgent {
             config_path,
             acl_mgr,
             qos_mgr,
-            identity_mgr,
             grpc_client,
             wg_manager,
             routing_manager,
             unix_socket_path: "/run/aria-agent.sock".to_string(),
-            config_update_tx,
             last_sync_peers,
             cancel_token,
             log_handle,
@@ -1100,8 +1093,6 @@ impl UnifiedAgent {
                         Ok(_) => {
                             let mut current = current_log_level.lock().unwrap();
                             *current = level.clone();
-                            drop(current);
-                            drop(handle);
                             
                             tracing::info!("Log level updated to {}", level);
                             UnixResponse {
@@ -1694,7 +1685,6 @@ impl UnifiedAgent {
                 .context("Failed to list current VPN routes")?;
             
             // 计算差异
-            let to_add: Vec<_> = desired_routes.difference(&current_routes).cloned().collect();
             let to_remove: Vec<_> = current_routes.difference(&desired_routes).cloned().collect();
             
             let mut added_count = 0;

@@ -22,6 +22,7 @@ pub enum IdentityError {
     #[error("Map not found: {0}")]
     MapNotFound(String),
     #[error("ID not found: {0}")]
+    #[allow(dead_code)]
     IdNotFound(u32),
 }
 
@@ -102,6 +103,7 @@ impl IdentityManager {
         Ok(id)
     }
 
+    #[allow(dead_code)]
     pub fn remove_id(&mut self, id: u32) -> Result<(), IdentityError> {
         let entry = self.id_to_cidr.remove(&id)
             .ok_or_else(|| IdentityError::IdNotFound(id))?;
@@ -131,10 +133,12 @@ impl IdentityManager {
         self.cidr_to_id.get(&entry).copied()
     }
 
+    #[allow(dead_code)]
     pub fn get_cidr(&self, id: u32) -> Option<&CidrEntry> {
         self.id_to_cidr.get(&id)
     }
 
+    #[allow(dead_code)]
     pub fn list_all(&self) -> Vec<(u32, String)> {
         self.id_to_cidr
             .iter()

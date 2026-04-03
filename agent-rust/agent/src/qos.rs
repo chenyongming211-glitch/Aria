@@ -624,7 +624,6 @@ impl QoSManager {
             })
             .collect();
         
-        let total = ip_keys.len() + pair_keys.len() + service_keys.len();
         let mut removed_count = 0;
         let mut failed_count = 0;
         

@@ -57,11 +57,13 @@ pub fn record_wireguard_totals(
     counter!("wireguard_total_tx_bytes").absolute(total_tx_bytes);
 }
 
+#[allow(dead_code)]
 pub fn record_acl_packet_stats(packets_passed: u64, packets_dropped: u64) {
     counter!("acl_packets_passed_total").absolute(packets_passed);
     counter!("acl_packets_dropped_total").absolute(packets_dropped);
 }
 
+#[allow(dead_code)]
 pub fn record_qos_byte_stats(bytes_passed: u64, bytes_dropped: u64) {
     counter!("qos_bytes_passed_total").absolute(bytes_passed);
     counter!("qos_bytes_dropped_total").absolute(bytes_dropped);
@@ -81,6 +83,7 @@ pub fn record_qos_rule_stats(rule_type: &str, rule_id: u32, passed_bytes: u64, d
         .absolute(dropped_bytes);
 }
 
+#[allow(dead_code)]
 pub fn record_ebpf_map_size(map_name: &str, size: usize) {
     gauge!("ebpf_map_size", "map" => map_name.to_string()).set(size as f64);
 }
@@ -126,6 +129,7 @@ pub fn record_acl_rule_count(count: usize) {
     gauge!("acl_rule_count").set(count as f64);
 }
 
+#[allow(dead_code)]
 pub fn record_qos_rule_count(count: usize) {
     gauge!("qos_rule_count").set(count as f64);
 }
@@ -134,6 +138,7 @@ pub fn record_config_reload_failure() {
     counter!("config_reload_failure_total").increment(1);
 }
 
+#[allow(dead_code)]
 pub struct MetricsCounters {
     pub acl_passed: AtomicU64,
     pub acl_dropped: AtomicU64,
@@ -141,6 +146,7 @@ pub struct MetricsCounters {
     pub qos_dropped: AtomicU64,
 }
 
+#[allow(dead_code)]
 impl MetricsCounters {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {

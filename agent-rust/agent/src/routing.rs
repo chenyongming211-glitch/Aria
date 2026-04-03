@@ -5,9 +5,11 @@ use std::collections::HashSet;
 
 const VPN_TABLE: u32 = 100;
 const DIRECT_TABLE: u32 = 200;
+#[allow(dead_code)]
 const MAIN_TABLE: u32 = 254;
 const VPN_PRIORITY: u32 = 100;
 
+#[allow(dead_code)]
 #[derive(Error, Debug)]
 pub enum RouteError {
     #[error("Failed to add route: {0}")]
@@ -20,6 +22,7 @@ pub enum RouteError {
     InitError(String),
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RouteEntry {
     pub destination: String,
@@ -34,6 +37,7 @@ pub struct RoutingManager {
     interface_name: String,
 }
 
+#[allow(dead_code)]
 impl RoutingManager {
     pub fn new(interface_name: &str) -> Self {
         Self {

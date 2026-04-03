@@ -283,18 +283,6 @@ impl ConfigManager {
         &self.state_path
     }
 
-    pub fn load_or_init(&self, force: bool) -> Result<Option<AgentConfig>> {
-        if force {
-            return Ok(None);
-        }
-
-        if !Path::new(&self.bootstrap_path).exists() {
-            return Ok(None);
-        }
-
-        self.load().map(Some)
-    }
-
     pub fn load_parts_or_init(&self, force: bool) -> Result<Option<(BootstrapConfig, AgentState)>> {
         if force {
             return Ok(None);
@@ -322,10 +310,6 @@ impl ConfigManager {
         read_yaml_file(&self.bootstrap_path)
     }
 
-    pub fn load_state(&self) -> Result<AgentState> {
-        self.load_or_migrate_state()
-    }
-
     pub fn load_state_opt(&self) -> Result<Option<AgentState>> {
         if !Path::new(&self.state_path).exists() {
             return Ok(None);
@@ -340,11 +324,6 @@ impl ConfigManager {
 
     pub fn save_state(&self, state: &AgentState) -> Result<()> {
         write_yaml_file(&self.state_path, state)
-    }
-
-    pub fn save(&self, config: &AgentConfig) -> Result<()> {
-        self.save_bootstrap(&config.to_bootstrap())?;
-        self.save_state(&config.to_state())
     }
 
     fn load_or_migrate_state(&self) -> Result<AgentState> {

@@ -6,6 +6,7 @@ use wireguard_uapi::{DeviceInterface, WgSocket};
 const DEFAULT_LISTEN_PORT: u16 = 51820;
 const DEFAULT_MTU: u32 = 1360;
 
+#[allow(dead_code)]
 #[derive(Error, Debug)]
 pub enum WireGuardError {
     #[error("Failed to create interface: {0}")]
@@ -175,6 +176,7 @@ impl WireGuardManager {
     }
     
     /// 检查必要的命令是否存在
+    #[allow(dead_code)]
     pub fn check_dependencies() -> Result<()> {
         let commands = vec!["ip", "wg"];
         

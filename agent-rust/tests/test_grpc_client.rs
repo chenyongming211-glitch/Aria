@@ -19,7 +19,7 @@ async fn main() {
     // 测试 1: 连接 Controller
     println!("测试 1: 连接 Controller (mTLS)...");
     match GrpcClient::new(controller_url.clone(), ca_cert.clone(), client_cert.clone(), client_key.clone()).await {
-        Ok(mut client) => {
+        Ok(client) => {
             println!("✅ mTLS 连接成功！\n");
             
             // 测试 2: 注册

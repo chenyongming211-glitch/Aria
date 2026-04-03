@@ -284,6 +284,7 @@ fn infer_tls_server_name(controller_url: &str) -> Option<String> {
     Some(host_port.split(':').next().unwrap_or(host_port).to_string())
 }
 
+#[allow(dead_code)]
 /// 同步结果
 pub struct SyncResult {
     pub peers: Vec<PeerInfo>,
@@ -293,6 +294,7 @@ pub struct SyncResult {
     pub blacklist_rules: Vec<BlacklistRule>,
 }
 
+#[allow(dead_code)]
 /// Peer 信息
 #[derive(Debug, Clone)]
 pub struct PeerInfo {
@@ -318,6 +320,7 @@ pub struct AclRule {
     pub max_port: u32,
 }
 
+#[allow(dead_code)]
 /// QoS 规则
 #[derive(Debug, Clone)]
 pub struct QoSRule {

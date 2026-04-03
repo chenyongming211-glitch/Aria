@@ -24,6 +24,7 @@ pub enum AclError {
     #[error("Map not found: {0}")]
     MapNotFound(String),
     #[error("Invalid parameter: {0}")]
+    #[allow(dead_code)]
     InvalidParam(String),
     #[error("Lock error")]
     LockError,
@@ -289,6 +290,7 @@ impl AclManager {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn get_rule_stats(
         &self,
         src_cidr: &str,
@@ -361,18 +363,14 @@ impl AclManager {
             })
             .collect();
         
-        let total_count = keys.len();
         let mut removed_count = 0;
         let mut failed_keys = Vec::new();
         
         // 第二次遍历：尝试删除，最多重试3次
         for key in keys {
-            let mut success = false;
-            
             for attempt in 1..=3 {
                 match self.policy_map.remove(&key) {
                     Ok(_) => {
-                        success = true;
                         removed_count += 1;
                         break;
                     }
