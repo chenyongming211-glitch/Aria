@@ -91,6 +91,7 @@ impl GrpcClient {
     }
 
     /// 创建新的 gRPC 客户端（mTLS：双向认证）
+    #[allow(dead_code)]
     pub async fn new(
         controller_url: String,
         ca_cert_path: String,
@@ -108,6 +109,7 @@ impl GrpcClient {
     }
     
     /// 注册到 Controller
+    #[allow(dead_code)]
     pub async fn register(
         &self,
         public_key: String,
@@ -317,6 +319,7 @@ pub struct AclRule {
     pub dst_net: String,
     pub protocol: u32,
     pub min_port: u32,
+    #[allow(dead_code)]
     pub max_port: u32,
 }
 
