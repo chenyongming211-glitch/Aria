@@ -63,5 +63,5 @@ prost = "0.13"
 tokio-stream = "0.1"
 
 [build-dependencies]
-aya-build = "0.1"
+cargo_metadata = "0.23"
 tonic-build = "0.13"
