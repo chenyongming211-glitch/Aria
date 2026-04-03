@@ -32,13 +32,14 @@ async fn main() {
             let region = "sh".to_string();
             
             match client.register(public_key.clone(), endpoint, public_ip, hostname, token, region).await {
-                Ok(assigned_ip) => {
+                Ok(registration) => {
                     println!("✅ 注册成功！");
-                    println!("   分配的 IP: {}\n", assigned_ip);
+                    println!("   分配的 IP: {}", registration.assigned_ip);
+                    println!("   节点 ID: {}\n", registration.node_id.as_deref().unwrap_or("(none)"));
                     
                     // 测试 3: 同步配置
                     println!("测试 3: 同步配置...");
-                    match client.sync(public_key).await {
+                    match client.sync(registration.node_id.clone(), public_key).await {
                         Ok(sync_result) => {
                             println!("✅ 同步成功！");
                             println!("   Peers 数量: {}", sync_result.peers.len());

@@ -18,7 +18,7 @@ async fn main() {
             println!("✅ mTLS 连接成功！\n");
             
             println!("测试 2: 同步配置（使用真实公钥）...");
-            match client.sync(real_public_key.to_string()).await {
+            match client.sync(None, real_public_key.to_string()).await {
                 Ok(sync_result) => {
                     println!("✅ Sync 成功！");
                     println!("   分配的 IP: {}", sync_result.assigned_ip);
