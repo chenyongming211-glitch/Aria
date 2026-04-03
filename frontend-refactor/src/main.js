@@ -7,7 +7,7 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 
 // 引入全局样式
 import './styles/global.css'
-import './styles/element-variables.scss'
+import './styles/element-variables.css'
 
 // 引入字体
 import '@fontsource-variable/plus-jakarta-sans'

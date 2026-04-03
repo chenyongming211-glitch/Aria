@@ -20,7 +20,6 @@
     "@fontsource-variable/plus-jakarta-sans": "^5.2.8",
     "@types/node": "^20.0.0",
     "@vitejs/plugin-vue": "^4.5.0",
-    "sass": "^1.69.0",
     "terser": "^5.46.0",
     "typescript": "^5.0.0",
     "vite": "^4.5.0"

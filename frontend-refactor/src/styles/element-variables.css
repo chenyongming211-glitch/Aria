@@ -1,6 +1,6 @@
-// src/styles/element-variables.scss
+/* src/styles/element-variables.css */
 :root {
-  // 主色调
+  /* 主色调 */
   --el-color-primary: #1890ff;
   --el-color-primary-light-3: #40a9ff;
   --el-color-primary-light-5: #69c0ff;
@@ -9,41 +9,41 @@
   --el-color-primary-light-9: #d6eaff;
   --el-color-primary-dark-2: #096dd9;
 
-  // 成功、警告、危险等辅助色
+  /* 成功、警告、危险等辅助色 */
   --el-color-success: #52c41a;
   --el-color-warning: #faad14;
   --el-color-danger: #f5222d;
   --el-color-info: #8c8c8c;
 
-  // 背景色
+  /* 背景色 */
   --el-bg-color: #f5f7fa;
   --el-bg-color-overlay: #ffffff;
 
-  // 文字颜色
+  /* 文字颜色 */
   --el-text-color-primary: #1f2937;
   --el-text-color-regular: #4b5563;
   --el-text-color-secondary: #6b7280;
   --el-text-color-placeholder: #9ca3af;
 
-  // 边框颜色
+  /* 边框颜色 */
   --el-border-color: #d1d5db;
   --el-border-color-light: #e5e7eb;
   --el-border-color-lighter: #f3f4f6;
 
-  // 阴影
+  /* 阴影 */
   --el-box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
   --el-box-shadow-light: 0 2px 8px 0 rgba(0, 0, 0, 0.09);
   --el-box-shadow-lighter: 0 1px 6px 0 rgba(0, 0, 0, 0.05);
   --el-box-shadow-dark: 0 4px 12px 0 rgba(0, 0, 0, 0.15);
 
-  // 菜单背景
+  /* 菜单背景 */
   --el-menu-bg-color: #1d222a;
   --el-menu-hover-bg-color: #393e46;
   --el-menu-text-color: #bfcbd9;
   --el-menu-active-color: #ffffff;
 }
 
-// 为特定组件定制样式
+/* 为特定组件定制样式 */
 .el-menu {
   border: none;
 }
@@ -69,14 +69,14 @@
   background: var(--el-color-primary-light-9);
 }
 
-// 定制侧边栏菜单样式
+/* 定制侧边栏菜单样式 */
 .el-menu-item,
 .el-sub-menu__title {
   height: 48px;
   line-height: 48px;
 }
 
-// 定制头部样式
+/* 定制头部样式 */
 .el-header {
   padding: 0;
   background-color: var(--el-bg-color-overlay);
@@ -84,12 +84,12 @@
   height: 60px;
 }
 
-// 定制输入框样式
+/* 定制输入框样式 */
 .el-input__wrapper {
   border-radius: 6px;
 }
 
-// 定制按钮样式
+/* 定制按钮样式 */
 .el-button {
   border-radius: 6px;
 }

@@ -25,11 +25,13 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: false,
     minify: 'esbuild', // 使用esbuild而不是terser
+    chunkSizeWarningLimit: 1400,
     rollupOptions: {
       output: {
         manualChunks: {
           vendor: ['vue', 'vue-router', 'pinia'],
           element: ['element-plus'],
+          elementIcons: ['@element-plus/icons-vue'],
           chart: ['echarts']
         }
       }
