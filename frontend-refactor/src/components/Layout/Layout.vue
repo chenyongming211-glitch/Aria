@@ -18,6 +18,7 @@
       <el-menu
         :default-active="$route.path"
         :collapse="isCollapsed"
+        :default-openeds="defaultOpeneds"
         :unique-opened="true"
         class="sidebar-menu"
         router
@@ -30,38 +31,64 @@
           <el-icon><Monitor /></el-icon>
           <template #title>{{ t('nav.nodes') }}</template>
         </el-menu-item>
-        <el-menu-item index="/routing">
-          <el-icon><Position /></el-icon>
-          <template #title>{{ t('nav.routingManagement') }}</template>
-        </el-menu-item>
-        <el-menu-item index="/policies">
-          <el-icon><Tickets /></el-icon>
-          <template #title>{{ t('nav.policyManagement') }}</template>
-        </el-menu-item>
-        <el-menu-item index="/bandwidth-control">
-          <el-icon><Coin /></el-icon>
-          <template #title>{{ t('nav.bandwidthControl') }}</template>
-        </el-menu-item>
-        <el-menu-item index="/tokens">
-          <el-icon><Key /></el-icon>
-          <template #title>{{ t('nav.tokenManagement') }}</template>
-        </el-menu-item>
-        <el-menu-item index="/tenant-management">
-          <el-icon><User /></el-icon>
-          <template #title>{{ t('nav.tenantManagement') }}</template>
-        </el-menu-item>
+        <el-sub-menu index="connectivity">
+          <template #title>
+            <el-icon><Position /></el-icon>
+            <span>{{ t('nav.connectivity') }}</span>
+          </template>
+          <el-menu-item index="/connectivity/routing">
+            <el-icon><Position /></el-icon>
+            <template #title>{{ t('nav.routingManagement') }}</template>
+          </el-menu-item>
+          <el-menu-item index="/connectivity/topology">
+            <el-icon><Connection /></el-icon>
+            <template #title>{{ t('nav.vpnTopology') }}</template>
+          </el-menu-item>
+        </el-sub-menu>
+        <el-sub-menu index="policy-center">
+          <template #title>
+            <el-icon><Tickets /></el-icon>
+            <span>{{ t('nav.policyCenter') }}</span>
+          </template>
+          <el-menu-item index="/policy-center">
+            <el-icon><Tickets /></el-icon>
+            <template #title>{{ t('nav.policyCenter') }}</template>
+          </el-menu-item>
+          <el-menu-item index="/policy-center/acl-rules">
+            <el-icon><Lock /></el-icon>
+            <template #title>{{ t('nav.aclManagement') }}</template>
+          </el-menu-item>
+          <el-menu-item index="/policy-center/bandwidth-control">
+            <el-icon><Coin /></el-icon>
+            <template #title>{{ t('nav.bandwidthControl') }}</template>
+          </el-menu-item>
+        </el-sub-menu>
         <el-menu-item index="/monitoring">
           <el-icon><DataLine /></el-icon>
           <template #title>{{ t('nav.monitoringCenter') }}</template>
         </el-menu-item>
-        <el-menu-item index="/ai-assistant">
+        <el-menu-item index="/ai-copilot">
           <el-icon><ChatLineRound /></el-icon>
-          <template #title>{{ t('nav.aiAssistant') }}</template>
+          <template #title>{{ t('nav.aiCopilot') }}</template>
         </el-menu-item>
-        <el-menu-item index="/settings">
-          <el-icon><Setting /></el-icon>
-          <template #title>{{ t('nav.settings') }}</template>
-        </el-menu-item>
+        <el-sub-menu index="platform">
+          <template #title>
+            <el-icon><Setting /></el-icon>
+            <span>{{ t('nav.platform') }}</span>
+          </template>
+          <el-menu-item index="/platform/tokens">
+            <el-icon><Key /></el-icon>
+            <template #title>{{ t('nav.tokenManagement') }}</template>
+          </el-menu-item>
+          <el-menu-item index="/platform/tenants">
+            <el-icon><User /></el-icon>
+            <template #title>{{ t('nav.tenantManagement') }}</template>
+          </el-menu-item>
+          <el-menu-item index="/platform/settings">
+            <el-icon><Setting /></el-icon>
+            <template #title>{{ t('nav.settings') }}</template>
+          </el-menu-item>
+        </el-sub-menu>
       </el-menu>
 
       <!-- 侧边栏底部 -->
@@ -178,7 +205,9 @@ import {
   Key,
   Tickets,
   Position,
+  Connection,
   Coin,
+  Lock,
   ChatLineRound,
   CaretBottom,
   SwitchButton
@@ -198,21 +227,24 @@ const currentUser = computed(() => userStore.user)
 const currentLang = computed(() => appStore.lang)
 const appVersion = computed(() => appStore.version)
 const sidebarWidth = computed(() => isCollapsed.value ? '72px' : '240px')
+const defaultOpeneds = computed(() => isCollapsed.value ? [] : ['connectivity', 'policy-center', 'platform'])
 
 const getPageTitle = computed(() => {
   const routeMap = {
-    '/dashboard': t('nav.dashboard'),
-    '/nodes': t('nav.nodes'),
-    '/routing': t('nav.routingManagement'),
-    '/bandwidth-control': t('nav.bandwidthControl'),
-    '/tokens': t('nav.tokenManagement'),
-    '/policies': t('nav.policyManagement'),
-    '/tenant-management': t('nav.tenantManagement'),
-    '/monitoring': t('nav.monitoringCenter'),
-    '/ai-assistant': t('nav.aiAssistant'),
-    '/settings': t('nav.settings')
+    Dashboard: t('nav.dashboard'),
+    Nodes: t('nav.nodes'),
+    Routing: t('nav.routingManagement'),
+    VpnTopology: t('nav.vpnTopology'),
+    Policies: t('nav.policyCenter'),
+    ACLRules: t('nav.aclManagement'),
+    BandwidthControl: t('nav.bandwidthControl'),
+    Tokens: t('nav.tokenManagement'),
+    TenantManagement: t('nav.tenantManagement'),
+    Monitoring: t('nav.monitoringCenter'),
+    AiAssistant: t('nav.aiCopilot'),
+    Settings: t('nav.settings')
   }
-  return routeMap[route.path] || t('common.dashboard')
+  return routeMap[route.name] || t('common.dashboard')
 })
 
 const toggleSidebar = () => {
@@ -234,7 +266,7 @@ const handleUserAction = (command) => {
       // Navigate to profile page
       break
     case 'settings':
-      router.push('/settings')
+      router.push('/platform/settings')
       break
   }
 }
@@ -345,6 +377,34 @@ const openHelp = () => {
   transition: all var(--aria-transition-base);
   position: relative;
   overflow: hidden;
+}
+
+:deep(.sidebar-menu .el-sub-menu__title) {
+  color: var(--aria-dark-text-secondary);
+  height: 48px;
+  line-height: 48px;
+  border-radius: var(--aria-radius);
+  margin-bottom: 4px;
+  transition: all var(--aria-transition-base);
+}
+
+:deep(.sidebar-menu .el-sub-menu__title:hover) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--aria-dark-text-primary);
+}
+
+:deep(.sidebar-menu .el-sub-menu.is-opened > .el-sub-menu__title) {
+  color: var(--aria-dark-text-primary);
+}
+
+:deep(.sidebar-menu .el-menu--inline) {
+  background: transparent;
+}
+
+:deep(.sidebar-menu .el-menu--inline .el-menu-item) {
+  padding-left: 52px !important;
+  height: 44px;
+  line-height: 44px;
 }
 
 :deep(.sidebar-menu .el-menu-item::before) {
