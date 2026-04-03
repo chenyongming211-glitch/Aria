@@ -1,10 +1,11 @@
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use std::sync::atomic::{AtomicU8, Ordering};
 use tokio::signal;
 use tokio::signal::unix::{signal, SignalKind};
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use aya::{
     include_bytes_aligned,
@@ -14,7 +15,14 @@ use aya::{
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::{EnvFilter, Registry, reload};
 
-use crate::grpc_client::{GrpcClient, PeerInfo as GrpcPeerInfo, AclRule, QoSRule as GrpcQoSRule};
+use crate::grpc_client::{
+    AclRule,
+    GrpcClient,
+    GrpcCommandRequest,
+    GrpcCommandResponse,
+    PeerInfo as GrpcPeerInfo,
+    QoSRule as GrpcQoSRule,
+};
 use crate::wireguard::{WireGuardManager, PeerConfig, InterfaceConfig};
 use crate::routing::RoutingManager;
 use crate::acl::AclManager;
@@ -36,6 +44,18 @@ struct UnixResponse {
     success: bool,
     message: Option<String>,
     data: Option<serde_json::Value>,
+}
+
+struct RemoteCommandEnvelope {
+    request: GrpcCommandRequest,
+    reply_tx: oneshot::Sender<GrpcCommandResponse>,
+}
+
+fn current_unix_timestamp() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 pub struct UnifiedAgent {
@@ -264,8 +284,10 @@ impl UnifiedAgent {
         tracing::info!("✅ Initial sync completed");
         
         self.start_unix_socket_server()?;
+        let (remote_command_tx, remote_command_rx) = mpsc::channel(16);
+        self.start_command_stream_task(remote_command_tx);
         
-        self.run_main_loop().await
+        self.run_main_loop(remote_command_rx).await
     }
     
     async fn ensure_interface(&self) -> Result<()> {
@@ -306,7 +328,7 @@ impl UnifiedAgent {
         Ok(())
     }
     
-    async fn run_main_loop(&mut self) -> Result<()> {
+    async fn run_main_loop(&mut self, mut remote_command_rx: mpsc::Receiver<RemoteCommandEnvelope>) -> Result<()> {
         tracing::info!("Entering main loop");
         
         let mut sync_interval = tokio::time::interval(self.config.sync_interval);
@@ -338,6 +360,21 @@ impl UnifiedAgent {
                         metrics::record_config_reload();
                     }
                 }
+
+                maybe_command = remote_command_rx.recv() => {
+                    match maybe_command {
+                        Some(envelope) => {
+                            let response = self.execute_remote_command(envelope.request).await;
+                            if envelope.reply_tx.send(response).is_err() {
+                                tracing::warn!("Remote command response receiver dropped");
+                            }
+                        }
+                        None => {
+                            tracing::warn!("Remote command channel closed, stopping agent loop");
+                            break;
+                        }
+                    }
+                }
                 
                 _ = signal::ctrl_c() => {
                     tracing::info!("Shutting down...");
@@ -346,8 +383,105 @@ impl UnifiedAgent {
             }
         }
         
+        self.cancel_token.cancel();
         self.cleanup().await?;
         Ok(())
+    }
+
+    fn start_command_stream_task(&self, remote_command_tx: mpsc::Sender<RemoteCommandEnvelope>) {
+        let grpc_client = self.grpc_client.clone();
+        let cancel_token = self.cancel_token.clone();
+        let agent_id = self.config.public_key.clone();
+
+        tokio::spawn(async move {
+            loop {
+                if cancel_token.is_cancelled() {
+                    break;
+                }
+
+                match grpc_client.connect_command_stream(agent_id.clone()).await {
+                    Ok((response_tx, mut request_stream)) => {
+                        tracing::info!("Controller command stream connected");
+
+                        loop {
+                            tokio::select! {
+                                _ = cancel_token.cancelled() => {
+                                    tracing::info!("Command stream task shutting down");
+                                    return;
+                                }
+                                message = request_stream.message() => {
+                                    match message {
+                                        Ok(Some(request)) => {
+                                            let command_id = request.command_id.clone();
+                                            let command_name = request.command.clone();
+                                            let (reply_tx, reply_rx) = oneshot::channel();
+
+                                            if remote_command_tx.send(RemoteCommandEnvelope {
+                                                request,
+                                                reply_tx,
+                                            }).await.is_err() {
+                                                let _ = response_tx.send(build_failed_command_response(
+                                                    command_id,
+                                                    "remote command executor unavailable".to_string(),
+                                                )).await;
+                                                return;
+                                            }
+
+                                            if response_tx.send(GrpcCommandResponse {
+                                                command_id: command_id.clone(),
+                                                status: "acknowledged".to_string(),
+                                                message: format!("command {} queued", command_name),
+                                                result: HashMap::new(),
+                                                completed_at: 0,
+                                            }).await.is_err() {
+                                                tracing::warn!("Failed to send acknowledged response for {}", command_id);
+                                                break;
+                                            }
+
+                                            match reply_rx.await {
+                                                Ok(response) => {
+                                                    if response_tx.send(response).await.is_err() {
+                                                        tracing::warn!("Failed to send final response for {}", command_id);
+                                                        break;
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    if response_tx.send(build_failed_command_response(
+                                                        command_id.clone(),
+                                                        format!("command execution dropped: {}", e),
+                                                    )).await.is_err() {
+                                                        tracing::warn!("Failed to report dropped command {}", command_id);
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Ok(None) => {
+                                            tracing::warn!("Controller command stream closed");
+                                            break;
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!("Command stream receive error: {:?}", e);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to connect command stream: {:?}", e);
+                    }
+                }
+
+                tokio::select! {
+                    _ = cancel_token.cancelled() => break,
+                    _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+                }
+            }
+
+            tracing::info!("Command stream task stopped");
+        });
     }
     
     fn start_unix_socket_server(&self) -> Result<()> {
@@ -1011,6 +1145,177 @@ impl UnifiedAgent {
             "{\"success\":false,\"message\":\"Failed to serialize response\"}".to_string()
         }) + "\n"
     }
+
+    async fn execute_remote_command(&mut self, request: GrpcCommandRequest) -> GrpcCommandResponse {
+        let command_id = request.command_id.clone();
+        let command_name = request.command.clone();
+
+        tracing::info!("Executing remote command {} ({})", command_id, command_name);
+
+        let response = match command_name.as_str() {
+            "sync" => match self.sync().await {
+                Ok(_) => {
+                    let mut result = HashMap::new();
+                    result.insert(
+                        "peer_count".to_string(),
+                        self.last_sync_peers.lock().unwrap().len().to_string(),
+                    );
+                    build_completed_command_response(
+                        command_id.clone(),
+                        "sync completed".to_string(),
+                        result,
+                    )
+                }
+                Err(e) => build_failed_command_response(
+                    command_id.clone(),
+                    format!("sync failed: {}", e),
+                ),
+            },
+            "config_reload" => match self.reload_config().await {
+                Ok(_) => build_completed_command_response(
+                    command_id.clone(),
+                    "config reload completed".to_string(),
+                    HashMap::new(),
+                ),
+                Err(e) => build_failed_command_response(
+                    command_id.clone(),
+                    format!("config reload failed: {}", e),
+                ),
+            },
+            "health_check" => self.execute_health_check_command(command_id.clone()).await,
+            "restart" => build_failed_command_response(
+                command_id.clone(),
+                "restart is not implemented yet".to_string(),
+            ),
+            _ => self.execute_unix_style_remote_command(request).await,
+        };
+
+        if response.status == "failed" {
+            tracing::warn!(
+                "Remote command {} ({}) failed: {}",
+                command_id,
+                command_name,
+                response.message
+            );
+        } else {
+            tracing::info!("Remote command {} ({}) completed", command_id, command_name);
+        }
+
+        response
+    }
+
+    async fn execute_health_check_command(&self, command_id: String) -> GrpcCommandResponse {
+        let mut result = HashMap::new();
+        result.insert("agent_id".to_string(), self.config.public_key.clone());
+        result.insert("interface_name".to_string(), self.config.interface_name.clone());
+        result.insert(
+            "hostname".to_string(),
+            self.config.hostname.clone().unwrap_or_else(|| "unknown".to_string()),
+        );
+        result.insert(
+            "sync_interval_secs".to_string(),
+            self.config.sync_interval.as_secs().to_string(),
+        );
+        result.insert(
+            "last_sync_peer_count".to_string(),
+            self.last_sync_peers.lock().unwrap().len().to_string(),
+        );
+
+        let wg = self.wg_manager.lock().await;
+        match wg.list_peers() {
+            Ok(peers) => {
+                result.insert("wireguard_peer_count".to_string(), peers.len().to_string());
+                build_completed_command_response(
+                    command_id,
+                    "agent healthy".to_string(),
+                    result,
+                )
+            }
+            Err(e) => {
+                result.insert("wireguard_error".to_string(), e.to_string());
+                build_failed_command_response_with_result(
+                    command_id,
+                    "failed to query wireguard peers".to_string(),
+                    result,
+                )
+            }
+        }
+    }
+
+    async fn execute_unix_style_remote_command(
+        &self,
+        request: GrpcCommandRequest,
+    ) -> GrpcCommandResponse {
+        let args = Self::decode_remote_command_args(&request.params);
+        let peers_snapshot = self.last_sync_peers.lock().unwrap().clone();
+        let response_raw = Self::handle_unix_command(
+            UnixRequest {
+                cmd: request.command.clone(),
+                args,
+            },
+            &self.acl_mgr,
+            &self.qos_mgr,
+            &self.wg_manager,
+            &self.log_handle,
+            &self.current_log_level,
+            &peers_snapshot,
+        )
+        .await;
+
+        match serde_json::from_str::<UnixResponse>(response_raw.trim()) {
+            Ok(response) => {
+                let result = Self::unix_response_to_result_map(response.data);
+                if response.success {
+                    build_completed_command_response(
+                        request.command_id,
+                        response.message.unwrap_or_else(|| "command completed".to_string()),
+                        result,
+                    )
+                } else {
+                    build_failed_command_response_with_result(
+                        request.command_id,
+                        response.message.unwrap_or_else(|| "command failed".to_string()),
+                        result,
+                    )
+                }
+            }
+            Err(e) => build_failed_command_response(
+                request.command_id,
+                format!("failed to parse command response: {}", e),
+            ),
+        }
+    }
+
+    fn decode_remote_command_args(params: &HashMap<String, String>) -> serde_json::Value {
+        let mut args = serde_json::Map::new();
+        for (key, value) in params {
+            let parsed = serde_json::from_str::<serde_json::Value>(value)
+                .unwrap_or_else(|_| serde_json::Value::String(value.clone()));
+            args.insert(key.clone(), parsed);
+        }
+        serde_json::Value::Object(args)
+    }
+
+    fn unix_response_to_result_map(data: Option<serde_json::Value>) -> HashMap<String, String> {
+        match data {
+            Some(serde_json::Value::Object(map)) => map
+                .into_iter()
+                .map(|(key, value)| {
+                    let value = match value {
+                        serde_json::Value::String(s) => s,
+                        other => other.to_string(),
+                    };
+                    (key, value)
+                })
+                .collect(),
+            Some(other) => {
+                let mut result = HashMap::new();
+                result.insert("data".to_string(), other.to_string());
+                result
+            }
+            None => HashMap::new(),
+        }
+    }
     
     pub async fn sync(&mut self) -> Result<()> {
         tracing::debug!("Syncing with Controller...");
@@ -1659,5 +1964,37 @@ impl UnifiedAgent {
         
         tracing::info!("Cleanup completed");
         Ok(())
+    }
+}
+
+fn build_completed_command_response(
+    command_id: String,
+    message: String,
+    result: HashMap<String, String>,
+) -> GrpcCommandResponse {
+    GrpcCommandResponse {
+        command_id,
+        status: "completed".to_string(),
+        message,
+        result,
+        completed_at: current_unix_timestamp(),
+    }
+}
+
+fn build_failed_command_response(command_id: String, message: String) -> GrpcCommandResponse {
+    build_failed_command_response_with_result(command_id, message, HashMap::new())
+}
+
+fn build_failed_command_response_with_result(
+    command_id: String,
+    message: String,
+    result: HashMap<String, String>,
+) -> GrpcCommandResponse {
+    GrpcCommandResponse {
+        command_id,
+        status: "failed".to_string(),
+        message,
+        result,
+        completed_at: current_unix_timestamp(),
     }
 }

@@ -133,29 +133,24 @@ sudo aria ebpf qos limit-port 80 --mbps 100
 
 ```
 Aria/
-├── cmd/                    # 程序入口
-│   ├── agent/              # Agent 程序
-│   ├── controller/         # Controller 程序
-│   └── ariactl/            # CLI 工具
-├── pkg/                    # 公共库
-│   ├── datapath/           # 数据平面
-│   ├── tunnel/             # WireGuard 隧道
-│   ├── wgmanager/         # WireGuard 管理
-│   ├── metrics/            # 指标收集
-│   └── monitor/            # 链路监控
-├── internal/               # 私有模块
-│   ├── agent/              # Agent 核心逻辑
-│   ├── api/                # HTTP API
-│   ├── cli/                # CLI 实现
-│   ├── eBPF/               # eBPF 程序
-│   └── im/                 # 飞书/钉钉集成
-├── bpf/                    # eBPF 源码
-├── configs/                # 配置文件
-├── deployments/            # 部署配置
-│   ├── controller-web/     # Controller Web
-│   └── monitoring/         # Grafana 监控
+├── cmd/                    # Go 入口程序（controller、ariactl）
+├── internal/               # Controller 私有模块（API、CLI、认证、租户、AI、IM）
+├── pkg/                    # Go 公共库（存储、gRPC、监控、网络能力）
+├── agent-rust/             # Rust Agent 与 eBPF 数据面
+├── frontend-refactor/      # Vue 3 管理后台
+├── deployments/            # 部署与监控配置（Ansible、systemd、monitoring）
+├── configs/                # Redis/PostgreSQL 等配置样例
+├── scripts/                # 证书、测试、部署辅助脚本
+├── docs/                   # 关键架构、部署、gRPC 测试文档
 └── Makefile                # 构建入口
 ```
+
+## 文档索引
+
+- `docs/README.md` - 主要技术文档导航
+- `agent-rust/README.md` - Rust Agent 架构说明
+- `agent-rust/BUILD-GUIDE.md` - Rust Agent 编译指南
+- `frontend-refactor/DESIGN-SYSTEM.md` - 前端设计规范
 
 ## 监控
 

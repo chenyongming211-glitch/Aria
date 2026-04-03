@@ -162,30 +162,62 @@ func (s *ControllerServer) CommandStream(stream agentpb.ControllerService_Comman
 			if result, ok := resp.Result["agent_id"]; ok {
 				agentID = result
 			}
+			if agentID == "" {
+				continue
+			}
+			if err := s.sendNextPendingCommand(stream, agentID); err != nil {
+				return err
+			}
 			continue
 		}
 
-		// 处理命令执行结果
-		// TODO: 更新数据库中的命令状态
-		// store.UpdateCommandStatus(resp.CommandId, resp.Status, resp.Message, resp.Result)
+		if resp.CommandId != "" && s.store != nil {
+			if err := s.store.UpdateAgentCommandStatus(resp.CommandId, resp.Status, resp.Message, resp.Result); err != nil {
+				return fmt.Errorf("failed to update command status: %w", err)
+			}
+		}
 
-		// 发送新命令给 Agent（如果有待执行的命令）
-		// TODO: 从数据库或 Redis 中获取待执行的命令
-		// cmd := store.GetPendingCommand(agentID)
-		// if cmd != nil {
-		// 	err := stream.Send(&agentpb.CommandRequest{
-		// 		CommandId: cmd.ID,
-		// 		Command:   cmd.Command,
-		// 		Params:    cmd.Params,
-		// 		Timeout:   int32(cmd.Timeout),
-		// 		Priority:  int32(cmd.Priority),
-		// 		CreatedAt: cmd.CreatedAt,
-		// 	})
-		// 	if err != nil {
-		// 		return fmt.Errorf("stream send error: %w", err)
-		// 	}
-		// }
-		_ = agentID // 暂时忽略未使用警告
+		if isTerminalCommandStatus(resp.Status) {
+			if err := s.sendNextPendingCommand(stream, agentID); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func (s *ControllerServer) sendNextPendingCommand(stream agentpb.ControllerService_CommandStreamServer, agentID string) error {
+	if s.store == nil || agentID == "" {
+		return nil
+	}
+
+	cmd, err := s.store.GetNextPendingAgentCommand(agentID)
+	if err != nil {
+		return fmt.Errorf("failed to get pending command: %w", err)
+	}
+	if cmd == nil {
+		return nil
+	}
+
+	if err := stream.Send(&agentpb.CommandRequest{
+		CommandId: cmd.ID,
+		Command:   cmd.Command,
+		Params:    cmd.Params,
+		Timeout:   int32(cmd.TimeoutSeconds),
+		Priority:  int32(cmd.Priority),
+		CreatedAt: cmd.CreatedAt.Unix(),
+	}); err != nil {
+		return fmt.Errorf("stream send error: %w", err)
+	}
+
+	return nil
+}
+
+func isTerminalCommandStatus(status string) bool {
+	switch status {
+	case controllerstorage.AgentCommandStatusCompleted, controllerstorage.AgentCommandStatusFailed:
+		return true
+	default:
+		return false
 	}
 }
 

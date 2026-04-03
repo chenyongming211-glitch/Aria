@@ -314,6 +314,25 @@ func (s *Storage) Migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_ai_audit_session ON ai_audit_logs(session_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_audit_tool ON ai_audit_logs(tool_name)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_audit_created ON ai_audit_logs(created_at)`,
+
+		`CREATE TABLE IF NOT EXISTS agent_commands (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			node_public_key VARCHAR(44) NOT NULL,
+			command VARCHAR(64) NOT NULL,
+			params JSONB NOT NULL DEFAULT '{}'::jsonb,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			message TEXT,
+			priority INTEGER NOT NULL DEFAULT 0,
+			timeout_seconds INTEGER NOT NULL DEFAULT 30,
+			result JSONB NOT NULL DEFAULT '{}'::jsonb,
+			sent_at TIMESTAMPTZ,
+			acknowledged_at TIMESTAMPTZ,
+			completed_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			updated_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_commands_node_status ON agent_commands(node_public_key, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_commands_created_at ON agent_commands(created_at)`,
 	}
 
 	for i, migration := range migrations {

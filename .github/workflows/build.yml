@@ -1,0 +1,123 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go-build:
+    name: Go Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run Go tests
+        run: go test ./...
+
+      - name: Build controller and ariactl
+        run: |
+          make build-controller
+          make build-ariactl
+          make build-linux-amd64
+          make build-linux-arm64
+
+      - name: Upload Go artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-binaries
+          path: |
+            bin/aria-controller
+            bin/ariactl
+            bin/aria-controller-linux-amd64
+            bin/aria-controller-linux-arm64
+          if-no-files-found: error
+
+  rust-agent-build:
+    name: Rust Agent Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent-rust
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            llvm \
+            libelf-dev \
+            libbpf-dev \
+            pkg-config \
+            protobuf-compiler
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy, rust-src
+          targets: x86_64-unknown-linux-gnu, bpfel-unknown-none
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "agent-rust -> target"
+
+      - name: Install bpf-linker
+        run: cargo install bpf-linker --locked
+
+      - name: Build Rust agent
+        run: cargo build --release -p aria-agent
+
+      - name: Upload Rust artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-agent-binary
+          path: agent-rust/target/release/aria-agent
+          if-no-files-found: error
+
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend-refactor
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend-refactor/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend-refactor/dist
+          if-no-files-found: error

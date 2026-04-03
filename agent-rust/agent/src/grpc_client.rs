@@ -1,6 +1,10 @@
-use anyhow::Result;
-use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
+use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::fs;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
+use tonic::Streaming;
 
 // 引入生成的 protobuf 代码
 pub mod aria {
@@ -8,6 +12,9 @@ pub mod aria {
 }
 
 use aria::controller_service_client::ControllerServiceClient;
+
+pub type GrpcCommandRequest = aria::CommandRequest;
+pub type GrpcCommandResponse = aria::CommandResponse;
 
 /// 获取内核版本
 fn get_kernel_version() -> String {
@@ -27,8 +34,9 @@ fn has_aesni_support() -> bool {
 }
 
 /// gRPC Controller 客户端
+#[derive(Clone)]
 pub struct GrpcClient {
-    client: ControllerServiceClient<Channel>,
+    channel: Channel,
 }
 
 impl GrpcClient {
@@ -63,15 +71,12 @@ impl GrpcClient {
         // 连接服务器
         let channel = endpoint.connect().await?;
         
-        // 创建客户端
-        let client = ControllerServiceClient::new(channel);
-        
-        Ok(Self { client })
+        Ok(Self { channel })
     }
     
     /// 注册到 Controller
     pub async fn register(
-        &mut self,
+        &self,
         public_key: String,
         endpoint: String,
         public_ip: String,
@@ -100,20 +105,22 @@ impl GrpcClient {
             kernel_version,
             has_aesni,
         });
-        
-        let response = self.client.register(request).await?;
+
+        let mut client = ControllerServiceClient::new(self.channel.clone());
+        let response = client.register(request).await?;
         let resp = response.into_inner();
         
         Ok(resp.assigned_ip)
     }
     
     /// 从 Controller 同步配置
-    pub async fn sync(&mut self, public_key: String) -> Result<SyncResult> {
+    pub async fn sync(&self, public_key: String) -> Result<SyncResult> {
         let request = tonic::Request::new(aria::SyncRequest {
             public_key,
         });
-        
-        let response = self.client.sync(request).await?;
+
+        let mut client = ControllerServiceClient::new(self.channel.clone());
+        let response = client.sync(request).await?;
         let resp = response.into_inner();
         
         Ok(SyncResult {
@@ -147,7 +154,32 @@ impl GrpcClient {
             }).collect(),
         })
     }
-    
+
+    pub async fn connect_command_stream(
+        &self,
+        agent_id: String,
+    ) -> Result<(mpsc::Sender<GrpcCommandResponse>, Streaming<GrpcCommandRequest>)> {
+        let (tx, rx) = mpsc::channel(16);
+
+        let mut init_result = HashMap::new();
+        init_result.insert("agent_id".to_string(), agent_id);
+
+        tx.send(GrpcCommandResponse {
+            command_id: "init".to_string(),
+            status: "ready".to_string(),
+            message: "agent connected".to_string(),
+            result: init_result,
+            completed_at: 0,
+        })
+        .await
+        .context("failed to enqueue init message")?;
+
+        let request_stream = ReceiverStream::new(rx);
+        let mut client = ControllerServiceClient::new(self.channel.clone());
+        let response = client.command_stream(request_stream).await?;
+
+        Ok((tx, response.into_inner()))
+    }
 }
 
 /// 同步结果

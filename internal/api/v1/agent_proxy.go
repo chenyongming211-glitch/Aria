@@ -6,8 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"aria/pkg/controllerstorage"
 )
 
@@ -106,19 +104,10 @@ func (h *AgentProxyHandler) HandleAgentCommand(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// 检查节点是否存在（支持通过 public_key 或 hostname 查询）
-	var node *controllerstorage.Node
-	var err error
-
-	// 首先尝试通过 public_key 查询
-	node, err = h.store.GetNode(nodeID)
-	if err != nil || node == nil {
-		// 如果找不到，尝试通过 hostname 查询
-		node, err = h.store.GetNodeByHostname(nodeID)
-		if err != nil || node == nil {
-			WriteError(w, http.StatusNotFound, CodeNodeNotFound, "Node not found: "+nodeID, nil)
-			return
-		}
+	node, err := h.resolveNode(nodeID)
+	if err != nil {
+		WriteError(w, http.StatusNotFound, CodeNodeNotFound, "Node not found: "+nodeID, nil)
+		return
 	}
 
 	// 设置默认值
@@ -126,31 +115,25 @@ func (h *AgentProxyHandler) HandleAgentCommand(w http.ResponseWriter, r *http.Re
 		req.Timeout = 30
 	}
 
-	// 创建命令记录
-	commandID := uuid.New().String()
-	now := time.Now()
-
-	// TODO: 将命令存储到Redis或数据库
-	// cmd := map[string]interface{}{
-	// 	"id":         commandID,
-	// 	"node_id":    nodeID,
-	// 	"command":    req.Command,
-	// 	"params":     req.Params,
-	// 	"status":     "pending",
-	// 	"priority":   req.Priority,
-	// 	"timeout":    req.Timeout,
-	// 	"created_at": now,
-	// 	"updated_at": now,
-	// }
-	// store.SaveCommand(cmd)
+	cmd, err := h.store.QueueAgentCommand(
+		node.PublicKey,
+		req.Command,
+		req.Params,
+		req.Priority,
+		req.Timeout,
+	)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeCommandFailed, "Failed to queue command: "+err.Error(), nil)
+		return
+	}
 
 	response := CommandResponse{
-		CommandID: commandID,
-		NodeID:    nodeID,
-		Status:    "pending",
+		CommandID: cmd.ID,
+		NodeID:    node.PublicKey,
+		Status:    cmd.Status,
 		Message:   "Command queued for delivery",
-		CreatedAt: now,
-		UpdatedAt: now,
+		CreatedAt: cmd.CreatedAt,
+		UpdatedAt: cmd.UpdatedAt,
 	}
 
 	WriteSuccess(w, response, "Command queued successfully")
@@ -171,19 +154,10 @@ func (h *AgentProxyHandler) HandleAgentStatus(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// 获取节点信息（支持通过 public_key 或 hostname 查询）
-	var node *controllerstorage.Node
-	var err error
-
-	// 首先尝试通过 public_key 查询
-	node, err = h.store.GetNode(nodeID)
-	if err != nil || node == nil {
-		// 如果找不到，尝试通过 hostname 查询
-		node, err = h.store.GetNodeByHostname(nodeID)
-		if err != nil || node == nil {
-			WriteError(w, http.StatusNotFound, CodeNodeNotFound, "Node not found: "+nodeID, nil)
-			return
-		}
+	node, err := h.resolveNode(nodeID)
+	if err != nil {
+		WriteError(w, http.StatusNotFound, CodeNodeNotFound, "Node not found: "+nodeID, nil)
+		return
 	}
 
 	// 计算状态
@@ -200,17 +174,26 @@ func (h *AgentProxyHandler) HandleAgentStatus(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	// TODO: 从命令队列查询待执行命令数
-	pendingCmds := 0
+	pendingCmds, err := h.store.CountIncompleteAgentCommands(node.PublicKey)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeCommandFailed, "Failed to query pending commands: "+err.Error(), nil)
+		return
+	}
+	lastCommandID, err := h.store.GetLastAgentCommandID(node.PublicKey)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeCommandFailed, "Failed to query last command: "+err.Error(), nil)
+		return
+	}
 
 	response := AgentStatus{
-		NodeID:      nodeID,
+		NodeID:      node.PublicKey,
 		Hostname:    node.Hostname,
 		Region:      node.Region,
 		PublicIP:    node.PublicIP,
 		AssignedIP:  node.AssignedIP,
 		Status:      status,
 		LastSeen:    node.LastSeen,
+		LastCommand: lastCommandID,
 		PendingCmds: pendingCmds,
 		Uptime:      uptime,
 	}
@@ -247,7 +230,7 @@ func (h *AgentProxyHandler) HandleBatchCommand(w http.ResponseWriter, r *http.Re
 	} else {
 		// 获取指定节点
 		for _, nodeID := range req.NodeIDs {
-			node, err := h.store.GetNode(nodeID)
+			node, err := h.resolveNode(nodeID)
 			if err == nil && node != nil {
 				nodes = append(nodes, node)
 			}
@@ -262,32 +245,32 @@ func (h *AgentProxyHandler) HandleBatchCommand(w http.ResponseWriter, r *http.Re
 	// 批量发送命令
 	var results []CommandResponse
 	var successCount, failedCount int
-	now := time.Now()
 
 	for _, node := range nodes {
-		commandID := uuid.New().String()
-
-		// TODO: 创建并存储命令记录到队列
-		// cmd := map[string]interface{}{
-		// 	"id":         commandID,
-		// 	"node_id":    node.PublicKey,
-		// 	"command":    req.Command.Command,
-		// 	"params":     req.Command.Params,
-		// 	"status":     "pending",
-		// 	"priority":   req.Command.Priority,
-		// 	"timeout":    req.Command.Timeout,
-		// 	"created_at": now,
-		// 	"updated_at": now,
-		// }
-		// store.SaveCommand(cmd)
+		cmd, err := h.store.QueueAgentCommand(
+			node.PublicKey,
+			req.Command.Command,
+			req.Command.Params,
+			req.Command.Priority,
+			req.Command.Timeout,
+		)
+		if err != nil {
+			failedCount++
+			results = append(results, CommandResponse{
+				NodeID:  node.PublicKey,
+				Status:  controllerstorage.AgentCommandStatusFailed,
+				Message: "Failed to queue command: " + err.Error(),
+			})
+			continue
+		}
 
 		results = append(results, CommandResponse{
-			CommandID: commandID,
+			CommandID: cmd.ID,
 			NodeID:    node.PublicKey,
-			Status:    "pending",
+			Status:    cmd.Status,
 			Message:   "Command queued for delivery",
-			CreatedAt: now,
-			UpdatedAt: now,
+			CreatedAt: cmd.CreatedAt,
+			UpdatedAt: cmd.UpdatedAt,
 		})
 		successCount++
 	}
@@ -300,6 +283,14 @@ func (h *AgentProxyHandler) HandleBatchCommand(w http.ResponseWriter, r *http.Re
 	}
 
 	WriteSuccess(w, response, strconv.Itoa(successCount)+" commands queued successfully")
+}
+
+func (h *AgentProxyHandler) resolveNode(nodeID string) (*controllerstorage.Node, error) {
+	node, err := h.store.GetNode(nodeID)
+	if err == nil && node != nil {
+		return node, nil
+	}
+	return h.store.GetNodeByHostname(nodeID)
 }
 
 // extractNodeID 从URL路径中提取节点ID
