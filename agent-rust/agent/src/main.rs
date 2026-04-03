@@ -806,7 +806,16 @@ async fn bootstrap_register(
     }
     state.assigned_ip = Some(registration.assigned_ip.clone());
     state.address = Some(format!("{}/32", registration.assigned_ip));
+    state.last_desired_version = None;
+    state.last_applied_version = None;
     state.last_sync_status = Some("registered".to_string());
+    state.last_sync_message = Some("bootstrap registration completed".to_string());
+    state.last_sync_at = Some(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64,
+    );
     Ok(true)
 }
 

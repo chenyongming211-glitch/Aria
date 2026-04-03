@@ -188,6 +188,10 @@ func (s *Storage) UpdateAgentCommandStatus(commandID, status, message string, re
 		return err
 	}
 
+	if err := s.syncNodeControlStateForCommandTx(tx, commandID, status, message, result); err != nil {
+		return err
+	}
+
 	return tx.Commit()
 }
 

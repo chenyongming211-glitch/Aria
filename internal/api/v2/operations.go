@@ -420,23 +420,23 @@ func (r *Router) buildNodeOperationsSummary(node *controllerstorage.Node) (map[s
 		return nil, err
 	}
 
-	configurationStatus := "idle"
-	if pendingCmds > 0 {
-		configurationStatus = "pending"
-	} else if lastCommand != nil {
-		switch lastCommand.Status {
-		case controllerstorage.AgentCommandStatusCompleted:
-			configurationStatus = "applied"
-		case controllerstorage.AgentCommandStatusFailed:
-			configurationStatus = "error"
-		case controllerstorage.AgentCommandStatusAcknowledged, controllerstorage.AgentCommandStatusSent:
-			configurationStatus = "in_progress"
-		default:
-			configurationStatus = "pending"
-		}
+	controlState, err := r.store.GetNodeControlState(node.TenantID, node.ID)
+	if err != nil {
+		return nil, err
 	}
 
-	return map[string]interface{}{
+	configurationStatus := deriveConfigurationStatus(controlState, lastCommand, pendingCmds)
+	lastSyncAt := interface{}(node.LastSeen)
+	if controlState != nil && controlState.LastSyncAt != nil {
+		lastSyncAt = controlState.LastSyncAt
+	}
+
+	lastAppliedAt := lastAppliedTimestamp(lastCommand)
+	if controlState != nil && controlState.AppliedStateUpdatedAt != nil {
+		lastAppliedAt = controlState.AppliedStateUpdatedAt
+	}
+
+	summary := map[string]interface{}{
 		"node_id":              node.ID.String(),
 		"node_public_key":      node.PublicKey,
 		"hostname":             node.Hostname,
@@ -448,7 +448,7 @@ func (r *Router) buildNodeOperationsSummary(node *controllerstorage.Node) (map[s
 		"sync_status":          nodeAvailabilityStatus(node),
 		"configuration_status": configurationStatus,
 		"last_seen":            node.LastSeen,
-		"last_sync_at":         node.LastSeen,
+		"last_sync_at":         lastSyncAt,
 		"pending_cmds":         pendingCmds,
 		"uptime":               nodeUptimeSeconds(node),
 		"last_command":         agentCommandToMap(lastCommand),
@@ -456,8 +456,32 @@ func (r *Router) buildNodeOperationsSummary(node *controllerstorage.Node) (map[s
 		"last_command_message": valueOrEmpty(lastCommand, func(cmd *controllerstorage.AgentCommand) string { return cmd.Message }),
 		"last_command_error":   lastCommandError(lastCommand),
 		"last_command_at":      lastCommandTimestamp(lastCommand),
-		"last_applied_at":      lastAppliedTimestamp(lastCommand),
-	}, nil
+		"last_applied_at":      lastAppliedAt,
+	}
+
+	if controlState != nil {
+		summary["desired_state_version"] = controlState.DesiredStateVersion
+		summary["desired_state_updated_at"] = controlState.DesiredStateUpdatedAt
+		summary["applied_state_version"] = controlState.AppliedStateVersion
+		summary["applied_state_updated_at"] = controlState.AppliedStateUpdatedAt
+		summary["observed_state"] = firstNonEmptyString(controlState.ObservedState, configurationStatus)
+		summary["observed_message"] = controlState.ObservedMessage
+		summary["observed_at"] = controlState.ObservedAt
+		summary["last_sync_error"] = controlState.LastSyncError
+		summary["state_convergence"] = stateConvergenceStatus(controlState, configurationStatus)
+	} else {
+		summary["desired_state_version"] = ""
+		summary["desired_state_updated_at"] = nil
+		summary["applied_state_version"] = ""
+		summary["applied_state_updated_at"] = nil
+		summary["observed_state"] = configurationStatus
+		summary["observed_message"] = ""
+		summary["observed_at"] = nil
+		summary["last_sync_error"] = ""
+		summary["state_convergence"] = "idle"
+	}
+
+	return summary, nil
 }
 
 func agentCommandToMap(cmd *controllerstorage.AgentCommand) map[string]interface{} {
@@ -520,6 +544,75 @@ func valueOrEmpty(cmd *controllerstorage.AgentCommand, getter func(*controllerst
 		return ""
 	}
 	return getter(cmd)
+}
+
+func deriveConfigurationStatus(
+	controlState *controllerstorage.NodeControlState,
+	lastCommand *controllerstorage.AgentCommand,
+	pendingCmds int,
+) string {
+	if pendingCmds > 0 {
+		if lastCommand != nil {
+			switch lastCommand.Status {
+			case controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged:
+				return "in_progress"
+			}
+		}
+		return "pending"
+	}
+
+	if controlState != nil {
+		if controlState.LastSyncError != "" || controlState.ObservedState == "error" {
+			return "error"
+		}
+		if controlState.DesiredStateVersion != "" && controlState.DesiredStateVersion == controlState.AppliedStateVersion {
+			return "applied"
+		}
+		if controlState.DesiredStateVersion != "" && controlState.AppliedStateVersion != controlState.DesiredStateVersion {
+			return "pending"
+		}
+		if controlState.ObservedState == "healthy" {
+			return "applied"
+		}
+	}
+
+	if lastCommand != nil {
+		switch lastCommand.Status {
+		case controllerstorage.AgentCommandStatusCompleted:
+			return "applied"
+		case controllerstorage.AgentCommandStatusFailed:
+			return "error"
+		case controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged:
+			return "in_progress"
+		}
+	}
+
+	return "idle"
+}
+
+func stateConvergenceStatus(controlState *controllerstorage.NodeControlState, configurationStatus string) string {
+	if controlState == nil {
+		return "idle"
+	}
+	if configurationStatus == "error" {
+		return "diverged"
+	}
+	if controlState.DesiredStateVersion == "" {
+		return "idle"
+	}
+	if controlState.DesiredStateVersion == controlState.AppliedStateVersion {
+		return "converged"
+	}
+	return "pending"
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func maxInt64(a, b int64) int64 {

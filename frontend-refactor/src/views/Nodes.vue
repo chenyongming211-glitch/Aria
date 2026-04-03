@@ -120,6 +120,14 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="Desired / Applied" width="180">
+          <template #default="{ row }">
+            <div class="state-version-cell">
+              <div>{{ shortStateVersion(row.desiredStateVersion) }}</div>
+              <div class="muted-line">{{ shortStateVersion(row.appliedStateVersion) }}</div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="pendingCmds" label="Pending" width="90" />
         <el-table-column prop="lastSeen" label="Last Seen" width="150" />
         <el-table-column label="Actions" width="180" fixed="right">
@@ -256,6 +264,34 @@
             </el-descriptions-item>
             <el-descriptions-item label="Last Command Error" :span="2">
               {{ selectedNode.lastCommandError || 'N/A' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Desired Version">
+              {{ selectedNode.desiredStateVersion || 'N/A' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Desired Updated">
+              {{ selectedNode.desiredStateUpdatedAt || 'N/A' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Applied Version">
+              {{ selectedNode.appliedStateVersion || 'N/A' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Applied Updated">
+              {{ selectedNode.appliedStateUpdatedAt || 'N/A' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Observed State">
+              <el-tag size="small" :type="getObservedTagType(selectedNode.observedState)">
+                {{ formatObservedState(selectedNode.observedState) }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="Convergence">
+              <el-tag size="small" :type="getConvergenceTagType(selectedNode.stateConvergence)">
+                {{ formatConvergence(selectedNode.stateConvergence) }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="Observed At">
+              {{ selectedNode.observedAt || 'N/A' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Observed Message" :span="2">
+              {{ selectedNode.observedMessage || 'N/A' }}
             </el-descriptions-item>
           </el-descriptions>
         </div>
@@ -501,6 +537,59 @@ const getConfigTagType = (status) => {
   }
 }
 
+const formatObservedState = (state) => {
+  const map = {
+    applied: 'Applied',
+    healthy: 'Healthy',
+    error: 'Error',
+    in_progress: 'In Progress',
+    idle: 'Idle'
+  }
+  return map[state] || state || 'Unknown'
+}
+
+const getObservedTagType = (state) => {
+  switch (state) {
+    case 'applied':
+    case 'healthy':
+      return 'success'
+    case 'in_progress':
+      return 'warning'
+    case 'error':
+      return 'danger'
+    default:
+      return 'info'
+  }
+}
+
+const formatConvergence = (state) => {
+  const map = {
+    converged: 'Converged',
+    pending: 'Pending',
+    diverged: 'Diverged',
+    idle: 'Idle'
+  }
+  return map[state] || state || 'Unknown'
+}
+
+const getConvergenceTagType = (state) => {
+  switch (state) {
+    case 'converged':
+      return 'success'
+    case 'pending':
+      return 'warning'
+    case 'diverged':
+      return 'danger'
+    default:
+      return 'info'
+  }
+}
+
+const shortStateVersion = (value) => {
+  if (!value) return 'N/A'
+  return value.length > 18 ? `${value.slice(0, 18)}...` : value
+}
+
 const formatCommandTime = (value) => {
   if (!value) return 'N/A'
   const date = new Date(value)
@@ -528,6 +617,17 @@ onMounted(() => {
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 4px;
+}
+
+.state-version-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.muted-line {
+  color: var(--aria-text-secondary);
 }
 
 /* ============================================

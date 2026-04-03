@@ -29,7 +29,7 @@ use crate::acl::AclManager;
 use crate::qos::QoSManager;
 use crate::identity::IdentityManager;
 use crate::metrics;
-use crate::config::AgentConfig;
+use crate::config::{AgentConfig, ConfigManager};
 
 const BPF_FS_PATH: &str = "/sys/fs/bpf/aria";
 
@@ -122,6 +122,18 @@ impl UnifiedAgent {
             log_handle,
             current_log_level,
         })
+    }
+
+    fn set_sync_observation(&mut self, status: &str, message: String) {
+        self.config.last_sync_status = Some(status.to_string());
+        self.config.last_sync_message = Some(message);
+        self.config.last_sync_at = Some(current_unix_timestamp());
+    }
+
+    fn persist_runtime_state(&self) -> Result<()> {
+        let config_manager = ConfigManager::new(&self.config_path);
+        config_manager.save_state(&self.config.to_state())?;
+        Ok(())
     }
     
     fn load_ebpf_programs(interface: &str) -> Result<(
@@ -338,6 +350,10 @@ impl UnifiedAgent {
                 _ = sync_interval.tick() => {
                     if let Err(e) = self.sync().await {
                         tracing::error!("Sync failed: {:?}", e);
+                        self.set_sync_observation("error", e.to_string());
+                        if let Err(save_err) = self.persist_runtime_state() {
+                            tracing::warn!("Failed to persist runtime state after sync error: {:?}", save_err);
+                        }
                         metrics::record_sync_failure();
                     } else {
                         metrics::record_sync_success(self.last_sync_peers.lock().unwrap().len());
@@ -1162,6 +1178,21 @@ impl UnifiedAgent {
                         "peer_count".to_string(),
                         self.last_sync_peers.lock().unwrap().len().to_string(),
                     );
+                    if let Some(value) = self.config.last_desired_version.clone().filter(|value| !value.trim().is_empty()) {
+                        result.insert("desired_state_version".to_string(), value);
+                    }
+                    if let Some(value) = self.config.last_applied_version.clone().filter(|value| !value.trim().is_empty()) {
+                        result.insert("applied_state_version".to_string(), value);
+                    }
+                    if let Some(value) = self.config.last_sync_status.clone().filter(|value| !value.trim().is_empty()) {
+                        result.insert("observed_state".to_string(), value);
+                    }
+                    if let Some(value) = self.config.last_sync_message.clone().filter(|value| !value.trim().is_empty()) {
+                        result.insert("observed_message".to_string(), value);
+                    }
+                    if let Some(value) = self.config.last_sync_at {
+                        result.insert("observed_at".to_string(), value.to_string());
+                    }
                     build_completed_command_response(
                         command_id.clone(),
                         "sync completed".to_string(),
@@ -1333,7 +1364,13 @@ impl UnifiedAgent {
         tracing::debug!("Syncing with Controller...");
         
         let sync_result = self.grpc_client
-            .sync(self.config.node_id.clone(), self.config.public_key.clone())
+            .sync_with_state(
+                self.config.node_id.clone(),
+                self.config.public_key.clone(),
+                self.config.last_applied_version.clone(),
+                self.config.last_sync_status.clone(),
+                self.config.last_sync_message.clone(),
+            )
             .await?;
         
         tracing::debug!("Sync received: {} peers, {} ACL rules, {} blacklist rules, {} QoS rules", 
@@ -1341,23 +1378,52 @@ impl UnifiedAgent {
             sync_result.acl_rules.len(),
             sync_result.blacklist_rules.len(),
             sync_result.qos_rules.len());
-        
+
         self.sync_peers(&sync_result.peers).await?;
         self.sync_advertised_routes(&sync_result.peers).await?;
-        
+
+        let mut apply_errors = Vec::new();
         if let Err(e) = self.sync_acl_rules(&sync_result.acl_rules).await {
             tracing::error!("Failed to sync ACL rules: {:?}", e);
+            apply_errors.push(format!("acl: {}", e));
         }
 
         if let Err(e) = self.sync_blacklist_rules(&sync_result.blacklist_rules).await {
             tracing::error!("Failed to sync blacklist rules: {:?}", e);
+            apply_errors.push(format!("blacklist: {}", e));
         }
         
         if let Err(e) = self.sync_qos_rules(&sync_result.qos_rules).await {
             tracing::error!("Failed to sync QoS rules: {:?}", e);
+            apply_errors.push(format!("qos: {}", e));
         }
-        
-        *self.last_sync_peers.lock().unwrap() = sync_result.peers;
+
+        if !apply_errors.is_empty() {
+            let message = format!("sync apply failed: {}", apply_errors.join("; "));
+            self.set_sync_observation("error", message.clone());
+            if let Err(e) = self.persist_runtime_state() {
+                tracing::warn!("Failed to persist runtime state after apply error: {:?}", e);
+            }
+            return Err(anyhow::anyhow!(message));
+        }
+
+        let desired_state_version = sync_result.desired_state_version.clone();
+        let assigned_ip = sync_result.assigned_ip.clone();
+        let peers = sync_result.peers;
+
+        *self.last_sync_peers.lock().unwrap() = peers;
+        if !assigned_ip.trim().is_empty() {
+            self.config.assigned_ip = Some(assigned_ip.clone());
+            self.config.address = Some(format!("{}/32", assigned_ip));
+        }
+        if !desired_state_version.trim().is_empty() {
+            self.config.last_desired_version = Some(desired_state_version.clone());
+            self.config.last_applied_version = Some(desired_state_version);
+        }
+        self.set_sync_observation("applied", "sync applied successfully".to_string());
+        if let Err(e) = self.persist_runtime_state() {
+            tracing::warn!("Failed to persist runtime state after sync: {:?}", e);
+        }
         tracing::debug!("Sync completed");
         Ok(())
     }

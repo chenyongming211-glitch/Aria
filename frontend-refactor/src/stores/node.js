@@ -53,6 +53,14 @@ export default defineStore('node', () => {
           pendingCmds: node.pending_cmds || 0,
           configurationStatus: node.configuration_status || 'idle',
           lastSyncAt: node.last_sync_at ? formatTimestamp(node.last_sync_at) : 'N/A',
+          desiredStateVersion: node.desired_state_version || '',
+          desiredStateUpdatedAt: node.desired_state_updated_at ? formatDateTime(node.desired_state_updated_at) : 'N/A',
+          appliedStateVersion: node.applied_state_version || '',
+          appliedStateUpdatedAt: node.applied_state_updated_at ? formatDateTime(node.applied_state_updated_at) : 'N/A',
+          observedState: node.observed_state || node.configuration_status || 'idle',
+          observedMessage: node.observed_message || node.last_sync_error || '',
+          observedAt: node.observed_at ? formatDateTime(node.observed_at) : 'N/A',
+          stateConvergence: node.state_convergence || 'idle',
           lastCommand: node.last_command || null,
           lastCommandStatus: node.last_command_status || '',
           lastCommandError: node.last_command_error || '',
@@ -104,6 +112,14 @@ export default defineStore('node', () => {
       pendingCmds: status.pending_cmds || detail.pending_cmds || 0,
       configurationStatus: status.configuration_status || detail.configuration_status || 'idle',
       lastSyncAt: status.last_sync_at ? formatTimestamp(status.last_sync_at) : (detail.last_sync_at ? formatTimestamp(detail.last_sync_at) : 'N/A'),
+      desiredStateVersion: status.desired_state_version || detail.desired_state_version || '',
+      desiredStateUpdatedAt: formatDateTime(status.desired_state_updated_at || detail.desired_state_updated_at),
+      appliedStateVersion: status.applied_state_version || detail.applied_state_version || '',
+      appliedStateUpdatedAt: formatDateTime(status.applied_state_updated_at || detail.applied_state_updated_at),
+      observedState: status.observed_state || detail.observed_state || status.configuration_status || detail.configuration_status || 'idle',
+      observedMessage: status.observed_message || detail.observed_message || status.last_sync_error || detail.last_sync_error || '',
+      observedAt: formatDateTime(status.observed_at || detail.observed_at),
+      stateConvergence: status.state_convergence || detail.state_convergence || 'idle',
       lastCommand: status.last_command || detail.last_command || null,
       lastCommandStatus: status.last_command_status || detail.last_command_status || '',
       lastCommandError: status.last_command_error || detail.last_command_error || '',
@@ -119,7 +135,10 @@ export default defineStore('node', () => {
   // 格式化时间戳（转换为北京时间 UTC+8）
   function formatTimestamp(timestamp) {
     if (!timestamp) return 'N/A'
-    const date = new Date(timestamp * 1000)
+    const date = typeof timestamp === 'number'
+      ? new Date(timestamp * 1000)
+      : new Date(timestamp)
+    if (Number.isNaN(date.getTime())) return 'N/A'
     
     // 转换为北京时间（UTC+8）
     const beijingTime = new Date(date.getTime() + 8 * 60 * 60 * 1000)
@@ -133,6 +152,13 @@ export default defineStore('node', () => {
     const seconds = String(beijingTime.getUTCSeconds()).padStart(2, '0')
     
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+  }
+
+  function formatDateTime(value) {
+    if (!value) return 'N/A'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return 'N/A'
+    return date.toLocaleString()
   }
 
   // 格式化运行时间

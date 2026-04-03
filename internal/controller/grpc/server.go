@@ -78,6 +78,10 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 		return nil, err
 	}
 
+	if err := s.reportRuntimeSyncState(node, req); err != nil {
+		return nil, fmt.Errorf("failed to persist runtime sync state: %w", err)
+	}
+
 	// 调用 REST API handler
 	peersInterface, assignedIP, aclRulesInterface, metricsGateway, err := s.syncHandler(node.PublicKey)
 	if err != nil {
@@ -141,14 +145,20 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 		blacklistRules = []*agentpb.BlacklistRule{}
 	}
 
+	desiredVersion, err := s.ensureDesiredStateVersion(node)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine desired state version: %w", err)
+	}
+
 	return &agentpb.SyncResponse{
-		Peers:              peers,
-		AssignedIp:         assignedIP,
-		LastUpdate:         time.Now().Unix(),
-		AclRules:           aclRules,
-		MetricsPushGateway: metricsGateway,
-		QosRules:           qosRules,
-		BlacklistRules:     blacklistRules,
+		Peers:               peers,
+		AssignedIp:          assignedIP,
+		LastUpdate:          time.Now().Unix(),
+		AclRules:            aclRules,
+		MetricsPushGateway:  metricsGateway,
+		QosRules:            qosRules,
+		BlacklistRules:      blacklistRules,
+		DesiredStateVersion: desiredVersion,
 	}, nil
 }
 
@@ -269,6 +279,49 @@ func registeredNodeID(store *controllerstorage.Storage, publicKey string) string
 	}
 
 	return node.ID.String()
+}
+
+func (s *ControllerServer) reportRuntimeSyncState(node *controllerstorage.Node, req *agentpb.SyncRequest) error {
+	if s.store == nil || node == nil {
+		return nil
+	}
+
+	now := time.Now()
+	lastSyncError := ""
+	if req.ObservedState == "error" {
+		lastSyncError = req.ObservedMessage
+	}
+
+	_, err := s.store.ReportNodeControlState(node.TenantID, node.ID, controllerstorage.NodeControlStateReport{
+		AppliedStateVersion: req.AppliedStateVersion,
+		ObservedState:       req.ObservedState,
+		ObservedMessage:     req.ObservedMessage,
+		LastSyncAt:          &now,
+		LastSyncError:       lastSyncError,
+	})
+	return err
+}
+
+func (s *ControllerServer) ensureDesiredStateVersion(node *controllerstorage.Node) (string, error) {
+	if s.store == nil || node == nil {
+		return "", nil
+	}
+
+	state, err := s.store.GetNodeControlState(node.TenantID, node.ID)
+	if err != nil {
+		return "", err
+	}
+	if state != nil && state.DesiredStateVersion != "" {
+		return state.DesiredStateVersion, nil
+	}
+
+	created, err := s.store.UpsertNodeDesiredState(node.TenantID, node.ID, controllerstorage.NewDesiredStateVersion(), map[string]interface{}{
+		"source": "sync-baseline",
+	})
+	if err != nil {
+		return "", err
+	}
+	return created.DesiredStateVersion, nil
 }
 
 func (s *ControllerServer) resolveRuntimeNode(nodeID, publicKey string) (*controllerstorage.Node, error) {

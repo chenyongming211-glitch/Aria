@@ -383,11 +383,29 @@ func (s *Storage) Migrate() error {
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		`CREATE TABLE IF NOT EXISTS node_control_states (
+			node_id UUID PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
+			tenant_id UUID NOT NULL REFERENCES tenants(id),
+			desired_state_version VARCHAR(64),
+			desired_state_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+			desired_state_updated_at TIMESTAMPTZ,
+			applied_state_version VARCHAR(64),
+			applied_state_updated_at TIMESTAMPTZ,
+			observed_state VARCHAR(32) NOT NULL DEFAULT 'idle',
+			observed_message TEXT,
+			observed_at TIMESTAMPTZ,
+			last_sync_at TIMESTAMPTZ,
+			last_sync_error TEXT,
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			updated_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_commands_node_status ON agent_commands(node_public_key, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_commands_created_at ON agent_commands(created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_policy_deliveries_tenant_node_domain_ref ON policy_deliveries(tenant_id, node_id, policy_domain, policy_ref)`,
 		`CREATE INDEX IF NOT EXISTS idx_policy_deliveries_command_id ON policy_deliveries(command_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_policy_deliveries_created_at ON policy_deliveries(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_node_control_states_tenant_node ON node_control_states(tenant_id, node_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_node_control_states_desired_version ON node_control_states(desired_state_version)`,
 	}
 
 	for i, migration := range migrations {

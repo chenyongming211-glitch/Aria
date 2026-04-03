@@ -76,6 +76,9 @@ message RegisterResponse {
 message SyncRequest {
   string public_key = 1;              // 兼容字段：运行期按 public_key 查找节点
   string node_id = 2;                 // 优先字段：运行期按 node_id 查找节点
+  string applied_state_version = 3;   // Agent 当前已应用的 desired state 版本
+  string observed_state = 4;          // Agent 当前观测状态：applied / healthy / error / in_progress
+  string observed_message = 5;        // Agent 当前观测说明或错误信息
 }
 
 message SyncResponse {
@@ -87,6 +90,7 @@ message SyncResponse {
   
   repeated QoSRule qos_rules = 6;            // QoS 限速规则
   repeated BlacklistRule blacklist_rules = 7; // 黑名单规则
+  string desired_state_version = 8;          // Controller 当前期望配置版本
 }
 
 message PeerInfo {

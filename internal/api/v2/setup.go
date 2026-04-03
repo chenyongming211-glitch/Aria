@@ -442,6 +442,9 @@ func (r *Router) buildTenantNodeACLPolicies(tenantID uuid.UUID, node *controller
 		return nil, err
 	}
 
+	if summary, err := r.buildNodeOperationsSummary(node); err == nil {
+		attachNodeSummaryToPolicyItems(items, summary)
+	}
 	finalizePolicyItems(items)
 	return items, nil
 }
@@ -493,6 +496,9 @@ func (r *Router) buildTenantNodeQoSPolicies(tenantID uuid.UUID, node *controller
 		return nil, err
 	}
 
+	if summary, err := r.buildNodeOperationsSummary(node); err == nil {
+		attachNodeSummaryToPolicyItems(items, summary)
+	}
 	finalizePolicyItems(items)
 	return items, nil
 }
@@ -531,6 +537,9 @@ func (r *Router) buildTenantNodeRoutePolicies(tenantID uuid.UUID, node *controll
 		return nil, err
 	}
 
+	if summary, err := r.buildNodeOperationsSummary(node); err == nil {
+		attachNodeSummaryToPolicyItems(items, summary)
+	}
 	finalizePolicyItems(items)
 	return items, nil
 }
@@ -545,6 +554,27 @@ func finalizePolicyItems(items []map[string]interface{}) {
 			if version := stringifyPolicyValue(lastDelivery["id"]); version != "" {
 				item["version"] = version
 			}
+		}
+	}
+}
+
+func attachNodeSummaryToPolicyItems(items []map[string]interface{}, summary map[string]interface{}) {
+	if len(items) == 0 || summary == nil {
+		return
+	}
+
+	for _, item := range items {
+		item["desired_state_version"] = summary["desired_state_version"]
+		item["desired_state_updated_at"] = summary["desired_state_updated_at"]
+		item["applied_state_version"] = summary["applied_state_version"]
+		item["applied_state_updated_at"] = summary["applied_state_updated_at"]
+		item["observed_state"] = summary["observed_state"]
+		item["observed_message"] = summary["observed_message"]
+		item["observed_at"] = summary["observed_at"]
+		item["last_sync_error"] = summary["last_sync_error"]
+		item["state_convergence"] = summary["state_convergence"]
+		if version := stringifyPolicyValue(summary["desired_state_version"]); version != "" {
+			item["version"] = version
 		}
 	}
 }
@@ -978,6 +1008,9 @@ func (r *Router) handleTenantNodeACLs(w http.ResponseWriter, req *http.Request, 
 				v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetACLRulesFailed, "Failed to load ACL delivery history", nil)
 				return
 			}
+			if summary, err := r.buildNodeOperationsSummary(node); err == nil {
+				attachNodeSummaryToPolicyItems(rules, summary)
+			}
 			v1.WriteSuccess(w, rules, fmt.Sprintf("%d ACL rules retrieved", len(rules)))
 		case http.MethodPost:
 			if !r.authorizeTenantAdmin(w, req, tenantID) {
@@ -1187,6 +1220,9 @@ func (r *Router) listTenantNodeQoS(w http.ResponseWriter, tenantID uuid.UUID, no
 	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "qos", items, "id"); err != nil {
 		v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetLimitsFailed, "Failed to load QoS delivery history", nil)
 		return
+	}
+	if summary, err := r.buildNodeOperationsSummary(node); err == nil {
+		attachNodeSummaryToPolicyItems(items, summary)
 	}
 
 	v1.WriteSuccess(w, items, fmt.Sprintf("%d QoS rules retrieved", len(items)))
@@ -1537,6 +1573,9 @@ func (r *Router) listTenantNodeRoutes(w http.ResponseWriter, tenantID uuid.UUID,
 		v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetNodesFailed, "Failed to load route delivery history", nil)
 		return
 	}
+	if summary, err := r.buildNodeOperationsSummary(node); err == nil {
+		attachNodeSummaryToPolicyItems(routes, summary)
+	}
 
 	v1.WriteSuccess(w, routes, fmt.Sprintf("%d routes retrieved", len(routes)))
 }
@@ -1838,11 +1877,25 @@ func (r *Router) queueNodePolicySync(
 	policyName string,
 	metadata map[string]interface{},
 ) (map[string]interface{}, *controllerstorage.PolicyDelivery, error) {
+	desiredVersion := controllerstorage.NewDesiredStateVersion()
+	desiredMetadata := clonePolicyMetadata(metadata)
+	desiredMetadata["domain"] = domain
+	desiredMetadata["action"] = action
+	desiredMetadata["policy_ref"] = strings.TrimSpace(policyRef)
+	if name := strings.TrimSpace(policyName); name != "" {
+		desiredMetadata["policy_name"] = name
+	}
+	controlState, err := r.store.UpsertNodeDesiredState(node.TenantID, node.ID, desiredVersion, desiredMetadata)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	params := map[string]interface{}{
-		"domain":   domain,
-		"action":   action,
-		"node_id":  node.ID.String(),
-		"hostname": node.Hostname,
+		"domain":                domain,
+		"action":                action,
+		"node_id":               node.ID.String(),
+		"hostname":              node.Hostname,
+		"desired_state_version": desiredVersion,
 	}
 	for key, value := range metadata {
 		params[key] = value
@@ -1854,12 +1907,16 @@ func (r *Router) queueNodePolicySync(
 	}
 
 	dispatch := map[string]interface{}{
-		"command_id":      cmd.ID,
-		"command":         cmd.Command,
-		"status":          cmd.Status,
-		"message":         "Policy sync queued",
-		"created_at":      cmd.CreatedAt,
-		"timeout_seconds": cmd.TimeoutSeconds,
+		"command_id":            cmd.ID,
+		"command":               cmd.Command,
+		"status":                cmd.Status,
+		"message":               "Policy sync queued",
+		"created_at":            cmd.CreatedAt,
+		"timeout_seconds":       cmd.TimeoutSeconds,
+		"desired_state_version": desiredVersion,
+	}
+	if controlState != nil {
+		dispatch["desired_state_updated_at"] = controlState.DesiredStateUpdatedAt
 	}
 
 	policyRef = strings.TrimSpace(policyRef)
@@ -1871,6 +1928,7 @@ func (r *Router) queueNodePolicySync(
 	deliveryMetadata["domain"] = domain
 	deliveryMetadata["action"] = action
 	deliveryMetadata["command"] = cmd.Command
+	deliveryMetadata["desired_state_version"] = desiredVersion
 
 	delivery, err := r.store.CreatePolicyDelivery(&controllerstorage.PolicyDelivery{
 		TenantID:      node.TenantID,
@@ -1934,6 +1992,15 @@ func (r *Router) writePolicyMutationSuccess(
 		if _, exists := data["pending_cmds"]; !exists {
 			data["pending_cmds"] = summary["pending_cmds"]
 		}
+		data["desired_state_version"] = summary["desired_state_version"]
+		data["desired_state_updated_at"] = summary["desired_state_updated_at"]
+		data["applied_state_version"] = summary["applied_state_version"]
+		data["applied_state_updated_at"] = summary["applied_state_updated_at"]
+		data["observed_state"] = summary["observed_state"]
+		data["observed_message"] = summary["observed_message"]
+		data["observed_at"] = summary["observed_at"]
+		data["state_convergence"] = summary["state_convergence"]
+		data["last_sync_error"] = summary["last_sync_error"]
 		data["last_command_error"] = summary["last_command_error"]
 	}
 
@@ -2001,6 +2068,15 @@ func (r *Router) proxyLegacyPolicyMutation(
 		if _, exists := data["pending_cmds"]; !exists {
 			data["pending_cmds"] = summary["pending_cmds"]
 		}
+		data["desired_state_version"] = summary["desired_state_version"]
+		data["desired_state_updated_at"] = summary["desired_state_updated_at"]
+		data["applied_state_version"] = summary["applied_state_version"]
+		data["applied_state_updated_at"] = summary["applied_state_updated_at"]
+		data["observed_state"] = summary["observed_state"]
+		data["observed_message"] = summary["observed_message"]
+		data["observed_at"] = summary["observed_at"]
+		data["state_convergence"] = summary["state_convergence"]
+		data["last_sync_error"] = summary["last_sync_error"]
 		data["last_command_error"] = summary["last_command_error"]
 	}
 
@@ -2188,6 +2264,9 @@ func policyDeliveryToMap(delivery *controllerstorage.PolicyDelivery) map[string]
 		"metadata":       delivery.Metadata,
 		"created_at":     delivery.CreatedAt,
 		"updated_at":     delivery.UpdatedAt,
+	}
+	if desiredStateVersion := stringifyPolicyValue(delivery.Metadata["desired_state_version"]); desiredStateVersion != "" {
+		payload["desired_state_version"] = desiredStateVersion
 	}
 	if delivery.CompletedAt != nil {
 		payload["completed_at"] = delivery.CompletedAt

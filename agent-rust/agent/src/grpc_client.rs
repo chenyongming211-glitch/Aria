@@ -184,9 +184,23 @@ impl GrpcClient {
     
     /// 从 Controller 同步配置
     pub async fn sync(&self, node_id: Option<String>, public_key: String) -> Result<SyncResult> {
+        self.sync_with_state(node_id, public_key, None, None, None).await
+    }
+
+    pub async fn sync_with_state(
+        &self,
+        node_id: Option<String>,
+        public_key: String,
+        applied_state_version: Option<String>,
+        observed_state: Option<String>,
+        observed_message: Option<String>,
+    ) -> Result<SyncResult> {
         let request = tonic::Request::new(aria::SyncRequest {
             public_key,
             node_id: node_id.unwrap_or_default(),
+            applied_state_version: applied_state_version.unwrap_or_default(),
+            observed_state: observed_state.unwrap_or_default(),
+            observed_message: observed_message.unwrap_or_default(),
         });
 
         let mut client = ControllerServiceClient::new(self.channel.clone());
@@ -207,6 +221,7 @@ impl GrpcClient {
                 advertised_routes: p.advertised_routes,
             }).collect(),
             assigned_ip: resp.assigned_ip,
+            desired_state_version: resp.desired_state_version,
             acl_rules: resp.acl_rules.into_iter().map(|r| AclRule {
                 src_net: r.src_net,
                 dst_net: r.dst_net,
@@ -310,6 +325,7 @@ fn infer_tls_server_name(controller_url: &str) -> Option<String> {
 pub struct SyncResult {
     pub peers: Vec<PeerInfo>,
     pub assigned_ip: String,
+    pub desired_state_version: String,
     pub acl_rules: Vec<AclRule>,
     pub qos_rules: Vec<QoSRule>,
     pub blacklist_rules: Vec<BlacklistRule>,

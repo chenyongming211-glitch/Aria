@@ -146,6 +146,14 @@
           </template>
         </el-table-column>
 
+        <el-table-column label="Convergence" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" :type="convergenceTagType(row.stateConvergence)">
+              {{ convergenceLabel(row.stateConvergence) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+
         <el-table-column prop="pendingCmds" label="待执行" width="90" />
 
         <el-table-column label="最近命令" width="150">
@@ -186,6 +194,12 @@
           <el-descriptions-item label="交付状态">{{ statusLabel(selectedPolicy.status) }}</el-descriptions-item>
           <el-descriptions-item label="最近命令 ID">{{ selectedPolicy.lastDeliveryCommandId || '-' }}</el-descriptions-item>
           <el-descriptions-item label="版本">{{ selectedPolicy.version || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="Desired Version">{{ selectedPolicy.desiredStateVersion || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="Applied Version">{{ selectedPolicy.appliedStateVersion || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="Observed State">{{ statusLabel(selectedPolicy.observedState) }}</el-descriptions-item>
+          <el-descriptions-item label="Convergence">{{ convergenceLabel(selectedPolicy.stateConvergence) }}</el-descriptions-item>
+          <el-descriptions-item label="Observed Message" :span="1">{{ selectedPolicy.observedMessage || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="Observed At">{{ formatTimestamp(selectedPolicy.observedAt) }}</el-descriptions-item>
         </el-descriptions>
 
         <h4 class="section-title">Spec</h4>
@@ -256,6 +270,7 @@ const kindTagType = (kind) => {
 const statusLabel = (status) => {
   const labels = {
     applied: '已应用',
+    healthy: 'Healthy',
     pending: '待下发',
     in_progress: '下发中',
     error: '失败',
@@ -280,6 +295,29 @@ const statusTagType = (status) => {
       return 'warning'
     case 'error':
     case 'failed':
+      return 'danger'
+    default:
+      return 'info'
+  }
+}
+
+const convergenceLabel = (value) => {
+  const labels = {
+    converged: 'Converged',
+    pending: 'Pending',
+    diverged: 'Diverged',
+    idle: 'Idle'
+  }
+  return labels[value] || value || 'Unknown'
+}
+
+const convergenceTagType = (value) => {
+  switch (value) {
+    case 'converged':
+      return 'success'
+    case 'pending':
+      return 'warning'
+    case 'diverged':
       return 'danger'
     default:
       return 'info'
