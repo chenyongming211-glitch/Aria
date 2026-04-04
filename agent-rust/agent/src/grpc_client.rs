@@ -182,7 +182,8 @@ impl GrpcClient {
         })
     }
     
-    /// 从 Controller 同步配置
+    /// 从 Controller 同步配置（不带状态上报，向后兼容）
+    #[allow(dead_code)]
     pub async fn sync(&self, node_id: Option<String>, public_key: String) -> Result<SyncResult> {
         self.sync_with_state(node_id, public_key, None, None, None).await
     }
