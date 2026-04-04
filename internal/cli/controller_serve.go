@@ -494,6 +494,22 @@ func (c *Controller) StartCleanupRoutine() {
 }
 
 func (c *Controller) cleanupStaleNodes() {
+	// 1. Query nodes that are about to go offline (last_seen > 60s, currently online)
+	goingOffline, err := c.store.GetNodesGoingOffline(60)
+	if err != nil {
+		c.logger.Error("Failed to query nodes going offline: %v", err)
+		// Continue with cleanup even if this query fails
+		goingOffline = nil
+	}
+
+	// 2. Query nodes that have recovered (last_seen <= 60s, currently offline)
+	recovering, err := c.store.GetNodesRecovering(60)
+	if err != nil {
+		c.logger.Error("Failed to query recovering nodes: %v", err)
+		recovering = nil
+	}
+
+	// 3. Run the existing cleanup routine
 	count, err := c.store.CleanupStaleNodes(120)
 	if err != nil {
 		c.logger.Error("Failed to cleanup stale nodes: %v", err)
@@ -501,6 +517,48 @@ func (c *Controller) cleanupStaleNodes() {
 	}
 	if count > 0 {
 		c.logger.Info("Cleaned up %d stale nodes", count)
+	}
+
+	// 4. Generate alerts and audit events for newly offline nodes
+	for _, node := range goingOffline {
+		if err := c.store.GenerateNodeOfflineAlert(node.TenantID, node.ID, node.Hostname); err != nil {
+			c.logger.Error("Failed to generate offline alert for node %s: %v", node.Hostname, err)
+		}
+		// Create node_offline audit event
+		nodeID := node.ID
+		auditEvent := &controllerstorage.AuditEvent{
+			TenantID:  node.TenantID,
+			NodeID:    &nodeID,
+			EventType: "node_offline",
+			Actor:     "system",
+			Summary:   fmt.Sprintf("节点 %s 离线", node.Hostname),
+		}
+		if _, err := c.store.CreateAuditEvent(auditEvent); err != nil {
+			c.logger.Error("Failed to create node_offline audit event for node %s: %v", node.Hostname, err)
+		}
+	}
+
+	// 5. Handle recovering nodes: resolve alerts, update status, create audit events
+	for _, node := range recovering {
+		if err := c.store.ResolveNodeOfflineAlert(node.TenantID, node.ID); err != nil {
+			c.logger.Error("Failed to resolve offline alert for node %s: %v", node.Hostname, err)
+		}
+		// Update node status to online
+		if err := c.store.MarkNodeOnline(node.ID); err != nil {
+			c.logger.Error("Failed to mark node %s as online: %v", node.Hostname, err)
+		}
+		// Create node_online audit event
+		nodeID := node.ID
+		auditEvent := &controllerstorage.AuditEvent{
+			TenantID:  node.TenantID,
+			NodeID:    &nodeID,
+			EventType: "node_online",
+			Actor:     "system",
+			Summary:   fmt.Sprintf("节点 %s 恢复在线", node.Hostname),
+		}
+		if _, err := c.store.CreateAuditEvent(auditEvent); err != nil {
+			c.logger.Error("Failed to create node_online audit event for node %s: %v", node.Hostname, err)
+		}
 	}
 }
 

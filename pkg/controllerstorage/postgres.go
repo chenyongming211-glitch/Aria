@@ -406,6 +406,40 @@ func (s *Storage) Migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_policy_deliveries_created_at ON policy_deliveries(created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_node_control_states_tenant_node ON node_control_states(tenant_id, node_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_node_control_states_desired_version ON node_control_states(desired_state_version)`,
+
+		// Alerts table for monitoring closure
+		`CREATE TABLE IF NOT EXISTS alerts (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			tenant_id UUID NOT NULL REFERENCES tenants(id),
+			node_id UUID REFERENCES nodes(id),
+			alert_type VARCHAR(32) NOT NULL,
+			severity VARCHAR(16) NOT NULL,
+			title VARCHAR(255) NOT NULL,
+			message TEXT,
+			context JSONB NOT NULL DEFAULT '{}'::jsonb,
+			status VARCHAR(16) NOT NULL DEFAULT 'active',
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			resolved_at TIMESTAMPTZ
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_alerts_tenant_status ON alerts(tenant_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_alerts_tenant_node_type ON alerts(tenant_id, node_id, alert_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON alerts(created_at)`,
+
+		// Audit events table for monitoring closure
+		`CREATE TABLE IF NOT EXISTS audit_events (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			tenant_id UUID NOT NULL REFERENCES tenants(id),
+			node_id UUID REFERENCES nodes(id),
+			event_type VARCHAR(32) NOT NULL,
+			actor VARCHAR(128) NOT NULL DEFAULT 'system',
+			summary VARCHAR(512) NOT NULL,
+			detail JSONB NOT NULL DEFAULT '{}'::jsonb,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_tenant ON audit_events(tenant_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_tenant_node ON audit_events(tenant_id, node_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_type ON audit_events(event_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON audit_events(created_at)`,
 	}
 
 	for i, migration := range migrations {
@@ -662,6 +696,56 @@ func (s *Storage) CleanupDeletedNodes(thresholdTimestamp int64) (int, error) {
 	}
 	count, _ := result.RowsAffected()
 	return int(count), nil
+}
+
+// GetNodesGoingOffline returns nodes that are about to be marked offline:
+// last_seen older than thresholdSeconds ago AND status is not already 'offline'/'stale'/'deleted'.
+func (s *Storage) GetNodesGoingOffline(thresholdSeconds int) ([]*Node, error) {
+	threshold := time.Now().Unix() - int64(thresholdSeconds)
+	query := `SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE last_seen < $1 AND status = 'online'`
+	rows, err := s.db.Query(query, threshold)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var nodes []*Node
+	for rows.Next() {
+		node, err := s.scanNodeRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes, rows.Err()
+}
+
+// GetNodesRecovering returns nodes that have recovered: last_seen within thresholdSeconds AND status is 'offline'.
+func (s *Storage) GetNodesRecovering(thresholdSeconds int) ([]*Node, error) {
+	threshold := time.Now().Unix() - int64(thresholdSeconds)
+	query := `SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE last_seen >= $1 AND status = 'offline'`
+	rows, err := s.db.Query(query, threshold)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var nodes []*Node
+	for rows.Next() {
+		node, err := s.scanNodeRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes, rows.Err()
+}
+
+// MarkNodeOnline updates a single node's status to 'online' and clears offline_since.
+func (s *Storage) MarkNodeOnline(nodeID uuid.UUID) error {
+	query := `UPDATE nodes SET status = 'online', offline_since = NULL, updated_at = NOW() WHERE id = $1`
+	_, err := s.db.Exec(query, nodeID)
+	return err
 }
 
 // CleanupStaleNodes 执行完整的节点状态维护流程

@@ -232,13 +232,34 @@ func (r *Router) handleTenantMonitoring(w http.ResponseWriter, req *http.Request
 	}
 
 	parts := splitPath(req.URL.Path)
-	if len(parts) == 6 && parts[4] == "monitoring" && parts[5] == "stats" && req.Method == http.MethodGet {
-		r.handleTenantMonitoringStats(w, tenantID)
+
+	// GET /monitoring/stats
+	if len(parts) == 6 && parts[5] == "stats" && req.Method == http.MethodGet {
+		r.handleMonitoringStats(w, req, tenantID)
 		return
 	}
 
-	if len(parts) == 7 && parts[4] == "monitoring" && parts[5] == "nodes" && req.Method == http.MethodGet {
-		r.handleTenantMonitoringNodeDetail(w, tenantID, parts[6])
+	// GET /monitoring/events
+	if len(parts) == 6 && parts[5] == "events" && req.Method == http.MethodGet {
+		r.handleMonitoringEvents(w, req, tenantID)
+		return
+	}
+
+	// GET /monitoring/alerts
+	if len(parts) == 6 && parts[5] == "alerts" && req.Method == http.MethodGet {
+		r.handleMonitoringAlerts(w, req, tenantID)
+		return
+	}
+
+	// GET /monitoring/nodes/{node_id}
+	if len(parts) == 7 && parts[5] == "nodes" && req.Method == http.MethodGet {
+		r.handleMonitoringNodeDetail(w, req, tenantID, parts[6])
+		return
+	}
+
+	// POST /monitoring/alerts/{alert_id}/resolve
+	if len(parts) == 8 && parts[5] == "alerts" && parts[7] == "resolve" && req.Method == http.MethodPost {
+		r.handleMonitoringAlertResolve(w, req, tenantID, parts[6])
 		return
 	}
 

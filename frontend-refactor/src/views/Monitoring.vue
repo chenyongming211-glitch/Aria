@@ -1,318 +1,430 @@
 <!-- src/views/Monitoring.vue -->
 <template>
   <div class="monitoring">
-    <el-card>
+    <!-- Stats Cards -->
+    <el-row :gutter="16" class="stats-row">
+      <el-col :xs="12" :sm="8" :lg="4" v-for="card in statCards" :key="card.key">
+        <div class="stat-card light-card" :class="`stat-card-${card.color}`">
+          <div class="stat-icon-wrap">
+            <el-icon :size="22"><component :is="card.icon" /></el-icon>
+          </div>
+          <div class="stat-value">{{ card.value }}</div>
+          <div class="stat-label">{{ card.label }}</div>
+        </div>
+      </el-col>
+    </el-row>
+
+    <!-- Filter Bar + Refresh -->
+    <el-card class="filter-card light-card" shadow="never">
+      <div class="filter-bar">
+        <div class="filter-left">
+          <el-select
+            v-model="filterEventType"
+            placeholder="Event Type"
+            clearable
+            style="width: 180px"
+            @change="loadEvents"
+          >
+            <el-option label="All Types" value="" />
+            <el-option label="Node Offline" value="node_offline" />
+            <el-option label="Node Online" value="node_online" />
+            <el-option label="Sync Failed" value="sync_failed" />
+            <el-option label="Policy Failed" value="policy_failed" />
+            <el-option label="Command Completed" value="command_completed" />
+            <el-option label="Command Failed" value="command_failed" />
+            <el-option label="Policy Delivered" value="policy_delivered" />
+            <el-option label="Alert Created" value="alert_created" />
+            <el-option label="Alert Resolved" value="alert_resolved" />
+          </el-select>
+          <el-select
+            v-model="filterSeverity"
+            placeholder="Severity"
+            clearable
+            style="width: 150px"
+            @change="loadEvents"
+          >
+            <el-option label="All Severities" value="" />
+            <el-option label="Critical" value="critical" />
+            <el-option label="Warning" value="warning" />
+            <el-option label="Info" value="info" />
+          </el-select>
+        </div>
+        <el-button type="primary" :icon="Refresh" :loading="refreshing" @click="refreshAll">
+          Refresh
+        </el-button>
+      </div>
+    </el-card>
+
+    <!-- Event Feed Timeline -->
+    <el-card class="events-card light-card" shadow="never" v-loading="eventsLoading">
       <template #header>
         <div class="card-header">
-          <h3>{{ labels.title }}</h3>
-          <div class="header-actions">
-            <el-date-picker
-              v-model="dateRange"
-              type="datetimerange"
-              :range-separator="currentLang === 'zh' ? '至' : 'To'"
-              :start-placeholder="labels.startDate"
-              :end-placeholder="labels.endDate"
-              style="width: 300px; margin-right: 10px;"
-            />
-            <el-button type="primary" @click="refreshData">
-              <el-icon><Refresh /></el-icon>
-              {{ labels.refresh }}
-            </el-button>
+          <div class="header-left">
+            <el-icon class="header-icon"><Clock /></el-icon>
+            <span class="header-title">Event Feed</span>
+            <el-tag size="small" type="info" v-if="eventsTotal > 0">{{ eventsTotal }} total</el-tag>
           </div>
         </div>
       </template>
 
-      <el-row :gutter="20" class="stats-grid">
-        <el-col :span="6">
-          <el-card class="stat-card">
-            <div class="stat-content">
-              <div class="stat-value">{{ stats.totalConnections }}</div>
-              <div class="stat-label">{{ labels.activeConnections }}</div>
-              <div class="stat-change positive">+5.2% {{ labels.fromLastHour }}</div>
-            </div>
-          </el-card>
-        </el-col>
-        <el-col :span="6">
-          <el-card class="stat-card">
-            <div class="stat-content">
-              <div class="stat-value">{{ stats.avgLatency }} ms</div>
-              <div class="stat-label">{{ labels.avgLatency }}</div>
-              <div class="stat-change negative">+1.3% {{ labels.fromLastHour }}</div>
-            </div>
-          </el-card>
-        </el-col>
-        <el-col :span="6">
-          <el-card class="stat-card">
-            <div class="stat-content">
-              <div class="stat-value">{{ stats.packetLoss }}%</div>
-              <div class="stat-label">{{ labels.packetLoss }}</div>
-              <div class="stat-change negative">+0.1% {{ labels.fromLastHour }}</div>
-            </div>
-          </el-card>
-        </el-col>
-        <el-col :span="6">
-          <el-card class="stat-card">
-            <div class="stat-content">
-              <div class="stat-value">{{ stats.throughput }} Gbps</div>
-              <div class="stat-label">{{ labels.throughput }}</div>
-              <div class="stat-change positive">+3.7% {{ labels.fromLastHour }}</div>
-            </div>
-          </el-card>
-        </el-col>
-      </el-row>
+      <div v-if="events.length === 0 && !eventsLoading" class="empty-state">
+        <el-empty description="No events found" />
+      </div>
 
-      <el-tabs v-model="activeTab" class="monitoring-tabs">
-        <el-tab-pane :label="labels.trafficGraph" name="traffic">
-          <div ref="trafficChartRef" class="chart-container" />
-        </el-tab-pane>
-        <el-tab-pane :label="labels.nodeHealth" name="health">
-          <el-table
-            :data="nodeHealth"
-            stripe
-            style="width: 100%"
-            height="400"
-          >
-            <el-table-column prop="hostname" :label="labels.node" width="150" />
-            <el-table-column prop="cpu" :label="labels.cpu" width="100">
-              <template #default="{ row }">
-                <el-progress :percentage="row.cpu" :color="getProgressColor(row.cpu)" />
-              </template>
-            </el-table-column>
-            <el-table-column prop="memory" :label="labels.memory" width="100">
-              <template #default="{ row }">
-                <el-progress :percentage="row.memory" :color="getProgressColor(row.memory)" />
-              </template>
-            </el-table-column>
-            <el-table-column prop="disk" :label="labels.disk" width="100">
-              <template #default="{ row }">
-                <el-progress :percentage="row.disk" :color="getProgressColor(row.disk)" />
-              </template>
-            </el-table-column>
-            <el-table-column prop="latency" :label="labels.latency" width="100">
-              <template #default="{ row }">
-                <span :class="getLatencyClass(row.latency)">{{ row.latency }} ms</span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="connections" :label="labels.connections" width="100" />
-            <el-table-column prop="status" :label="labels.status" width="100">
-              <template #default="{ row }">
-                <el-tag :type="getStatusType(row.status)" size="small">{{ getStatusLabel(row.status) }}</el-tag>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
-        <el-tab-pane :label="labels.alerts" name="alerts">
-          <el-table
-            :data="alerts"
-            stripe
-            style="width: 100%"
-            height="400"
-          >
-            <el-table-column prop="timestamp" :label="labels.timestamp" width="180" />
-            <el-table-column prop="severity" :label="labels.severity" width="100">
-              <template #default="{ row }">
-                <el-tag :type="getSeverityType(row.severity)" size="small">{{ row.severity }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="message" :label="labels.message" />
-            <el-table-column prop="node" :label="labels.node" width="150" />
-          </el-table>
-        </el-tab-pane>
-      </el-tabs>
+      <div class="event-timeline" v-else>
+        <div
+          v-for="event in events"
+          :key="event.id"
+          class="event-item"
+          :class="`event-${event.source}`"
+        >
+          <div class="event-indicator">
+            <div class="event-dot" :class="severityDotClass(event)"></div>
+            <div class="event-line"></div>
+          </div>
+          <div class="event-body">
+            <div class="event-header-row">
+              <div class="event-tags">
+                <el-tag size="small" :type="eventTypeTagType(event.event_type)" effect="plain">
+                  {{ formatEventType(event.event_type) }}
+                </el-tag>
+                <el-tag
+                  v-if="event.source === 'alert' && event.severity"
+                  size="small"
+                  :type="severityTagType(event.severity)"
+                >
+                  {{ event.severity }}
+                </el-tag>
+              </div>
+              <span class="event-time">{{ formatTime(event.created_at) }}</span>
+            </div>
+            <div class="event-title">{{ event.title }}</div>
+            <div class="event-actions-row">
+              <span
+                v-if="event.node_id"
+                class="event-node-link"
+                @click="goToNodeDetail(event.node_id)"
+              >
+                Node: {{ event.node_id.substring(0, 8) }}…
+              </span>
+              <el-button
+                v-if="event.source === 'alert' && event.severity"
+                size="small"
+                type="warning"
+                plain
+                :loading="resolvingId === event.id"
+                @click="handleResolve(event.id)"
+              >
+                Resolve
+              </el-button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pagination -->
+      <div class="events-pagination" v-if="eventsTotal > eventsLimit">
+        <el-pagination
+          v-model:current-page="eventsPage"
+          :page-size="eventsLimit"
+          :total="eventsTotal"
+          layout="prev, pager, next"
+          @current-change="onPageChange"
+        />
+      </div>
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch, computed } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
-import * as echarts from 'echarts'
-import { useAppStore } from '@/stores'
+import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import {
+  Refresh,
+  Clock,
+  Monitor,
+  CircleCheck,
+  Connection,
+  Lock,
+  Setting,
+  Warning,
+  Bell
+} from '@element-plus/icons-vue'
+import { useMonitorApi } from '@/composables/useMonitorApi'
+import { ElMessage } from 'element-plus'
 
-const appStore = useAppStore()
-const currentLang = computed(() => appStore.lang)
+const router = useRouter()
 
-const labels = computed(() => ({
-  title: currentLang.value === 'zh' ? '网络监控' : 'Network Monitoring',
-  refresh: currentLang.value === 'zh' ? '刷新' : 'Refresh',
-  activeConnections: currentLang.value === 'zh' ? '活动连接数' : 'Active Connections',
-  avgLatency: currentLang.value === 'zh' ? '平均延迟' : 'Avg. Latency',
-  packetLoss: currentLang.value === 'zh' ? '丢包率' : 'Packet Loss',
-  throughput: currentLang.value === 'zh' ? '吞吐量' : 'Throughput',
-  trafficGraph: currentLang.value === 'zh' ? '流量图表' : 'Traffic Graph',
-  nodeHealth: currentLang.value === 'zh' ? '节点健康' : 'Node Health',
-  alerts: currentLang.value === 'zh' ? '告警' : 'Alerts',
-  node: currentLang.value === 'zh' ? '节点' : 'Node',
-  cpu: currentLang.value === 'zh' ? 'CPU' : 'CPU',
-  memory: currentLang.value === 'zh' ? '内存' : 'Memory',
-  disk: currentLang.value === 'zh' ? '磁盘' : 'Disk',
-  latency: currentLang.value === 'zh' ? '延迟' : 'Latency',
-  connections: currentLang.value === 'zh' ? '连接数' : 'Connections',
-  status: currentLang.value === 'zh' ? '状态' : 'Status',
-  healthy: currentLang.value === 'zh' ? '健康' : 'Healthy',
-  warning: currentLang.value === 'zh' ? '警告' : 'Warning',
-  critical: currentLang.value === 'zh' ? '严重' : 'Critical',
-  timestamp: currentLang.value === 'zh' ? '时间' : 'Timestamp',
-  severity: currentLang.value === 'zh' ? '级别' : 'Severity',
-  message: currentLang.value === 'zh' ? '消息' : 'Message',
-  fromLastHour: currentLang.value === 'zh' ? '较前一小时' : 'from last hour',
-  startDate: currentLang.value === 'zh' ? '开始日期' : 'Start date',
-  endDate: currentLang.value === 'zh' ? '结束日期' : 'End date',
-}))
+// --- State ---
+const statsLoading = ref(false)
+const eventsLoading = ref(false)
+const refreshing = ref(false)
+const resolvingId = ref(null)
 
-// Mock data
-const dateRange = ref([new Date(2024, 0, 15, 0, 0, 0), new Date()])
-const activeTab = ref('traffic')
 const stats = ref({
-  totalConnections: 1242,
-  avgLatency: 18.4,
-  packetLoss: 0.02,
-  throughput: 2.34
+  total_nodes: 0,
+  online_nodes: 0,
+  offline_nodes: 0,
+  sync_success_rate: 100,
+  total_peers: 0,
+  total_acl_rules: 0,
+  total_qos_rules: 0,
+  failed_commands_count: 0,
+  active_alerts_count: 0
 })
 
-const nodeHealth = ref([
-  { hostname: 'worker-01', cpu: 45, memory: 62, disk: 30, latency: 12, connections: 234, status: 'healthy' },
-  { hostname: 'worker-02', cpu: 78, memory: 85, disk: 60, latency: 18, connections: 421, status: 'warning' },
-  { hostname: 'backup-server', cpu: 20, memory: 30, disk: 15, latency: 45, connections: 12, status: 'critical' },
-  { hostname: 'main-router', cpu: 65, memory: 70, disk: 45, latency: 8, connections: 567, status: 'healthy' },
-  { hostname: 'edge-node-01', cpu: 88, memory: 92, disk: 75, latency: 22, connections: 345, status: 'warning' },
-  { hostname: 'edge-node-02', cpu: 30, memory: 40, disk: 25, latency: 15, connections: 189, status: 'healthy' },
-  { hostname: 'gw-01', cpu: 95, memory: 88, disk: 80, latency: 67, connections: 789, status: 'critical' },
-  { hostname: 'gw-02', cpu: 50, memory: 55, disk: 35, latency: 14, connections: 210, status: 'healthy' }
+const events = ref([])
+const eventsTotal = ref(0)
+const eventsPage = ref(1)
+const eventsLimit = 50
+
+const filterEventType = ref('')
+const filterSeverity = ref('')
+
+// --- Computed ---
+const statCards = computed(() => [
+  {
+    key: 'nodes',
+    label: 'Nodes',
+    value: `${stats.value.online_nodes} / ${stats.value.total_nodes}`,
+    icon: Monitor,
+    color: 'blue'
+  },
+  {
+    key: 'sync',
+    label: 'Sync Rate',
+    value: `${stats.value.sync_success_rate.toFixed(1)}%`,
+    icon: CircleCheck,
+    color: 'green'
+  },
+  {
+    key: 'peers',
+    label: 'Peers',
+    value: stats.value.total_peers,
+    icon: Connection,
+    color: 'cyan'
+  },
+  {
+    key: 'acl',
+    label: 'ACL Rules',
+    value: stats.value.total_acl_rules,
+    icon: Lock,
+    color: 'orange'
+  },
+  {
+    key: 'qos',
+    label: 'QoS Rules',
+    value: stats.value.total_qos_rules,
+    icon: Setting,
+    color: 'purple'
+  },
+  {
+    key: 'failed',
+    label: 'Failed Cmds',
+    value: stats.value.failed_commands_count,
+    icon: Warning,
+    color: stats.value.failed_commands_count > 0 ? 'red' : 'green'
+  },
+  {
+    key: 'alerts',
+    label: 'Active Alerts',
+    value: stats.value.active_alerts_count,
+    icon: Bell,
+    color: stats.value.active_alerts_count > 0 ? 'red' : 'green'
+  }
 ])
 
-const alerts = ref([
-  { id: 1, timestamp: '2024-01-15 14:30:25', severity: 'critical', message: 'High CPU usage on gw-01 (>90%)', node: 'gw-01' },
-  { id: 2, timestamp: '2024-01-15 14:28:12', severity: 'warning', message: 'Latency above threshold on backup-server', node: 'backup-server' },
-  { id: 3, timestamp: '2024-01-15 14:15:08', severity: 'info', message: 'New node connected: edge-node-03', node: 'edge-node-03' },
-  { id: 4, timestamp: '2024-01-15 14:10:45', severity: 'critical', message: 'Connection loss to bj-region', node: 'main-router' },
-  { id: 5, timestamp: '2024-01-15 14:05:22', severity: 'warning', message: 'Disk usage above 80% on gw-01', node: 'gw-01' }
-])
-
-const trafficChartRef = ref(null)
-let chartInstance = null
-
-const getProgressColor = (value) => {
-  if (value < 70) return '#67c23a'
-  if (value < 85) return '#e6a23c'
-  return '#f56c6c'
+// --- Methods ---
+const loadStats = async () => {
+  try {
+    statsLoading.value = true
+    const data = await useMonitorApi.getStats()
+    if (data) {
+      stats.value = { ...stats.value, ...data }
+    }
+  } catch (e) {
+    console.error('Failed to load stats:', e)
+  } finally {
+    statsLoading.value = false
+  }
 }
 
-const getStatusType = (status) => {
-  switch(status) {
-    case 'healthy': return 'success'
-    case 'warning': return 'warning'
+const loadEvents = async () => {
+  try {
+    eventsLoading.value = true
+    const params = {
+      limit: eventsLimit,
+      offset: (eventsPage.value - 1) * eventsLimit
+    }
+    if (filterEventType.value) params.event_type = filterEventType.value
+    if (filterSeverity.value) params.severity = filterSeverity.value
+
+    const data = await useMonitorApi.getEvents(params)
+    if (data) {
+      events.value = data.items || []
+      eventsTotal.value = data.total || 0
+    }
+  } catch (e) {
+    console.error('Failed to load events:', e)
+    events.value = []
+    eventsTotal.value = 0
+  } finally {
+    eventsLoading.value = false
+  }
+}
+
+const refreshAll = async () => {
+  refreshing.value = true
+  await Promise.all([loadStats(), loadEvents()])
+  refreshing.value = false
+  ElMessage.success('Data refreshed')
+}
+
+const onPageChange = () => {
+  loadEvents()
+}
+
+const handleResolve = async (alertId) => {
+  try {
+    resolvingId.value = alertId
+    await useMonitorApi.resolveAlert(alertId)
+    ElMessage.success('Alert resolved')
+    await Promise.all([loadStats(), loadEvents()])
+  } catch (e) {
+    ElMessage.error('Failed to resolve alert')
+  } finally {
+    resolvingId.value = null
+  }
+}
+
+const goToNodeDetail = (nodeId) => {
+  router.push({ name: 'NodeMonitorDetail', params: { nodeId } })
+}
+
+// --- Formatters ---
+const formatTime = (iso) => {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return d.toLocaleString()
+}
+
+const formatEventType = (type) => {
+  if (!type) return ''
+  return type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+const eventTypeTagType = (type) => {
+  if (!type) return 'info'
+  if (type.includes('failed')) return 'danger'
+  if (type.includes('offline')) return 'danger'
+  if (type.includes('completed') || type.includes('delivered') || type.includes('online')) return 'success'
+  if (type.includes('alert')) return 'warning'
+  return 'info'
+}
+
+const severityTagType = (severity) => {
+  switch (severity) {
     case 'critical': return 'danger'
+    case 'warning': return 'warning'
+    case 'info': return 'info'
     default: return 'info'
   }
 }
 
-const getStatusLabel = (status) => {
-  const map = {
-    healthy: labels.value.healthy,
-    warning: labels.value.warning,
-    critical: labels.value.critical
+const severityDotClass = (event) => {
+  if (event.source === 'alert') {
+    return `dot-${event.severity || 'info'}`
   }
-  return map[status] || status
+  if (event.event_type?.includes('failed') || event.event_type?.includes('offline')) return 'dot-critical'
+  if (event.event_type?.includes('completed') || event.event_type?.includes('online')) return 'dot-success'
+  return 'dot-info'
 }
 
-const getAlertSeverityType = (severity) => {
-  switch(severity) {
-    case 'critical': return 'danger'
-    case 'warning': return 'warning'
-    case 'info': return 'info'
-    default: return 'primary'
-  }
-}
-
-const refreshData = () => {
-  // Simulate API call
-  stats.value = {
-    totalConnections: Math.floor(Math.random() * 1000) + 1200,
-    avgLatency: parseFloat((Math.random() * 10 + 15).toFixed(1)),
-    packetLoss: parseFloat((Math.random() * 0.1).toFixed(2)),
-    throughput: parseFloat((Math.random() * 2 + 1.5).toFixed(2))
-  }
-}
-
-const acknowledgeAlert = (alert) => {
-  // In a real app, this would call an API to acknowledge the alert
-  console.log('Acknowledging alert:', alert)
-}
-
+// --- Lifecycle ---
 onMounted(() => {
-  initTrafficChart()
+  loadStats()
+  loadEvents()
 })
-
-watch(activeTab, (newTab) => {
-  if (newTab === 'traffic' && trafficChartRef.value) {
-    // Delay chart initialization to ensure DOM is ready
-    setTimeout(initTrafficChart, 100)
-  }
-})
-
-const initTrafficChart = () => {
-  if (trafficChartRef.value) {
-    if (chartInstance) {
-      chartInstance.dispose()
-    }
-
-    chartInstance = echarts.init(trafficChartRef.value)
-    const option = {
-      tooltip: {
-        trigger: 'axis'
-      },
-      legend: {
-        data: ['Upload', 'Download', 'Connections']
-      },
-      grid: {
-        left: '3%',
-        right: '4%',
-        bottom: '3%',
-        containLabel: true
-      },
-      xAxis: {
-        type: 'category',
-        boundaryGap: false,
-        data: Array.from({ length: 24 }, (_, i) => `${i}:00`)
-      },
-      yAxis: {
-        type: 'value'
-      },
-      series: [
-        {
-          name: 'Upload',
-          type: 'line',
-          smooth: true,
-          data: Array.from({ length: 24 }, () => Math.random() * 100 + 50)
-        },
-        {
-          name: 'Download',
-          type: 'line',
-          smooth: true,
-          data: Array.from({ length: 24 }, () => Math.random() * 150 + 80)
-        },
-        {
-          name: 'Connections',
-          type: 'line',
-          smooth: true,
-          data: Array.from({ length: 24 }, () => Math.random() * 500 + 800)
-        }
-      ]
-    }
-    chartInstance.setOption(option)
-
-    // Handle resize
-    window.addEventListener('resize', () => {
-      chartInstance.resize()
-    })
-  }
-}
 </script>
 
 <style scoped>
 .monitoring {
-  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Stats Cards */
+.stats-row {
+  margin-bottom: 0;
+}
+
+.stat-card {
+  padding: 16px;
+  border-radius: var(--aria-radius-lg, 12px);
+  text-align: center;
+  transition: all 0.2s;
+  margin-bottom: 12px;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--aria-shadow, 0 2px 8px rgba(0,0,0,0.08));
+}
+
+.stat-icon-wrap {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 8px;
+}
+
+.stat-card-blue .stat-icon-wrap { background: rgba(59,130,246,0.1); color: #3B82F6; }
+.stat-card-green .stat-icon-wrap { background: rgba(34,197,94,0.1); color: #22C55E; }
+.stat-card-cyan .stat-icon-wrap { background: rgba(6,182,212,0.1); color: #06B6D4; }
+.stat-card-orange .stat-icon-wrap { background: rgba(245,158,11,0.1); color: #F59E0B; }
+.stat-card-purple .stat-icon-wrap { background: rgba(139,92,246,0.1); color: #8B5CF6; }
+.stat-card-red .stat-icon-wrap { background: rgba(239,68,68,0.1); color: #EF4444; }
+
+.stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--aria-text-primary, #1E293B);
+  margin-bottom: 2px;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--aria-text-muted, #94A3B8);
+}
+
+/* Filter Bar */
+.filter-card {
+  padding: 0;
+}
+
+.filter-card :deep(.el-card__body) {
+  padding: 12px 16px;
+}
+
+.filter-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.filter-left {
+  display: flex;
+  gap: 10px;
+}
+
+/* Events Card */
+.events-card {
+  min-height: 300px;
 }
 
 .card-header {
@@ -321,55 +433,131 @@ const initTrafficChart = () => {
   align-items: center;
 }
 
-.header-actions {
+.header-left {
   display: flex;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
 }
 
-.stats-grid {
-  margin-bottom: 20px;
+.header-icon {
+  font-size: 18px;
+  color: var(--aria-primary, #3B82F6);
 }
 
-.stat-card {
-  height: 100px;
-  overflow: hidden;
+.header-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--aria-text-primary, #1E293B);
 }
 
-.stat-content {
-  padding: 10px;
+/* Event Timeline */
+.event-timeline {
+  display: flex;
+  flex-direction: column;
 }
 
-.stat-value {
-  font-size: 20px;
-  font-weight: bold;
-  color: #303133;
+.event-item {
+  display: flex;
+  gap: 14px;
+  padding: 12px 0;
+}
+
+.event-item + .event-item {
+  border-top: 1px solid var(--aria-border-primary, #F1F5F9);
+}
+
+.event-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 4px;
+  min-width: 16px;
+}
+
+.event-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-critical { background: #EF4444; }
+.dot-warning { background: #F59E0B; }
+.dot-info { background: #3B82F6; }
+.dot-success { background: #22C55E; }
+
+.event-line {
+  width: 2px;
+  flex: 1;
+  background: var(--aria-border-primary, #F1F5F9);
+  margin-top: 4px;
+}
+
+.event-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.event-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 4px;
 }
 
-.stat-label {
-  font-size: 14px;
-  color: #909399;
-  margin-bottom: 4px;
+.event-tags {
+  display: flex;
+  gap: 6px;
 }
 
-.stat-change {
+.event-time {
   font-size: 12px;
+  color: var(--aria-text-muted, #94A3B8);
+  white-space: nowrap;
 }
 
-.stat-change.positive {
-  color: #67c23a;
+.event-title {
+  font-size: 14px;
+  color: var(--aria-text-primary, #1E293B);
+  margin-bottom: 6px;
+  line-height: 1.5;
 }
 
-.stat-change.negative {
-  color: #f56c6c;
+.event-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.monitoring-tabs {
-  margin-top: 20px;
+.event-node-link {
+  font-size: 12px;
+  color: var(--aria-primary, #3B82F6);
+  cursor: pointer;
+  text-decoration: underline;
 }
 
-.chart-container {
-  width: 100%;
-  height: 400px;
+.event-node-link:hover {
+  opacity: 0.8;
+}
+
+.events-pagination {
+  display: flex;
+  justify-content: center;
+  padding-top: 16px;
+}
+
+.empty-state {
+  padding: 40px 0;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .filter-left {
+    flex-direction: column;
+  }
 }
 </style>

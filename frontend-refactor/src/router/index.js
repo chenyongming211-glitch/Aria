@@ -77,6 +77,12 @@ const routes = [
         meta: { title: 'Monitoring Center', requiresAuth: true }
       },
       {
+        path: 'monitoring/nodes/:nodeId',
+        name: 'NodeMonitorDetail',
+        component: () => import('@/views/NodeMonitorDetail.vue'),
+        meta: { title: 'Node Monitor Detail', requiresAuth: true }
+      },
+      {
         path: 'ai-copilot',
         name: 'AiAssistant',
         component: () => import('@/views/AIAssistant.vue'),

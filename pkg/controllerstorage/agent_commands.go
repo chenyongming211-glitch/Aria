@@ -4,7 +4,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -192,7 +196,126 @@ func (s *Storage) UpdateAgentCommandStatus(commandID, status, message string, re
 		return err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// Non-blocking alert/audit integration for terminal statuses
+	if status == AgentCommandStatusCompleted || status == AgentCommandStatusFailed {
+		s.emitCommandAlertAndAudit(commandID, status, message)
+	}
+
+	return nil
+}
+
+// emitCommandAlertAndAudit generates alerts and audit events after a command reaches a terminal status.
+// All writes are non-blocking: errors are logged but never returned.
+func (s *Storage) emitCommandAlertAndAudit(commandID, status, errorMsg string) {
+	// Fetch node info (tenant_id, node_id) and command type via JOIN
+	var (
+		tenantID    uuid.UUID
+		nodeID      uuid.UUID
+		commandType string
+	)
+	err := s.db.QueryRow(`
+		SELECT n.tenant_id, n.id, ac.command
+		FROM agent_commands ac
+		JOIN nodes n ON n.public_key = ac.node_public_key
+		WHERE ac.id = $1
+	`, commandID).Scan(&tenantID, &nodeID, &commandType)
+	if err != nil {
+		log.Printf("[agent_commands] failed to fetch node info for command %s alert/audit: %v", commandID, err)
+		return
+	}
+
+	// Command-level alerts and audit events
+	switch status {
+	case AgentCommandStatusFailed:
+		if err := s.GenerateSyncFailedAlert(tenantID, nodeID, commandID, errorMsg); err != nil {
+			log.Printf("[agent_commands] failed to generate sync_failed alert for command %s: %v", commandID, err)
+		}
+		if _, err := s.CreateAuditEvent(&AuditEvent{
+			TenantID:  tenantID,
+			NodeID:    &nodeID,
+			EventType: "command_failed",
+			Actor:     "system",
+			Summary:   fmt.Sprintf("命令执行失败: %s", commandType),
+			Detail:    map[string]interface{}{"command_id": commandID, "error": errorMsg},
+		}); err != nil {
+			log.Printf("[agent_commands] failed to create command_failed audit event for command %s: %v", commandID, err)
+		}
+
+	case AgentCommandStatusCompleted:
+		if _, err := s.CreateAuditEvent(&AuditEvent{
+			TenantID:  tenantID,
+			NodeID:    &nodeID,
+			EventType: "command_completed",
+			Actor:     "system",
+			Summary:   fmt.Sprintf("命令执行成功: %s", commandType),
+			Detail:    map[string]interface{}{"command_id": commandID},
+		}); err != nil {
+			log.Printf("[agent_commands] failed to create command_completed audit event for command %s: %v", commandID, err)
+		}
+	}
+
+	// PolicyDelivery cascade alerts and audit events
+	s.emitPolicyDeliveryAlertAndAudit(commandID, status, errorMsg, tenantID, nodeID)
+}
+
+// emitPolicyDeliveryAlertAndAudit generates alerts and audit events for policy deliveries
+// affected by a command status change. All writes are non-blocking.
+func (s *Storage) emitPolicyDeliveryAlertAndAudit(commandID, status, errorMsg string, tenantID, nodeID uuid.UUID) {
+	rows, err := s.db.Query(`
+		SELECT policy_domain, policy_ref
+		FROM policy_deliveries
+		WHERE command_id = $1
+	`, commandID)
+	if err != nil {
+		log.Printf("[agent_commands] failed to query policy deliveries for command %s: %v", commandID, err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var domain, ref string
+		if err := rows.Scan(&domain, &ref); err != nil {
+			log.Printf("[agent_commands] failed to scan policy delivery for command %s: %v", commandID, err)
+			continue
+		}
+
+		switch status {
+		case AgentCommandStatusFailed:
+			if err := s.GeneratePolicyFailedAlert(tenantID, nodeID, domain, ref, errorMsg); err != nil {
+				log.Printf("[agent_commands] failed to generate policy_failed alert for command %s domain %s: %v", commandID, domain, err)
+			}
+			if _, err := s.CreateAuditEvent(&AuditEvent{
+				TenantID:  tenantID,
+				NodeID:    &nodeID,
+				EventType: "policy_failed",
+				Actor:     "system",
+				Summary:   fmt.Sprintf("策略下发失败: %s/%s", domain, ref),
+				Detail:    map[string]interface{}{"command_id": commandID, "policy_domain": domain, "policy_ref": ref, "error": errorMsg},
+			}); err != nil {
+				log.Printf("[agent_commands] failed to create policy_failed audit event for command %s: %v", commandID, err)
+			}
+
+		case AgentCommandStatusCompleted:
+			if _, err := s.CreateAuditEvent(&AuditEvent{
+				TenantID:  tenantID,
+				NodeID:    &nodeID,
+				EventType: "policy_delivered",
+				Actor:     "system",
+				Summary:   fmt.Sprintf("策略下发成功: %s/%s", domain, ref),
+				Detail:    map[string]interface{}{"command_id": commandID, "policy_domain": domain, "policy_ref": ref},
+			}); err != nil {
+				log.Printf("[agent_commands] failed to create policy_delivered audit event for command %s: %v", commandID, err)
+			}
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("[agent_commands] error iterating policy deliveries for command %s: %v", commandID, err)
+	}
 }
 
 func (s *Storage) CountIncompleteAgentCommands(nodePublicKey string) (int, error) {

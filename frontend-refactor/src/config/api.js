@@ -144,7 +144,10 @@ export const API_ENDPOINTS = {
   // 监控 API
   MONITOR: {
     STATS: (tenantId) => buildTenantPath(tenantId, '/monitoring/stats'),
-    NODE_DETAIL: (tenantId, nodeId) => buildTenantPath(tenantId, `/monitoring/nodes/${nodeId}`)
+    NODE_DETAIL: (tenantId, nodeId) => buildTenantPath(tenantId, `/monitoring/nodes/${nodeId}`),
+    EVENTS: (tenantId) => buildTenantPath(tenantId, '/monitoring/events'),
+    ALERTS: (tenantId) => buildTenantPath(tenantId, '/monitoring/alerts'),
+    ALERT_RESOLVE: (tenantId, alertId) => buildTenantPath(tenantId, `/monitoring/alerts/${alertId}/resolve`)
   },
 
   // AI 聊天 API
