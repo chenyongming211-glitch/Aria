@@ -17,7 +17,7 @@
 
 - `agent-rust/README.md`：Agent 架构、eBPF map、ACL/QoS 处理流程。
 - `agent-rust/BUILD-GUIDE.md`：Agent 编译环境和构建步骤。
-- `frontend-refactor/DESIGN-SYSTEM.md`：前端视觉和组件设计约束。
+- `frontend/DESIGN-SYSTEM.md`：前端视觉和组件设计约束。
 
 ## 监控文档
 

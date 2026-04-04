@@ -59,9 +59,9 @@ sequenceDiagram
 | Monitoring API | `internal/api/v2/monitoring.go` | stats / node detail / events / alerts HTTP handlers |
 | Alert Generator | `pkg/controllerstorage/alert_generator.go` | 告警生成与自动解除逻辑 |
 | Offline Detector | `internal/cli/controller_serve.go` | 扩展现有 cleanup routine，集成离线检测 |
-| Frontend Composable | `frontend-refactor/src/composables/useMonitorApi.js` | 扩展 API 调用 hooks |
-| Frontend View | `frontend-refactor/src/views/Monitoring.vue` | 重构监控页面 |
-| Frontend Node Detail | `frontend-refactor/src/views/NodeMonitorDetail.vue` | 新增节点监控详情面板 |
+| Frontend Composable | `frontend/src/composables/useMonitorApi.js` | 扩展 API 调用 hooks |
+| Frontend View | `frontend/src/views/Monitoring.vue` | 重构监控页面 |
+| Frontend Node Detail | `frontend/src/views/NodeMonitorDetail.vue` | 新增节点监控详情面板 |
 
 ## 组件与接口
 

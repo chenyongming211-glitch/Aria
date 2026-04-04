@@ -8,7 +8,7 @@
 
   vars:
     # 前端全新部署配置
-    frontend_source_dir: /Users/chen/Aria/frontend-refactor
+    frontend_source_dir: /Users/chen/Aria/frontend
     frontend_dist_dir: /Users/chen/Aria/temp-dist
     frontend_remote_dir: /root/aria-controller/ui-dist
     

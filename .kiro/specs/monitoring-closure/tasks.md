@@ -132,12 +132,12 @@
   - 确保所有测试通过，如有问题请向用户确认。
 
 - [x] 12. 前端 API 层扩展
-  - [x] 12.1 修改 `frontend-refactor/src/config/api.js`，在 MONITOR 对象中添加新端点
+  - [x] 12.1 修改 `frontend/src/config/api.js`，在 MONITOR 对象中添加新端点
     - EVENTS: (tenantId) => buildTenantPath(tenantId, '/monitoring/events')
     - ALERTS: (tenantId) => buildTenantPath(tenantId, '/monitoring/alerts')
     - ALERT_RESOLVE: (tenantId, alertId) => buildTenantPath(tenantId, `/monitoring/alerts/${alertId}/resolve`)
     - _需求: 5.1, 6.1, 6.3_
-  - [x] 12.2 修改 `frontend-refactor/src/composables/useMonitorApi.js`，添加新 API 方法
+  - [x] 12.2 修改 `frontend/src/composables/useMonitorApi.js`，添加新 API 方法
     - getEvents(params)：GET /monitoring/events，支持 limit/offset/node_id/event_type/severity/since 参数
     - getAlerts(params)：GET /monitoring/alerts，支持 status/alert_type/node_id/limit/offset 参数
     - resolveAlert(alertId)：POST /monitoring/alerts/{alertId}/resolve
@@ -145,7 +145,7 @@
     - _需求: 7.7_
 
 - [x] 13. 前端 Monitoring.vue 重构
-  - [x] 13.1 重构 `frontend-refactor/src/views/Monitoring.vue`，移除所有 mock 数据，接入真实 API
+  - [x] 13.1 重构 `frontend/src/views/Monitoring.vue`，移除所有 mock 数据，接入真实 API
     - 页面顶部统计卡片区域：在线节点数/总节点数、同步成功率、Peer 数、ACL 规则数、QoS 规则数、命令失败数、活跃告警数，数据来源 stats API
     - 统计卡片下方展示事件流时间线：按时间倒序展示 Alert 和 AuditEvent 混合流，数据来源 events API
     - 每条事件展示：时间戳、事件类型图标/标签、severity 标签（仅 Alert）、事件摘要文本、关联节点名称（可点击跳转节点详情）
@@ -155,7 +155,7 @@
     - _需求: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7_
 
 - [x] 14. 前端节点监控详情面板
-  - [x] 14.1 创建 `frontend-refactor/src/views/NodeMonitorDetail.vue`，实现节点监控详情面板
+  - [x] 14.1 创建 `frontend/src/views/NodeMonitorDetail.vue`，实现节点监控详情面板
     - 展示节点 desired / applied / observed 三态信息和 state_convergence 状态
     - 展示最近 AgentCommand 和 PolicyDelivery 历史记录，按时间倒序
     - desired_state_version 与 applied_state_version 不一致时以醒目样式标示 diverged/pending

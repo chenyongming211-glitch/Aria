@@ -137,7 +137,7 @@ Aria/
 ├── internal/               # Controller 私有模块（API、CLI、认证、租户、AI、IM）
 ├── pkg/                    # Go 公共库（存储、gRPC、监控、网络能力）
 ├── agent-rust/             # Rust Agent 与 eBPF 数据面
-├── frontend-refactor/      # Vue 3 管理后台
+├── frontend/      # Vue 3 管理后台
 ├── deployments/            # 部署与监控配置（Ansible、systemd、monitoring）
 ├── configs/                # Redis/PostgreSQL 等配置样例
 ├── scripts/                # 证书、测试、部署辅助脚本
@@ -150,7 +150,7 @@ Aria/
 - `docs/README.md` - 主要技术文档导航
 - `agent-rust/README.md` - Rust Agent 架构说明
 - `agent-rust/BUILD-GUIDE.md` - Rust Agent 编译指南
-- `frontend-refactor/DESIGN-SYSTEM.md` - 前端设计规范
+- `frontend/DESIGN-SYSTEM.md` - 前端设计规范
 
 ## 监控
 
