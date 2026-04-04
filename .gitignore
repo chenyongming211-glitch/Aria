@@ -56,6 +56,13 @@ temp/
 *.key
 credentials.json
 
+# 证书文件（临时/测试证书不提交）
+certs/
+certs-new/
+*.crt
+*.csr
+*.srl
+
 # 打包临时目录
 aria-package/
 
