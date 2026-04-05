@@ -279,6 +279,17 @@ type UserResponse struct {
 
 // checkTenantAccess 校验用户是否有权访问目标租户
 func (t *TenantAPI) checkTenantAccess(w http.ResponseWriter, r *http.Request, targetTenantID string) error {
+	role, exists := middleware.GetUserRole(r.Context())
+	if !exists {
+		WriteError(w, http.StatusUnauthorized, CodeUnauthorized, "Unauthorized", nil)
+		return fmt.Errorf("unauthorized")
+	}
+
+	// super_admin can access any tenant
+	if role == "super_admin" {
+		return nil
+	}
+
 	userTenantID, exists := middleware.GetTenantID(r.Context())
 	if !exists {
 		WriteError(w, http.StatusUnauthorized, CodeUnauthorized, "Unauthorized", nil)
@@ -290,8 +301,7 @@ func (t *TenantAPI) checkTenantAccess(w http.ResponseWriter, r *http.Request, ta
 		return fmt.Errorf("permission denied: cross-tenant access")
 	}
 
-	role, exists := middleware.GetUserRole(r.Context())
-	if !exists || (role != "admin" && role != "owner") {
+	if role != "admin" && role != "owner" {
 		WriteError(w, http.StatusForbidden, CodeAccessDenied, "Permission denied: admin role required", nil)
 		return fmt.Errorf("permission denied: insufficient role")
 	}
