@@ -247,6 +247,7 @@ func (s *Storage) Migrate() error {
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			last_login TIMESTAMPTZ
 		)`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE`,
 
 		`CREATE TABLE IF NOT EXISTS acl_rules (
 			id SERIAL PRIMARY KEY,
