@@ -241,13 +241,14 @@ func (s *Storage) Migrate() error {
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			username VARCHAR(64) NOT NULL,
 			password_hash VARCHAR(255) NOT NULL,
-			tenant_id UUID NOT NULL REFERENCES tenants(id),
+			tenant_id UUID REFERENCES tenants(id),
 			role VARCHAR(20) DEFAULT 'viewer',
 			email VARCHAR(100),
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			last_login TIMESTAMPTZ
 		)`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE`,
+		`ALTER TABLE users ALTER COLUMN tenant_id DROP NOT NULL`,
 
 		`CREATE TABLE IF NOT EXISTS acl_rules (
 			id SERIAL PRIMARY KEY,
@@ -518,22 +519,7 @@ func (s *Storage) GetTenantInfo(tenantID uuid.UUID) (*TenantInfo, error) {
 
 // GetNodesByTenant retrieves all nodes for a specific tenant
 func (s *Storage) GetNodesByTenant(tenantID uuid.UUID) ([]*Node, error) {
-	query := `SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 ORDER BY last_seen DESC`
-	rows, err := s.db.Query(query, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var nodes []*Node
-	for rows.Next() {
-		node, err := s.scanNodeRows(rows)
-		if err != nil {
-			return nil, err
-		}
-		nodes = append(nodes, node)
-	}
-	return nodes, nil
+	return s.getNodes("WHERE tenant_id = $1 AND status != 'deleted'", []interface{}{tenantID}, "")
 }
 
 // GetNodeByTenant retrieves a specific node for a specific tenant (ensures tenant isolation)
@@ -610,13 +596,23 @@ func (s *Storage) GetNodeByHostname(hostname string) (*Node, error) {
 	return s.scanNode(row)
 }
 
-func (s *Storage) GetAllNodes() ([]*Node, error) {
-	query := `SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes ORDER BY last_seen DESC`
-	log.Printf("[GetAllNodes] Query: %q", query)
-	log.Printf("[GetAllNodes] Executing query...")
-	rows, err := s.db.Query(query)
+const nodeSelectColumns = `id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at`
+
+// getNodes is a helper that queries nodes with optional WHERE clause and args.
+// extraWhere should include the "WHERE" keyword if non-empty, e.g. "WHERE status != 'deleted'".
+func (s *Storage) getNodes(extraWhere string, args []interface{}, orderBy string) ([]*Node, error) {
+	query := `SELECT ` + nodeSelectColumns + ` FROM nodes`
+	if extraWhere != "" {
+		query += " " + extraWhere
+	}
+	if orderBy != "" {
+		query += " " + orderBy
+	} else {
+		query += " ORDER BY last_seen DESC"
+	}
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		log.Printf("[GetAllNodes] Query error: %v", err)
 		return nil, err
 	}
 	defer rows.Close()
@@ -625,14 +621,47 @@ func (s *Storage) GetAllNodes() ([]*Node, error) {
 	for rows.Next() {
 		node, err := s.scanNodeRows(rows)
 		if err != nil {
-			log.Printf("[GetAllNodes] Scan error: %v", err)
 			return nil, err
 		}
-		log.Printf("[GetAllNodes] Found node: %s (%s)", node.Hostname, node.AssignedIP)
 		nodes = append(nodes, node)
 	}
-	log.Printf("[GetAllNodes] Returning %d nodes", len(nodes))
 	return nodes, nil
+}
+
+func (s *Storage) GetAllNodes() ([]*Node, error) {
+	return s.getNodes("", nil, "WHERE status != 'deleted'")
+}
+
+// GetAllNodesIncludeDeleted returns all nodes including deleted ones (for audit/admin purposes)
+func (s *Storage) GetAllNodesIncludeDeleted() ([]*Node, error) {
+	return s.getNodes("", nil, "")
+}
+
+// ReuseHostnameIP atomically finds a node by hostname within a tenant, marks it deleted,
+// and returns its assigned_ip and ip_offset for reuse. Uses SELECT FOR UPDATE
+// to prevent concurrent hostname reuse races. Returns sql.ErrNoRows if not found.
+func (s *Storage) ReuseHostnameIP(hostname string, tenantID uuid.UUID) (assignedIP string, ipOffset int, err error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return "", 0, err
+	}
+	defer tx.Rollback()
+
+	var pubKey string
+	err = tx.QueryRow(
+		`SELECT public_key, assigned_ip, ip_offset FROM nodes WHERE hostname = $1 AND tenant_id = $2 AND status != 'deleted' FOR UPDATE LIMIT 1`,
+		hostname, tenantID,
+	).Scan(&pubKey, &assignedIP, &ipOffset)
+	if err != nil {
+		return "", 0, err
+	}
+
+	_, err = tx.Exec(`UPDATE nodes SET status = 'deleted', updated_at = NOW() WHERE public_key = $1`, pubKey)
+	if err != nil {
+		return "", 0, err
+	}
+
+	return assignedIP, ipOffset, tx.Commit()
 }
 
 func (s *Storage) DeleteNode(publicKey string) error {
@@ -859,26 +888,20 @@ func (s *Storage) GetNextAvailableOffset() (int, error) {
 		return 0, fmt.Errorf("failed to read next_offset: %v", err)
 	}
 
-	// Find the next available offset within the same transaction
+	// Find the next available offset using a single SQL query
 	// For /16 network: offset range is 1 to 65534 (100.64.0.1 ~ 100.64.255.254)
 	const maxOffset = 65534
 	var foundOffset int = -1
-	for i := 0; i < maxOffset; i++ {
-		offset := current + i
-		if offset > maxOffset {
-			offset = offset - maxOffset + 1 // wrap around to 1
-		}
 
-		var count int
-		err = tx.QueryRow(`SELECT COUNT(*) FROM nodes WHERE ip_offset = $1`, offset).Scan(&count)
-		if err != nil {
-			return 0, fmt.Errorf("failed to check offset %d: %v", offset, err)
-		}
-
-		if count == 0 {
-			foundOffset = offset
-			break
-		}
+	err = tx.QueryRow(`
+		SELECT o FROM generate_series(1, $2) AS o
+		WHERE NOT EXISTS (SELECT 1 FROM nodes WHERE ip_offset = o AND status != 'deleted')
+		ORDER BY CASE WHEN o >= $1 THEN o - $1 ELSE o - $1 + $2 END, o
+		LIMIT 1`,
+		current, maxOffset,
+	).Scan(&foundOffset)
+	if err != nil {
+		return 0, fmt.Errorf("no available IP offset (all %d offsets in use): %v", maxOffset, err)
 	}
 
 	if foundOffset == -1 {

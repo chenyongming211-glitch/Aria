@@ -109,6 +109,9 @@ network:
   base_ip: "100.64.0.0"
   cidr: "100.64.0.0/16"
 
+jwt:
+  secret: "CHANGE-ME-TO-A-RANDOM-32-BYTE-STRING"
+
 logging:
   level: "info"
   dir: "/var/log/aria"
@@ -317,6 +320,9 @@ storage:
 network:
   base_ip: "100.64.0.0"
   cidr: "100.64.0.0/16"
+
+jwt:
+  secret: "CHANGE-ME-TO-A-RANDOM-32-BYTE-STRING"
 
 logging:
   level: "info"

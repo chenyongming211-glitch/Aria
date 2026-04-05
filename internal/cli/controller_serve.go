@@ -27,6 +27,7 @@ import (
 
 	"aria/internal/api/middleware"
 	v2 "aria/internal/api/v2"
+	"aria/internal/auth"
 	grpcserver "aria/internal/controller/grpc"
 	"aria/internal/im"
 	"aria/internal/service"
@@ -111,6 +112,9 @@ type ControllerConfig struct {
 		EncryptKey  string `yaml:"encrypt_key"`
 		VerifyToken string `yaml:"verify_token"`
 	} `yaml:"feishu"`
+	JWT struct {
+		Secret string `yaml:"secret"` // HMAC signing key for JWT tokens
+	} `yaml:"jwt"`
 }
 
 // Controller represents the controller service
@@ -235,6 +239,14 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	logger.Info("Version: %s", Version)
 	logger.Info("Config: %s", serveConfigPath)
 	logger.Info("Log Level: %s", cfg.Logging.Level)
+
+	// Initialize JWT secret from config
+	if cfg.JWT.Secret != "" {
+		auth.SetSecret(cfg.JWT.Secret)
+		logger.Info("JWT secret loaded from config")
+	} else {
+		logger.Warn("No jwt.secret configured — using default (insecure!)")
+	}
 
 	// Check required config
 	if cfg.Storage.Postgres.Host == "" {

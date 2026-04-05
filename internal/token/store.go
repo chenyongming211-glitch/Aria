@@ -152,7 +152,7 @@ func (s *Store) IncrementUsage(tokenStr, deviceID string) error {
 		        WHEN used_count + 1 >= max_uses THEN 'exhausted'
 		        ELSE status
 		    END
-		WHERE token = $1 AND status = 'active'
+		WHERE token = $1 AND status = 'active' AND (max_uses = 0 OR used_count < max_uses)
 	`
 	result, err := s.db.Exec(query, tokenStr, deviceID)
 	if err != nil {
