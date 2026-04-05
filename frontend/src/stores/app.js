@@ -18,7 +18,7 @@ export default defineStore('app', () => {
 
   const fetchVersion = async () => {
     try {
-      const response = await fetch('/api/v1/version')
+      const response = await fetch('/api/version')
       const data = await response.json()
       if (data.version) {
         version.value = data.version

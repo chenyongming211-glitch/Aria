@@ -314,11 +314,11 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 
 	// Initialize Bandwidth Management API with tenant awareness
 	// Set up HTTP handlers
+	// Southbound API (Agent 南向接口)
 	http.HandleFunc("/register", controller.HandleRegister)
 	http.HandleFunc("/unregister", controller.HandleUnregister)
 	http.HandleFunc("/network/manage", controller.HandleNetworkManage)
 	http.HandleFunc("/version", handleVersion)
-	http.HandleFunc("/api/v1/version", handleVersion)
 
 	// Initialize API v2 skeleton
 	// Derive VictoriaMetrics query base URL from push gateway
@@ -353,12 +353,8 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 
 	listenAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	logger.Info("HTTP API listening on %s", listenAddr)
-	logger.Info("Available endpoints:")
-	logger.Info("  POST /register          - Register new node (requires token)")
-	logger.Info("  POST /unregister        - Unregister node")
-	logger.Info("  POST /network/manage    - Manage advertised routes")
-	logger.Info("  /api/v2/auth/*          - JWT authentication APIs")
-	logger.Info("  /api/v2/tenants/*       - Tenant-scoped management plane APIs")
+	logger.Info("Southbound: POST /register, /unregister, /network/manage")
+	logger.Info("Northbound: /api/v2/auth/*, /api/v2/tenants/*")
 	logger.Info("========================================")
 	logger.Info("Controller ready")
 	logger.Info("========================================")
