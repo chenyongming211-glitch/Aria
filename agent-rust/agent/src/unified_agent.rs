@@ -85,9 +85,37 @@ impl UnifiedAgent {
         log_handle: Arc<StdMutex<Option<reload::Handle<EnvFilter, Registry>>>>,
     ) -> Result<Self> {
         tracing::info!("Creating UnifiedAgent...");
-        
-        let (acl_mgr, qos_mgr, _identity_mgr) = Self::load_ebpf_programs(interface)?;
-        tracing::info!("✅ eBPF programs loaded");
+
+        // Create ALL WireGuard interfaces BEFORE loading eBPF
+        // (eBPF XDP/TC attaches to the interfaces, so they must exist first)
+        let interfaces = if config.multi_tunnel {
+            let base = config.interface_name.trim_end_matches(|c: char| c.is_numeric());
+            vec![
+                config.interface_name.clone(),
+                format!("{}1", base),
+                format!("{}2", base),
+                format!("{}3", base),
+            ]
+        } else {
+            vec![config.interface_name.clone()]
+        };
+
+        let wg_manager = Arc::new(Mutex::new(WireGuardManager::new(&config.interface_name)));
+        for (i, iface_name) in interfaces.iter().enumerate() {
+            let port = config.listen_port + i as u16;
+            let mut wg = WireGuardManager::new(iface_name);
+            wg.ensure_interface(
+                config.private_key.clone(),
+                config.address.clone(),
+                port,
+                config.mtu,
+            ).context(format!("Failed to create WireGuard interface {}", iface_name))?;
+            tracing::info!("✅ WireGuard interface {} created on port {}", iface_name, port);
+        }
+
+        // Load eBPF programs and attach to ALL interfaces
+        let (acl_mgr, qos_mgr, _identity_mgr) = Self::load_ebpf_programs_multi(&interfaces)?;
+        tracing::info!("✅ eBPF programs loaded and attached to {} interfaces", interfaces.len());
         
         let grpc_client = GrpcClient::new_with_options(
             config.controller_url.clone(),
@@ -97,10 +125,7 @@ impl UnifiedAgent {
             config.tls_server_name.clone(),
         ).await.context("Failed to connect to Controller")?;
         tracing::info!("✅ gRPC client connected");
-        
-        let wg_manager = Arc::new(Mutex::new(WireGuardManager::new(&config.interface_name)));
-        tracing::info!("✅ WireGuard manager created");
-        
+
         let routing_manager = RoutingManager::new(&config.interface_name);
         tracing::info!("✅ Routing manager created");
         
@@ -223,65 +248,96 @@ impl UnifiedAgent {
         
         Ok((acl_mgr, qos_mgr, identity_mgr))
     }
+
+    /// Load eBPF programs and attach XDP/TC to multiple interfaces (multi-tunnel mode)
+    fn load_ebpf_programs_multi(interfaces: &[String]) -> Result<(
+        Arc<Mutex<AclManager>>,
+        Arc<Mutex<QoSManager>>,
+        Arc<StdMutex<IdentityManager>>,
+    )> {
+        tracing::info!("Loading eBPF programs for {} interfaces: {:?}", interfaces.len(), interfaces);
+
+        // Load ACL eBPF
+        let acl_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/acl"));
+        let mut acl_ebpf = EbpfLoader::new()
+            .load(acl_bytes)
+            .context("Failed to load ACL eBPF bytecode")?;
+
+        let program_ref = acl_ebpf.program_mut("xdp_ingress_acl")
+            .context("XDP program not found in eBPF object")?;
+        let xdp_program: &mut Xdp = program_ref.try_into()?;
+        xdp_program.load()?;
+
+        // Attach XDP to ALL interfaces
+        for iface in interfaces {
+            tracing::info!("Attaching XDP program to {}...", iface);
+            xdp_program.attach(iface, XdpFlags::default())
+                .context(format!("Failed to attach XDP to {}", iface))?;
+            tracing::info!("✅ XDP attached to {}", iface);
+        }
+
+        let identity_mgr = IdentityManager::new(&mut acl_ebpf)?;
+        let identity_mgr = Arc::new(StdMutex::new(identity_mgr));
+        let acl_mgr = Arc::new(Mutex::new(AclManager::new(&mut acl_ebpf, identity_mgr.clone())?));
+
+        // Load QoS eBPF
+        let qos_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/qos"));
+        let mut qos_ebpf = EbpfLoader::new().load(qos_bytes)?;
+        let tc_program: &mut SchedClassifier = qos_ebpf.program_mut("tc_egress_qos")
+            .context("TC program not found")?
+            .try_into()?;
+        tc_program.load()?;
+
+        // Attach TC to ALL interfaces
+        for iface in interfaces {
+            let _ = std::process::Command::new("tc")
+                .args(&["qdisc", "del", "dev", iface, "clsact"])
+                .output();
+            tc::qdisc_add_clsact(iface)?;
+            tc_program.attach(iface, TcAttachType::Egress)?;
+            tracing::info!("✅ TC attached to {}", iface);
+        }
+
+        let qos_mgr = Arc::new(Mutex::new(QoSManager::new(&mut qos_ebpf, identity_mgr.clone())?));
+
+        Ok((acl_mgr, qos_mgr, identity_mgr))
+    }
     
     pub async fn start(&mut self) -> Result<()> {
         tracing::info!("Starting UnifiedAgent...");
-        
-        // Step 1: 创建 WireGuard 接口（aria0）
-        self.ensure_interface().await?;
-        tracing::info!("✅ WireGuard interface created/verified");
-        
+
         // ========================================
-        // Step 2: 系统优化（P0 + P1）- 在接口创建后执行
+        // 系统优化（P0 + P1）- 接口已由 new() 创建
         // ========================================
-        tracing::info!("Step 2: Applying system optimizations...");
-        
-        // 优化主接口
-        let optimizer = crate::system_optimization::SystemOptimizer::new(
-            51820,                  // WireGuard 默认端口
-            "eth0".to_string(),     // 物理网卡
-            self.config.interface_name.clone(), // 隧道网卡（如 aria0）
-        );
-        
-        match optimizer.optimize(true) { // true = 优化隧道接口
-            Ok(result) => {
-                tracing::info!("✅ System optimizations applied for {}", self.config.interface_name);
-                if !result.warnings.is_empty() {
-                    tracing::warn!("⚠️  Some optimizations had warnings: {:?}", result.warnings);
-                }
-            }
-            Err(e) => {
-                tracing::warn!("⚠️  System optimizations failed for {}: {}", self.config.interface_name, e);
-            }
-        }
-        
-        // 如果启用了多隧道，优化额外的接口
-        if self.config.multi_tunnel {
-            let base_name = self.config.interface_name.clone();
-            let base_name = base_name.trim_end_matches(|c: char| c.is_numeric());
-            
-            for i in 1..4 {
-                let interface_name = format!("{}{}", base_name, i);
-                let port = 51820 + i as u16;
-                
-                tracing::info!("Optimizing additional interface {}...", interface_name);
-                let optimizer_extra = crate::system_optimization::SystemOptimizer::new(
-                    port,
-                    "eth0".to_string(),
-                    interface_name.clone(),
-                );
-                
-                match optimizer_extra.optimize(true) {
-                    Ok(result) => {
-                        tracing::info!("✅ Optimized interface {}", interface_name);
-                        if !result.warnings.is_empty() {
-                            tracing::warn!("⚠️  Warnings for {}: {:?}", interface_name, result.warnings);
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("⚠️  Failed to optimize {}: {}", interface_name, e);
+        tracing::info!("Applying system optimizations...");
+
+        // 确定所有接口列表
+        let all_interfaces = if self.config.multi_tunnel {
+            let base = self.config.interface_name.trim_end_matches(|c: char| c.is_numeric()).to_string();
+            vec![
+                (self.config.interface_name.clone(), self.config.listen_port),
+                (format!("{}1", base), self.config.listen_port + 1),
+                (format!("{}2", base), self.config.listen_port + 2),
+                (format!("{}3", base), self.config.listen_port + 3),
+            ]
+        } else {
+            vec![(self.config.interface_name.clone(), self.config.listen_port)]
+        };
+
+        for (iface, port) in &all_interfaces {
+            let optimizer = crate::system_optimization::SystemOptimizer::new(
+                *port,
+                "eth0".to_string(),
+                iface.clone(),
+            );
+            match optimizer.optimize(true) {
+                Ok(result) => {
+                    tracing::info!("✅ System optimizations applied for {}", iface);
+                    if !result.warnings.is_empty() {
+                        tracing::warn!("⚠️  Warnings for {}: {:?}", iface, result.warnings);
                     }
                 }
+                Err(e) => tracing::warn!("⚠️  Failed to optimize {}: {}", iface, e),
             }
         }
         
