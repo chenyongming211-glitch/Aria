@@ -277,7 +277,6 @@ const refreshAll = async () => {
   refreshing.value = true
   await Promise.all([loadStats(), loadEvents()])
   refreshing.value = false
-  ElMessage.success('Data refreshed')
 }
 
 const onPageChange = () => {

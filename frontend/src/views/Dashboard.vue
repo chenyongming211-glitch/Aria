@@ -215,7 +215,7 @@ import {
 import * as echarts from 'echarts'
 import { useMonitorApi } from '@/composables/useMonitorApi'
 import { useTenantApi } from '@/composables/useTenantApi'
-import { ElMessage } from 'element-plus'
+
 
 const trafficLoading = ref(false)
 const healthLoading = ref(false)
@@ -340,28 +340,28 @@ const quickActions = [
     icon: Plus,
     bgColor: 'rgba(59, 130, 246, 0.1)',
     iconColor: '#3B82F6',
-    handler: () => ElMessage.info('Add node dialog will open')
+    handler: () => {}
   },
   {
     name: 'Create Route',
     icon: Position,
     bgColor: 'rgba(34, 197, 94, 0.1)',
     iconColor: '#22C55E',
-    handler: () => ElMessage.info('Create route dialog will open')
+    handler: () => {}
   },
   {
     name: 'View Logs',
     icon: DataAnalysis,
     bgColor: 'rgba(245, 158, 11, 0.1)',
     iconColor: '#F59E0B',
-    handler: () => ElMessage.info('Logs viewer will open')
+    handler: () => {}
   },
   {
     name: 'System Config',
     icon: Setting,
     bgColor: 'rgba(139, 92, 246, 0.1)',
     iconColor: '#8B5CF6',
-    handler: () => ElMessage.info('System config will open')
+    handler: () => {}
   }
 ]
 

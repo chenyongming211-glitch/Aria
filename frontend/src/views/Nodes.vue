@@ -444,7 +444,6 @@ const paginatedNodes = computed(() => {
 // 方法
 const refreshNodes = async () => {
   await nodeStore.loadNodes()
-  ElMessage.success('Nodes refreshed')
 }
 
 const addNode = () => {
