@@ -272,6 +272,10 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	defer store.Close()
 	logger.Info("Storage initialized successfully")
 
+	if err := ensureDefaultTenant(store, logger); err != nil {
+		return fmt.Errorf("failed to ensure default tenant: %w", err)
+	}
+
 	if err := ensureSuperAdmin(store.DB(), logger); err != nil {
 		return fmt.Errorf("failed to ensure super admin: %w", err)
 	}
@@ -2123,5 +2127,27 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 	}
 
 	logger.Info("Default super admin created: %s (password must be changed on first login)", username)
+	return nil
+}
+
+func ensureDefaultTenant(store *controllerstorage.Storage, logger *logging.Logger) error {
+	var count int
+	err := store.DB().QueryRow("SELECT COUNT(*) FROM tenants").Scan(&count)
+	if err != nil {
+		logger.Warn("Failed to check tenants: %v", err)
+		return nil
+	}
+
+	if count > 0 {
+		logger.Info("Tenants already exist (%d)", count)
+		return nil
+	}
+
+	_, err = store.GetOrCreateTenantByCode("default", "Aria Default")
+	if err != nil {
+		return fmt.Errorf("failed to create default tenant: %w", err)
+	}
+
+	logger.Info("Default tenant created: Aria Default (code=default)")
 	return nil
 }
