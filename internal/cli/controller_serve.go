@@ -319,6 +319,7 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	http.HandleFunc("/unregister", controller.HandleUnregister)
 	http.HandleFunc("/network/manage", controller.HandleNetworkManage)
 	http.HandleFunc("/version", handleVersion)
+	http.HandleFunc("/api/version", handleVersion)
 
 	// Initialize API v2 skeleton
 	// Derive VictoriaMetrics query base URL from push gateway
