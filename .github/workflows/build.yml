@@ -61,6 +61,8 @@ jobs:
     name: Docker Build & Push
     runs-on: ubuntu-latest
     needs: go-build
+    # 只在手动触发时构建镜像
+    if: github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout
@@ -82,7 +84,7 @@ jobs:
         with:
           context: .
           file: Dockerfile.controller
-          push: ${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/v0.1.0' }}
+          push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/aria-controller:latest
             ghcr.io/${{ github.repository_owner }}/aria-controller:${{ steps.vars.outputs.version }}
