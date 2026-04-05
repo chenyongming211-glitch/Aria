@@ -2109,10 +2109,10 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 	password := os.Getenv("ARIA_SUPER_ADMIN_PASSWORD")
 
 	if username == "" {
-		username = "admin"
+		username = "sysadmin"
 	}
 	if password == "" {
-		password = "admin123"
+		password = "Sysadmin@123"
 	}
 
 	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(password), 12)
