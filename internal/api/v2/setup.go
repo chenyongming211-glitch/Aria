@@ -20,6 +20,7 @@ import (
 	v1 "aria/internal/api/v1"
 	"aria/internal/service"
 	"aria/pkg/controllerstorage"
+	"aria/pkg/victoriametrics"
 )
 
 type Router struct {
@@ -28,15 +29,17 @@ type Router struct {
 	tenantAPI  *v1.TenantAPI
 	tenantMgmt *v1.TenantManagementAPI
 	chatAPI    *v1.ChatHandler
+	vmClient   *victoriametrics.Client
 }
 
-func SetupRoutes(mux *http.ServeMux, store *controllerstorage.Storage) {
+func SetupRoutes(mux *http.ServeMux, store *controllerstorage.Storage, vmClient *victoriametrics.Client) {
 	router := &Router{
 		store:      store,
 		authAPI:    v1.NewAuthAPI(store),
 		tenantAPI:  v1.NewTenantAPI(store),
 		tenantMgmt: v1.NewTenantManagementAPI(store),
 		chatAPI:    v1.NewChatHandler(service.NewAIService(store)),
+		vmClient:   vmClient,
 	}
 
 	mux.HandleFunc("/api/v2/auth/login", router.authAPI.HandleLogin)

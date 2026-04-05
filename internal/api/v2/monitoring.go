@@ -1,9 +1,13 @@
 package v2
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
+	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	v1 "aria/internal/api/v1"
@@ -314,4 +318,237 @@ func computeStateConvergence(cs *controllerstorage.NodeControlState) string {
 		return "diverged"
 	}
 	return "pending"
+}
+
+// handleMonitoringTraffic returns tenant-level traffic time series data.
+// GET /api/v2/tenants/{tenant_id}/monitoring/traffic?range=24h
+func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
+	rangeParam := req.URL.Query().Get("range")
+	if rangeParam == "" {
+		rangeParam = "24h"
+	}
+
+	var duration time.Duration
+	var step time.Duration
+	switch rangeParam {
+	case "1h":
+		duration = time.Hour
+		step = 60 * time.Second
+	case "24h":
+		duration = 24 * time.Hour
+		step = 5 * time.Minute
+	case "7d":
+		duration = 7 * 24 * time.Hour
+		step = 30 * time.Minute
+	case "30d":
+		duration = 30 * 24 * time.Hour
+		step = 2 * time.Hour
+	default:
+		v1.WriteError(w, http.StatusBadRequest, v1.CodeBadRequest, "Invalid range parameter, must be 1h/24h/7d/30d", nil)
+		return
+	}
+
+	end := time.Now()
+	start := end.Add(-duration)
+
+	// 获取租户下所有节点的标识用于 PromQL 过滤
+	nodes, err := r.store.GetNodesByTenant(tenantID)
+	if err != nil || len(nodes) == 0 {
+		v1.WriteSuccess(w, map[string]interface{}{
+			"timestamps":          []int64{},
+			"upload_bytes":        []float64{},
+			"download_bytes":      []float64{},
+			"peak_bandwidth_mbps": 0,
+		}, "Traffic data retrieved")
+		return
+	}
+
+	// 构建 instance 过滤列表
+	instances := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		if n.PublicIP != "" {
+			instances = append(instances, n.PublicIP+".*")
+		}
+	}
+	instanceFilter := strings.Join(instances, "|")
+
+	ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
+	defer cancel()
+
+	// 查询上传流量
+	txQuery := fmt.Sprintf(`sum(rate(wireguard_total_tx_bytes{instance=~"%s"}[5m]))`, instanceFilter)
+	txResult, _ := r.vmClient.QueryRange(ctx, txQuery, start, end, step)
+
+	// 查询下载流量
+	rxQuery := fmt.Sprintf(`sum(rate(wireguard_total_rx_bytes{instance=~"%s"}[5m]))`, instanceFilter)
+	rxResult, _ := r.vmClient.QueryRange(ctx, rxQuery, start, end, step)
+
+	timestamps := []int64{}
+	uploadBytes := []float64{}
+	downloadBytes := []float64{}
+	peakBandwidth := 0.0
+
+	if txResult != nil && len(txResult.Data.Result) > 0 {
+		for _, v := range txResult.Data.Result[0].Values {
+			if len(v) >= 2 {
+				if ts, ok := v[0].(float64); ok {
+					timestamps = append(timestamps, int64(ts))
+				}
+				if val, ok := v[1].(string); ok {
+					f, _ := strconv.ParseFloat(val, 64)
+					uploadBytes = append(uploadBytes, f)
+					mbps := f * 8 / 1_000_000
+					if mbps > peakBandwidth {
+						peakBandwidth = mbps
+					}
+				}
+			}
+		}
+	}
+
+	if rxResult != nil && len(rxResult.Data.Result) > 0 {
+		for _, v := range rxResult.Data.Result[0].Values {
+			if len(v) >= 2 {
+				if val, ok := v[1].(string); ok {
+					f, _ := strconv.ParseFloat(val, 64)
+					downloadBytes = append(downloadBytes, f)
+					mbps := f * 8 / 1_000_000
+					if mbps > peakBandwidth {
+						peakBandwidth = mbps
+					}
+				}
+			}
+		}
+	}
+
+	v1.WriteSuccess(w, map[string]interface{}{
+		"timestamps":          timestamps,
+		"upload_bytes":        uploadBytes,
+		"download_bytes":      downloadBytes,
+		"peak_bandwidth_mbps": math.Round(peakBandwidth*100) / 100,
+	}, "Traffic data retrieved")
+}
+
+// handleMonitoringHealth returns tenant-level health indicators.
+// GET /api/v2/tenants/{tenant_id}/monitoring/health
+func (r *Router) handleMonitoringHealth(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
+	totalNodes, onlineNodes, _, err := r.store.CountNodesByTenantAndStatus(tenantID)
+	nodeOnlineRate := 100.0
+	if err == nil && totalNodes > 0 {
+		nodeOnlineRate = float64(onlineNodes) * 100.0 / float64(totalNodes)
+	}
+
+	syncRate, _ := r.store.CalcSyncSuccessRate(tenantID)
+	activeAlerts, _ := r.store.CountActiveAlerts(tenantID)
+	failedCmds, _ := r.store.CountFailedCommandsByTenant(tenantID)
+
+	v1.WriteSuccess(w, map[string]interface{}{
+		"node_online_rate":      math.Round(nodeOnlineRate*10) / 10,
+		"sync_success_rate":     math.Round(syncRate*10) / 10,
+		"active_alerts_count":   activeAlerts,
+		"failed_commands_count": failedCmds,
+	}, "Health data retrieved")
+}
+
+// handleMonitoringNodeMetrics returns per-node bandwidth and latency metrics.
+// GET /api/v2/tenants/{tenant_id}/monitoring/nodes/{node_id}/metrics
+func (r *Router) handleMonitoringNodeMetrics(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, nodeID string) {
+	node, err := r.getTenantNodeRecord(nodeID, tenantID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			v1.WriteError(w, http.StatusNotFound, v1.CodeNodeNotFound, "Node not found", nil)
+			return
+		}
+		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to get node", nil)
+		return
+	}
+
+	uploadMbps := 0.0
+	downloadMbps := 0.0
+	latencyMs := 0.0
+
+	if r.vmClient != nil && node.PublicIP != "" {
+		ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
+		defer cancel()
+
+		instanceFilter := node.PublicIP + ".*"
+
+		// 查询上传速率
+		txQuery := fmt.Sprintf(`sum(rate(wireguard_peer_tx_bytes{instance=~"%s"}[5m]))`, instanceFilter)
+		txResult, _ := r.vmClient.QueryInstant(ctx, txQuery)
+		if txResult != nil && len(txResult.Data.Result) > 0 {
+			if val, ok := txResult.Data.Result[0].Value[1].(string); ok {
+				f, _ := strconv.ParseFloat(val, 64)
+				uploadMbps = f * 8 / 1_000_000
+			}
+		}
+
+		// 查询下载速率
+		rxQuery := fmt.Sprintf(`sum(rate(wireguard_peer_rx_bytes{instance=~"%s"}[5m]))`, instanceFilter)
+		rxResult, _ := r.vmClient.QueryInstant(ctx, rxQuery)
+		if rxResult != nil && len(rxResult.Data.Result) > 0 {
+			if val, ok := rxResult.Data.Result[0].Value[1].(string); ok {
+				f, _ := strconv.ParseFloat(val, 64)
+				downloadMbps = f * 8 / 1_000_000
+			}
+		}
+
+		// 查询延迟（最近握手时间作为参考）
+		latencyQuery := fmt.Sprintf(`min(wireguard_peer_last_handshake_secs{instance=~"%s"})`, instanceFilter)
+		latencyResult, _ := r.vmClient.QueryInstant(ctx, latencyQuery)
+		if latencyResult != nil && len(latencyResult.Data.Result) > 0 {
+			if val, ok := latencyResult.Data.Result[0].Value[1].(string); ok {
+				f, _ := strconv.ParseFloat(val, 64)
+				latencyMs = f * 1000 // 秒转毫秒
+			}
+		}
+	}
+
+	v1.WriteSuccess(w, map[string]interface{}{
+		"upload_mbps":   math.Round(uploadMbps*100) / 100,
+		"download_mbps": math.Round(downloadMbps*100) / 100,
+		"latency_ms":    math.Round(latencyMs*100) / 100,
+	}, "Node metrics retrieved")
+}
+
+// handleMonitoringTopology returns the mesh topology for a tenant.
+// GET /api/v2/tenants/{tenant_id}/monitoring/topology
+func (r *Router) handleMonitoringTopology(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
+	nodes, err := r.store.GetNodesByTenant(tenantID)
+	if err != nil {
+		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to get nodes", nil)
+		return
+	}
+
+	topoNodes := make([]map[string]interface{}, 0, len(nodes))
+	for _, n := range nodes {
+		topoNodes = append(topoNodes, map[string]interface{}{
+			"id":          n.ID.String(),
+			"hostname":    n.Hostname,
+			"region":      n.Region,
+			"status":      nodeAvailabilityStatus(n),
+			"assigned_ip": n.AssignedIP,
+		})
+	}
+
+	// 构建全连接 peer 关系（WireGuard mesh）
+	links := make([]map[string]interface{}, 0)
+	for i := 0; i < len(nodes); i++ {
+		for j := i + 1; j < len(nodes); j++ {
+			status := "inactive"
+			if nodeAvailabilityStatus(nodes[i]) == "online" && nodeAvailabilityStatus(nodes[j]) == "online" {
+				status = "active"
+			}
+			links = append(links, map[string]interface{}{
+				"source": nodes[i].ID.String(),
+				"target": nodes[j].ID.String(),
+				"status": status,
+			})
+		}
+	}
+
+	v1.WriteSuccess(w, map[string]interface{}{
+		"nodes": topoNodes,
+		"links": links,
+	}, "Topology data retrieved")
 }

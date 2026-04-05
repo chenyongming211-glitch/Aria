@@ -401,6 +401,7 @@ import {
 import { ElMessage, ElMessageBox } from 'element-plus'
 import useNodeStore from '../stores/node'
 import { useAgentProxyApi } from '../composables/useAgentProxyApi'
+import { useMonitorApi } from '../composables/useMonitorApi'
 
 // 使用节点 store
 const nodeStore = useNodeStore()
@@ -455,6 +456,23 @@ const addNode = () => {
 const viewNodeDetails = async (node) => {
   try {
     selectedNode.value = await nodeStore.loadNodeDetail(node.id)
+    // Fetch real bandwidth/latency metrics
+    try {
+      const metrics = await useMonitorApi.getNodeMetrics(node.id)
+      if (metrics && selectedNode.value) {
+        selectedNode.value.bandwidth = {
+          upload: metrics.upload_mbps != null ? Number(metrics.upload_mbps.toFixed(2)) : 'N/A',
+          download: metrics.download_mbps != null ? Number(metrics.download_mbps.toFixed(2)) : 'N/A'
+        }
+        selectedNode.value.latency = metrics.latency_ms != null ? Number(metrics.latency_ms.toFixed(1)) : 'N/A'
+      }
+    } catch (metricsError) {
+      console.error('Failed to load node metrics:', metricsError)
+      if (selectedNode.value) {
+        selectedNode.value.bandwidth = { upload: 'N/A', download: 'N/A' }
+        selectedNode.value.latency = 'N/A'
+      }
+    }
     detailDialogVisible.value = true
   } catch (error) {
     console.error('Failed to load node detail:', error)

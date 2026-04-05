@@ -147,7 +147,11 @@ export const API_ENDPOINTS = {
     NODE_DETAIL: (tenantId, nodeId) => buildTenantPath(tenantId, `/monitoring/nodes/${nodeId}`),
     EVENTS: (tenantId) => buildTenantPath(tenantId, '/monitoring/events'),
     ALERTS: (tenantId) => buildTenantPath(tenantId, '/monitoring/alerts'),
-    ALERT_RESOLVE: (tenantId, alertId) => buildTenantPath(tenantId, `/monitoring/alerts/${alertId}/resolve`)
+    ALERT_RESOLVE: (tenantId, alertId) => buildTenantPath(tenantId, `/monitoring/alerts/${alertId}/resolve`),
+    TRAFFIC: (tenantId) => buildTenantPath(tenantId, '/monitoring/traffic'),
+    HEALTH: (tenantId) => buildTenantPath(tenantId, '/monitoring/health'),
+    NODE_METRICS: (tenantId, nodeId) => buildTenantPath(tenantId, `/monitoring/nodes/${nodeId}/metrics`),
+    TOPOLOGY: (tenantId) => buildTenantPath(tenantId, '/monitoring/topology')
   },
 
   // AI 聊天 API

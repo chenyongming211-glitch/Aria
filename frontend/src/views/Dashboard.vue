@@ -9,19 +9,13 @@
             <div class="stat-icon">
               <component :is="stat.icon" />
             </div>
-            <div class="stat-trend" :class="stat.trendClass">
-              <el-icon>
-                <component :is="stat.trendIcon" />
-              </el-icon>
-              <span>{{ stat.trend }}</span>
-            </div>
           </div>
           <div class="stat-content">
             <div class="stat-value">{{ stat.value }}</div>
             <div class="stat-label">{{ stat.label }}</div>
             <div class="stat-description">{{ stat.description }}</div>
           </div>
-          <div class="stat-progress" v-if="stat.progress">
+          <div class="stat-progress" v-if="stat.progress !== undefined">
             <div class="progress-bar">
               <div class="progress-fill" :style="{ width: stat.progress + '%' }"></div>
             </div>
@@ -52,7 +46,10 @@
               </div>
             </div>
           </template>
-          <div ref="trafficChartRef" class="chart-container" v-loading="loading"></div>
+          <div ref="trafficChartRef" class="chart-container" v-loading="trafficLoading"></div>
+          <div v-if="trafficError" class="chart-error">
+            <el-alert :title="trafficError" type="warning" :closable="false" show-icon />
+          </div>
         </el-card>
       </el-col>
 
@@ -89,6 +86,7 @@
                 </div>
               </div>
             </div>
+            <el-empty v-if="activities.length === 0" description="No recent activity" :image-size="60" />
           </div>
         </el-card>
       </el-col>
@@ -126,6 +124,7 @@
                 <div class="region-percentage">{{ region.percentage }}%</div>
               </div>
             </div>
+            <el-empty v-if="regions.length === 0" description="No region data" :image-size="60" />
           </div>
         </el-card>
       </el-col>
@@ -170,7 +169,10 @@
               </div>
             </div>
           </template>
-          <div class="health-metrics">
+          <div v-if="healthError" class="health-error">
+            <el-alert title="数据不可用" type="warning" :closable="false" show-icon />
+          </div>
+          <div v-else class="health-metrics" v-loading="healthLoading">
             <div v-for="metric in healthMetrics" :key="metric.name" class="health-item">
               <div class="metric-header">
                 <span class="metric-name">{{ metric.name }}</span>
@@ -192,7 +194,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import {
   Monitor,
   CircleCheck,
@@ -205,129 +207,131 @@ import {
   Setting,
   Plus,
   Download,
-  ArrowUp,
-  ArrowDown,
-  Minus,
   Connection,
   DataAnalysis,
-  Lock
+  Lock,
+  Warning as WarningIcon
 } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { useMonitorApi } from '@/composables/useMonitorApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 import { ElMessage } from 'element-plus'
 
-const loading = ref(false)
+const trafficLoading = ref(false)
+const healthLoading = ref(false)
 const timeRange = ref('24h')
 const trafficChartRef = ref(null)
+const trafficError = ref('')
+const healthError = ref(false)
 let chartInstance = null
+let healthTimer = null
 
-// 统计数据
-const stats = computed(() => [
-  {
-    label: 'Total Nodes',
-    value: nodesData.value.total,
-    description: 'Across all regions',
-    color: 'blue',
-    icon: Monitor,
-    trend: '+12%',
-    trendIcon: ArrowUp,
-    trendClass: 'positive',
-    progress: 85
-  },
-  {
-    label: 'Online Nodes',
-    value: nodesData.value.online,
-    description: 'Currently active',
-    color: 'green',
-    icon: CircleCheck,
-    trend: '+5%',
-    trendIcon: ArrowUp,
-    trendClass: 'positive',
-    progress: 92
-  },
-  {
-    label: 'Advertised Routes',
-    value: nodesData.value.routes,
-    description: 'Network routes',
-    color: 'orange',
-    icon: Position,
-    trend: '-2%',
-    trendIcon: ArrowDown,
-    trendClass: 'negative',
-    progress: 68
-  },
-  {
-    label: 'Bandwidth',
-    value: nodesData.value.bandwidth + ' Gbps',
-    description: 'Peak throughput',
-    color: 'purple',
-    icon: TrendCharts,
-    trend: '+8%',
-    trendIcon: ArrowUp,
-    trendClass: 'positive',
-    progress: 76
-  }
-])
-
+// 节点统计
 const nodesData = ref({
-  total: 0,
-  online: 0,
-  routes: 0,
-  bandwidth: '0'
+  total: 'N/A',
+  online: 'N/A',
+  routes: 'N/A',
+  bandwidth: 'N/A'
 })
 
-// 活动数据
-const activities = ref([
-  {
-    type: 'node',
-    icon: Monitor,
-    text: 'Node "worker-01" came online',
-    time: '2 min ago',
-    tag: 'Online',
-    tagType: 'success'
-  },
-  {
-    type: 'route',
-    icon: Position,
-    text: 'New route added: 10.0.1.0/24',
-    time: '15 min ago',
-    tag: 'Route',
-    tagType: 'info'
-  },
-  {
-    type: 'config',
-    icon: Setting,
-    text: 'Configuration updated for "main-router"',
-    time: '1 hour ago',
-    tag: 'Config',
-    tagType: 'warning'
-  },
-  {
-    type: 'node',
-    icon: Monitor,
-    text: 'Node "backup-server" went offline',
-    time: '2 hours ago',
-    tag: 'Offline',
-    tagType: 'danger'
-  },
-  {
-    type: 'node',
-    icon: Monitor,
-    text: 'Node "worker-02" joined the network',
-    time: '3 hours ago',
-    tag: 'New',
-    tagType: 'success'
-  }
-])
+// 健康数据
+const healthData = ref(null)
 
-// 区域数据
-const regions = ref([
-  { name: 'Shanghai', icon: '🏙️', nodes: 12, percentage: 45, color: '#3B82F6' },
-  { name: 'Beijing', icon: '🏛️', nodes: 8, percentage: 30, color: '#22C55E' },
-  { name: 'Guangzhou', icon: '🌆', nodes: 4, percentage: 15, color: '#F59E0B' },
-  { name: 'Hong Kong', icon: '🏝️', nodes: 3, percentage: 10, color: '#06B6D4' }
-])
+// 活动数据
+const activities = ref([])
+
+// 区域数据（从节点列表聚合）
+const regions = ref([])
+
+// 缓存节点列表用于区域聚合
+let cachedNodes = []
+
+// 统计卡片 — 无硬编码趋势
+const stats = computed(() => {
+  const total = nodesData.value.total
+  const online = nodesData.value.online
+  const routes = nodesData.value.routes
+  const bw = nodesData.value.bandwidth
+
+  return [
+    {
+      label: 'Total Nodes',
+      value: total,
+      description: 'Across all regions',
+      color: 'blue',
+      icon: Monitor,
+      progress: typeof total === 'number' ? Math.min(total * 5, 100) : 0
+    },
+    {
+      label: 'Online Nodes',
+      value: online,
+      description: 'Currently active',
+      color: 'green',
+      icon: CircleCheck,
+      progress: (typeof total === 'number' && typeof online === 'number' && total > 0)
+        ? Math.round(online / total * 100)
+        : 0
+    },
+    {
+      label: 'Advertised Routes',
+      value: routes,
+      description: 'Network routes',
+      color: 'orange',
+      icon: Position,
+      progress: typeof routes === 'number' ? Math.min(routes * 3, 100) : 0
+    },
+    {
+      label: 'Bandwidth',
+      value: bw === 'N/A' ? 'N/A' : bw + ' Mbps',
+      description: 'Peak throughput',
+      color: 'purple',
+      icon: TrendCharts,
+      progress: (typeof bw === 'number') ? Math.min(bw / 10, 100) : 0
+    }
+  ]
+})
+
+// 健康指标
+const healthMetrics = computed(() => {
+  if (!healthData.value) return []
+
+  const h = healthData.value
+  const onlineRate = h.node_online_rate ?? 0
+  const syncRate = h.sync_success_rate ?? 0
+  const alerts = h.active_alerts_count ?? 0
+  const failedCmds = h.failed_commands_count ?? 0
+
+  return [
+    {
+      name: 'Node Online Rate',
+      value: onlineRate.toFixed(1) + '%',
+      percentage: Math.min(Math.round(onlineRate), 100),
+      color: onlineRate >= 80 ? '#22C55E' : onlineRate >= 50 ? '#F59E0B' : '#EF4444',
+      statusClass: onlineRate >= 80 ? 'status-good' : onlineRate >= 50 ? 'status-warning' : 'status-danger'
+    },
+    {
+      name: 'Sync Success Rate',
+      value: syncRate.toFixed(1) + '%',
+      percentage: Math.min(Math.round(syncRate), 100),
+      color: syncRate >= 90 ? '#22C55E' : syncRate >= 70 ? '#F59E0B' : '#EF4444',
+      statusClass: syncRate >= 90 ? 'status-good' : syncRate >= 70 ? 'status-warning' : 'status-danger'
+    },
+    {
+      name: 'Active Alerts',
+      value: String(alerts),
+      percentage: Math.min(alerts * 10, 100),
+      color: alerts === 0 ? '#22C55E' : alerts <= 3 ? '#F59E0B' : '#EF4444',
+      statusClass: alerts === 0 ? 'status-good' : alerts <= 3 ? 'status-warning' : 'status-danger'
+    },
+    {
+      name: 'Failed Commands',
+      value: String(failedCmds),
+      percentage: Math.min(failedCmds * 15, 100),
+      color: failedCmds === 0 ? '#22C55E' : failedCmds <= 2 ? '#F59E0B' : '#EF4444',
+      statusClass: failedCmds === 0 ? 'status-good' : failedCmds <= 2 ? 'status-warning' : 'status-danger'
+    }
+  ]
+})
 
 // 快速操作
 const quickActions = [
@@ -361,50 +365,70 @@ const quickActions = [
   }
 ]
 
-// 健康指标
-const healthMetrics = computed(() => [
-  {
-    name: 'CPU Usage',
-    value: '45%',
-    percentage: 45,
-    color: '#22C55E',
-    statusClass: 'status-good'
-  },
-  {
-    name: 'Memory Usage',
-    value: '62%',
-    percentage: 62,
-    color: '#F59E0B',
-    statusClass: 'status-warning'
-  },
-  {
-    name: 'Disk Usage',
-    value: '38%',
-    percentage: 38,
-    color: '#22C55E',
-    statusClass: 'status-good'
-  },
-  {
-    name: 'Network Latency',
-    value: '12ms',
-    percentage: 24,
-    color: '#3B82F6',
-    statusClass: 'status-good'
+// 区域颜色映射
+const regionColors = ['#3B82F6', '#22C55E', '#F59E0B', '#06B6D4', '#8B5CF6', '#EF4444', '#EC4899']
+const regionIcons = { cn: '🇨🇳', us: '🇺🇸', eu: '🇪🇺', jp: '🇯🇵', sg: '🇸🇬', hk: '🇭🇰', default: '🌐' }
+
+// 从节点列表按 region 聚合
+const aggregateRegions = (nodes) => {
+  if (!nodes || nodes.length === 0) {
+    regions.value = []
+    return
   }
-])
+  const map = {}
+  nodes.forEach(n => {
+    const r = (n.region || 'unknown').toLowerCase()
+    if (!map[r]) map[r] = 0
+    map[r]++
+  })
+  const total = nodes.length
+  const entries = Object.entries(map).sort((a, b) => b[1] - a[1])
+  regions.value = entries.map(([name, count], i) => ({
+    name: name.charAt(0).toUpperCase() + name.slice(1),
+    icon: regionIcons[name] || regionIcons.default,
+    nodes: count,
+    percentage: Math.round(count / total * 100),
+    color: regionColors[i % regionColors.length]
+  }))
+}
 
-// 获取仪表盘数据
-const fetchDashboardData = async () => {
+// 事件类型映射
+const eventTypeMap = {
+  alert_fired: { type: 'config', icon: WarningIcon, tag: 'Alert', tagType: 'danger' },
+  alert_resolved: { type: 'node', icon: CircleCheck, tag: 'Resolved', tagType: 'success' },
+  node_registered: { type: 'node', icon: Monitor, tag: 'New', tagType: 'success' },
+  node_online: { type: 'node', icon: Monitor, tag: 'Online', tagType: 'success' },
+  node_offline: { type: 'node', icon: Monitor, tag: 'Offline', tagType: 'danger' },
+  command_sent: { type: 'config', icon: Setting, tag: 'Command', tagType: 'info' },
+  config_updated: { type: 'config', icon: Setting, tag: 'Config', tagType: 'warning' },
+  default: { type: 'node', icon: Monitor, tag: 'Event', tagType: 'info' }
+}
+
+const formatEventTime = (ts) => {
+  if (!ts) return ''
+  const date = new Date(ts)
+  if (isNaN(date.getTime())) return ts
+  const now = Date.now()
+  const diff = Math.floor((now - date.getTime()) / 1000)
+  if (diff < 60) return 'just now'
+  if (diff < 3600) return Math.floor(diff / 60) + ' min ago'
+  if (diff < 86400) return Math.floor(diff / 3600) + ' hours ago'
+  return Math.floor(diff / 86400) + ' days ago'
+}
+
+// 获取节点数据 + 统计卡片
+const fetchNodesData = async () => {
   try {
-    loading.value = true
-
     const nodes = await useTenantApi.getTenantNodes()
+    cachedNodes = Array.isArray(nodes) ? nodes : []
 
-    nodesData.value.total = nodes.length || 0
-    nodesData.value.online = nodes.filter(n => n.status === 'online').length || 0
+    nodesData.value.total = cachedNodes.length
+    nodesData.value.online = cachedNodes.filter(n =>
+      (n.availability_status || n.status) === 'online'
+    ).length
 
     let routeCount = 0
-    nodes.forEach(node => {
+    cachedNodes.forEach(node => {
       if (node.advertised_routes) {
         const routes = Array.isArray(node.advertised_routes)
           ? node.advertised_routes
@@ -414,30 +438,95 @@ const fetchDashboardData = async () => {
     })
     nodesData.value.routes = routeCount
 
+    // 聚合区域
+    aggregateRegions(cachedNodes)
   } catch (error) {
-    console.error('获取仪表盘数据失败:', error)
+    console.error('获取节点数据失败:', error)
+    nodesData.value.total = 'N/A'
+    nodesData.value.online = 'N/A'
+    nodesData.value.routes = 'N/A'
+  }
+}
+
+// 获取流量数据 + 峰值带宽
+const fetchTrafficData = async () => {
+  trafficLoading.value = true
+  trafficError.value = ''
+  try {
+    const data = await useMonitorApi.getTraffic(timeRange.value)
+    if (data) {
+      nodesData.value.bandwidth = data.peak_bandwidth_mbps != null
+        ? Number(data.peak_bandwidth_mbps.toFixed(1))
+        : 0
+      renderTrafficChart(data)
+    }
+  } catch (error) {
+    console.error('获取流量数据失败:', error)
+    trafficError.value = 'Failed to load traffic data'
+    nodesData.value.bandwidth = 'N/A'
   } finally {
-    loading.value = false
+    trafficLoading.value = false
   }
 }
 
-// 初始化图表
-const initTrafficChart = () => {
-  if (trafficChartRef.value) {
-    chartInstance = echarts.init(trafficChartRef.value)
-    updateChart()
+// 获取健康数据
+const fetchHealthData = async () => {
+  healthLoading.value = true
+  healthError.value = false
+  try {
+    const data = await useMonitorApi.getHealth()
+    healthData.value = data
+  } catch (error) {
+    console.error('获取健康数据失败:', error)
+    healthError.value = true
+  } finally {
+    healthLoading.value = false
+  }
+}
 
-    window.addEventListener('resize', () => {
-      chartInstance.resize()
+// 获取活动列表
+const fetchActivities = async () => {
+  try {
+    const data = await useMonitorApi.getEvents({ limit: 8 })
+    const items = Array.isArray(data) ? data : (data?.items || [])
+    activities.value = items.map(ev => {
+      const mapping = eventTypeMap[ev.event_type] || eventTypeMap.default
+      return {
+        type: mapping.type,
+        icon: mapping.icon,
+        text: ev.message || ev.description || ev.event_type || 'Event',
+        time: formatEventTime(ev.created_at || ev.timestamp),
+        tag: mapping.tag,
+        tagType: mapping.tagType
+      }
     })
+  } catch (error) {
+    console.error('获取活动列表失败:', error)
+    activities.value = []
   }
 }
 
-// 更新图表数据
-const updateChart = () => {
+// 渲染流量图表
+const renderTrafficChart = (data) => {
   if (!chartInstance) return
 
-  const data = generateChartData()
+  const timestamps = data.timestamps || []
+  const uploadBytes = data.upload_bytes || []
+  const downloadBytes = data.download_bytes || []
+
+  // 转换时间戳为可读标签
+  const xAxis = timestamps.map(ts => {
+    const d = new Date(ts * 1000)
+    if (timeRange.value === '1h' || timeRange.value === '24h') {
+      return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
+    }
+    return (d.getMonth() + 1) + '/' + d.getDate()
+  })
+
+  // bytes → Mbps (bytes * 8 / 1_000_000) 用于显示
+  const toMbps = (bytes) => Number(((bytes * 8) / 1000000).toFixed(2))
+  const upload = uploadBytes.map(toMbps)
+  const download = downloadBytes.map(toMbps)
 
   const option = {
     backgroundColor: 'transparent',
@@ -445,61 +534,29 @@ const updateChart = () => {
       trigger: 'axis',
       backgroundColor: 'rgba(255, 255, 255, 0.95)',
       borderColor: 'rgba(0, 0, 0, 0.1)',
-      textStyle: {
-        color: '#1E293B'
-      },
-      axisPointer: {
-        lineStyle: {
-          color: 'rgba(59, 130, 246, 0.2)'
-        }
-      }
+      textStyle: { color: '#1E293B' },
+      axisPointer: { lineStyle: { color: 'rgba(59, 130, 246, 0.2)' } }
     },
     legend: {
       data: ['Upload', 'Download'],
-      textStyle: {
-        color: '#475569'
-      },
+      textStyle: { color: '#475569' },
       top: 0
     },
-    grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '3%',
-      top: '15%',
-      containLabel: true
-    },
+    grid: { left: '3%', right: '4%', bottom: '3%', top: '15%', containLabel: true },
     xAxis: {
       type: 'category',
       boundaryGap: false,
-      data: data.xAxis,
-      axisLine: {
-        lineStyle: {
-          color: 'rgba(0, 0, 0, 0.08)'
-        }
-      },
-      axisLabel: {
-        color: '#64748B'
-      }
+      data: xAxis,
+      axisLine: { lineStyle: { color: 'rgba(0, 0, 0, 0.08)' } },
+      axisLabel: { color: '#64748B' }
     },
     yAxis: {
       type: 'value',
-      name: 'Gbps',
-      nameTextStyle: {
-        color: '#64748B'
-      },
-      axisLine: {
-        lineStyle: {
-          color: 'rgba(0, 0, 0, 0.08)'
-        }
-      },
-      axisLabel: {
-        color: '#64748B'
-      },
-      splitLine: {
-        lineStyle: {
-          color: 'rgba(0, 0, 0, 0.05)'
-        }
-      }
+      name: 'Mbps',
+      nameTextStyle: { color: '#64748B' },
+      axisLine: { lineStyle: { color: 'rgba(0, 0, 0, 0.08)' } },
+      axisLabel: { color: '#64748B' },
+      splitLine: { lineStyle: { color: 'rgba(0, 0, 0, 0.05)' } }
     },
     series: [
       {
@@ -507,18 +564,11 @@ const updateChart = () => {
         type: 'line',
         smooth: true,
         symbol: 'none',
-        data: data.upload,
-        lineStyle: {
-          width: 3,
-          color: '#3B82F6'
-        },
+        data: upload,
+        lineStyle: { width: 3, color: '#3B82F6' },
         areaStyle: {
           color: {
-            type: 'linear',
-            x: 0,
-            y: 0,
-            x2: 0,
-            y2: 1,
+            type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
             colorStops: [
               { offset: 0, color: 'rgba(59, 130, 246, 0.2)' },
               { offset: 1, color: 'rgba(59, 130, 246, 0.02)' }
@@ -531,18 +581,11 @@ const updateChart = () => {
         type: 'line',
         smooth: true,
         symbol: 'none',
-        data: data.download,
-        lineStyle: {
-          width: 3,
-          color: '#22C55E'
-        },
+        data: download,
+        lineStyle: { width: 3, color: '#22C55E' },
         areaStyle: {
           color: {
-            type: 'linear',
-            x: 0,
-            y: 0,
-            x2: 0,
-            y2: 1,
+            type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
             colorStops: [
               { offset: 0, color: 'rgba(34, 197, 94, 0.2)' },
               { offset: 1, color: 'rgba(34, 197, 94, 0.02)' }
@@ -556,39 +599,54 @@ const updateChart = () => {
   chartInstance.setOption(option, true)
 }
 
-// 生成模拟图表数据
-const generateChartData = () => {
-  const hours = 24
-  const xAxis = Array.from({ length: hours }, (_, i) => {
-    const time = new Date()
-    time.setHours(time.getHours() - hours + i)
-    return time.getHours() + ':00'
-  })
-
-  const upload = Array.from({ length: hours }, () =>
-    (Math.random() * 1.5 + 0.5).toFixed(2)
-  )
-
-  const download = Array.from({ length: hours }, () =>
-    (Math.random() * 2.5 + 1).toFixed(2)
-  )
-
-  return { xAxis, upload, download }
+// 初始化图表
+const initTrafficChart = () => {
+  if (trafficChartRef.value) {
+    chartInstance = echarts.init(trafficChartRef.value)
+    window.addEventListener('resize', () => {
+      chartInstance?.resize()
+    })
+  }
 }
 
 // 刷新活动
 const refreshActivities = () => {
-  ElMessage.success('Activities refreshed')
+  fetchActivities()
 }
 
 // 监听时间范围变化
 watch(timeRange, () => {
-  updateChart()
+  fetchTrafficData()
 })
 
+// 60 秒自动刷新健康指标
+const startHealthRefresh = () => {
+  healthTimer = setInterval(() => {
+    fetchHealthData()
+  }, 60000)
+}
+
 onMounted(async () => {
-  await fetchDashboardData()
   initTrafficChart()
+  await Promise.all([
+    fetchNodesData(),
+    fetchTrafficData(),
+    fetchHealthData(),
+    fetchActivities()
+  ])
+  startHealthRefresh()
+})
+
+onBeforeUnmount(() => {
+  if (healthTimer) {
+    clearInterval(healthTimer)
+    healthTimer = null
+  }
+  if (chartInstance) {
+    chartInstance.dispose()
+    chartInstance = null
+  }
+  window.removeEventListener('resize', () => {})
 })
 </script>
 
@@ -602,14 +660,10 @@ onMounted(async () => {
   gap: 20px;
 }
 
-/* ============================================
-   Stats Row
-   ============================================ */
 .stats-row {
   margin-bottom: 0;
 }
 
-/* Stat Cards (浅色) */
 .stat-card {
   position: relative;
   padding: 24px;
@@ -642,54 +696,12 @@ onMounted(async () => {
   transition: all var(--aria-transition-base);
 }
 
-.stat-card-blue .stat-icon {
-  background: rgba(59, 130, 246, 0.1);
-  color: #3B82F6;
-}
+.stat-card-blue .stat-icon { background: rgba(59, 130, 246, 0.1); color: #3B82F6; }
+.stat-card-green .stat-icon { background: rgba(34, 197, 94, 0.1); color: #22C55E; }
+.stat-card-orange .stat-icon { background: rgba(245, 158, 11, 0.1); color: #F59E0B; }
+.stat-card-purple .stat-icon { background: rgba(139, 92, 246, 0.1); color: #8B5CF6; }
 
-.stat-card-green .stat-icon {
-  background: rgba(34, 197, 94, 0.1);
-  color: #22C55E;
-}
-
-.stat-card-orange .stat-icon {
-  background: rgba(245, 158, 11, 0.1);
-  color: #F59E0B;
-}
-
-.stat-card-purple .stat-icon {
-  background: rgba(139, 92, 246, 0.1);
-  color: #8B5CF6;
-}
-
-.stat-trend {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 4px 8px;
-  border-radius: var(--radius-full);
-}
-
-.stat-trend.positive {
-  color: var(--aria-success);
-  background: rgba(34, 197, 94, 0.1);
-}
-
-.stat-trend.negative {
-  color: var(--aria-danger);
-  background: rgba(239, 68, 68, 0.1);
-}
-
-.stat-trend.neutral {
-  color: var(--aria-text-muted);
-  background: rgba(148, 163, 184, 0.1);
-}
-
-.stat-content {
-  margin-bottom: 16px;
-}
+.stat-content { margin-bottom: 16px; }
 
 .stat-value {
   font-size: 32px;
@@ -712,49 +724,17 @@ onMounted(async () => {
   color: var(--aria-text-muted);
 }
 
-.stat-progress {
-  height: 4px;
-  background: var(--aria-content-bg-tertiary);
-  border-radius: 2px;
-  overflow: hidden;
-}
+.stat-progress { height: 4px; background: var(--aria-content-bg-tertiary); border-radius: 2px; overflow: hidden; }
+.progress-bar { height: 100%; background: var(--aria-content-bg-tertiary); border-radius: 2px; }
+.progress-fill { height: 100%; border-radius: 2px; transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
 
-.progress-bar {
-  height: 100%;
-  background: var(--aria-content-bg-tertiary);
-  border-radius: 2px;
-}
+.stat-card-blue .progress-fill { background: linear-gradient(90deg, #3B82F6 0%, #60A5FA 100%); }
+.stat-card-green .progress-fill { background: linear-gradient(90deg, #22C55E 0%, #4ADE80 100%); }
+.stat-card-orange .progress-fill { background: linear-gradient(90deg, #F59E0B 0%, #FBBF24 100%); }
+.stat-card-purple .progress-fill { background: linear-gradient(90deg, #8B5CF6 0%, #A78BFA 100%); }
 
-.progress-fill {
-  height: 100%;
-  border-radius: 2px;
-  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-}
+.content-row { margin-bottom: 0; }
 
-.stat-card-blue .progress-fill {
-  background: linear-gradient(90deg, #3B82F6 0%, #60A5FA 100%);
-}
-
-.stat-card-green .progress-fill {
-  background: linear-gradient(90deg, #22C55E 0%, #4ADE80 100%);
-}
-
-.stat-card-orange .progress-fill {
-  background: linear-gradient(90deg, #F59E0B 0%, #FBBF24 100%);
-}
-
-.stat-card-purple .progress-fill {
-  background: linear-gradient(90deg, #8B5CF6 0%, #A78BFA 100%);
-}
-
-/* ============================================
-   Content Row
-   ============================================ */
-.content-row {
-  margin-bottom: 0;
-}
-
-/* Card Headers */
 .card-header {
   display: flex;
   justify-content: space-between;
@@ -764,51 +744,17 @@ onMounted(async () => {
   background: transparent;
 }
 
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
+.header-left { display: flex; align-items: center; gap: 10px; }
+.header-icon { font-size: 20px; color: var(--aria-primary); }
+.header-title { font-size: 16px; font-weight: 600; color: var(--aria-text-primary); }
+.header-actions { display: flex; align-items: center; gap: 12px; }
 
-.header-icon {
-  font-size: 20px;
-  color: var(--aria-primary);
-}
+.chart-card { min-height: 420px; }
+.chart-container { width: 100%; height: 340px; }
+.chart-error { margin-top: 8px; }
 
-.header-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--aria-text-primary);
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-/* Chart Card */
-.chart-card {
-  min-height: 420px;
-}
-
-.chart-container {
-  width: 100%;
-  height: 340px;
-}
-
-/* ============================================
-   Activity Card
-   ============================================ */
-.activity-card {
-  min-height: 420px;
-}
-
-.activity-list {
-  max-height: 340px;
-  overflow-y: auto;
-  padding: 4px;
-}
+.activity-card { min-height: 420px; }
+.activity-list { max-height: 340px; overflow-y: auto; padding: 4px; }
 
 .activity-item {
   display: flex;
@@ -819,248 +765,72 @@ onMounted(async () => {
   cursor: pointer;
   border-bottom: 1px solid var(--aria-border-primary);
 }
-
-.activity-item:last-child {
-  border-bottom: none;
-}
-
-.activity-item:hover {
-  background: var(--aria-content-bg-tertiary);
-}
+.activity-item:last-child { border-bottom: none; }
+.activity-item:hover { background: var(--aria-content-bg-tertiary); }
 
 .activity-icon-wrapper {
-  width: 40px;
-  height: 40px;
+  width: 40px; height: 40px;
   border-radius: var(--aria-radius);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; flex-shrink: 0;
 }
+.activity-icon-wrapper.node { background: rgba(59, 130, 246, 0.1); color: #3B82F6; }
+.activity-icon-wrapper.route { background: rgba(34, 197, 94, 0.1); color: #22C55E; }
+.activity-icon-wrapper.config { background: rgba(245, 158, 11, 0.1); color: #F59E0B; }
 
-.activity-icon-wrapper.node {
-  background: rgba(59, 130, 246, 0.1);
-  color: #3B82F6;
-}
+.activity-content { flex: 1; min-width: 0; }
+.activity-text { font-size: 14px; color: var(--aria-text-primary); margin-bottom: 4px; line-height: 1.5; }
+.activity-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.activity-time { font-size: 12px; color: var(--aria-text-muted); }
 
-.activity-icon-wrapper.route {
-  background: rgba(34, 197, 94, 0.1);
-  color: #22C55E;
-}
-
-.activity-icon-wrapper.config {
-  background: rgba(245, 158, 11, 0.1);
-  color: #F59E0B;
-}
-
-.activity-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.activity-text {
-  font-size: 14px;
-  color: var(--aria-text-primary);
-  margin-bottom: 4px;
-  line-height: 1.5;
-}
-
-.activity-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.activity-time {
-  font-size: 12px;
-  color: var(--aria-text-muted);
-}
-
-/* ============================================
-   Region Card
-   ============================================ */
-.region-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
+.region-list { display: flex; flex-direction: column; gap: 16px; }
 .region-item {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px;
-  background: var(--aria-content-bg-tertiary);
-  border-radius: var(--aria-radius);
+  display: flex; align-items: center; gap: 16px; padding: 12px;
+  background: var(--aria-content-bg-tertiary); border-radius: var(--aria-radius);
   transition: all var(--aria-transition-fast);
 }
+.region-item:hover { background: var(--aria-content-bg-secondary); border: 1px solid var(--aria-border-hover); }
+.region-info { display: flex; align-items: center; gap: 12px; flex: 1; }
+.region-icon { font-size: 24px; }
+.region-details { display: flex; flex-direction: column; gap: 2px; }
+.region-name { font-size: 14px; font-weight: 500; color: var(--aria-text-primary); }
+.region-nodes { font-size: 12px; color: var(--aria-text-muted); }
+.region-stats { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; min-width: 100px; }
+.region-percentage { font-size: 12px; font-weight: 600; color: var(--aria-text-secondary); }
 
-.region-item:hover {
-  background: var(--aria-content-bg-secondary);
-  border: 1px solid var(--aria-border-hover);
-}
-
-.region-info {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-}
-
-.region-icon {
-  font-size: 24px;
-}
-
-.region-details {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.region-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--aria-text-primary);
-}
-
-.region-nodes {
-  font-size: 12px;
-  color: var(--aria-text-muted);
-}
-
-.region-stats {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
-  min-width: 100px;
-}
-
-.region-percentage {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--aria-text-secondary);
-}
-
-/* ============================================
-   Quick Actions Card
-   ============================================ */
-.quick-actions-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-}
-
+.quick-actions-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .quick-action-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 20px;
-  background: var(--aria-content-bg-tertiary);
-  border-radius: var(--aria-radius);
-  cursor: pointer;
-  transition: all var(--aria-transition-base);
+  display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px;
+  background: var(--aria-content-bg-tertiary); border-radius: var(--aria-radius);
+  cursor: pointer; transition: all var(--aria-transition-base);
   border: 1px solid var(--aria-border-primary);
 }
-
 .quick-action-item:hover {
-  background: var(--aria-content-bg-secondary);
-  border-color: var(--aria-border-hover);
-  transform: translateY(-2px);
-  box-shadow: var(--aria-shadow);
+  background: var(--aria-content-bg-secondary); border-color: var(--aria-border-hover);
+  transform: translateY(-2px); box-shadow: var(--aria-shadow);
 }
-
 .action-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--aria-radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
+  width: 48px; height: 48px; border-radius: var(--aria-radius-md);
+  display: flex; align-items: center; justify-content: center; font-size: 24px;
 }
+.action-name { font-size: 13px; font-weight: 500; color: var(--aria-text-primary); text-align: center; }
 
-.action-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--aria-text-primary);
-  text-align: center;
-}
+.health-metrics { display: flex; flex-direction: column; gap: 20px; }
+.health-item { display: flex; flex-direction: column; gap: 8px; }
+.metric-header { display: flex; justify-content: space-between; align-items: center; }
+.metric-name { font-size: 13px; font-weight: 500; color: var(--aria-text-secondary); }
+.metric-value { font-size: 14px; font-weight: 600; }
+.metric-value.status-good { color: var(--aria-success); }
+.metric-value.status-warning { color: var(--aria-warning); }
+.metric-value.status-danger { color: var(--aria-danger); }
+.health-error { padding: 8px 0; }
 
-/* ============================================
-   Health Card
-   ============================================ */
-.health-metrics {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.health-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.metric-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.metric-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--aria-text-secondary);
-}
-
-.metric-value {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.metric-value.status-good {
-  color: var(--aria-success);
-}
-
-.metric-value.status-warning {
-  color: var(--aria-warning);
-}
-
-.metric-value.status-danger {
-  color: var(--aria-danger);
-}
-
-/* ============================================
-   Responsive
-   ============================================ */
 @media (max-width: 768px) {
-  .dashboard {
-    gap: 16px;
-  }
-
-  .stat-value {
-    font-size: 28px;
-  }
-
-  .chart-card,
-  .activity-card {
-    min-height: auto;
-  }
-
-  .chart-container {
-    height: 280px;
-  }
-
-  .activity-list {
-    max-height: 280px;
-  }
-
-  .quick-actions-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
+  .dashboard { gap: 16px; }
+  .stat-value { font-size: 28px; }
+  .chart-card, .activity-card { min-height: auto; }
+  .chart-container { height: 280px; }
+  .activity-list { max-height: 280px; }
+  .quick-actions-grid { grid-template-columns: repeat(2, 1fr); }
 }
 </style>

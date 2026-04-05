@@ -257,6 +257,30 @@ func (r *Router) handleTenantMonitoring(w http.ResponseWriter, req *http.Request
 		return
 	}
 
+	// GET /monitoring/nodes/{node_id}/metrics
+	if len(parts) == 8 && parts[5] == "nodes" && parts[7] == "metrics" && req.Method == http.MethodGet {
+		r.handleMonitoringNodeMetrics(w, req, tenantID, parts[6])
+		return
+	}
+
+	// GET /monitoring/traffic
+	if len(parts) == 6 && parts[5] == "traffic" && req.Method == http.MethodGet {
+		r.handleMonitoringTraffic(w, req, tenantID)
+		return
+	}
+
+	// GET /monitoring/health
+	if len(parts) == 6 && parts[5] == "health" && req.Method == http.MethodGet {
+		r.handleMonitoringHealth(w, req, tenantID)
+		return
+	}
+
+	// GET /monitoring/topology
+	if len(parts) == 6 && parts[5] == "topology" && req.Method == http.MethodGet {
+		r.handleMonitoringTopology(w, req, tenantID)
+		return
+	}
+
 	// POST /monitoring/alerts/{alert_id}/resolve
 	if len(parts) == 8 && parts[5] == "alerts" && parts[7] == "resolve" && req.Method == http.MethodPost {
 		r.handleMonitoringAlertResolve(w, req, tenantID, parts[6])

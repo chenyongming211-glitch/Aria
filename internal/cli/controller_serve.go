@@ -34,6 +34,7 @@ import (
 	"aria/pkg/controllerstorage"
 	"aria/pkg/grpc/agentpb"
 	"aria/pkg/logging"
+	"aria/pkg/victoriametrics"
 )
 
 var controllerServeCmd = &cobra.Command{
@@ -320,7 +321,13 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	http.HandleFunc("/api/v1/version", handleVersion)
 
 	// Initialize API v2 skeleton
-	v2.SetupRoutes(http.DefaultServeMux, store)
+	// Derive VictoriaMetrics query base URL from push gateway
+	vmBaseURL := "http://localhost:8428"
+	if strings.Contains(metricsPushGateway, "/api/v1/import/prometheus") {
+		vmBaseURL = strings.TrimSuffix(metricsPushGateway, "/api/v1/import/prometheus")
+	}
+	vmClient := victoriametrics.NewClient(vmBaseURL)
+	v2.SetupRoutes(http.DefaultServeMux, store, vmClient)
 
 	// AI handlers (Production)
 	if cfg.AI.Enabled {

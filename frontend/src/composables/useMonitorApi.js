@@ -93,14 +93,59 @@ export const useMonitorApi = {
   },
 
   /**
-   * 获取健康状态
+   * 获取流量数据
+   * @param {string} range - 时间范围（1h/24h/7d/30d）
+   */
+  getTraffic: async (range = '24h') => {
+    try {
+      const tenantId = requireCurrentTenantId()
+      const response = await api.get(API_ENDPOINTS.MONITOR.TRAFFIC(tenantId), { params: { range } })
+      return response.data?.data || response.data
+    } catch (error) {
+      console.error('获取流量数据失败:', error)
+      throw error
+    }
+  },
+
+  /**
+   * 获取系统健康指标
    */
   getHealth: async () => {
     try {
-      const response = await api.get(API_ENDPOINTS.HEALTH)
-      return response.data
+      const tenantId = requireCurrentTenantId()
+      const response = await api.get(API_ENDPOINTS.MONITOR.HEALTH(tenantId))
+      return response.data?.data || response.data
     } catch (error) {
-      console.error('获取健康状态失败:', error)
+      console.error('获取健康指标失败:', error)
+      throw error
+    }
+  },
+
+  /**
+   * 获取单节点 metrics（带宽/延迟）
+   * @param {string} nodeId - 节点ID
+   */
+  getNodeMetrics: async (nodeId) => {
+    try {
+      const tenantId = requireCurrentTenantId()
+      const response = await api.get(API_ENDPOINTS.MONITOR.NODE_METRICS(tenantId, nodeId))
+      return response.data?.data || response.data
+    } catch (error) {
+      console.error('获取节点 metrics 失败:', error)
+      throw error
+    }
+  },
+
+  /**
+   * 获取拓扑数据
+   */
+  getTopology: async () => {
+    try {
+      const tenantId = requireCurrentTenantId()
+      const response = await api.get(API_ENDPOINTS.MONITOR.TOPOLOGY(tenantId))
+      return response.data?.data || response.data
+    } catch (error) {
+      console.error('获取拓扑数据失败:', error)
       throw error
     }
   },
