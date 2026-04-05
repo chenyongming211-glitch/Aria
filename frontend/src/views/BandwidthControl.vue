@@ -691,7 +691,6 @@ const fetchRules = async () => {
 
     updateCurrentRules()
     updateCharts()
-    ElMessage.success('规则数据加载成功')
   } catch (error) {
     console.error('Failed to fetch rules:', error)
     ElMessage.error(`获取规则失败: ${error.message}`)

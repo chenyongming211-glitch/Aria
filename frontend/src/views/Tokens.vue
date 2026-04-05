@@ -197,9 +197,7 @@ const fetchTokens = async () => {
     }
 
     if (tokens.value.length === 0) {
-      ElMessage.info('No tokens found')
-    } else {
-      ElMessage.success('Tokens loaded successfully')
+      // No tokens found - silently show empty state
     }
   } catch (error) {
     console.error('Failed to fetch tokens:', error)
