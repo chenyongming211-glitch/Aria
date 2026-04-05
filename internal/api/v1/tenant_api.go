@@ -389,7 +389,7 @@ func (t *TenantAPI) CreateUser(w http.ResponseWriter, r *http.Request, tenantID 
 		req.Role = "member"
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeCreateUserFailed, "Failed to hash password", nil)
 		return
@@ -444,7 +444,7 @@ func (t *TenantAPI) UpdateUser(w http.ResponseWriter, r *http.Request, tenantID,
 	}
 
 	if req.Password != "" {
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 		if err != nil {
 			WriteError(w, http.StatusInternalServerError, CodeUpdateUserFailed, "Failed to hash password", nil)
 			return

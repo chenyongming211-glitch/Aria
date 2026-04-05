@@ -164,7 +164,12 @@ func (a *AuthAPI) HandleForceChangePassword(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	claims, err := auth.ValidateToken(r.Header.Get("Authorization")[7:])
+	authHeader := r.Header.Get("Authorization")
+	if len(authHeader) < 8 || authHeader[:7] != "Bearer " {
+		WriteError(w, http.StatusUnauthorized, CodeInvalidToken, "Missing or malformed Authorization header", nil)
+		return
+	}
+	claims, err := auth.ValidateToken(authHeader[7:])
 	if err != nil {
 		WriteError(w, http.StatusUnauthorized, CodeInvalidToken, "Invalid token", nil)
 		return
@@ -182,7 +187,7 @@ func (a *AuthAPI) HandleForceChangePassword(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), 12)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "HASH_ERROR", "Failed to hash password", nil)
 		return

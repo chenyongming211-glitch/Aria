@@ -325,13 +325,14 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	// Initialize AI Simple handler (MVP) - 使用独立的 MVP 实现
 
 	// Initialize Bandwidth Management API with tenant awareness
-	// Set up HTTP handlers
+	// Set up HTTP handlers using a local mux (avoid polluting http.DefaultServeMux)
+	mux := http.NewServeMux()
 	// Southbound API (Agent 南向接口)
-	http.HandleFunc("/register", controller.HandleRegister)
-	http.HandleFunc("/unregister", controller.HandleUnregister)
-	http.HandleFunc("/network/manage", controller.HandleNetworkManage)
-	http.HandleFunc("/version", handleVersion)
-	http.HandleFunc("/api/version", handleVersion)
+	mux.HandleFunc("/register", controller.HandleRegister)
+	mux.HandleFunc("/unregister", controller.HandleUnregister)
+	mux.HandleFunc("/network/manage", controller.HandleNetworkManage)
+	mux.HandleFunc("/version", handleVersion)
+	mux.HandleFunc("/api/version", handleVersion)
 
 	// Initialize API v2 skeleton
 	// Derive VictoriaMetrics query base URL from push gateway
@@ -340,7 +341,7 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 		vmBaseURL = strings.TrimSuffix(metricsPushGateway, "/api/v1/import/prometheus")
 	}
 	vmClient := victoriametrics.NewClient(vmBaseURL)
-	v2.SetupRoutes(http.DefaultServeMux, store, vmClient)
+	v2.SetupRoutes(mux, store, vmClient)
 
 	// AI handlers (Production)
 	if cfg.AI.Enabled {
@@ -351,7 +352,7 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 		if cfg.DingTalk.Enabled {
 			controller.dingtalkHandler = im.NewDingTalkHandler(aiService, cfg.DingTalk.Webhook, cfg.DingTalk.Secret)
 			// 注册钉钉 Webhook
-			http.HandleFunc("/v1/im/dingtalk", controller.dingtalkHandler.HandleWebhook)
+			mux.HandleFunc("/v1/im/dingtalk", controller.dingtalkHandler.HandleWebhook)
 			logger.Info("DingTalk integration enabled: /v1/im/dingtalk")
 		}
 
@@ -359,7 +360,7 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 		if cfg.Feishu.Enabled {
 			controller.feishuHandler = im.NewFeishuHandler(aiService, cfg.Feishu.AppID, cfg.Feishu.AppSecret, cfg.Feishu.EncryptKey, cfg.Feishu.VerifyToken)
 			// 注册飞书 Webhook
-			http.HandleFunc("/v1/im/feishu", controller.feishuHandler.HandleWebhook)
+			mux.HandleFunc("/v1/im/feishu", controller.feishuHandler.HandleWebhook)
 			logger.Info("Feishu integration enabled: /v1/im/feishu")
 		}
 	}
@@ -479,7 +480,7 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 
 	// ========== Start HTTP Server ==========
 	logger.Info("HTTP server listening on %s", listenAddr)
-	if err := http.ListenAndServe(listenAddr, nil); err != nil {
+	if err := http.ListenAndServe(listenAddr, mux); err != nil {
 		return fmt.Errorf("failed to start HTTP server: %w", err)
 	}
 
@@ -685,27 +686,15 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 				req.Hostname, req.AdvertisedRoutes)
 		}
 	} else {
-		allNodes, _ := c.store.GetAllNodes()
-		for _, node := range allNodes {
-			if node.Hostname == req.Hostname {
-				if requestedTenantID != uuid.Nil && node.TenantID != requestedTenantID {
-					c.logger.Warn("Skipping hostname reuse for %s: existing node belongs to another tenant", req.Hostname)
-					continue
-				}
-				c.logger.Info("Found existing node with same hostname: %s, reusing IP: %s",
-					req.Hostname, node.AssignedIP)
-				assignedIP = node.AssignedIP
-				ipOffset = node.IPOffset
-
-				// Preserve existing advertised routes if not provided
-				if len(req.AdvertisedRoutes) == 0 && len(node.AdvertisedRoutes) > 0 {
-					req.AdvertisedRoutes = node.AdvertisedRoutes
-					c.logger.Info("Preserving existing advertised routes for node %s: %v",
-						req.Hostname, req.AdvertisedRoutes)
-				}
-				c.store.DeleteNode(node.PublicKey)
-				break
+		// Try atomic hostname reuse with tenant isolation
+		if requestedTenantID != uuid.Nil {
+			reusedIP, reusedOffset, err := c.store.ReuseHostnameIP(req.Hostname, requestedTenantID)
+			if err == nil {
+				assignedIP = reusedIP
+				ipOffset = reusedOffset
+				c.logger.Info("Atomically reused IP for hostname %s: %s", req.Hostname, assignedIP)
 			}
+			// err == sql.ErrNoRows means no matching hostname, proceed to new allocation
 		}
 
 		if assignedIP == "" {
@@ -1855,22 +1844,13 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 			req.AdvertisedRoutes = existingNode.AdvertisedRoutes
 		}
 	} else {
-		allNodes, _ := c.store.GetAllNodes()
-		for _, node := range allNodes {
-			if node.Hostname == req.Hostname {
-				if requestedTenantID != uuid.Nil && node.TenantID != requestedTenantID {
-					c.logger.Warn("Skipping hostname reuse for %s: existing node belongs to another tenant", req.Hostname)
-					continue
-				}
-				c.logger.Info("Found existing node with same hostname: %s, reusing IP: %s",
-					req.Hostname, node.AssignedIP)
-				assignedIP = node.AssignedIP
-				ipOffset = node.IPOffset
-				if len(req.AdvertisedRoutes) == 0 && len(node.AdvertisedRoutes) > 0 {
-					req.AdvertisedRoutes = node.AdvertisedRoutes
-				}
-				c.store.DeleteNode(node.PublicKey)
-				break
+		// Try atomic hostname reuse with tenant isolation
+		if requestedTenantID != uuid.Nil {
+			reusedIP, reusedOffset, err := c.store.ReuseHostnameIP(req.Hostname, requestedTenantID)
+			if err == nil {
+				assignedIP = reusedIP
+				ipOffset = reusedOffset
+				c.logger.Info("Atomically reused IP for hostname %s: %s", req.Hostname, assignedIP)
 			}
 		}
 	}
@@ -2131,7 +2111,7 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 		password = "admin123"
 	}
 
-	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(password), 12)
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
