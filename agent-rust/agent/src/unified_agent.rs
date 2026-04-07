@@ -74,8 +74,8 @@ pub struct UnifiedAgent {
     last_sync_peers: Arc<Mutex<Vec<GrpcPeerInfo>>>,
     
     cancel_token: CancellationToken,
-    log_handle: Arc<Mutex<Option<reload::Handle<EnvFilter, Registry>>>>,
-    current_log_level: Arc<Mutex<String>>,
+    log_handle: Arc<StdMutex<Option<reload::Handle<EnvFilter, Registry>>>>,
+    current_log_level: Arc<StdMutex<String>>,
 }
 
 impl UnifiedAgent {
@@ -136,7 +136,7 @@ impl UnifiedAgent {
         tracing::info!("✅ Routing manager created");
         
         let cancel_token = CancellationToken::new();
-        let current_log_level = Arc::new(Mutex::new("info".to_string()));
+        let current_log_level = Arc::new(StdMutex::new("info".to_string()));
         let last_sync_peers = Arc::new(Mutex::new(Vec::new()));
         
         Ok(Self {
@@ -1163,7 +1163,7 @@ impl UnifiedAgent {
             "set_log_level" => {
                 let level = req.args["level"].as_str().unwrap_or("info").to_string();
                 
-                let handle = log_handle.lock().await;
+                let handle = log_handle.lock().unwrap();
                 if let Some(handle) = handle.as_ref() {
                     let new_filter = match level.as_str() {
                         "trace" => EnvFilter::new("trace"),
@@ -1176,7 +1176,7 @@ impl UnifiedAgent {
                     
                     match handle.reload(new_filter) {
                         Ok(_) => {
-                            let mut current = current_log_level.lock().await;
+                            let mut current = current_log_level.lock().unwrap();
                             *current = level.clone();
                             
                             tracing::info!("Log level updated to {}", level);
@@ -1203,7 +1203,7 @@ impl UnifiedAgent {
                 }
             }
             "get_log_level" => {
-                let current = current_log_level.lock().await;
+                let current = current_log_level.lock().unwrap();
                 let level = current.clone();
                 drop(current);
                 
