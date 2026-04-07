@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
 use tokio::signal::unix::{signal, SignalKind};
@@ -70,11 +70,11 @@ pub struct UnifiedAgent {
     
     unix_socket_path: String,
     
-    last_sync_peers: Arc<StdMutex<Vec<GrpcPeerInfo>>>,
+    last_sync_peers: Arc<Mutex<Vec<GrpcPeerInfo>>>,
     
     cancel_token: CancellationToken,
-    log_handle: Arc<StdMutex<Option<reload::Handle<EnvFilter, Registry>>>>,
-    current_log_level: Arc<StdMutex<String>>,
+    log_handle: Arc<Mutex<Option<reload::Handle<EnvFilter, Registry>>>>,
+    current_log_level: Arc<Mutex<String>>,
 }
 
 impl UnifiedAgent {
@@ -130,8 +130,8 @@ impl UnifiedAgent {
         tracing::info!("✅ Routing manager created");
         
         let cancel_token = CancellationToken::new();
-        let current_log_level = Arc::new(StdMutex::new("info".to_string()));
-        let last_sync_peers = Arc::new(StdMutex::new(Vec::new()));
+        let current_log_level = Arc::new(Mutex::new("info".to_string()));
+        let last_sync_peers = Arc::new(Mutex::new(Vec::new()));
         
         Ok(Self {
             config,
@@ -412,7 +412,7 @@ impl UnifiedAgent {
                         }
                         metrics::record_sync_failure();
                     } else {
-                        metrics::record_sync_success(self.last_sync_peers.lock().unwrap().len());
+                        metrics::record_sync_success(self.last_sync_peers.lock().await.len());
                     }
                 }
                 
@@ -615,7 +615,7 @@ impl UnifiedAgent {
                                         }
                                         
                                         // 获取 last_sync_peers 的快照
-                                        let peers_snapshot = last_sync_peers.lock().unwrap().clone();
+                                        let peers_snapshot = last_sync_peers.lock().await.clone();
                                         
                                         let response = match serde_json::from_str::<UnixRequest>(&line) {
                                             Ok(req) => {
@@ -1156,7 +1156,7 @@ impl UnifiedAgent {
             "set_log_level" => {
                 let level = req.args["level"].as_str().unwrap_or("info").to_string();
                 
-                let handle = log_handle.lock().unwrap();
+                let handle = log_handle.lock().await;
                 if let Some(handle) = handle.as_ref() {
                     let new_filter = match level.as_str() {
                         "trace" => EnvFilter::new("trace"),
@@ -1169,7 +1169,7 @@ impl UnifiedAgent {
                     
                     match handle.reload(new_filter) {
                         Ok(_) => {
-                            let mut current = current_log_level.lock().unwrap();
+                            let mut current = current_log_level.lock().await;
                             *current = level.clone();
                             
                             tracing::info!("Log level updated to {}", level);
@@ -1196,7 +1196,7 @@ impl UnifiedAgent {
                 }
             }
             "get_log_level" => {
-                let current = current_log_level.lock().unwrap();
+                let current = current_log_level.lock().await;
                 let level = current.clone();
                 drop(current);
                 
@@ -1232,7 +1232,7 @@ impl UnifiedAgent {
                     let mut result = HashMap::new();
                     result.insert(
                         "peer_count".to_string(),
-                        self.last_sync_peers.lock().unwrap().len().to_string(),
+                        self.last_sync_peers.lock().await.len().to_string(),
                     );
                     if let Some(value) = self.config.last_desired_version.clone().filter(|value| !value.trim().is_empty()) {
                         result.insert("desired_state_version".to_string(), value);
@@ -1317,7 +1317,7 @@ impl UnifiedAgent {
         );
         result.insert(
             "last_sync_peer_count".to_string(),
-            self.last_sync_peers.lock().unwrap().len().to_string(),
+            self.last_sync_peers.lock().await.len().to_string(),
         );
 
         let wg = self.wg_manager.lock().await;
@@ -1346,7 +1346,7 @@ impl UnifiedAgent {
         request: GrpcCommandRequest,
     ) -> GrpcCommandResponse {
         let args = Self::decode_remote_command_args(&request.params);
-        let peers_snapshot = self.last_sync_peers.lock().unwrap().clone();
+        let peers_snapshot = self.last_sync_peers.lock().await.clone();
         let response_raw = Self::handle_unix_command(
             UnixRequest {
                 cmd: request.command.clone(),
@@ -1467,7 +1467,7 @@ impl UnifiedAgent {
         let assigned_ip = sync_result.assigned_ip.clone();
         let peers = sync_result.peers;
 
-        *self.last_sync_peers.lock().unwrap() = peers;
+        *self.last_sync_peers.lock().await = peers;
         if !assigned_ip.trim().is_empty() {
             self.config.assigned_ip = Some(assigned_ip.clone());
             self.config.address = Some(format!("{}/32", assigned_ip));

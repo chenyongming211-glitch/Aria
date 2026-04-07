@@ -26,6 +26,12 @@ function onTokenRefreshed(newToken) {
   refreshSubscribers = []
 }
 
+// 通知所有订阅者 token 刷新失败
+function onTokenRefreshFailed() {
+  refreshSubscribers.forEach(callback => callback(null))
+  refreshSubscribers = []
+}
+
 // 检查 token 是否快过期（剩余 < 10 分钟）
 function isTokenExpiringSoon() {
   const tokenExpireTime = sessionStorage.getItem('aria_token_expire_time')
@@ -117,16 +123,24 @@ api.interceptors.request.use(
         if (newToken) {
           onTokenRefreshed(newToken)
         } else {
-          // 刷新失败，跳转登录
+          // 刷新失败，通知所有等待的请求，然后跳转登录
+          onTokenRefreshFailed()
           redirectToLogin()
           return config
         }
       } else {
         // 正在刷新，等待刷新完成后更新 token
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
           subscribeTokenRefresh((newToken) => {
-            config.headers.Authorization = `Bearer ${newToken}`
-            resolve(config)
+            if (newToken) {
+              // 刷新成功，使用新 token 继续请求
+              config.headers.Authorization = `Bearer ${newToken}`
+              resolve(config)
+            } else {
+              // 刷新失败，跳转登录并 reject Promise
+              redirectToLogin()
+              reject(new Error('Token refresh failed'))
+            }
           })
         })
       }
