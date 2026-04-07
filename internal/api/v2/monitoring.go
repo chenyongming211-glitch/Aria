@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -367,7 +368,7 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 	instances := make([]string, 0, len(nodes))
 	for _, n := range nodes {
 		if n.PublicIP != "" {
-			instances = append(instances, n.PublicIP+".*")
+			instances = append(instances, regexp.QuoteMeta(n.PublicIP)+":.*")
 		}
 	}
 	instanceFilter := strings.Join(instances, "|")
@@ -471,7 +472,7 @@ func (r *Router) handleMonitoringNodeMetrics(w http.ResponseWriter, req *http.Re
 		ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
 		defer cancel()
 
-		instanceFilter := node.PublicIP + ".*"
+		instanceFilter := regexp.QuoteMeta(node.PublicIP) + ":.*"
 
 		// 查询上传速率
 		txQuery := fmt.Sprintf(`sum(rate(wireguard_peer_tx_bytes{instance=~"%s"}[5m]))`, instanceFilter)

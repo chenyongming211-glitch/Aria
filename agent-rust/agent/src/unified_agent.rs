@@ -61,11 +61,12 @@ fn current_unix_timestamp() -> i64 {
 pub struct UnifiedAgent {
     config: AgentConfig,
     config_path: String,
-    
+
     acl_mgr: Arc<Mutex<AclManager>>,
     qos_mgr: Arc<Mutex<QoSManager>>,
     grpc_client: GrpcClient,
     wg_manager: Arc<Mutex<WireGuardManager>>,
+    wg_managers: HashMap<String, Arc<Mutex<WireGuardManager>>>,
     routing_manager: RoutingManager,
     
     unix_socket_path: String,
@@ -100,7 +101,7 @@ impl UnifiedAgent {
             vec![config.interface_name.clone()]
         };
 
-        let wg_manager = Arc::new(Mutex::new(WireGuardManager::new(&config.interface_name)));
+        let mut wg_managers = HashMap::new();
         for (i, iface_name) in interfaces.iter().enumerate() {
             let port = config.listen_port + i as u16;
             let mut wg = WireGuardManager::new(iface_name);
@@ -111,7 +112,12 @@ impl UnifiedAgent {
                 config.mtu,
             ).context(format!("Failed to create WireGuard interface {}", iface_name))?;
             tracing::info!("✅ WireGuard interface {} created on port {}", iface_name, port);
+            wg_managers.insert(iface_name.clone(), Arc::new(Mutex::new(wg)));
         }
+
+        let wg_manager = wg_managers.get(&config.interface_name)
+            .expect("main interface must be in wg_managers")
+            .clone();
 
         // Load eBPF programs and attach to ALL interfaces
         let (acl_mgr, qos_mgr, _identity_mgr) = Self::load_ebpf_programs_multi(&interfaces)?;
@@ -140,6 +146,7 @@ impl UnifiedAgent {
             qos_mgr,
             grpc_client,
             wg_manager,
+            wg_managers,
             routing_manager,
             unix_socket_path: "/run/aria-agent.sock".to_string(),
             last_sync_peers,
@@ -1605,7 +1612,8 @@ impl UnifiedAgent {
     async fn sync_peers(&mut self, new_peers: &[GrpcPeerInfo]) -> Result<()> {
         let new_peers = new_peers.to_vec();
         let multi_tunnel = self.config.multi_tunnel;
-        
+        let wg_managers = self.wg_managers.clone();
+
         let result = tokio::task::spawn_blocking(move || -> Result<(usize, usize, usize, usize)> {
             // 确定要配置的接口列表
             let interfaces = if multi_tunnel {
@@ -1614,14 +1622,15 @@ impl UnifiedAgent {
                 vec!["aria0"]
             };
             let interface_count = interfaces.len();
-            
+
             let mut total_added = 0;
             let mut total_removed = 0;
             let mut total_updated = 0;
-            
+
             for iface in interfaces {
-                let iface_wg_manager = Arc::new(Mutex::new(WireGuardManager::new(iface)));
-                let mut wg = iface_wg_manager.blocking_lock();
+                let mgr = wg_managers.get(iface)
+                    .unwrap_or_else(|| panic!("WireGuardManager for {} not found", iface));
+                let mut wg = mgr.blocking_lock();
                 
                 let current_peers = wg.list_peers()
                     .context("Failed to list current peers")?;

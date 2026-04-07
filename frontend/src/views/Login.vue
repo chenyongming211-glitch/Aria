@@ -268,7 +268,7 @@ const loadRememberedCredentials = () => {
       const creds = JSON.parse(remembered)
       return {
         username: creds.username || '',
-        password: creds.password || '',
+        password: '',
         rememberMe: true
       }
     } catch {
@@ -340,8 +340,7 @@ const handleLogin = async () => {
 
       if (loginForm.value.rememberMe) {
         localStorage.setItem('aria_remembered_login', JSON.stringify({
-          username: loginForm.value.username,
-          password: loginForm.value.password
+          username: loginForm.value.username
         }))
       } else {
         localStorage.removeItem('aria_remembered_login')

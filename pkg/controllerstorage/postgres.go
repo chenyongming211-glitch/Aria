@@ -1394,36 +1394,6 @@ func (s *Storage) DeleteACLRuleByTenant(id int, tenantID uuid.UUID) error {
 	return nil
 }
 
-// BulkSaveACLRules replaces all ACL rules atomically.
-func (s *Storage) BulkSaveACLRules(rules []*ACLRule) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Delete all existing rules
-	if _, err := tx.Exec(`DELETE FROM acl_rules`); err != nil {
-		return err
-	}
-
-	// Insert new rules
-	for _, rule := range rules {
-		query := `
-			INSERT INTO acl_rules (name, src_node, src_net, dst_node, dst_net, protocol, min_port, max_port, action, enabled, priority, description)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		`
-		if _, err := tx.Exec(query,
-			rule.Name, rule.SrcNode, rule.SrcNet, rule.DstNode, rule.DstNet, rule.Protocol,
-			rule.MinPort, rule.MaxPort, rule.Action, rule.Enabled, rule.Priority, rule.Description,
-		); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
-}
-
 // BulkSaveACLRulesByTenant saves ACL rules for a specific tenant atomically.
 func (s *Storage) BulkSaveACLRulesByTenant(tenantID uuid.UUID, rules []*ACLRule) error {
 	tx, err := s.db.Begin()

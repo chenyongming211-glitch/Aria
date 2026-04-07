@@ -75,10 +75,16 @@ func JWTAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		ctx = context.WithValue(ctx, UsernameKey, claims.Username)
 		ctx = context.WithValue(ctx, UserRoleKey, claims.Role)
 
-		// 支持前端切换租户：优先使用 X-Tenant-ID 头
-		if tenantIDHeader := r.Header.Get("X-Tenant-ID"); tenantIDHeader != "" {
-			if _, err := uuid.Parse(tenantIDHeader); err == nil {
-				ctx = context.WithValue(ctx, TenantIDKey, tenantIDHeader)
+		// 租户上下文设置：
+		// - super_admin：允许通过 X-Tenant-ID 头切换租户（管理多租户需要）
+		// - 其他角色：强制使用 JWT claims 中的 TenantID，防止越权
+		if claims.Role == "super_admin" {
+			if tenantIDHeader := r.Header.Get("X-Tenant-ID"); tenantIDHeader != "" {
+				if _, err := uuid.Parse(tenantIDHeader); err == nil {
+					ctx = context.WithValue(ctx, TenantIDKey, tenantIDHeader)
+				} else if claims.TenantID != "" {
+					ctx = context.WithValue(ctx, TenantIDKey, claims.TenantID)
+				}
 			} else if claims.TenantID != "" {
 				ctx = context.WithValue(ctx, TenantIDKey, claims.TenantID)
 			}
