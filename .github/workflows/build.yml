@@ -48,6 +48,7 @@ jobs:
 
       - name: Upload Go artifacts
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: go-binaries
           path: |
@@ -133,6 +134,7 @@ jobs:
 
       - name: Upload Rust artifact
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: rust-agent-binary
           path: agent-rust/target/release/aria-agent
@@ -164,6 +166,7 @@ jobs:
 
       - name: Upload frontend artifact
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: frontend-dist
           path: temp-dist
