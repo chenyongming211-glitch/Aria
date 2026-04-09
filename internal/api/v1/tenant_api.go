@@ -174,67 +174,6 @@ func (t *TenantAPI) ListTenants(w http.ResponseWriter, r *http.Request) {
 	WriteSuccess(w, tenants, fmt.Sprintf("%d tenants retrieved", len(tenants)))
 }
 
-// ✅ 核心修复：干掉不存在的 GetAllNodes 调用，直接下推 SQL 进行租户级高性能查询
-func (t *TenantAPI) GetTenantNodes(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "Method not allowed", nil)
-		return
-	}
-
-	userTenantID, exists := middleware.GetTenantID(r.Context())
-	if !exists {
-		WriteError(w, http.StatusUnauthorized, CodeTenantContextNotFound, "请先选择租户：当前未设置租户上下文", nil)
-		return
-	}
-
-	query := `
-		SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role,
-		       COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0),
-		       advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at
-		FROM nodes 
-		WHERE tenant_id = $1 
-		ORDER BY last_seen DESC`
-
-	rows, err := t.store.DB().Query(query, userTenantID)
-	if err != nil {
-		WriteError(w, http.StatusInternalServerError, CodeGetNodesFailed, "Failed to get nodes", nil)
-		return
-	}
-	defer rows.Close()
-
-	var tenantNodes []map[string]interface{}
-	for rows.Next() {
-		var node controllerstorage.Node
-		var advertisedRoutes interface{}
-		var enrolledWithToken interface{}
-
-		err := rows.Scan(
-			&node.ID, &node.PublicKey, &node.MachineID, &node.TenantID,
-			&node.Endpoint, &node.PrivateIP, &node.PublicIP, &node.Region,
-			&node.VPCID, &node.Hostname, &node.AssignedIP, &node.IPOffset,
-			&node.LastSeen, &node.RegisteredAt, &node.Role,
-			&node.RuntimeMode, &node.KernelVersion, &node.HasAESNI,
-			&node.Status, &node.OfflineSince,
-			&advertisedRoutes, &enrolledWithToken,
-			&node.CreatedAt, &node.UpdatedAt,
-		)
-		if err != nil {
-			continue // 生产环境建议加上 log.Printf
-		}
-
-		tenantNodes = append(tenantNodes, map[string]interface{}{
-			"id":          node.ID.String(),
-			"public_key":  node.PublicKey,
-			"hostname":    node.Hostname,
-			"assigned_ip": node.AssignedIP,
-			"status":      node.Status,
-			"last_seen":   node.LastSeen,
-		})
-	}
-
-	WriteSuccess(w, tenantNodes, fmt.Sprintf("%d nodes retrieved", len(tenantNodes)))
-}
-
 func (t *TenantAPI) HandleTenants(w http.ResponseWriter, r *http.Request) {
 	pathParts := strings.Split(r.URL.Path, "/")
 
@@ -256,16 +195,6 @@ func (t *TenantAPI) HandleTenants(w http.ResponseWriter, r *http.Request) {
 	default:
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "Method not allowed", nil)
 	}
-}
-
-func SetupTenantAPIRoutes(mux *http.ServeMux, store *controllerstorage.Storage) {
-	api := NewTenantAPI(store)
-	withJWT := middleware.JWTAuthMiddleware
-	withTenantAdmin := middleware.RequireTenantAdmin
-
-	mux.HandleFunc("/api/v1/tenants", withJWT(api.HandleTenants))
-	mux.HandleFunc("/api/v1/tenants/", withJWT(withTenantAdmin(api.HandleTenantUsers)))
-	mux.HandleFunc("/api/v1/nodes", withJWT(api.GetTenantNodes))
 }
 
 // ==================== 用户管理 ====================

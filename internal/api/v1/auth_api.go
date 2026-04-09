@@ -202,12 +202,3 @@ func (a *AuthAPI) HandleForceChangePassword(w http.ResponseWriter, r *http.Reque
 
 	WriteSuccess(w, map[string]string{"message": "Password changed successfully, please login again"}, "Password changed successfully")
 }
-
-// ✅ 注意：在路由注册处需要传入 store
-func SetupAuthRoutes(mux *http.ServeMux, store *controllerstorage.Storage) {
-	api := NewAuthAPI(store)
-	mux.HandleFunc("/api/v1/auth/login", api.HandleLogin)
-	mux.HandleFunc("/api/v1/auth/refresh", api.HandleRefresh)
-	mux.HandleFunc("/api/v1/auth/logout", api.HandleLogout)
-	mux.HandleFunc("/api/v1/auth/force-change-password", api.HandleForceChangePassword)
-}

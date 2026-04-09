@@ -3,7 +3,6 @@ package middleware
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -135,26 +134,6 @@ func GetUserRole(ctx context.Context) (string, bool) {
 	return value.(string), true
 }
 
-func RequireRole(requiredRole string) func(http.HandlerFunc) http.HandlerFunc {
-	return func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			role, exists := GetUserRole(ctx)
-			if !exists {
-				WriteUnauthorizedError(w, "User not authenticated")
-				return
-			}
-
-			if role != "admin" && role != requiredRole {
-				WriteForbiddenError(w, fmt.Sprintf("Insufficient permissions. Required role: %s", requiredRole))
-				return
-			}
-
-			next(w, r)
-		}
-	}
-}
-
 func WriteForbiddenError(w http.ResponseWriter, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusForbidden)
@@ -168,45 +147,4 @@ func WriteForbiddenError(w http.ResponseWriter, message string) {
 		},
 	}
 	json.NewEncoder(w).Encode(response)
-}
-
-func RequireTenantAdmin(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		role, exists := GetUserRole(ctx)
-		if !exists {
-			WriteUnauthorizedError(w, "User not authenticated")
-			return
-		}
-
-		tenantIDVal := ctx.Value(TenantIDKey)
-		var tenantID string
-		if tenantIDVal != nil {
-			switch v := tenantIDVal.(type) {
-			case string:
-				tenantID = v
-			case uuid.UUID:
-				tenantID = v.String()
-			}
-		}
-
-		targetTenantID := r.PathValue("tenant_id")
-
-		if role == "super_admin" {
-			next(w, r)
-			return
-		}
-
-		if role == "member" || role == "viewer" {
-			WriteForbiddenError(w, "user management requires admin role")
-			return
-		}
-
-		if targetTenantID != "" && tenantID != "" && tenantID != targetTenantID {
-			WriteForbiddenError(w, "cross-tenant access prohibited")
-			return
-		}
-
-		next(w, r)
-	}
 }
