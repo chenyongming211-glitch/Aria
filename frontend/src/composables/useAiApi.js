@@ -3,7 +3,7 @@ import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 
 /**
  * AI聊天API接口
- * 与后端 /v1/ai/* API 对接
+ * 与后端 /v2/tenants/{tenant_id}/ai/* API 对接
  */
 export const useAiApi = {
   /**

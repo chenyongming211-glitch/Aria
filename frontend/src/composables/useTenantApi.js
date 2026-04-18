@@ -3,7 +3,7 @@ import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 
 /**
  * 租户管理API接口
- * 与后端 /api/v1/tenant-management/* API 对接
+ * 与后端 /v2/tenants/* API 对接
  */
 export const useTenantApi = {
   /**

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	v1 "aria/internal/api/v1"
+	apibase "aria/internal/api/apibase"
 	"aria/pkg/controllerstorage"
 
 	"github.com/google/uuid"
@@ -37,12 +37,12 @@ func (r *Router) handleTenantAgents(w http.ResponseWriter, req *http.Request, te
 		return
 	}
 
-	v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid agent path", nil)
+	apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidPath, "Invalid agent path", nil)
 }
 
 func (r *Router) handleTenantNodeAgent(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, parts []string) {
 	if len(parts) != 8 {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid node agent path", nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidPath, "Invalid node agent path", nil)
 		return
 	}
 
@@ -69,23 +69,23 @@ func (r *Router) handleTenantNodeAgent(w http.ResponseWriter, req *http.Request,
 		}
 		r.handleTenantNodeAgentStatus(w, node)
 	default:
-		v1.WriteError(w, http.StatusNotFound, v1.CodeEndpointNotFound, "Unknown node agent endpoint", nil)
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Unknown node agent endpoint", nil)
 	}
 }
 
 func (r *Router) handleTenantNodeAgentCommand(w http.ResponseWriter, req *http.Request, node *controllerstorage.Node) {
 	if req.Method != http.MethodPost {
-		v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
+		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
 		return
 	}
 
 	var body v2AgentCommandRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeBadRequest, "Invalid request body: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Invalid request body: "+err.Error(), nil)
 		return
 	}
 	if body.Command == "" {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeBadRequest, "command is required", nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "command is required", nil)
 		return
 	}
 	if body.Timeout == 0 {
@@ -94,11 +94,11 @@ func (r *Router) handleTenantNodeAgentCommand(w http.ResponseWriter, req *http.R
 
 	cmd, err := r.store.QueueAgentCommand(node.PublicKey, body.Command, body.Params, body.Priority, body.Timeout)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, codeCommandDispatchFailed, "Failed to queue command: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, codeCommandDispatchFailed, "Failed to queue command: "+err.Error(), nil)
 		return
 	}
 
-	v1.WriteSuccess(w, map[string]interface{}{
+	apibase.WriteSuccess(w, map[string]interface{}{
 		"command_id":      cmd.ID,
 		"node_id":         node.ID.String(),
 		"node_public_key": node.PublicKey,
@@ -115,16 +115,16 @@ func (r *Router) handleTenantNodeAgentCommand(w http.ResponseWriter, req *http.R
 func (r *Router) handleTenantNodeAgentStatus(w http.ResponseWriter, node *controllerstorage.Node) {
 	summary, err := r.buildNodeOperationsSummary(node)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, codeCommandDispatchFailed, "Failed to query agent status: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, codeCommandDispatchFailed, "Failed to query agent status: "+err.Error(), nil)
 		return
 	}
 
-	v1.WriteSuccess(w, summary, "Agent status retrieved")
+	apibase.WriteSuccess(w, summary, "Agent status retrieved")
 }
 
 func (r *Router) handleTenantNodeAgentCommands(w http.ResponseWriter, req *http.Request, node *controllerstorage.Node) {
 	if req.Method != http.MethodGet {
-		v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
+		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
 		return
 	}
 
@@ -137,7 +137,7 @@ func (r *Router) handleTenantNodeAgentCommands(w http.ResponseWriter, req *http.
 
 	commands, err := r.store.ListRecentAgentCommands(node.PublicKey, limit)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, codeCommandDispatchFailed, "Failed to load agent commands: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, codeCommandDispatchFailed, "Failed to load agent commands: "+err.Error(), nil)
 		return
 	}
 
@@ -146,7 +146,7 @@ func (r *Router) handleTenantNodeAgentCommands(w http.ResponseWriter, req *http.
 		items = append(items, agentCommandToMap(cmd))
 	}
 
-	v1.WriteSuccess(w, map[string]interface{}{
+	apibase.WriteSuccess(w, map[string]interface{}{
 		"node_id":         node.ID.String(),
 		"node_public_key": node.PublicKey,
 		"items":           items,
@@ -156,11 +156,11 @@ func (r *Router) handleTenantNodeAgentCommands(w http.ResponseWriter, req *http.
 func (r *Router) handleTenantBatchAgentCommand(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
 	var body v2BatchAgentCommandRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeBadRequest, "Invalid request body: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Invalid request body: "+err.Error(), nil)
 		return
 	}
 	if body.Command.Command == "" {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeBadRequest, "command is required", nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "command is required", nil)
 		return
 	}
 	if body.Command.Timeout == 0 {
@@ -174,7 +174,7 @@ func (r *Router) handleTenantBatchAgentCommand(w http.ResponseWriter, req *http.
 	if len(body.NodeIDs) == 0 {
 		nodes, err = r.store.GetNodesByTenant(tenantID)
 		if err != nil {
-			v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetNodesFailed, "Failed to load tenant nodes", nil)
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeGetNodesFailed, "Failed to load tenant nodes", nil)
 			return
 		}
 	} else {
@@ -186,7 +186,7 @@ func (r *Router) handleTenantBatchAgentCommand(w http.ResponseWriter, req *http.
 		}
 	}
 	if len(nodes) == 0 {
-		v1.WriteError(w, http.StatusNotFound, v1.CodeNodeNotFound, "No nodes found", nil)
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeNodeNotFound, "No nodes found", nil)
 		return
 	}
 
@@ -218,7 +218,7 @@ func (r *Router) handleTenantBatchAgentCommand(w http.ResponseWriter, req *http.
 		})
 	}
 
-	v1.WriteSuccess(w, map[string]interface{}{
+	apibase.WriteSuccess(w, map[string]interface{}{
 		"total_count":   len(nodes),
 		"success_count": successCount,
 		"failed_count":  failedCount,
@@ -287,152 +287,7 @@ func (r *Router) handleTenantMonitoring(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid monitoring path", nil)
-}
-
-func (r *Router) handleTenantMonitoringStats(w http.ResponseWriter, tenantID uuid.UUID) {
-	nodes, err := r.store.GetNodesByTenant(tenantID)
-	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetNodesFailed, "Failed to load tenant nodes", nil)
-		return
-	}
-
-	regions := make(map[string]struct{})
-	peerDetails := make([]map[string]interface{}, 0, len(nodes))
-	onlineNodes := 0
-	totalRoutes := 0
-	for _, node := range nodes {
-		if node.Region != "" {
-			regions[node.Region] = struct{}{}
-		}
-		if nodeAvailabilityStatus(node) == "online" {
-			onlineNodes++
-		}
-		totalRoutes += len(node.AdvertisedRoutes)
-		peerDetails = append(peerDetails, map[string]interface{}{
-			"publicKey":     node.PublicKey,
-			"peerIp":        node.AssignedIP,
-			"localIp":       node.AssignedIP,
-			"publicIp":      node.PublicIP,
-			"hostId":        node.ID.String(),
-			"hostname":      node.Hostname,
-			"region":        node.Region,
-			"connected":     nodeAvailabilityStatus(node) == "online",
-			"lastHandshake": node.LastSeen,
-			"rtt":           0,
-			"lossRatio":     0,
-			"healthScore":   map[bool]float64{true: 1, false: 0}[nodeAvailabilityStatus(node) == "online"],
-			"failureCount":  0,
-			"rxBytes":       0,
-			"txBytes":       0,
-			"rxRate":        0,
-			"txRate":        0,
-		})
-	}
-
-	regionList := make([]string, 0, len(regions))
-	for region := range regions {
-		regionList = append(regionList, region)
-	}
-
-	v1.WriteSuccess(w, map[string]interface{}{
-		"peers":        len(peerDetails),
-		"avgRtt":       "-",
-		"packetLoss":   "-",
-		"totalTraffic": "-",
-		"trafficData": map[string]interface{}{
-			"timestamps": []string{},
-			"入向":         []float64{},
-			"出向":         []float64{},
-		},
-		"peerDetails": peerDetails,
-		"systemStats": map[string]interface{}{
-			"totalNodes":      len(nodes),
-			"onlineNodes":     onlineNodes,
-			"avgRtt":          0,
-			"packetLoss":      0,
-			"avgCpu":          0,
-			"avgMemory":       0,
-			"totalGoroutines": 0,
-		},
-		"globalStats": map[string]interface{}{
-			"totalNodes":   len(nodes),
-			"onlineNodes":  onlineNodes,
-			"totalRegions": len(regionList),
-			"regionList":   regionList,
-			"totalRoutes":  totalRoutes,
-			"directRoutes": totalRoutes,
-			"relayRoutes":  0,
-			"totalRxRate":  0,
-			"totalTxRate":  0,
-			"totalTraffic": "-",
-		},
-	}, "Monitoring stats retrieved")
-}
-
-func (r *Router) handleTenantMonitoringNodeDetail(w http.ResponseWriter, tenantID uuid.UUID, nodeID string) {
-	node, err := r.getTenantNodeRecord(nodeID, tenantID)
-	if err != nil {
-		r.writeNodeLookupError(w, err)
-		return
-	}
-
-	peers, err := r.store.GetNodesByTenant(tenantID)
-	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetNodesFailed, "Failed to load peers", nil)
-		return
-	}
-
-	peerItems := make([]map[string]interface{}, 0, len(peers))
-	for _, peer := range peers {
-		if peer.ID == node.ID {
-			continue
-		}
-		peerItems = append(peerItems, map[string]interface{}{
-			"publicKey":    peer.PublicKey,
-			"peerIp":       peer.AssignedIP,
-			"endpoint":     peer.Endpoint,
-			"handshakeAge": 0,
-			"rtt":          0,
-			"lossRatio":    0,
-			"rxRate":       0,
-			"txRate":       0,
-			"status":       nodeAvailabilityStatus(peer),
-			"rxBytes":      0,
-			"txBytes":      0,
-		})
-	}
-
-	v1.WriteSuccess(w, map[string]interface{}{
-		"hostId":           node.ID.String(),
-		"hostname":         node.Hostname,
-		"publicIp":         node.PublicIP,
-		"localIp":          node.AssignedIP,
-		"region":           node.Region,
-		"ip":               node.AssignedIP,
-		"version":          "unknown",
-		"role":             node.Role,
-		"runtimeMode":      node.RuntimeMode,
-		"advertisedRoutes": node.AdvertisedRoutes,
-		"uptime":           nodeUptimeSeconds(node),
-		"cpuUsage":         0,
-		"memoryUsage":      0,
-		"goroutines":       0,
-		"cpuCores":         []interface{}{},
-		"cpuBalance":       0,
-		"tunnels":          []interface{}{},
-		"tunnelBalance":    0,
-		"peers":            peerItems,
-		"firewall": map[string]interface{}{
-			"acceptPackets":    0,
-			"dropPackets":      0,
-			"invalidPackets":   0,
-			"tcpFlagsPackets":  0,
-			"notrackRules":     0,
-			"processedPackets": 0,
-			"droppedPackets":   0,
-		},
-	}, "Node monitoring detail retrieved")
+	apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidPath, "Invalid monitoring path", nil)
 }
 
 func nodeAvailabilityStatus(node *controllerstorage.Node) string {

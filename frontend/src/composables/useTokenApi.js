@@ -3,7 +3,7 @@ import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 
 /**
  * 令牌管理API接口
- * 与后端 /tokens API 对接（注意：后端端点是 /tokens 不是 /v1/tokens）
+ * 与后端 /v2/tenants/{tenant_id}/tokens API 对接
  */
 export const useTokenApi = {
   /**

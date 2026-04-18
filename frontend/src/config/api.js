@@ -80,10 +80,10 @@ export const API_ENDPOINTS = {
     FORCE_CHANGE_PASSWORD: '/v2/auth/force-change-password'
   },
 
-  // 用户相关
+  // 用户相关 (v2 规划中，目前集成在 tenant-scoped handlers)
   USER: {
-    PROFILE: '/user/profile',
-    SETTINGS: '/user/settings'
+    PROFILE: '/v2/user/profile',
+    SETTINGS: '/v2/user/settings'
   },
 
   // 租户管理 API
@@ -119,15 +119,14 @@ export const API_ENDPOINTS = {
   NODES: {
     LIST: (tenantId) => buildTenantPath(tenantId, '/nodes'),
     DETAIL: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}`),
-    SYNC: '/sync'
+    SYNC: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}/agent/sync`)
   },
 
   // Controller 管理 API（Agent 注册）
   CONTROLLER: {
     REGISTER: '/register',
     UNREGISTER: '/unregister',
-    CONFIG: '/config',
-    TOKENS: '/tokens'
+    CONFIG: '/config'
   },
 
   // 带宽管理 API
@@ -160,7 +159,7 @@ export const API_ENDPOINTS = {
     CONFIRM: (tenantId) => buildTenantPath(tenantId, '/ai/confirm')
   },
 
-  // 即时通讯 Webhook
+  // 即时通讯 Webhook (Legacy /v1 for external bot compatibility)
   IM: {
     DINGTALK: '/v1/im/dingtalk',
     FEISHU: '/v1/im/feishu'

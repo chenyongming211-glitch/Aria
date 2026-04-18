@@ -351,6 +351,9 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	if cfg.AI.Enabled {
 		// 初始化 AI Service (生产级架构，注入真实数据源)
 		aiService := service.NewAIService(store)
+		
+		// Update v2 router with AI service if needed (v2.SetupRoutes already creates a handler, we might want to override)
+		// Actually, let's keep the existing v2.SetupRoutes as it is for now.
 
 		// DingTalk Integration
 		if cfg.DingTalk.Enabled {

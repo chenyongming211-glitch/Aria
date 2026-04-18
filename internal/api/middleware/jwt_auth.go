@@ -2,10 +2,10 @@ package middleware
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 
+	"aria/internal/api/apibase"
 	"aria/internal/auth"
 
 	"github.com/google/uuid"
@@ -15,14 +15,13 @@ import (
 type contextKey string
 
 const (
-	// ✅ 修复：将所有鉴权相关的上下文键统一在此处定义，避免编译冲突
 	UserIDKey   contextKey = "user_id"
 	UsernameKey contextKey = "username"
 	UserRoleKey contextKey = "user_role"
 	TenantIDKey contextKey = "tenant_id"
 )
 
-var mcpWhitelist = []string{"/v1/auth/force-change-password", "/v1/auth/login", "/v1/auth/refresh", "/v1/auth/logout"}
+var mcpWhitelist = []string{"/api/v2/auth/force-change-password", "/api/v2/auth/login", "/api/v2/auth/refresh", "/api/v2/auth/logout"}
 
 func containsPath(paths []string, path string) bool {
 	for _, p := range paths {
@@ -38,7 +37,7 @@ func JWTAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			WriteUnauthorizedError(w, "Authorization header required")
+			apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeAuthHeaderRequired, "Authorization header required", nil)
 			return
 		}
 
@@ -50,22 +49,22 @@ func JWTAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		if tokenString == "" {
-			WriteUnauthorizedError(w, "Invalid token format")
+			apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "Invalid token format", nil)
 			return
 		}
 
 		claims, err := auth.ValidateToken(tokenString)
 		if err != nil {
 			if err == auth.ErrExpiredToken {
-				WriteUnauthorizedError(w, "Token has expired")
+				apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "Token has expired", nil)
 			} else {
-				WriteUnauthorizedError(w, "Invalid token")
+				apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "Invalid token", nil)
 			}
 			return
 		}
 
 		if claims.MustChangePassword && !containsPath(mcpWhitelist, r.URL.Path) {
-			WriteForbiddenError(w, "You must change your password before proceeding")
+			apibase.WriteError(w, http.StatusForbidden, apibase.CodeForbidden, "You must change your password before proceeding", nil)
 			return
 		}
 
@@ -74,9 +73,6 @@ func JWTAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		ctx = context.WithValue(ctx, UsernameKey, claims.Username)
 		ctx = context.WithValue(ctx, UserRoleKey, claims.Role)
 
-		// 租户上下文设置：
-		// - super_admin：允许通过 X-Tenant-ID 头切换租户（管理多租户需要）
-		// - 其他角色：强制使用 JWT claims 中的 TenantID，防止越权
 		if claims.Role == "super_admin" {
 			if tenantIDHeader := r.Header.Get("X-Tenant-ID"); tenantIDHeader != "" {
 				if _, err := uuid.Parse(tenantIDHeader); err == nil {
@@ -93,21 +89,6 @@ func JWTAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 		next(w, r.WithContext(ctx))
 	}
-}
-
-func WriteUnauthorizedError(w http.ResponseWriter, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnauthorized)
-	response := map[string]interface{}{
-		"success": false,
-		"message": message,
-		"code":    "UNAUTHORIZED",
-		"error": map[string]interface{}{
-			"code":    "UNAUTHORIZED",
-			"message": message,
-		},
-	}
-	json.NewEncoder(w).Encode(response)
 }
 
 func GetUserID(ctx context.Context) (string, bool) {
@@ -132,19 +113,4 @@ func GetUserRole(ctx context.Context) (string, bool) {
 		return "", false
 	}
 	return value.(string), true
-}
-
-func WriteForbiddenError(w http.ResponseWriter, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusForbidden)
-	response := map[string]interface{}{
-		"success": false,
-		"message": message,
-		"code":    "FORBIDDEN",
-		"error": map[string]interface{}{
-			"code":    "FORBIDDEN",
-			"message": message,
-		},
-	}
-	json.NewEncoder(w).Encode(response)
 }

@@ -1,10 +1,8 @@
-package v1
+package apibase
 
 import (
 	"encoding/json"
-	"math/rand"
 	"net/http"
-	"time"
 )
 
 // APIResponse 标准响应格式
@@ -32,8 +30,6 @@ type APIMeta struct {
 	Next     string `json:"next,omitempty"`      // 下一页链接
 	Prev     string `json:"prev,omitempty"`      // 上一页链接
 }
-
-// 统一响应辅助函数
 
 // WriteSuccess 写入成功响应
 func WriteSuccess(w http.ResponseWriter, data interface{}, message string) {
@@ -64,11 +60,6 @@ func WriteError(w http.ResponseWriter, statusCode int, errorCode, message string
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(resp)
-}
-
-// WriteValidationError 写入参数验证错误响应
-func WriteValidationError(w http.ResponseWriter, fieldErrors map[string]string) {
-	WriteError(w, http.StatusBadRequest, "VALIDATION_FAILED", "请求参数验证失败", fieldErrors)
 }
 
 // ParseRequestJSON 解析请求JSON体
@@ -116,6 +107,10 @@ const (
 	CodeNodeNotFound       = "NODE_NOT_FOUND"
 	CodeUpdateNodeFailed   = "UPDATE_NODE_FAILED"
 	CodeScanNodeFailed     = "SCAN_NODE_FAILED"
+	CodeGetACLRulesFailed  = "GET_ACL_RULES_FAILED"
+	CodeScanACLRuleFailed  = "SCAN_ACL_RULE_FAILED"
+	CodeGetLimitsFailed    = "GET_LIMITS_FAILED"
+	CodeLimitApplyFailed   = "LIMIT_APPLY_FAILED"
 
 	// 用户相关错误码
 	CodeListUsersFailed  = "LIST_USERS_FAILED"
@@ -125,57 +120,8 @@ const (
 	CodeInvalidUserID    = "INVALID_USER_ID"
 	CodeUserNotFound     = "USER_NOT_FOUND"
 
-	// 带宽相关错误码
-	CodeInvalidBandwidth = "INVALID_BANDWIDTH"
-	CodeLimitApplyFailed = "LIMIT_APPLY_FAILED"
-	CodeLimitIDRequired  = "LIMIT_ID_REQUIRED"
-	CodeGetLimitsFailed  = "GET_LIMITS_FAILED"
-
-	// 策略相关错误码
-	CodePolicyNameRequired     = "POLICY_NAME_REQUIRED"
-	CodeInvalidAction          = "INVALID_ACTION"
-	CodeLimitBandwidthRequired = "LIMIT_BANDWIDTH_REQUIRED"
-	CodePolicyIDRequired       = "POLICY_ID_REQUIRED"
-	CodePolicyNotFound         = "POLICY_NOT_FOUND"
-	CodeCreatePolicyFailed     = "CREATE_POLICY_FAILED"
-	CodeUpdatePolicyFailed     = "UPDATE_POLICY_FAILED"
-	CodeDeletePolicyFailed     = "DELETE_POLICY_FAILED"
-	CodeGetPolicyFailed        = "GET_POLICY_FAILED"
-	CodeGetPoliciesFailed      = "GET_POLICIES_FAILED"
-	CodeQoSRuleApplyFailed     = "QOS_RULE_APPLY_FAILED"
-	CodeQoSRuleUpdateFailed    = "QOS_RULE_UPDATE_FAILED"
-
-	// Token 相关错误码
-	CodeInvalidResourceQuota = "INVALID_RESOURCE_QUOTA"
-	CodeInvalidTTLFormat     = "INVALID_TTL_FORMAT"
-	CodeListTokensFailed     = "LIST_TOKENS_FAILED"
-	CodeScanTokenFailed      = "SCAN_TOKEN_FAILED"
-	CodeTokenIDRequired      = "TOKEN_ID_REQUIRED"
-	CodeInvalidTokenID       = "INVALID_TOKEN_ID"
-	CodeDeleteTokenFailed    = "DELETE_TOKEN_FAILED"
-	CodeTokenNotFound        = "TOKEN_NOT_FOUND"
-	CodeTokenParamRequired   = "TOKEN_PARAM_REQUIRED"
-	CodeGetTokenNodesFailed  = "GET_TOKEN_NODES_FAILED"
-
-	// ACL 相关错误码
-	CodeGetACLRulesFailed = "GET_ACL_RULES_FAILED"
-	CodeScanACLRuleFailed = "SCAN_ACL_RULE_FAILED"
-
-	// 其他错误码
-	CodeInvalidProtocol = "INVALID_PROTOCOL"
-
-	// AI 相关错误码
-	CodeMessageEmpty   = "MESSAGE_EMPTY"
-	CodeAIServiceError = "AI_SERVICE_ERROR"
+	// 令牌相关错误码
+	CodeInvalidTokenID = "INVALID_TOKEN_ID"
+	CodeTokenNotFound   = "TOKEN_NOT_FOUND"
+	CodeDeleteTokenFailed = "DELETE_TOKEN_FAILED"
 )
-
-// randomString 生成随机字符串
-func randomString(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[seededRand.Intn(len(charset))]
-	}
-	return string(b)
-}

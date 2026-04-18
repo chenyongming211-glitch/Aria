@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	v1 "aria/internal/api/v1"
+	"aria/internal/api/apibase"
 	"aria/pkg/controllerstorage"
 
 	"github.com/google/uuid"
@@ -22,41 +22,41 @@ import (
 func (r *Router) handleMonitoringStats(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
 	totalNodes, onlineNodes, offlineNodes, err := r.store.CountNodesByTenantAndStatus(tenantID)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to count nodes: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to count nodes: "+err.Error(), nil)
 		return
 	}
 
 	syncRate, err := r.store.CalcSyncSuccessRate(tenantID)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to calculate sync rate: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to calculate sync rate: "+err.Error(), nil)
 		return
 	}
 
 	aclCount, err := r.store.CountACLRulesByTenant(tenantID)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to count ACL rules: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to count ACL rules: "+err.Error(), nil)
 		return
 	}
 
 	qosCount, err := r.store.CountQoSRulesByTenant(tenantID)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to count QoS rules: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to count QoS rules: "+err.Error(), nil)
 		return
 	}
 
 	failedCmds, err := r.store.CountFailedCommandsByTenant(tenantID)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to count failed commands: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to count failed commands: "+err.Error(), nil)
 		return
 	}
 
 	activeAlerts, err := r.store.CountActiveAlerts(tenantID)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to count active alerts: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to count active alerts: "+err.Error(), nil)
 		return
 	}
 
-	v1.WriteSuccess(w, map[string]interface{}{
+	apibase.WriteSuccess(w, map[string]interface{}{
 		"total_nodes":           totalNodes,
 		"online_nodes":          onlineNodes,
 		"offline_nodes":         offlineNodes,
@@ -75,7 +75,7 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 	node, err := r.getTenantNodeRecord(nodeID, tenantID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			v1.WriteError(w, http.StatusNotFound, v1.CodeNodeNotFound, "Node not found", nil)
+			apibase.WriteError(w, http.StatusNotFound, apibase.CodeNodeNotFound, "Node not found", nil)
 			return
 		}
 		r.writeNodeLookupError(w, err)
@@ -84,7 +84,7 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 
 	controlState, err := r.store.GetNodeControlState(tenantID, node.ID)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to get control state: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to get control state: "+err.Error(), nil)
 		return
 	}
 
@@ -115,7 +115,7 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 	// Recent agent commands (up to 20)
 	commands, err := r.store.ListRecentAgentCommands(node.PublicKey, 20)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to list commands: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to list commands: "+err.Error(), nil)
 		return
 	}
 	cmdItems := make([]map[string]interface{}, 0, len(commands))
@@ -127,7 +127,7 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 	// Recent policy deliveries (up to 20)
 	deliveries, err := r.store.ListRecentPolicyDeliveriesByNode(tenantID, node.ID, 20)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to list policy deliveries: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to list policy deliveries: "+err.Error(), nil)
 		return
 	}
 	pdItems := make([]map[string]interface{}, 0, len(deliveries))
@@ -158,7 +158,7 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 		data["learned_routes"] = learnedRoutes
 	}
 
-	v1.WriteSuccess(w, data, "Node monitoring detail retrieved")
+	apibase.WriteSuccess(w, data, "Node monitoring detail retrieved")
 }
 
 // handleMonitoringEvents returns a unified event feed of alerts and audit events.
@@ -193,7 +193,7 @@ func (r *Router) handleMonitoringEvents(w http.ResponseWriter, req *http.Request
 	if nodeIDStr := query.Get("node_id"); nodeIDStr != "" {
 		parsed, err := uuid.Parse(nodeIDStr)
 		if err != nil {
-			v1.WriteError(w, http.StatusBadRequest, v1.CodeBadRequest, "Invalid node_id format", nil)
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Invalid node_id format", nil)
 			return
 		}
 		filter.NodeID = &parsed
@@ -202,7 +202,7 @@ func (r *Router) handleMonitoringEvents(w http.ResponseWriter, req *http.Request
 	if sinceStr := query.Get("since"); sinceStr != "" {
 		parsed, err := time.Parse(time.RFC3339, sinceStr)
 		if err != nil {
-			v1.WriteError(w, http.StatusBadRequest, v1.CodeBadRequest, "Invalid since format, use ISO 8601", nil)
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Invalid since format, use ISO 8601", nil)
 			return
 		}
 		filter.Since = &parsed
@@ -210,11 +210,11 @@ func (r *Router) handleMonitoringEvents(w http.ResponseWriter, req *http.Request
 
 	items, total, err := r.store.ListEventFeed(tenantID, filter)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to query events: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to query events: "+err.Error(), nil)
 		return
 	}
 
-	v1.WriteSuccess(w, map[string]interface{}{
+	apibase.WriteSuccess(w, map[string]interface{}{
 		"items":  items,
 		"total":  total,
 		"limit":  limit,
@@ -259,7 +259,7 @@ func (r *Router) handleMonitoringAlerts(w http.ResponseWriter, req *http.Request
 	if nodeIDStr := query.Get("node_id"); nodeIDStr != "" {
 		parsed, err := uuid.Parse(nodeIDStr)
 		if err != nil {
-			v1.WriteError(w, http.StatusBadRequest, v1.CodeBadRequest, "Invalid node_id format", nil)
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Invalid node_id format", nil)
 			return
 		}
 		filter.NodeID = &parsed
@@ -267,11 +267,11 @@ func (r *Router) handleMonitoringAlerts(w http.ResponseWriter, req *http.Request
 
 	alerts, total, err := r.store.ListAlerts(tenantID, filter)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to query alerts: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to query alerts: "+err.Error(), nil)
 		return
 	}
 
-	v1.WriteSuccess(w, map[string]interface{}{
+	apibase.WriteSuccess(w, map[string]interface{}{
 		"items":  alerts,
 		"total":  total,
 		"limit":  limit,
@@ -284,7 +284,7 @@ func (r *Router) handleMonitoringAlerts(w http.ResponseWriter, req *http.Request
 func (r *Router) handleMonitoringAlertResolve(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, alertID string) {
 	alertUUID, err := uuid.Parse(alertID)
 	if err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeBadRequest, "Invalid alert_id format", nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Invalid alert_id format", nil)
 		return
 	}
 
@@ -292,24 +292,24 @@ func (r *Router) handleMonitoringAlertResolve(w http.ResponseWriter, req *http.R
 	existing, err := r.store.GetAlertByID(alertUUID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			v1.WriteError(w, http.StatusNotFound, "ALERT_NOT_FOUND", "Alert not found", nil)
+			apibase.WriteError(w, http.StatusNotFound, "ALERT_NOT_FOUND", "Alert not found", nil)
 			return
 		}
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to get alert: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to get alert: "+err.Error(), nil)
 		return
 	}
 	if existing.TenantID != tenantID {
-		v1.WriteError(w, http.StatusNotFound, "ALERT_NOT_FOUND", "Alert not found", nil)
+		apibase.WriteError(w, http.StatusNotFound, "ALERT_NOT_FOUND", "Alert not found", nil)
 		return
 	}
 	if existing.Status == "resolved" {
-		v1.WriteError(w, http.StatusBadRequest, "ALERT_ALREADY_RESOLVED", "Alert is already resolved", nil)
+		apibase.WriteError(w, http.StatusBadRequest, "ALERT_ALREADY_RESOLVED", "Alert is already resolved", nil)
 		return
 	}
 
 	resolved, err := r.store.ResolveAlert(alertUUID)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to resolve alert: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to resolve alert: "+err.Error(), nil)
 		return
 	}
 
@@ -326,7 +326,7 @@ func (r *Router) handleMonitoringAlertResolve(w http.ResponseWriter, req *http.R
 		},
 	})
 
-	v1.WriteSuccess(w, resolved, "Alert resolved")
+	apibase.WriteSuccess(w, resolved, "Alert resolved")
 }
 
 // computeStateConvergence determines the convergence status from a NodeControlState.
@@ -367,7 +367,7 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 		duration = 30 * 24 * time.Hour
 		step = 2 * time.Hour
 	default:
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeBadRequest, "Invalid range parameter, must be 1h/24h/7d/30d", nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Invalid range parameter, must be 1h/24h/7d/30d", nil)
 		return
 	}
 
@@ -377,7 +377,7 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 	// 获取租户下所有节点的标识用于 PromQL 过滤
 	nodes, err := r.store.GetNodesByTenant(tenantID)
 	if err != nil || len(nodes) == 0 {
-		v1.WriteSuccess(w, map[string]interface{}{
+		apibase.WriteSuccess(w, map[string]interface{}{
 			"timestamps":          []int64{},
 			"upload_bytes":        []float64{},
 			"download_bytes":      []float64{},
@@ -444,7 +444,7 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 		}
 	}
 
-	v1.WriteSuccess(w, map[string]interface{}{
+	apibase.WriteSuccess(w, map[string]interface{}{
 		"timestamps":          timestamps,
 		"upload_bytes":        uploadBytes,
 		"download_bytes":      downloadBytes,
@@ -465,7 +465,7 @@ func (r *Router) handleMonitoringHealth(w http.ResponseWriter, req *http.Request
 	activeAlerts, _ := r.store.CountActiveAlerts(tenantID)
 	failedCmds, _ := r.store.CountFailedCommandsByTenant(tenantID)
 
-	v1.WriteSuccess(w, map[string]interface{}{
+	apibase.WriteSuccess(w, map[string]interface{}{
 		"node_online_rate":      math.Round(nodeOnlineRate*10) / 10,
 		"sync_success_rate":     math.Round(syncRate*10) / 10,
 		"active_alerts_count":   activeAlerts,
@@ -479,10 +479,10 @@ func (r *Router) handleMonitoringNodeMetrics(w http.ResponseWriter, req *http.Re
 	node, err := r.getTenantNodeRecord(nodeID, tenantID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			v1.WriteError(w, http.StatusNotFound, v1.CodeNodeNotFound, "Node not found", nil)
+			apibase.WriteError(w, http.StatusNotFound, apibase.CodeNodeNotFound, "Node not found", nil)
 			return
 		}
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to get node", nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to get node", nil)
 		return
 	}
 
@@ -527,7 +527,7 @@ func (r *Router) handleMonitoringNodeMetrics(w http.ResponseWriter, req *http.Re
 		}
 	}
 
-	v1.WriteSuccess(w, map[string]interface{}{
+	apibase.WriteSuccess(w, map[string]interface{}{
 		"upload_mbps":   math.Round(uploadMbps*100) / 100,
 		"download_mbps": math.Round(downloadMbps*100) / 100,
 		"latency_ms":    math.Round(latencyMs*100) / 100,
@@ -539,7 +539,7 @@ func (r *Router) handleMonitoringNodeMetrics(w http.ResponseWriter, req *http.Re
 func (r *Router) handleMonitoringTopology(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
 	nodes, err := r.store.GetNodesByTenant(tenantID)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeInternalServerError, "Failed to get nodes", nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to get nodes", nil)
 		return
 	}
 
@@ -617,7 +617,7 @@ func (r *Router) handleMonitoringTopology(w http.ResponseWriter, req *http.Reque
 		}
 	}
 
-	v1.WriteSuccess(w, map[string]interface{}{
+	apibase.WriteSuccess(w, map[string]interface{}{
 		"nodes": topoNodes,
 		"links": links,
 	}, "Topology data retrieved")

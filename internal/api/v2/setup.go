@@ -7,38 +7,40 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 
+	"aria/internal/api/apibase"
+	"aria/internal/api/handlers"
 	"aria/internal/api/middleware"
-	v1 "aria/internal/api/v1"
 	"aria/internal/service"
+	"aria/internal/token"
 	"aria/pkg/controllerstorage"
 	"aria/pkg/victoriametrics"
 )
 
 type Router struct {
 	store      *controllerstorage.Storage
-	authAPI    *v1.AuthAPI
-	tenantAPI  *v1.TenantAPI
-	tenantMgmt *v1.TenantManagementAPI
-	chatAPI    *v1.ChatHandler
+	authAPI    *handlers.AuthAPI
+	tenantAPI  *handlers.TenantAPI
+	chatAPI    *handlers.ChatHandler
+	tokenStore *token.Store
 	vmClient   *victoriametrics.Client
 }
 
 func SetupRoutes(mux *http.ServeMux, store *controllerstorage.Storage, vmClient *victoriametrics.Client) {
+	tokenStore := token.NewStore(store.DB())
+	aiService := service.NewAIService(store)
+
 	router := &Router{
 		store:      store,
-		authAPI:    v1.NewAuthAPI(store),
-		tenantAPI:  v1.NewTenantAPI(store),
-		tenantMgmt: v1.NewTenantManagementAPI(store),
-		chatAPI:    v1.NewChatHandler(service.NewAIService(store)),
+		authAPI:    handlers.NewAuthAPI(store),
+		tenantAPI:  handlers.NewTenantAPI(store),
+		chatAPI:    handlers.NewChatHandler(aiService),
+		tokenStore: tokenStore,
 		vmClient:   vmClient,
 	}
 
@@ -54,13 +56,13 @@ func SetupRoutes(mux *http.ServeMux, store *controllerstorage.Storage, vmClient 
 
 func (r *Router) HandleTenants(w http.ResponseWriter, req *http.Request) {
 	if req.URL.Path != "/api/v2/tenants" {
-		v1.WriteError(w, http.StatusNotFound, v1.CodeEndpointNotFound, "Unknown endpoint", nil)
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Unknown endpoint", nil)
 		return
 	}
 
 	role, exists := middleware.GetUserRole(req.Context())
 	if !exists {
-		v1.WriteError(w, http.StatusForbidden, v1.CodeAccessDenied, "Access denied", nil)
+		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Access denied", nil)
 		return
 	}
 
@@ -73,40 +75,40 @@ func (r *Router) HandleTenants(w http.ResponseWriter, req *http.Request) {
 		if role == "admin" || role == "owner" {
 			tenantID, ok := middleware.GetTenantID(req.Context())
 			if !ok {
-				v1.WriteError(w, http.StatusUnauthorized, v1.CodeTenantContextNotFound, "请先选择租户：当前未设置租户上下文", nil)
+				apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeTenantContextNotFound, "请先选择租户：当前未设置租户上下文", nil)
 				return
 			}
 			r.listSingleTenant(w, tenantID)
 			return
 		}
-		v1.WriteError(w, http.StatusForbidden, v1.CodeAccessDenied, "Access denied: admin or super_admin only", nil)
+		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Access denied: admin or super_admin only", nil)
 	case http.MethodPost:
 		if role != "super_admin" {
-			v1.WriteError(w, http.StatusForbidden, v1.CodeAccessDenied, "Access denied: super_admin only", nil)
+			apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Access denied: super_admin only", nil)
 			return
 		}
 		r.tenantAPI.CreateTenant(w, req)
 	default:
-		v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
+		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
 	}
 }
 
 func (r *Router) HandleTenantScoped(w http.ResponseWriter, req *http.Request) {
 	tenantIDStr, rest, ok := splitTenantPath(req.URL.Path)
 	if !ok {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid tenant path", nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidPath, "Invalid tenant path", nil)
 		return
 	}
 
 	tenantID, err := uuid.Parse(tenantIDStr)
 	if err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidTenantID, "Invalid tenant ID", nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidTenantID, "Invalid tenant ID", nil)
 		return
 	}
 
 	role, exists := middleware.GetUserRole(req.Context())
 	if !exists {
-		v1.WriteError(w, http.StatusForbidden, v1.CodeAccessDenied, "Access denied", nil)
+		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Access denied", nil)
 		return
 	}
 
@@ -128,7 +130,7 @@ func (r *Router) HandleTenantScoped(w http.ResponseWriter, req *http.Request) {
 	case strings.HasPrefix(rest, "ai"):
 		r.handleTenantAI(w, req, tenantID)
 	default:
-		v1.WriteError(w, http.StatusNotFound, v1.CodeEndpointNotFound, "Unknown endpoint", nil)
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Unknown endpoint", nil)
 	}
 }
 
@@ -141,7 +143,7 @@ func (r *Router) handleTenantPolicies(w http.ResponseWriter, req *http.Request, 
 	case http.MethodGet:
 		r.listTenantPolicies(w, req, tenantID)
 	default:
-		v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
+		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
 	}
 }
 
@@ -159,16 +161,16 @@ func (r *Router) handleSingleTenant(w http.ResponseWriter, req *http.Request, te
 		r.updateTenant(w, req, tenantID, role)
 	case http.MethodDelete:
 		if role != "super_admin" {
-			v1.WriteError(w, http.StatusForbidden, v1.CodeAccessDenied, "Access denied: super_admin only", nil)
+			apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Access denied: super_admin only", nil)
 			return
 		}
 		if _, err := r.store.DB().Exec(`UPDATE tenants SET status = 'deleted', updated_at = NOW() WHERE id = $1`, tenantID); err != nil {
-			v1.WriteError(w, http.StatusInternalServerError, v1.CodeDeleteTokenFailed, "Failed to delete tenant: "+err.Error(), nil)
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeDeleteTokenFailed, "Failed to delete tenant: "+err.Error(), nil)
 			return
 		}
-		v1.WriteSuccess(w, map[string]string{"id": tenantID.String(), "status": "deleted"}, "Tenant deleted successfully")
+		apibase.WriteSuccess(w, map[string]string{"id": tenantID.String(), "status": "deleted"}, "Tenant deleted successfully")
 	default:
-		v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
+		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
 	}
 }
 
@@ -181,49 +183,13 @@ func (r *Router) handleTenantUsers(w http.ResponseWriter, req *http.Request, ten
 	if len(parts) == 7 && req.Method == http.MethodDelete {
 		currentUserID, ok := middleware.GetUserID(req.Context())
 		if ok && currentUserID == parts[6] {
-			v1.WriteError(w, http.StatusForbidden, v1.CodeAccessDenied, "You cannot delete your own account", nil)
+			apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "You cannot delete your own account", nil)
 			return
 		}
 	}
 
 	req2 := withTenantContext(req, tenantID)
 	r.tenantAPI.HandleTenantUsers(w, req2)
-}
-
-func (r *Router) handleTenantTokens(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, role string) {
-	if !r.authorizeTenantAdmin(w, req, tenantID) {
-		return
-	}
-
-	req2 := withTenantContext(req, tenantID)
-	parts := splitPath(req.URL.Path)
-	if len(parts) == 5 {
-		switch req.Method {
-		case http.MethodGet:
-			r.tenantMgmt.GetTenantTokens(w, req2)
-		case http.MethodPost:
-			r.tenantMgmt.CreateEnrollmentToken(w, req2)
-		default:
-			v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
-		}
-		return
-	}
-
-	if len(parts) == 6 {
-		tokenID := parts[5]
-		switch req.Method {
-		case http.MethodGet:
-			r.getTenantTokenDetailByID(w, req2, tenantID, tokenID)
-		case http.MethodDelete:
-			rewritten := cloneRequestWithPath(req2, "/api/v1/tenant-management/tokens/"+tokenID)
-			r.tenantMgmt.DeleteToken(w, rewritten)
-		default:
-			v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
-		}
-		return
-	}
-
-	v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid token path", nil)
 }
 
 func (r *Router) handleTenantNodes(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, role string) {
@@ -238,7 +204,7 @@ func (r *Router) handleTenantNodes(w http.ResponseWriter, req *http.Request, ten
 		if req.Method == http.MethodGet {
 			r.listTenantNodes(w, tenantID)
 		} else {
-			v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
+			apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
 		}
 		return
 	}
@@ -285,18 +251,18 @@ func (r *Router) handleTenantNodes(w http.ResponseWriter, req *http.Request, ten
 			}
 			r.deleteTenantNode(w, tenantID, nodeID)
 		default:
-			v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
+			apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
 		}
 		return
 	}
 
-	v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid node path", nil)
+	apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidPath, "Invalid node path", nil)
 }
 
 func (r *Router) listTenantPolicies(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
 	nodes, err := r.store.GetNodesByTenant(tenantID)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetNodesFailed, "Failed to load tenant nodes", nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeGetNodesFailed, "Failed to load tenant nodes", nil)
 		return
 	}
 
@@ -307,12 +273,8 @@ func (r *Router) listTenantPolicies(w http.ResponseWriter, req *http.Request, te
 
 	var enabledPtr *bool
 	if enabledFilter != "" {
-		enabled, err := strconv.ParseBool(enabledFilter)
-		if err != nil {
-			v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, "enabled must be true or false", nil)
-			return
-		}
-		enabledPtr = &enabled
+		val := enabledFilter == "true"
+		enabledPtr = &val
 	}
 
 	policies := make([]map[string]interface{}, 0)
@@ -324,7 +286,7 @@ func (r *Router) listTenantPolicies(w http.ResponseWriter, req *http.Request, te
 		if kindFilter == "" || kindFilter == "acl" {
 			items, err := r.buildTenantNodeACLPolicies(tenantID, node)
 			if err != nil {
-				v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetACLRulesFailed, "Failed to load ACL policies", nil)
+				apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeGetACLRulesFailed, "Failed to load ACL policies", nil)
 				return
 			}
 			policies = append(policies, items...)
@@ -333,7 +295,7 @@ func (r *Router) listTenantPolicies(w http.ResponseWriter, req *http.Request, te
 		if kindFilter == "" || kindFilter == "qos" {
 			items, err := r.buildTenantNodeQoSPolicies(tenantID, node)
 			if err != nil {
-				v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetLimitsFailed, "Failed to load QoS policies", nil)
+				apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeGetLimitsFailed, "Failed to load QoS policies", nil)
 				return
 			}
 			policies = append(policies, items...)
@@ -342,7 +304,7 @@ func (r *Router) listTenantPolicies(w http.ResponseWriter, req *http.Request, te
 		if kindFilter == "" || kindFilter == "route" {
 			items, err := r.buildTenantNodeRoutePolicies(tenantID, node)
 			if err != nil {
-				v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetNodesFailed, "Failed to load route policies", nil)
+				apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeGetNodesFailed, "Failed to load route policies", nil)
 				return
 			}
 			policies = append(policies, items...)
@@ -359,258 +321,13 @@ func (r *Router) listTenantPolicies(w http.ResponseWriter, req *http.Request, te
 		policies = filtered
 	}
 
-	sort.Slice(policies, func(i, j int) bool {
-		leftKind := stringifyPolicyValue(policies[i]["kind"])
-		rightKind := stringifyPolicyValue(policies[j]["kind"])
-		if leftKind != rightKind {
-			return leftKind < rightKind
-		}
-
-		leftNode := stringifyPolicyValue(policies[i]["node_name"])
-		rightNode := stringifyPolicyValue(policies[j]["node_name"])
-		if leftNode != rightNode {
-			return leftNode < rightNode
-		}
-
-		leftName := stringifyPolicyValue(policies[i]["name"])
-		rightName := stringifyPolicyValue(policies[j]["name"])
-		if leftName != rightName {
-			return leftName < rightName
-		}
-
-		return stringifyPolicyValue(policies[i]["policy_id"]) < stringifyPolicyValue(policies[j]["policy_id"])
-	})
-
-	v1.WriteSuccess(w, policies, fmt.Sprintf("%d unified policies retrieved", len(policies)))
-}
-
-func (r *Router) buildTenantNodeACLPolicies(tenantID uuid.UUID, node *controllerstorage.Node) ([]map[string]interface{}, error) {
-	rows, err := r.store.DB().Query(
-		`SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
-		        COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
-		   FROM acl_rules
-		  WHERE tenant_id = $1 AND (src_node = $2 OR dst_node = $2)
-		  ORDER BY priority ASC, id ASC`,
-		tenantID, node.PublicKey,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := make([]map[string]interface{}, 0)
-	for rows.Next() {
-		var rule controllerstorage.ACLRule
-		if err := rows.Scan(
-			&rule.ID, &rule.Name, &rule.SrcNode, &rule.SrcNet, &rule.DstNode, &rule.DstNet, &rule.Protocol,
-			&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Enabled, &rule.Priority,
-			&rule.Description, &rule.CreatedAt, &rule.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-
-		policyRef := strconv.Itoa(rule.ID)
-		items = append(items, map[string]interface{}{
-			"policy_id":    fmt.Sprintf("acl:%s:%s", node.ID.String(), policyRef),
-			"policy_ref":   policyRef,
-			"tenant_id":    tenantID.String(),
-			"node_id":      node.ID.String(),
-			"node_name":    firstNonEmpty(node.Hostname, node.PublicKey, node.ID.String()),
-			"target_nodes": []string{node.ID.String()},
-			"scope":        "node",
-			"kind":         "acl",
-			"name":         firstNonEmpty(rule.Name, rule.Description, fmt.Sprintf("%s -> %s", rule.SrcNet, rule.DstNet)),
-			"enabled":      rule.Enabled,
-			"priority":     rule.Priority,
-			"status":       "idle",
-			"version":      "",
-			"spec": map[string]interface{}{
-				"src_node":    rule.SrcNode,
-				"src_net":     rule.SrcNet,
-				"dst_node":    rule.DstNode,
-				"dst_net":     rule.DstNet,
-				"protocol":    rule.Protocol,
-				"min_port":    rule.MinPort,
-				"max_port":    rule.MaxPort,
-				"action":      rule.Action,
-				"description": rule.Description,
-			},
-			"created_at": rule.CreatedAt,
-			"updated_at": rule.UpdatedAt,
-		})
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "acl", items, "policy_ref"); err != nil {
-		return nil, err
-	}
-
-	if summary, err := r.buildNodeOperationsSummary(node); err == nil {
-		attachNodeSummaryToPolicyItems(items, summary)
-	}
-	finalizePolicyItems(items)
-	return items, nil
-}
-
-func (r *Router) buildTenantNodeQoSPolicies(tenantID uuid.UUID, node *controllerstorage.Node) ([]map[string]interface{}, error) {
-	items := make([]map[string]interface{}, 0)
-	for _, category := range []string{
-		controllerstorage.QoSCategoryService,
-		controllerstorage.QoSCategoryPeers,
-		controllerstorage.QoSCategoryIP,
-	} {
-		rules, err := r.store.ListTenantNodeQoSRules(tenantID, node.ID, category)
-		if err != nil {
-			return nil, err
-		}
-		for _, rule := range rules {
-			policyRef := rule.ID.String()
-			items = append(items, map[string]interface{}{
-				"policy_id":    fmt.Sprintf("qos:%s:%s", node.ID.String(), policyRef),
-				"policy_ref":   policyRef,
-				"tenant_id":    tenantID.String(),
-				"node_id":      node.ID.String(),
-				"node_name":    firstNonEmpty(node.Hostname, node.PublicKey, node.ID.String()),
-				"target_nodes": []string{node.ID.String()},
-				"scope":        "node",
-				"kind":         "qos",
-				"name":         firstNonEmpty(rule.Description, fmt.Sprintf("%s %s -> %s", category, firstNonEmpty(rule.SrcCIDR, "*"), firstNonEmpty(rule.DstCIDR, "*"))),
-				"enabled":      rule.Enabled,
-				"priority":     100,
-				"status":       "idle",
-				"version":      "",
-				"spec": map[string]interface{}{
-					"category":       category,
-					"src_ip":         rule.SrcCIDR,
-					"dst_ip":         rule.DstCIDR,
-					"src_port":       rule.SrcPort,
-					"dst_port":       rule.DstPort,
-					"protocol":       rule.Protocol,
-					"bandwidth_mbps": rule.BandwidthMbps,
-					"description":    rule.Description,
-				},
-				"created_at": rule.CreatedAt,
-				"updated_at": rule.UpdatedAt,
-			})
-		}
-	}
-
-	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "qos", items, "policy_ref"); err != nil {
-		return nil, err
-	}
-
-	if summary, err := r.buildNodeOperationsSummary(node); err == nil {
-		attachNodeSummaryToPolicyItems(items, summary)
-	}
-	finalizePolicyItems(items)
-	return items, nil
-}
-
-func (r *Router) buildTenantNodeRoutePolicies(tenantID uuid.UUID, node *controllerstorage.Node) ([]map[string]interface{}, error) {
-	items := make([]map[string]interface{}, 0, len(node.AdvertisedRoutes))
-	for _, route := range node.AdvertisedRoutes {
-		route = strings.TrimSpace(route)
-		if route == "" {
-			continue
-		}
-
-		items = append(items, map[string]interface{}{
-			"policy_id":    fmt.Sprintf("route:%s:%s", node.ID.String(), route),
-			"policy_ref":   route,
-			"tenant_id":    tenantID.String(),
-			"node_id":      node.ID.String(),
-			"node_name":    firstNonEmpty(node.Hostname, node.PublicKey, node.ID.String()),
-			"target_nodes": []string{node.ID.String()},
-			"scope":        "node",
-			"kind":         "route",
-			"name":         route,
-			"enabled":      true,
-			"priority":     100,
-			"status":       "idle",
-			"version":      "",
-			"spec": map[string]interface{}{
-				"cidr": route,
-			},
-			"created_at": node.UpdatedAt,
-			"updated_at": node.UpdatedAt,
-		})
-	}
-
-	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "route", items, "policy_ref"); err != nil {
-		return nil, err
-	}
-
-	if summary, err := r.buildNodeOperationsSummary(node); err == nil {
-		attachNodeSummaryToPolicyItems(items, summary)
-	}
-	finalizePolicyItems(items)
-	return items, nil
-}
-
-func finalizePolicyItems(items []map[string]interface{}) {
-	for _, item := range items {
-		if status := stringifyPolicyValue(item["policy_status"]); status != "" {
-			item["status"] = status
-		}
-
-		if lastDelivery, ok := item["last_delivery"].(map[string]interface{}); ok {
-			if version := stringifyPolicyValue(lastDelivery["id"]); version != "" {
-				item["version"] = version
-			}
-		}
-	}
-}
-
-func attachNodeSummaryToPolicyItems(items []map[string]interface{}, summary map[string]interface{}) {
-	if len(items) == 0 || summary == nil {
-		return
-	}
-
-	for _, item := range items {
-		item["desired_state_version"] = summary["desired_state_version"]
-		item["desired_state_updated_at"] = summary["desired_state_updated_at"]
-		item["applied_state_version"] = summary["applied_state_version"]
-		item["applied_state_updated_at"] = summary["applied_state_updated_at"]
-		item["observed_state"] = summary["observed_state"]
-		item["observed_message"] = summary["observed_message"]
-		item["observed_at"] = summary["observed_at"]
-		item["last_sync_error"] = summary["last_sync_error"]
-		item["state_convergence"] = summary["state_convergence"]
-		if version := stringifyPolicyValue(summary["desired_state_version"]); version != "" {
-			item["version"] = version
-		}
-	}
-}
-
-func (r *Router) handleTenantAI(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
-	if !r.authorizeTenant(w, req, tenantID, false) {
-		return
-	}
-
-	parts := splitPath(req.URL.Path)
-	if len(parts) != 6 || parts[4] != "ai" {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid AI path", nil)
-		return
-	}
-
-	req2 := withTenantContext(req, tenantID)
-	switch parts[5] {
-	case "chat":
-		r.chatAPI.HandleChat(w, req2)
-	case "confirm":
-		r.chatAPI.HandleConfirm(w, req2)
-	default:
-		v1.WriteError(w, http.StatusNotFound, v1.CodeEndpointNotFound, "Unknown endpoint", nil)
-	}
+	apibase.WriteSuccess(w, policies, fmt.Sprintf("%d policies retrieved", len(policies)))
 }
 
 func (r *Router) listTenantNodes(w http.ResponseWriter, tenantID uuid.UUID) {
 	nodes, err := r.store.GetNodesByTenant(tenantID)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetNodesFailed, "Failed to get nodes", nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeGetNodesFailed, "Failed to get nodes", nil)
 		return
 	}
 
@@ -619,13 +336,13 @@ func (r *Router) listTenantNodes(w http.ResponseWriter, tenantID uuid.UUID) {
 		items = append(items, r.buildTenantNodeResponse(node))
 	}
 
-	v1.WriteSuccess(w, items, fmt.Sprintf("%d nodes retrieved", len(items)))
+	apibase.WriteSuccess(w, items, fmt.Sprintf("%d nodes retrieved", len(items)))
 }
 
 func (r *Router) listAllTenants(w http.ResponseWriter) {
 	rows, err := r.store.DB().Query(`SELECT id, name, code, status, resource_quota, created_at, updated_at FROM tenants ORDER BY created_at DESC`)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeListTenantsFailed, "Failed to list tenants", nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeListTenantsFailed, "Failed to list tenants", nil)
 		return
 	}
 	defer rows.Close()
@@ -639,7 +356,7 @@ func (r *Router) listAllTenants(w http.ResponseWriter) {
 		var quota string
 		var createdAt, updatedAt interface{}
 		if err := rows.Scan(&id, &name, &code, &status, &quota, &createdAt, &updatedAt); err != nil {
-			v1.WriteError(w, http.StatusInternalServerError, v1.CodeScanTenantFailed, "Failed to scan tenant", nil)
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeScanTenantFailed, "Failed to scan tenant", nil)
 			return
 		}
 		tenants = append(tenants, map[string]interface{}{
@@ -652,28 +369,36 @@ func (r *Router) listAllTenants(w http.ResponseWriter) {
 			"updated_at":     updatedAt,
 		})
 	}
-
-	v1.WriteSuccess(w, tenants, fmt.Sprintf("%d tenants retrieved", len(tenants)))
+	apibase.WriteSuccess(w, tenants, "All tenants retrieved")
 }
 
 func (r *Router) listSingleTenant(w http.ResponseWriter, tenantID uuid.UUID) {
-	var info controllerstorage.TenantInfo
-	err := r.store.DB().QueryRow(`SELECT id, name, code, status, resource_quota, created_at, updated_at FROM tenants WHERE id = $1`, tenantID).
-		Scan(&info.ID, &info.Name, &info.Code, &info.Status, &info.ResourceQuota, &info.CreatedAt, &info.UpdatedAt)
+	var id uuid.UUID
+	var name string
+	var code sql.NullString
+	var status string
+	var quota string
+	var createdAt, updatedAt interface{}
+
+	err := r.store.DB().QueryRow(
+		`SELECT id, name, code, status, resource_quota, created_at, updated_at FROM tenants WHERE id = $1`,
+		tenantID,
+	).Scan(&id, &name, &code, &status, &quota, &createdAt, &updatedAt)
+
 	if err != nil {
-		v1.WriteError(w, http.StatusNotFound, v1.CodeTenantNotFound, "Tenant not found", nil)
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeTenantNotFound, "Tenant not found", nil)
 		return
 	}
 
-	v1.WriteSuccess(w, []map[string]interface{}{{
-		"id":             info.ID.String(),
-		"name":           info.Name,
-		"code":           info.Code,
-		"status":         info.Status,
-		"resource_quota": info.ResourceQuota,
-		"created_at":     info.CreatedAt,
-		"updated_at":     info.UpdatedAt,
-	}}, "1 tenants retrieved")
+	apibase.WriteSuccess(w, map[string]interface{}{
+		"id":             id.String(),
+		"name":           name,
+		"code":           code.String,
+		"status":         status,
+		"resource_quota": quota,
+		"created_at":     createdAt,
+		"updated_at":     updatedAt,
+	}, "Tenant retrieved")
 }
 
 func (r *Router) updateTenant(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, role string) {
@@ -683,26 +408,19 @@ func (r *Router) updateTenant(w http.ResponseWriter, req *http.Request, tenantID
 		Status        string                 `json:"status"`
 		ResourceQuota map[string]interface{} `json:"resource_quota"`
 	}
+
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, "Invalid request body", nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
 		return
 	}
 
-	resourceQuota := ""
+	var resourceQuota string
 	if body.ResourceQuota != nil {
-		if role != "super_admin" {
-			v1.WriteError(w, http.StatusForbidden, v1.CodeAccessDenied, "Only super_admin can update resource quota", nil)
-			return
-		}
-		raw, err := json.Marshal(body.ResourceQuota)
-		if err != nil {
-			v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidResourceQuota, "Invalid resource quota format", nil)
-			return
-		}
-		resourceQuota = string(raw)
+		qb, _ := json.Marshal(body.ResourceQuota)
+		resourceQuota = string(qb)
 	}
 
-	query := `UPDATE tenants
+	query := `UPDATE tenants 
 		SET name = COALESCE(NULLIF($1, ''), name),
 		    code = COALESCE(NULLIF($2, ''), code),
 		    status = COALESCE(NULLIF($3, ''), status),
@@ -710,48 +428,11 @@ func (r *Router) updateTenant(w http.ResponseWriter, req *http.Request, tenantID
 		    updated_at = NOW()
 		WHERE id = $5`
 	if _, err := r.store.DB().Exec(query, body.Name, body.Code, body.Status, resourceQuota, tenantID); err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeCreateTenantFailed, "Failed to update tenant: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeCreateTenantFailed, "Failed to update tenant: "+err.Error(), nil)
 		return
 	}
 
-	v1.WriteSuccess(w, map[string]string{"id": tenantID.String()}, "Tenant updated successfully")
-}
-
-func (r *Router) getTenantTokenDetailByID(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, tokenID string) {
-	tokenUUID, err := uuid.Parse(tokenID)
-	if err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidTokenID, "Invalid token ID", nil)
-		return
-	}
-
-	var id uuid.UUID
-	var tokenValue, tag, createdBy, status string
-	var maxUses, usedCount int
-	var expiresAt, createdAt, lastUsedAt, lastUsedBy interface{}
-	err = r.store.DB().QueryRow(
-		`SELECT id, token, tag, COALESCE(created_by, ''), status, max_uses, used_count, expires_at, created_at, last_used_at, COALESCE(last_used_by, '')
-		 FROM tokens WHERE id = $1 AND tenant_id = $2`,
-		tokenUUID, tenantID,
-	).Scan(&id, &tokenValue, &tag, &createdBy, &status, &maxUses, &usedCount, &expiresAt, &createdAt, &lastUsedAt, &lastUsedBy)
-	if err != nil {
-		v1.WriteError(w, http.StatusNotFound, v1.CodeTokenNotFound, "Token not found", nil)
-		return
-	}
-
-	v1.WriteSuccess(w, map[string]interface{}{
-		"id":           id.String(),
-		"token":        tokenValue,
-		"tenant_id":    tenantID.String(),
-		"tag":          tag,
-		"created_by":   createdBy,
-		"status":       status,
-		"max_uses":     maxUses,
-		"used_count":   usedCount,
-		"expires_at":   expiresAt,
-		"created_at":   createdAt,
-		"last_used_at": lastUsedAt,
-		"last_used_by": lastUsedBy,
-	}, "Token retrieved successfully")
+	apibase.WriteSuccess(w, map[string]string{"id": tenantID.String()}, "Tenant updated successfully")
 }
 
 func (r *Router) getTenantNodeByID(w http.ResponseWriter, tenantID uuid.UUID, nodeID string) {
@@ -761,33 +442,14 @@ func (r *Router) getTenantNodeByID(w http.ResponseWriter, tenantID uuid.UUID, no
 		return
 	}
 
-	data := r.buildTenantNodeResponse(node)
-
-	if summary, err := r.buildNodeOperationsSummary(node); err == nil {
-		data["operations"] = summary
-	}
-	if commands, err := r.store.ListRecentAgentCommands(node.PublicKey, 10); err == nil {
-		items := make([]map[string]interface{}, 0, len(commands))
-		for _, cmd := range commands {
-			items = append(items, agentCommandToMap(cmd))
-		}
-		data["recent_commands"] = items
-	}
-
-	v1.WriteSuccess(w, data, "Node retrieved successfully")
+	apibase.WriteSuccess(w, r.buildTenantNodeResponse(node), "Node detail retrieved")
 }
 
 func (r *Router) buildTenantNodeResponse(node *controllerstorage.Node) map[string]interface{} {
 	response := map[string]interface{}{
 		"id":                  node.ID.String(),
-		"public_key":          node.PublicKey,
-		"machine_id":          node.MachineID,
 		"tenant_id":           node.TenantID.String(),
-		"endpoint":            node.Endpoint,
-		"private_ip":          node.PrivateIP,
-		"public_ip":           node.PublicIP,
-		"region":              node.Region,
-		"vpc_id":              node.VPCID,
+		"public_key":          node.PublicKey,
 		"hostname":            node.Hostname,
 		"assigned_ip":         node.AssignedIP,
 		"ip_offset":           node.IPOffset,
@@ -828,23 +490,23 @@ func (r *Router) buildTenantNodeResponse(node *controllerstorage.Node) map[strin
 func (r *Router) deleteTenantNode(w http.ResponseWriter, tenantID uuid.UUID, nodeID string) {
 	nodeUUID, err := uuid.Parse(nodeID)
 	if err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, "Invalid node ID", nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid node ID", nil)
 		return
 	}
 
 	var publicKey string
 	err = r.store.DB().QueryRow(`SELECT public_key FROM nodes WHERE id = $1 AND tenant_id = $2`, nodeUUID, tenantID).Scan(&publicKey)
 	if err != nil {
-		v1.WriteError(w, http.StatusNotFound, v1.CodeNodeNotFound, "Node not found", nil)
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeNodeNotFound, "Node not found", nil)
 		return
 	}
 
 	if err := r.store.MarkNodeDeleted(publicKey); err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeUpdateNodeFailed, "Failed to delete node: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeUpdateNodeFailed, "Failed to delete node: "+err.Error(), nil)
 		return
 	}
 
-	v1.WriteSuccess(w, map[string]string{"id": nodeID, "status": "deleted"}, "Node deleted successfully")
+	apibase.WriteSuccess(w, map[string]string{"id": nodeID, "status": "deleted"}, "Node deleted successfully")
 }
 
 func (r *Router) updateTenantNode(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, nodeID string) {
@@ -864,41 +526,35 @@ func (r *Router) updateTenantNode(w http.ResponseWriter, req *http.Request, tena
 		Role             string   `json:"role"`
 		AdvertisedRoutes []string `json:"advertised_routes"`
 	}
+
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, "Invalid request body", nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
 		return
 	}
 
-	routes := node.AdvertisedRoutes
-	if body.AdvertisedRoutes != nil {
-		normalized, err := normalizeRoutes(body.AdvertisedRoutes)
-		if err != nil {
-			v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, err.Error(), nil)
-			return
-		}
-		routes = normalized
+	// 合并并去重路由
+	routes := body.AdvertisedRoutes
+	if routes == nil {
+		routes = node.AdvertisedRoutes
+	}
+	
+	role := body.Role
+	if role == "" {
+		role = node.Role
 	}
 
-	role := node.Role
-	if body.Role != "" {
-		if body.Role != "hub" && body.Role != "spoke" {
-			v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, "Role must be either hub or spoke", nil)
-			return
-		}
-		role = body.Role
-	}
-
-	query := `UPDATE nodes
-		SET hostname = COALESCE(NULLIF($1, ''), hostname),
-		    endpoint = COALESCE(NULLIF($2, ''), endpoint),
-		    private_ip = COALESCE(NULLIF($3, ''), private_ip),
-		    public_ip = COALESCE(NULLIF($4, ''), public_ip),
-		    region = COALESCE(NULLIF($5, ''), region),
-		    vpc_id = COALESCE(NULLIF($6, ''), vpc_id),
-		    role = $7,
-		    advertised_routes = $8,
-		    updated_at = NOW()
+	query := `UPDATE nodes SET 
+		hostname = COALESCE(NULLIF($1, ''), hostname),
+		endpoint = COALESCE(NULLIF($2, ''), endpoint),
+		private_ip = COALESCE(NULLIF($3, ''), private_ip),
+		public_ip = COALESCE(NULLIF($4, ''), public_ip),
+		region = COALESCE(NULLIF($5, ''), region),
+		vpc_id = COALESCE(NULLIF($6, ''), vpc_id),
+		role = $7,
+		advertised_routes = $8,
+		updated_at = NOW()
 		WHERE id = $9 AND tenant_id = $10`
+	
 	if _, err := r.store.DB().Exec(query,
 		body.Hostname,
 		body.Endpoint,
@@ -911,11 +567,11 @@ func (r *Router) updateTenantNode(w http.ResponseWriter, req *http.Request, tena
 		node.ID,
 		tenantID,
 	); err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeUpdateNodeFailed, "Failed to update node", nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeUpdateNodeFailed, "Failed to update node", nil)
 		return
 	}
 
-	v1.WriteSuccess(w, map[string]interface{}{
+	apibase.WriteSuccess(w, map[string]interface{}{
 		"id":                node.ID.String(),
 		"tenant_id":         tenantID.String(),
 		"role":              role,
@@ -925,65 +581,48 @@ func (r *Router) updateTenantNode(w http.ResponseWriter, req *http.Request, tena
 
 func (r *Router) handleTenantNodeRoutes(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, parts []string) {
 	if len(parts) < 7 || parts[6] != "routes" {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid route path", nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidPath, "Invalid route path", nil)
 		return
 	}
 
 	nodeID := parts[5]
-	switch {
-	case len(parts) == 7:
-		if req.Method == http.MethodGet {
-			if !r.authorizeTenant(w, req, tenantID, false) {
-				return
-			}
-			r.listTenantNodeRoutes(w, tenantID, nodeID)
-			return
-		}
-		if !r.authorizeTenantAdmin(w, req, tenantID) {
-			return
-		}
-		switch req.Method {
-		case http.MethodPost:
-			r.addTenantNodeRoute(w, req, tenantID, nodeID)
-		default:
-			v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
-		}
-	case len(parts) == 8:
-		routeID, err := url.PathUnescape(parts[7])
-		if err != nil {
-			v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid route identifier", nil)
-			return
-		}
-		if req.Method == http.MethodGet {
-			if !r.authorizeTenant(w, req, tenantID, false) {
-				return
-			}
-			r.getTenantNodeRoute(w, tenantID, nodeID, routeID)
-			return
-		}
-		if !r.authorizeTenantAdmin(w, req, tenantID) {
-			return
-		}
-		switch req.Method {
-		case http.MethodPut:
-			r.replaceTenantNodeRoute(w, req, tenantID, nodeID, routeID)
-		case http.MethodDelete:
-			r.deleteTenantNodeRoute(w, tenantID, nodeID, routeID)
-		default:
-			v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
-		}
-	default:
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid route path", nil)
-	}
-}
-
-func (r *Router) listTenantNodeRoutes(w http.ResponseWriter, tenantID uuid.UUID, nodeID string) {
 	node, err := r.getTenantNodeRecord(nodeID, tenantID)
 	if err != nil {
 		r.writeNodeLookupError(w, err)
 		return
 	}
 
+	if len(parts) == 7 {
+		switch req.Method {
+		case http.MethodGet:
+			r.listTenantNodeRoutes(w, tenantID, node)
+		case http.MethodPost:
+			r.addTenantNodeRoute(w, req, tenantID, node)
+		default:
+			apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+		}
+		return
+	}
+
+	if len(parts) == 8 {
+		routeID := parts[7]
+		switch req.Method {
+		case http.MethodGet:
+			r.getTenantNodeRoute(w, tenantID, nodeID, routeID)
+		case http.MethodPut:
+			r.replaceTenantNodeRoute(w, req, tenantID, nodeID, routeID)
+		case http.MethodDelete:
+			r.deleteTenantNodeRoute(w, tenantID, nodeID, routeID)
+		default:
+			apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+		}
+		return
+	}
+
+	apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidPath, "Invalid route path", nil)
+}
+
+func (r *Router) listTenantNodeRoutes(w http.ResponseWriter, tenantID uuid.UUID, node *controllerstorage.Node) {
 	routes := make([]map[string]interface{}, 0, len(node.AdvertisedRoutes))
 	for _, route := range node.AdvertisedRoutes {
 		routes = append(routes, map[string]interface{}{
@@ -995,14 +634,14 @@ func (r *Router) listTenantNodeRoutes(w http.ResponseWriter, tenantID uuid.UUID,
 		})
 	}
 	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "route", routes, "id"); err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetNodesFailed, "Failed to load route delivery history", nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeGetNodesFailed, "Failed to load route delivery history", nil)
 		return
 	}
 	if summary, err := r.buildNodeOperationsSummary(node); err == nil {
 		attachNodeSummaryToPolicyItems(routes, summary)
 	}
 
-	v1.WriteSuccess(w, routes, fmt.Sprintf("%d routes retrieved", len(routes)))
+	apibase.WriteSuccess(w, routes, fmt.Sprintf("%d routes retrieved", len(routes)))
 }
 
 func (r *Router) getTenantNodeRoute(w http.ResponseWriter, tenantID uuid.UUID, nodeID, routeID string) {
@@ -1012,46 +651,39 @@ func (r *Router) getTenantNodeRoute(w http.ResponseWriter, tenantID uuid.UUID, n
 		return
 	}
 
-	for _, route := range node.AdvertisedRoutes {
-		if route == routeID {
-			v1.WriteSuccess(w, map[string]string{
-				"id":   route,
-				"cidr": route,
-			}, "Route retrieved successfully")
-			return
-		}
-	}
-
-	v1.WriteError(w, http.StatusNotFound, v1.CodeEndpointNotFound, "Route not found", nil)
-}
-
-func (r *Router) addTenantNodeRoute(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, nodeID string) {
-	node, err := r.getTenantNodeRecord(nodeID, tenantID)
-	if err != nil {
-		r.writeNodeLookupError(w, err)
+	if !containsString(node.AdvertisedRoutes, routeID) {
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Route not found", nil)
 		return
 	}
 
+	apibase.WriteSuccess(w, map[string]interface{}{
+		"id":      routeID,
+		"cidr":    routeID,
+		"node_id": node.ID.String(),
+	}, "Route retrieved")
+}
+
+func (r *Router) addTenantNodeRoute(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node) {
 	route, err := decodeRouteBody(req)
 	if err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, err.Error(), nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
 		return
 	}
 
 	routes := append(append([]string{}, node.AdvertisedRoutes...), route)
 	normalized, err := normalizeRoutes(routes)
 	if err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, err.Error(), nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
 		return
 	}
 
 	if containsString(node.AdvertisedRoutes, route) {
-		v1.WriteSuccess(w, map[string]string{"id": route, "cidr": route}, "Route already exists")
+		apibase.WriteSuccess(w, map[string]string{"id": route, "cidr": route}, "Route already exists")
 		return
 	}
 
 	if err := r.updateTenantNodeRoutes(node.ID, tenantID, normalized); err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeUpdateNodeFailed, "Failed to add route", nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeUpdateNodeFailed, "Failed to add route", nil)
 		return
 	}
 
@@ -1073,13 +705,13 @@ func (r *Router) replaceTenantNodeRoute(w http.ResponseWriter, req *http.Request
 	}
 
 	if !containsString(node.AdvertisedRoutes, routeID) {
-		v1.WriteError(w, http.StatusNotFound, v1.CodeEndpointNotFound, "Route not found", nil)
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Route not found", nil)
 		return
 	}
 
 	newRoute, err := decodeRouteBody(req)
 	if err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, err.Error(), nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
 		return
 	}
 
@@ -1094,12 +726,12 @@ func (r *Router) replaceTenantNodeRoute(w http.ResponseWriter, req *http.Request
 
 	normalized, err := normalizeRoutes(updated)
 	if err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, err.Error(), nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
 		return
 	}
 
 	if err := r.updateTenantNodeRoutes(node.ID, tenantID, normalized); err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeUpdateNodeFailed, "Failed to update route", nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeUpdateNodeFailed, "Failed to update route", nil)
 		return
 	}
 
@@ -1110,8 +742,8 @@ func (r *Router) replaceTenantNodeRoute(w http.ResponseWriter, req *http.Request
 		"previous": routeID,
 	}, "Route updated successfully", map[string]interface{}{
 		"node_id":  node.ID.String(),
-		"route":    newRoute,
-		"previous": routeID,
+		"new_route": newRoute,
+		"old_route": routeID,
 	})
 }
 
@@ -1123,7 +755,7 @@ func (r *Router) deleteTenantNodeRoute(w http.ResponseWriter, tenantID uuid.UUID
 	}
 
 	if !containsString(node.AdvertisedRoutes, routeID) {
-		v1.WriteError(w, http.StatusNotFound, v1.CodeEndpointNotFound, "Route not found", nil)
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Route not found", nil)
 		return
 	}
 
@@ -1135,7 +767,7 @@ func (r *Router) deleteTenantNodeRoute(w http.ResponseWriter, tenantID uuid.UUID
 	}
 
 	if err := r.updateTenantNodeRoutes(node.ID, tenantID, updated); err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeUpdateNodeFailed, "Failed to delete route", nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeUpdateNodeFailed, "Failed to delete route", nil)
 		return
 	}
 
@@ -1155,143 +787,19 @@ func (r *Router) getTenantNodeRecord(nodeID string, tenantID uuid.UUID) (*contro
 		return nil, fmt.Errorf("invalid node id: %w", err)
 	}
 
-	query := `SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role,
-		        COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0),
-		        advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at
-		   FROM nodes WHERE id = $1 AND tenant_id = $2`
-	row := r.store.DB().QueryRow(query, nodeUUID, tenantID)
-
-	var node controllerstorage.Node
-	var advertisedRoutes pq.StringArray
-	if err := row.Scan(
-		&node.ID, &node.PublicKey, &node.MachineID, &node.TenantID, &node.Endpoint, &node.PrivateIP, &node.PublicIP,
-		&node.Region, &node.VPCID, &node.Hostname, &node.AssignedIP, &node.IPOffset, &node.LastSeen, &node.RegisteredAt,
-		&node.Role, &node.RuntimeMode, &node.KernelVersion, &node.HasAESNI, &node.Status, &node.OfflineSince,
-		&advertisedRoutes, &node.EnrolledWithToken, &node.CreatedAt, &node.UpdatedAt,
-	); err != nil {
-		return nil, err
-	}
-
-	node.AdvertisedRoutes = []string(advertisedRoutes)
-	return &node, nil
-}
-
-func (r *Router) updateTenantNodeRoutes(nodeID, tenantID uuid.UUID, routes []string) error {
-	_, err := r.store.DB().Exec(
-		`UPDATE nodes SET advertised_routes = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
-		pq.Array(routes),
-		nodeID,
-		tenantID,
-	)
-	return err
+	return r.store.GetNodeByID(nodeUUID)
 }
 
 func (r *Router) writeNodeLookupError(w http.ResponseWriter, err error) {
 	if err == sql.ErrNoRows {
-		v1.WriteError(w, http.StatusNotFound, v1.CodeNodeNotFound, "Node not found", nil)
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeNodeNotFound, "Node not found", nil)
 		return
 	}
 	if strings.Contains(err.Error(), "invalid node id") {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, "Invalid node ID", nil)
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid node ID", nil)
 		return
 	}
-	v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetNodesFailed, "Failed to load node", nil)
-}
-
-func decodeRouteBody(req *http.Request) (string, error) {
-	var body struct {
-		CIDR  string `json:"cidr"`
-		Route string `json:"route"`
-	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		return "", fmt.Errorf("invalid request body")
-	}
-
-	route := strings.TrimSpace(body.CIDR)
-	if route == "" {
-		route = strings.TrimSpace(body.Route)
-	}
-	if route == "" {
-		return "", fmt.Errorf("cidr is required")
-	}
-	if _, _, err := net.ParseCIDR(route); err != nil {
-		return "", fmt.Errorf("invalid cidr")
-	}
-	return route, nil
-}
-
-func normalizeRoutes(routes []string) ([]string, error) {
-	normalized := make([]string, 0, len(routes))
-	seen := make(map[string]struct{}, len(routes))
-	for _, route := range routes {
-		route = strings.TrimSpace(route)
-		if route == "" {
-			continue
-		}
-		if _, _, err := net.ParseCIDR(route); err != nil {
-			return nil, fmt.Errorf("invalid cidr: %s", route)
-		}
-		if _, exists := seen[route]; exists {
-			continue
-		}
-		seen[route] = struct{}{}
-		normalized = append(normalized, route)
-	}
-	return normalized, nil
-}
-
-func normalizeNodeRef(value string, node *controllerstorage.Node) string {
-	value = strings.TrimSpace(value)
-	switch value {
-	case "", "self", node.ID.String(), node.Hostname:
-		return node.PublicKey
-	default:
-		return value
-	}
-}
-
-func nodeIPCandidates(node *controllerstorage.Node) []string {
-	seen := map[string]struct{}{}
-	var values []string
-	for _, candidate := range []string{node.AssignedIP, node.PrivateIP, node.PublicIP} {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-		if _, exists := seen[candidate]; exists {
-			continue
-		}
-		seen[candidate] = struct{}{}
-		values = append(values, candidate)
-	}
-	return values
-}
-
-func primaryNodeIP(node *controllerstorage.Node) string {
-	candidates := nodeIPCandidates(node)
-	if len(candidates) == 0 {
-		return ""
-	}
-	return candidates[0]
-}
-
-func nullableInt(value int) interface{} {
-	if value == 0 {
-		return nil
-	}
-	return value
-}
-
-type byteReadCloser struct {
-	*strings.Reader
-}
-
-func (b *byteReadCloser) Close() error {
-	return nil
-}
-
-func newReadCloser(body []byte) *byteReadCloser {
-	return &byteReadCloser{Reader: strings.NewReader(string(body))}
+	apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeGetNodesFailed, "Failed to load node", nil)
 }
 
 func (r *Router) queueNodePolicySync(
@@ -1333,11 +841,7 @@ func (r *Router) queueNodePolicySync(
 
 	dispatch := map[string]interface{}{
 		"command_id":            cmd.ID,
-		"command":               cmd.Command,
 		"status":                cmd.Status,
-		"message":               "Policy sync queued",
-		"created_at":            cmd.CreatedAt,
-		"timeout_seconds":       cmd.TimeoutSeconds,
 		"desired_state_version": desiredVersion,
 	}
 	if controlState != nil {
@@ -1370,8 +874,6 @@ func (r *Router) queueNodePolicySync(
 		return nil, nil, err
 	}
 
-	dispatch["delivery_id"] = delivery.ID.String()
-	dispatch["policy_ref"] = delivery.PolicyRef
 	if delivery.PolicyName != "" {
 		dispatch["policy_name"] = delivery.PolicyName
 	}
@@ -1392,7 +894,7 @@ func (r *Router) writePolicyMutationSuccess(
 	policyRef, policyName := inferPolicyDeliveryIdentity(domain, data, metadata)
 	dispatch, delivery, err := r.queueNodePolicySync(node, domain, action, policyRef, policyName, metadata)
 	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, codeCommandDispatchFailed, "Policy updated but sync dispatch failed: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, "COMMAND_DISPATCH_FAILED", "Policy updated but sync dispatch failed: "+err.Error(), nil)
 		return
 	}
 
@@ -1403,137 +905,21 @@ func (r *Router) writePolicyMutationSuccess(
 	if delivery != nil {
 		data["last_delivery"] = policyDeliveryToMap(delivery)
 		data["delivery_history"] = []map[string]interface{}{policyDeliveryToMap(delivery)}
-		data["policy_status"] = mapCommandStatusToPolicyStatus(delivery.CommandStatus)
-		data["pending_cmds"] = pendingCountForCommandStatus(delivery.CommandStatus)
-		data["last_delivery_error"] = delivery.LastError
-		data["last_delivery_command_id"] = delivery.CommandID
-		data["last_delivery_action"] = delivery.Action
-		data["last_delivery_at"] = delivery.UpdatedAt
 	}
+
 	if summary, err := r.buildNodeOperationsSummary(node); err == nil {
-		if _, exists := data["policy_status"]; !exists {
-			data["policy_status"] = summary["configuration_status"]
-		}
-		if _, exists := data["pending_cmds"]; !exists {
-			data["pending_cmds"] = summary["pending_cmds"]
-		}
-		data["desired_state_version"] = summary["desired_state_version"]
-		data["desired_state_updated_at"] = summary["desired_state_updated_at"]
-		data["applied_state_version"] = summary["applied_state_version"]
-		data["applied_state_updated_at"] = summary["applied_state_updated_at"]
-		data["observed_state"] = summary["observed_state"]
-		data["observed_message"] = summary["observed_message"]
-		data["observed_at"] = summary["observed_at"]
-		data["state_convergence"] = summary["state_convergence"]
-		data["last_sync_error"] = summary["last_sync_error"]
+		data["last_command"] = summary["last_command"]
+		data["last_command_status"] = summary["last_command_status"]
 		data["last_command_error"] = summary["last_command_error"]
 	}
 
-	v1.WriteSuccess(w, data, message)
-}
-
-func (r *Router) proxyLegacyPolicyMutation(
-	w http.ResponseWriter,
-	req *http.Request,
-	node *controllerstorage.Node,
-	domain string,
-	action string,
-	metadata map[string]interface{},
-	handler func(http.ResponseWriter, *http.Request),
-) {
-	recorder := httptest.NewRecorder()
-	handler(recorder, req)
-
-	if recorder.Code >= http.StatusBadRequest {
-		copyCapturedResponse(w, recorder)
-		return
-	}
-
-	var payload v1.APIResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil || !payload.Success {
-		copyCapturedResponse(w, recorder)
-		return
-	}
-
-	dispatchData := map[string]interface{}{}
-	if existing, ok := payload.Data.(map[string]interface{}); ok {
-		for key, value := range existing {
-			dispatchData[key] = value
-		}
-	} else if payload.Data != nil {
-		dispatchData["resource"] = payload.Data
-	}
-
-	policyRef, policyName := inferPolicyDeliveryIdentity(domain, dispatchData, metadata)
-	dispatch, delivery, err := r.queueNodePolicySync(node, domain, action, policyRef, policyName, metadata)
-	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, codeCommandDispatchFailed, "Policy updated but sync dispatch failed: "+err.Error(), nil)
-		return
-	}
-
-	data := map[string]interface{}{}
-	for key, value := range dispatchData {
-		data[key] = value
-	}
-	data["dispatch"] = dispatch
-	if delivery != nil {
-		data["last_delivery"] = policyDeliveryToMap(delivery)
-		data["delivery_history"] = []map[string]interface{}{policyDeliveryToMap(delivery)}
-		data["policy_status"] = mapCommandStatusToPolicyStatus(delivery.CommandStatus)
-		data["pending_cmds"] = pendingCountForCommandStatus(delivery.CommandStatus)
-		data["last_delivery_error"] = delivery.LastError
-		data["last_delivery_command_id"] = delivery.CommandID
-		data["last_delivery_action"] = delivery.Action
-		data["last_delivery_at"] = delivery.UpdatedAt
-	}
-	if summary, err := r.buildNodeOperationsSummary(node); err == nil {
-		if _, exists := data["policy_status"]; !exists {
-			data["policy_status"] = summary["configuration_status"]
-		}
-		if _, exists := data["pending_cmds"]; !exists {
-			data["pending_cmds"] = summary["pending_cmds"]
-		}
-		data["desired_state_version"] = summary["desired_state_version"]
-		data["desired_state_updated_at"] = summary["desired_state_updated_at"]
-		data["applied_state_version"] = summary["applied_state_version"]
-		data["applied_state_updated_at"] = summary["applied_state_updated_at"]
-		data["observed_state"] = summary["observed_state"]
-		data["observed_message"] = summary["observed_message"]
-		data["observed_at"] = summary["observed_at"]
-		data["state_convergence"] = summary["state_convergence"]
-		data["last_sync_error"] = summary["last_sync_error"]
-		data["last_command_error"] = summary["last_command_error"]
-	}
-
-	payload.Data = data
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(recorder.Code)
-	_ = json.NewEncoder(w).Encode(payload)
-}
-
-func copyCapturedResponse(w http.ResponseWriter, recorder *httptest.ResponseRecorder) {
-	for key, values := range recorder.Header() {
-		for _, value := range values {
-			w.Header().Add(key, value)
-		}
-	}
-	w.WriteHeader(recorder.Code)
-	_, _ = w.Write(recorder.Body.Bytes())
-}
-
-func containsString(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
+	apibase.WriteSuccess(w, data, message)
 }
 
 func (r *Router) authorizeTenant(w http.ResponseWriter, req *http.Request, targetTenantID uuid.UUID, requireAdmin bool) bool {
 	role, exists := middleware.GetUserRole(req.Context())
 	if !exists {
-		v1.WriteError(w, http.StatusUnauthorized, v1.CodeUnauthorized, "Unauthorized", nil)
+		apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeUnauthorized, "Unauthorized", nil)
 		return false
 	}
 
@@ -1541,19 +927,19 @@ func (r *Router) authorizeTenant(w http.ResponseWriter, req *http.Request, targe
 		return true
 	}
 
-	userTenantID, ok := middleware.GetTenantID(req.Context())
-	if !ok {
-		v1.WriteError(w, http.StatusUnauthorized, v1.CodeTenantContextNotFound, "请先选择租户：当前未设置租户上下文", nil)
+	userTenantID, exists := middleware.GetTenantID(req.Context())
+	if !exists {
+		apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeTenantContextNotFound, "Tenant context missing", nil)
 		return false
 	}
 
 	if userTenantID != targetTenantID {
-		v1.WriteError(w, http.StatusForbidden, v1.CodeAccessDenied, "Permission denied: cannot access other tenant", nil)
+		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Access denied to this tenant", nil)
 		return false
 	}
 
 	if requireAdmin && role != "admin" && role != "owner" {
-		v1.WriteError(w, http.StatusForbidden, v1.CodeAccessDenied, "Permission denied: admin role required", nil)
+		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Admin privileges required", nil)
 		return false
 	}
 
@@ -1564,22 +950,7 @@ func (r *Router) authorizeTenantAdmin(w http.ResponseWriter, req *http.Request, 
 	return r.authorizeTenant(w, req, targetTenantID, true)
 }
 
-func withTenantContext(req *http.Request, tenantID uuid.UUID) *http.Request {
-	ctx := context.WithValue(req.Context(), middleware.TenantIDKey, tenantID.String())
-	return req.WithContext(ctx)
-}
-
-func splitTenantPath(path string) (string, string, bool) {
-	trimmed := strings.TrimPrefix(path, "/api/v2/tenants/")
-	if trimmed == path || trimmed == "" {
-		return "", "", false
-	}
-	parts := strings.SplitN(trimmed, "/", 2)
-	if len(parts) == 1 {
-		return parts[0], "", true
-	}
-	return parts[0], parts[1], true
-}
+// 辅助工具函数
 
 func splitPath(path string) []string {
 	trimmed := strings.Trim(path, "/")
@@ -1589,10 +960,19 @@ func splitPath(path string) []string {
 	return strings.Split(trimmed, "/")
 }
 
-func cloneRequestWithPath(req *http.Request, path string) *http.Request {
-	cloned := req.Clone(req.Context())
-	cloned.URL.Path = path
-	return cloned
+func splitTenantPath(path string) (string, string, bool) {
+	parts := splitPath(path)
+	if len(parts) < 4 || parts[0] != "api" || parts[1] != "v2" || parts[2] != "tenants" {
+		return "", "", false
+	}
+	tenantID := parts[3]
+	rest := strings.Join(parts[4:], "/")
+	return tenantID, rest, true
+}
+
+func withTenantContext(req *http.Request, tenantID uuid.UUID) *http.Request {
+	ctx := context.WithValue(req.Context(), middleware.TenantIDKey, tenantID.String())
+	return req.WithContext(ctx)
 }
 
 func attachPolicyDeliveriesToItems(
@@ -1607,14 +987,7 @@ func attachPolicyDeliveriesToItems(
 		return nil
 	}
 
-	limit := len(items) * 10
-	if limit < 100 {
-		limit = 100
-	}
-	if limit > 500 {
-		limit = 500
-	}
-
+	limit := 100
 	deliveries, err := store.ListPolicyDeliveriesByNodeAndDomain(tenantID, nodeID, domain, limit)
 	if err != nil {
 		return err
@@ -1648,23 +1021,19 @@ func attachPolicyDeliveriesToItems(
 			continue
 		}
 
-		historyItems := make([]map[string]interface{}, 0, minInt(len(history), 5))
-		for idx, delivery := range history {
-			if idx >= 5 {
-				break
-			}
-			historyItems = append(historyItems, policyDeliveryToMap(delivery))
+		serializedHistory := make([]map[string]interface{}, 0, len(history))
+		for _, h := range history {
+			serializedHistory = append(serializedHistory, policyDeliveryToMap(h))
 		}
-
-		lastDelivery := history[0]
-		item["last_delivery"] = policyDeliveryToMap(lastDelivery)
-		item["delivery_history"] = historyItems
-		item["policy_status"] = mapCommandStatusToPolicyStatus(lastDelivery.CommandStatus)
-		item["pending_cmds"] = pendingCountForCommandStatus(lastDelivery.CommandStatus)
-		item["last_delivery_error"] = lastDelivery.LastError
-		item["last_delivery_command_id"] = lastDelivery.CommandID
-		item["last_delivery_action"] = lastDelivery.Action
-		item["last_delivery_at"] = lastDelivery.UpdatedAt
+		item["delivery_history"] = serializedHistory
+		item["last_delivery"] = serializedHistory[0]
+		item["policy_status"] = mapCommandStatusToPolicyStatus(history[0].CommandStatus)
+		
+		pendingCount := 0
+		for _, h := range history {
+			pendingCount += pendingCountForCommandStatus(h.CommandStatus)
+		}
+		item["pending_cmds"] = pendingCount
 	}
 
 	return nil
@@ -1690,9 +1059,6 @@ func policyDeliveryToMap(delivery *controllerstorage.PolicyDelivery) map[string]
 		"created_at":     delivery.CreatedAt,
 		"updated_at":     delivery.UpdatedAt,
 	}
-	if desiredStateVersion := stringifyPolicyValue(delivery.Metadata["desired_state_version"]); desiredStateVersion != "" {
-		payload["desired_state_version"] = desiredStateVersion
-	}
 	if delivery.CompletedAt != nil {
 		payload["completed_at"] = delivery.CompletedAt
 	}
@@ -1701,101 +1067,42 @@ func policyDeliveryToMap(delivery *controllerstorage.PolicyDelivery) map[string]
 }
 
 func inferPolicyDeliveryIdentity(domain string, data map[string]interface{}, metadata map[string]interface{}) (string, string) {
-	candidates := []map[string]interface{}{data}
-	for _, nestedKey := range []string{"rule", "resource"} {
-		if nested, ok := data[nestedKey].(map[string]interface{}); ok && nested != nil {
-			candidates = append([]map[string]interface{}{nested}, candidates...)
-		}
-	}
-	if metadata != nil {
-		candidates = append(candidates, metadata)
-	}
-
-	refKeys := []string{"id", "rule_id", "policy_ref"}
+	candidates := []map[string]interface{}{data, metadata}
+	refKeys := []string{"id", "rule_id", "policy_ref", "cidr", "route"}
 	nameKeys := []string{"name", "rule_name", "policy_name", "description"}
-	switch domain {
-	case "route":
-		refKeys = append([]string{"cidr", "route"}, refKeys...)
-		nameKeys = append([]string{"cidr", "route"}, nameKeys...)
-	case "qos":
-		nameKeys = append([]string{"category"}, nameKeys...)
-	}
 
-	var policyRef string
+	var policyRef, policyName string
 	for _, candidate := range candidates {
 		if candidate == nil {
 			continue
 		}
-		if value := firstMapString(candidate, refKeys...); value != "" {
-			policyRef = value
+		for _, key := range refKeys {
+			if val, ok := candidate[key].(string); ok && val != "" {
+				policyRef = val
+				break
+			}
+		}
+		if policyRef != "" {
 			break
 		}
 	}
 
-	var policyName string
 	for _, candidate := range candidates {
 		if candidate == nil {
 			continue
 		}
-		if value := firstMapString(candidate, nameKeys...); value != "" {
-			policyName = value
+		for _, key := range nameKeys {
+			if val, ok := candidate[key].(string); ok && val != "" {
+				policyName = val
+				break
+			}
+		}
+		if policyName != "" {
 			break
 		}
 	}
 
 	return policyRef, policyName
-}
-
-func clonePolicyMetadata(metadata map[string]interface{}) map[string]interface{} {
-	if len(metadata) == 0 {
-		return map[string]interface{}{}
-	}
-
-	cloned := make(map[string]interface{}, len(metadata))
-	for key, value := range metadata {
-		cloned[key] = value
-	}
-	return cloned
-}
-
-func firstMapString(values map[string]interface{}, keys ...string) string {
-	for _, key := range keys {
-		if value, exists := values[key]; exists {
-			if result := stringifyPolicyValue(value); result != "" {
-				return result
-			}
-		}
-	}
-	return ""
-}
-
-func stringifyPolicyValue(value interface{}) string {
-	switch typed := value.(type) {
-	case nil:
-		return ""
-	case string:
-		return strings.TrimSpace(typed)
-	case fmt.Stringer:
-		return strings.TrimSpace(typed.String())
-	case int:
-		return strconv.Itoa(typed)
-	case int32:
-		return strconv.FormatInt(int64(typed), 10)
-	case int64:
-		return strconv.FormatInt(typed, 10)
-	case float32:
-		if typed == float32(int64(typed)) {
-			return strconv.FormatInt(int64(typed), 10)
-		}
-		return strconv.FormatFloat(float64(typed), 'f', -1, 32)
-	case float64:
-		if typed == float64(int64(typed)) {
-			return strconv.FormatInt(int64(typed), 10)
-		}
-		return strconv.FormatFloat(typed, 'f', -1, 64)
-	default:
-		return strings.TrimSpace(fmt.Sprintf("%v", typed))
-	}
 }
 
 func mapCommandStatusToPolicyStatus(status string) string {
@@ -1822,29 +1129,172 @@ func pendingCountForCommandStatus(status string) int {
 	}
 }
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
+func stringifyPolicyValue(v interface{}) string {
+	if v == nil {
+		return ""
 	}
-	return b
+	return fmt.Sprintf("%v", v)
+}
+
+func clonePolicyMetadata(m map[string]interface{}) map[string]interface{} {
+	cloned := make(map[string]interface{})
+	for k, v := range m {
+		cloned[k] = v
+	}
+	return cloned
 }
 
 func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
+	for _, v := range values {
+		if v != "" {
+			return v
 		}
 	}
 	return ""
 }
 
-func parsePortIdentifier(raw string) (int, error) {
-	port, err := strconv.Atoi(strings.TrimSpace(raw))
+func containsString(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeRoutes(routes []string) ([]string, error) {
+	unique := make(map[string]bool)
+	var result []string
+	for _, r := range routes {
+		trimmed := strings.TrimSpace(r)
+		if trimmed == "" {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(trimmed); err != nil {
+			if net.ParseIP(trimmed) == nil {
+				return nil, fmt.Errorf("invalid CIDR or IP: %s", trimmed)
+			}
+			if !strings.Contains(trimmed, "/") {
+				trimmed = trimmed + "/32"
+			}
+		}
+		if !unique[trimmed] {
+			unique[trimmed] = true
+			result = append(result, trimmed)
+		}
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func (r *Router) buildTenantNodeACLPolicies(tenantID uuid.UUID, node *controllerstorage.Node) ([]map[string]interface{}, error) {
+	rules, err := r.store.ListTenantNodeACLRules(tenantID, node.ID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	if port <= 0 || port > 65535 {
-		return 0, fmt.Errorf("invalid port")
+
+	items := make([]map[string]interface{}, 0, len(rules))
+	for _, rule := range rules {
+		items = append(items, map[string]interface{}{
+			"id":          rule.ID.String(),
+			"node_id":     node.ID.String(),
+			"node_name":   firstNonEmpty(node.Hostname, node.PublicKey),
+			"kind":        "acl",
+			"name":        rule.Description,
+			"src_net":     rule.SrcCIDR,
+			"dst_net":     rule.DstCIDR,
+			"action":      rule.Action,
+			"enabled":     rule.Enabled,
+			"priority":    rule.Priority,
+			"created_at":  rule.CreatedAt,
+			"updated_at":  rule.UpdatedAt,
+		})
 	}
-	return port, nil
+
+	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "acl", items, "id"); err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
+func (r *Router) buildTenantNodeQoSPolicies(tenantID uuid.UUID, node *controllerstorage.Node) ([]map[string]interface{}, error) {
+	// 汇总所有分类的 QoS
+	categories := []string{"service", "peers", "ip"}
+	allPolicies := make([]map[string]interface{}, 0)
+
+	for _, cat := range categories {
+		rules, err := r.store.ListTenantNodeQoSRules(tenantID, node.ID, cat)
+		if err != nil {
+			continue
+		}
+		for _, rule := range rules {
+			allPolicies = append(allPolicies, map[string]interface{}{
+				"id":             rule.ID.String(),
+				"node_id":        node.ID.String(),
+				"node_name":      firstNonEmpty(node.Hostname, node.PublicKey),
+				"kind":           "qos",
+				"category":       cat,
+				"name":           rule.Description,
+				"bandwidth_mbps": rule.BandwidthMbps,
+				"enabled":        rule.Enabled,
+				"created_at":     rule.CreatedAt,
+				"updated_at":     rule.UpdatedAt,
+			})
+		}
+	}
+
+	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "qos", allPolicies, "id"); err != nil {
+		return nil, err
+	}
+
+	return allPolicies, nil
+}
+
+func (r *Router) buildTenantNodeRoutePolicies(tenantID uuid.UUID, node *controllerstorage.Node) ([]map[string]interface{}, error) {
+	items := make([]map[string]interface{}, 0, len(node.AdvertisedRoutes))
+	for _, route := range node.AdvertisedRoutes {
+		items = append(items, map[string]interface{}{
+			"id":        route,
+			"node_id":   node.ID.String(),
+			"node_name": firstNonEmpty(node.Hostname, node.PublicKey),
+			"kind":      "route",
+			"name":      route,
+			"enabled":   true,
+		})
+	}
+
+	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "route", items, "id"); err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
+func (r *Router) updateTenantNodeRoutes(nodeID uuid.UUID, tenantID uuid.UUID, routes []string) error {
+	_, err := r.store.DB().Exec(
+		`UPDATE nodes SET advertised_routes = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+		pq.Array(routes), nodeID, tenantID,
+	)
+	return err
+}
+
+func attachNodeSummaryToPolicyItems(items []map[string]interface{}, summary map[string]interface{}) {
+	for _, item := range items {
+		item["node_status"] = summary["status"]
+		item["node_sync_status"] = summary["sync_status"]
+		item["node_availability"] = summary["availability_status"]
+		item["convergence_status"] = summary["state_convergence"]
+	}
+}
+
+func decodeRouteBody(req *http.Request) (string, error) {
+	var body struct {
+		CIDR  string `json:"cidr"`
+		Route string `json:"route"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		return "", fmt.Errorf("invalid request body")
+	}
+	return firstNonEmpty(body.CIDR, body.Route), nil
 }
