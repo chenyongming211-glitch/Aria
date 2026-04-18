@@ -22,16 +22,16 @@ export default defineStore('user', () => {
       const requirePasswordChange = response.data?.data?.require_password_change || response.data?.require_password_change || false
 
       if (token) {
-        // 存储 token 到 sessionStorage
-        sessionStorage.setItem('aria_token', token)
+        // 存储 token 到 localStorage
+        localStorage.setItem('aria_token', token)
         
         // 计算并存储 token 过期时间（默认 2 小时 = 7200 秒）
         const expiresIn = response.data?.data?.expires_in || 7200
         const expireTime = Date.now() + expiresIn * 1000
-        sessionStorage.setItem('aria_token_expire_time', expireTime.toString())
+        localStorage.setItem('aria_token_expire_time', expireTime.toString())
         
         // 初始化最后活动时间
-        sessionStorage.setItem('aria_last_activity', Date.now().toString())
+        localStorage.setItem('aria_last_activity', Date.now().toString())
 
         // 设置用户数据
         user.value = userData || {
@@ -45,7 +45,7 @@ export default defineStore('user', () => {
         mustChangePassword.value = requirePasswordChange
 
         // 存储用户会话
-        sessionStorage.setItem('aria_user', JSON.stringify(user.value))
+        localStorage.setItem('aria_user', JSON.stringify(user.value))
 
         // 存储租户 ID 到 localStorage（用于 API 请求）
         if (userData?.tenant_id) {
@@ -104,14 +104,16 @@ export default defineStore('user', () => {
   const logout = () => {
     user.value = null
     isAuthenticated.value = false
-    sessionStorage.removeItem('aria_token')
-    sessionStorage.removeItem('aria_user')
+    localStorage.removeItem('aria_token')
+    localStorage.removeItem('aria_token_expire_time')
+    localStorage.removeItem('aria_last_activity')
+    localStorage.removeItem('aria_user')
     localStorage.removeItem('aria-current-tenant')
   }
 
   const loadSession = () => {
-    const token = sessionStorage.getItem('aria_token')
-    const userData = sessionStorage.getItem('aria_user')
+    const token = localStorage.getItem('aria_token')
+    const userData = localStorage.getItem('aria_user')
 
     if (token && userData) {
       user.value = JSON.parse(userData)
@@ -136,7 +138,7 @@ export default defineStore('user', () => {
       const response = await api.post(API_ENDPOINTS.AUTH.REFRESH)
       const token = response.data?.data?.token || response.data?.token
       if (token) {
-        sessionStorage.setItem('aria_token', token)
+        localStorage.setItem('aria_token', token)
         return { success: true }
       }
       return { success: false }

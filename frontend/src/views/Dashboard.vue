@@ -393,7 +393,7 @@ const aggregateRegions = (nodes) => {
 
 // 事件类型映射
 const eventTypeMap = {
-  alert_fired: { type: 'config', icon: WarningIcon, tag: 'Alert', tagType: 'danger' },
+  alert_fired: { type: 'config', icon: Warning, tag: 'Alert', tagType: 'danger' },
   alert_resolved: { type: 'node', icon: CircleCheck, tag: 'Resolved', tagType: 'success' },
   node_registered: { type: 'node', icon: Monitor, tag: 'New', tagType: 'success' },
   node_online: { type: 'node', icon: Monitor, tag: 'Online', tagType: 'success' },

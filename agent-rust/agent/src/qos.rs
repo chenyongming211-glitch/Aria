@@ -696,7 +696,8 @@ impl QoSManager {
 }
 
 fn calculate_bucket_params(mbps: u64) -> (u64, u64) {
-    let rate = mbps * 1_000_000 / 8;
+    let effective_mbps = if mbps == 0 { 100_000 } else { mbps };
+    let rate = effective_mbps * 1_000_000 / 8;
     let burst = rate / 10;
     let burst = burst.max(1500);
     (rate, burst)

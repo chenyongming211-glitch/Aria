@@ -205,7 +205,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { UploadFilled } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAppStore } from '@/stores'
 
 const appStore = useAppStore()
@@ -310,7 +310,7 @@ const backupHistory = ref([
 
 const uploadUrl = ref('/api/settings/upload-backup')
 const uploadHeaders = ref({
-  'Authorization': `Bearer ${localStorage.getItem('aria_token')}`
+  'Authorization': `Bearer ${sessionStorage.getItem('aria_token')}`
 })
 
 const saveGeneralSettings = () => {

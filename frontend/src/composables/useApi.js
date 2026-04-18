@@ -34,7 +34,7 @@ function onTokenRefreshFailed() {
 
 // 检查 token 是否快过期（剩余 < 10 分钟）
 function isTokenExpiringSoon() {
-  const tokenExpireTime = sessionStorage.getItem('aria_token_expire_time')
+  const tokenExpireTime = localStorage.getItem('aria_token_expire_time')
   if (!tokenExpireTime) return true
   
   const expireTime = parseInt(tokenExpireTime, 10)
@@ -46,7 +46,7 @@ function isTokenExpiringSoon() {
 
 // 刷新 token
 async function refreshToken() {
-  const token = sessionStorage.getItem('aria_token')
+  const token = localStorage.getItem('aria_token')
   if (!token) return null
   
   try {
@@ -64,11 +64,11 @@ async function refreshToken() {
     if (response.data && response.data.success && response.data.data && response.data.data.token) {
       const newToken = response.data.data.token
       // 保存新 token
-      sessionStorage.setItem('aria_token', newToken)
+      localStorage.setItem('aria_token', newToken)
       // 从响应中获取新的过期时间（如果没有则默认 2 小时）
       const expiresIn = response.data.data.expires_in || 7200
       const expireTime = Date.now() + expiresIn * 1000
-      sessionStorage.setItem('aria_token_expire_time', expireTime.toString())
+      localStorage.setItem('aria_token_expire_time', expireTime.toString())
       
       return newToken
     }
@@ -81,7 +81,7 @@ async function refreshToken() {
 
 // 检查最大不活动时间（1 小时）
 function checkMaxIdleTime() {
-  const lastActivity = sessionStorage.getItem('aria_last_activity')
+  const lastActivity = localStorage.getItem('aria_last_activity')
   if (!lastActivity) {
     updateLastActivity()
     return true
@@ -100,7 +100,7 @@ function checkMaxIdleTime() {
 
 // 更新最后活动时间
 function updateLastActivity() {
-  sessionStorage.setItem('aria_last_activity', Date.now().toString())
+  localStorage.setItem('aria_last_activity', Date.now().toString())
 }
 
 // Request interceptor to add auth and tenant headers
@@ -113,7 +113,7 @@ api.interceptors.request.use(
     }
     
     // 检查 token 是否快过期，如果是则先刷新
-    const token = sessionStorage.getItem('aria_token')
+    const token = localStorage.getItem('aria_token')
     if (token && isTokenExpiringSoon()) {
       if (!isRefreshing) {
         isRefreshing = true
@@ -147,7 +147,7 @@ api.interceptors.request.use(
     }
     
     // Add token to requests if available
-    const currentToken = sessionStorage.getItem('aria_token')
+    const currentToken = localStorage.getItem('aria_token')
     if (currentToken) {
       config.headers.Authorization = `Bearer ${currentToken}`
     }
@@ -198,10 +198,10 @@ api.interceptors.response.use(
 
 // 跳转到登录页并清除会话
 function redirectToLogin() {
-  sessionStorage.removeItem('aria_token')
-  sessionStorage.removeItem('aria_token_expire_time')
-  sessionStorage.removeItem('aria_user')
-  sessionStorage.removeItem('aria_last_activity')
+  localStorage.removeItem('aria_token')
+  localStorage.removeItem('aria_token_expire_time')
+  localStorage.removeItem('aria_user')
+  localStorage.removeItem('aria_last_activity')
   localStorage.removeItem('aria-current-tenant')
   window.location.href = '/#/login'
 }

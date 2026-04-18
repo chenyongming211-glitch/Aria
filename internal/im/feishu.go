@@ -35,14 +35,31 @@ type ChatWithContextProvider interface {
 
 // NewFeishuHandler 创建飞书处理器
 func NewFeishuHandler(aiSvc service.AIService, appID, appSecret, encryptKey, verifyToken string) *FeishuHandler {
-	return &FeishuHandler{
-		aiService:  aiSvc,
-		appID:      appID,
-		appSecret:  appSecret,
-		encryptKey: encryptKey,
+	h := &FeishuHandler{
+		aiService:   aiSvc,
+		appID:       appID,
+		appSecret:   appSecret,
+		encryptKey:  encryptKey,
 		verifyToken: verifyToken,
-		processed:  make(map[string]time.Time),
+		processed:   make(map[string]time.Time),
 	}
+
+	// 启动定期清理任务
+	go func() {
+		ticker := time.NewTicker(30 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			h.mu.Lock()
+			for id, t := range h.processed {
+				if time.Since(t) > 2*time.Hour {
+					delete(h.processed, id)
+				}
+			}
+			h.mu.Unlock()
+		}
+	}()
+
+	return h
 }
 
 // FeishuEvent 飞书事件
@@ -137,18 +154,6 @@ func (h *FeishuHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		h.mu.Lock()
 		h.processed[eventID] = time.Now()
 		h.mu.Unlock()
-
-		// 清理 1 小时前的记录
-		go func() {
-			time.Sleep(time.Hour)
-			h.mu.Lock()
-			for id, t := range h.processed {
-				if time.Since(t) > time.Hour {
-					delete(h.processed, id)
-				}
-			}
-			h.mu.Unlock()
-		}()
 	}
 
 	// 2.2 验证 Token（如果配置了 verify_token）

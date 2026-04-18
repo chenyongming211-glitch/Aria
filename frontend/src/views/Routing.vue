@@ -258,7 +258,7 @@ const confirmRouteAction = async () => {
 
 const confirmDeleteRoute = async () => {
   try {
-    await useRouteApi.deleteRoute(currentDeleteRoute.value.nodeId, currentDeleteRoute.value.cidr)
+    await useRouteApi.deleteRoute(currentDeleteRoute.value.nodeId, currentDeleteRoute.value.id)
     ElMessage.success('路由删除成功')
     await loadRoutes()
     deleteDialogVisible.value = false

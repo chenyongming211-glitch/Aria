@@ -75,16 +75,22 @@ func JWTAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 		if claims.Role == "super_admin" {
 			if tenantIDHeader := r.Header.Get("X-Tenant-ID"); tenantIDHeader != "" {
-				if _, err := uuid.Parse(tenantIDHeader); err == nil {
-					ctx = context.WithValue(ctx, TenantIDKey, tenantIDHeader)
+				if tid, err := uuid.Parse(tenantIDHeader); err == nil {
+					ctx = context.WithValue(ctx, TenantIDKey, tid)
 				} else if claims.TenantID != "" {
-					ctx = context.WithValue(ctx, TenantIDKey, claims.TenantID)
+					if tid, err := uuid.Parse(claims.TenantID); err == nil {
+						ctx = context.WithValue(ctx, TenantIDKey, tid)
+					}
 				}
 			} else if claims.TenantID != "" {
-				ctx = context.WithValue(ctx, TenantIDKey, claims.TenantID)
+				if tid, err := uuid.Parse(claims.TenantID); err == nil {
+					ctx = context.WithValue(ctx, TenantIDKey, tid)
+				}
 			}
 		} else if claims.TenantID != "" {
-			ctx = context.WithValue(ctx, TenantIDKey, claims.TenantID)
+			if tid, err := uuid.Parse(claims.TenantID); err == nil {
+				ctx = context.WithValue(ctx, TenantIDKey, tid)
+			}
 		}
 
 		next(w, r.WithContext(ctx))

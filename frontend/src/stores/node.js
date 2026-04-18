@@ -231,6 +231,7 @@ export default defineStore('node', () => {
     loadNodeDetail,
     getNodeById,
     updateNode,
+    updateNodeRemote,
     deleteNode,
     setCurrentNode
   }

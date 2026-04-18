@@ -465,7 +465,7 @@ func (s *Storage) bumpNodeDesiredVersion(tenantID, nodeID uuid.UUID) error {
 	_, err := s.db.Exec(
 		`INSERT INTO node_control_states (tenant_id, node_id, desired_state_version, desired_state_updated_at, updated_at)
 		 VALUES ($1, $2, $3, NOW(), NOW())
-		 ON CONFLICT (tenant_id, node_id) DO UPDATE SET
+		 ON CONFLICT (node_id) DO UPDATE SET
 		    desired_state_version = EXCLUDED.desired_state_version,
 		    desired_state_updated_at = NOW(),
 		    updated_at = NOW()`,

@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -13,8 +14,17 @@ var (
 	ErrExpiredToken = errors.New("token has expired")
 )
 
-// JWTSecret 从配置中读取，这里使用默认值，生产环境应从配置中读取
-var JWTSecret = []byte("aria-jwt-secret-key-32-bytes-long!")
+var (
+	jwtSecret   = []byte("aria-jwt-secret-key-32-bytes-long!")
+	jwtSecretMu sync.RWMutex
+)
+
+// getSecret 获取当前的 JWT 密钥（线程安全）
+func getSecret() []byte {
+	jwtSecretMu.RLock()
+	defer jwtSecretMu.RUnlock()
+	return jwtSecret
+}
 
 // Claims 定义JWT声明
 type Claims struct {
@@ -54,7 +64,7 @@ func GenerateToken(userID, username, role, tenantID string, mustChangePassword .
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
 	// 签名令牌
-	tokenString, err := token.SignedString(JWTSecret)
+	tokenString, err := token.SignedString(getSecret())
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %w", err)
 	}
@@ -72,7 +82,7 @@ func ValidateToken(tokenString string) (*Claims, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return JWTSecret, nil
+		return getSecret(), nil
 	})
 
 	if err != nil {
@@ -104,5 +114,7 @@ func ExtractUserInfo(tokenString string) (*Claims, error) {
 
 // SetSecret 设置JWT密钥（应在初始化时调用）
 func SetSecret(secret string) {
-	JWTSecret = []byte(secret)
+	jwtSecretMu.Lock()
+	defer jwtSecretMu.Unlock()
+	jwtSecret = []byte(secret)
 }

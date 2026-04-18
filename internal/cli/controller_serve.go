@@ -430,7 +430,8 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 		// Create TLS config with mTLS (mutual TLS)
 		tlsConfig := &tls.Config{
 			Certificates:       []tls.Certificate{serverCert},
-			ClientAuth:         tls.RequestClientCert,
+			ClientAuth:         tls.RequireAndVerifyClientCert,
+			ClientCAs:          caCertPool,
 			MinVersion:         tls.VersionTLS12,
 			InsecureSkipVerify: false,
 		}
@@ -596,6 +597,12 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		c.logger.Warn("Invalid register request: %v", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.PublicKey == "" {
+		c.logger.Warn("Registration rejected: empty public key from %s", req.Hostname)
+		http.Error(w, "Public key required", http.StatusBadRequest)
 		return
 	}
 
@@ -903,11 +910,11 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 		}
 	}
 
-	// Get enabled ACL rules for sync (filtered by region)
+	// Get enabled ACL rules for sync (filtered by tenant and region)
 	var aclRulesJSON []ACLRuleJSON
-	aclRules, err := c.store.GetEnabledACLRules()
+	aclRules, err := c.store.GetEnabledACLRulesByTenant(nodeTenantID)
 	if err != nil {
-		c.logger.Error("Failed to get ACL rules: %v", err)
+		c.logger.Error("Failed to get ACL rules for tenant %s: %v", nodeTenantID, err)
 	} else {
 		// Filter rules by region
 		aclRulesJSON = c.getACLRulesForRegion(req.Region, aclRules)
@@ -2099,8 +2106,7 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 	var count int
 	err := db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'super_admin'").Scan(&count)
 	if err != nil {
-		logger.Warn("Failed to check super admin: %v", err)
-		return nil
+		return fmt.Errorf("failed to check super admin: %w", err)
 	}
 
 	if count > 0 {
@@ -2137,8 +2143,7 @@ func ensureDefaultTenant(store *controllerstorage.Storage, logger *logging.Logge
 	var count int
 	err := store.DB().QueryRow("SELECT COUNT(*) FROM tenants").Scan(&count)
 	if err != nil {
-		logger.Warn("Failed to check tenants: %v", err)
-		return nil
+		return fmt.Errorf("failed to check tenants: %w", err)
 	}
 
 	if count > 0 {

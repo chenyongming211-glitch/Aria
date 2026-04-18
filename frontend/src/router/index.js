@@ -142,11 +142,23 @@ const router = createRouter({
 })
 
 router.beforeEach((to, from, next) => {
-  const token = sessionStorage.getItem('aria_token')
+  const token = localStorage.getItem('aria_token')
+  const expireTime = localStorage.getItem('aria_token_expire_time')
   
-  if (to.meta.requiresAuth && !token) {
+  // 检查是否过期
+  let isExpired = false
+  if (expireTime) {
+    isExpired = Date.now() > parseInt(expireTime, 10)
+  }
+  
+  if (to.meta.requiresAuth && (!token || isExpired)) {
+    if (isExpired) {
+      console.warn('Token expired, redirecting to login')
+      localStorage.removeItem('aria_token')
+      localStorage.removeItem('aria_token_expire_time')
+    }
     next('/login')
-  } else if (to.path === '/login' && token) {
+  } else if (to.path === '/login' && token && !isExpired) {
     next('/dashboard')
   } else {
     next()

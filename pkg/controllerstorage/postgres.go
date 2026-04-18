@@ -318,6 +318,10 @@ func (s *Storage) Migrate() error {
 		`ALTER TABLE nodes ADD COLUMN IF NOT EXISTS enrolled_with_token VARCHAR(64)`,
 
 		// Add node references and action for policy management
+		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS node_id UUID REFERENCES nodes(id)`,
+		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS src_cidr CIDR`,
+		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS dst_cidr CIDR`,
+		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS dst_port INTEGER`,
 		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS src_node VARCHAR(100)`,
 		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS dst_node VARCHAR(100)`,
 		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS action VARCHAR(10) DEFAULT 'allow'`,
@@ -325,6 +329,7 @@ func (s *Storage) Migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_priority ON acl_rules(priority)`,
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_src_node ON acl_rules(src_node)`,
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_dst_node ON acl_rules(dst_node)`,
+		`CREATE INDEX IF NOT EXISTS idx_acl_rules_node_id ON acl_rules(node_id)`,
 
 		// Add indexes for tenant isolation
 		`CREATE INDEX IF NOT EXISTS idx_tokens_tenant_id ON tokens(tenant_id)`,
@@ -335,6 +340,7 @@ func (s *Storage) Migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_blacklist_rules_enabled ON blacklist_rules(enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_node_control_states_unique_node ON node_control_states(node_id)`,
 
 		// AI Audit Log - 记录 AI 对话和工具调用
 		`CREATE TABLE IF NOT EXISTS ai_audit_logs (
@@ -1296,6 +1302,42 @@ func (s *Storage) GetAllACLRules() ([]*ACLRule, error) {
 			&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Enabled, &rule.Priority,
 			&rule.Description, &rule.CreatedAt, &rule.UpdatedAt,
 		)
+		if err != nil {
+			return nil, err
+		}
+		rules = append(rules, rule)
+	}
+	return rules, nil
+}
+
+func (s *Storage) ScanACLRuleRows(rows *sql.Rows) (*ACLRule, error) {
+	rule := &ACLRule{}
+	err := rows.Scan(
+		&rule.ID, &rule.Name, &rule.SrcNode, &rule.SrcNet, &rule.DstNode, &rule.DstNet, &rule.Protocol,
+		&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Enabled, &rule.Priority,
+		&rule.Description, &rule.CreatedAt, &rule.UpdatedAt,
+	)
+	return rule, err
+}
+
+// GetEnabledACLRulesByTenant returns only enabled ACL rules for a specific tenant.
+func (s *Storage) GetEnabledACLRulesByTenant(tenantID uuid.UUID) ([]*ACLRule, error) {
+	query := `
+		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
+		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
+		FROM acl_rules
+		WHERE tenant_id = $1 AND enabled = true
+		ORDER BY priority ASC, id ASC
+	`
+	rows, err := s.db.Query(query, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var rules []*ACLRule
+	for rows.Next() {
+		rule, err := s.ScanACLRuleRows(rows)
 		if err != nil {
 			return nil, err
 		}

@@ -106,8 +106,8 @@ func (t *TenantAPI) GetTenant(w http.ResponseWriter, r *http.Request) {
 
 func (t *TenantAPI) ListTenants(w http.ResponseWriter, r *http.Request) {
 	role, exists := middleware.GetUserRole(r.Context())
-	if !exists || (role != "super_admin" && role != "admin" && role != "owner") {
-		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Access denied", nil)
+	if !exists || role != "super_admin" {
+		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Access denied: super_admin only", nil)
 		return
 	}
 

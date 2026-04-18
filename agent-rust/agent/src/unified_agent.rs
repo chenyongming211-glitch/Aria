@@ -159,10 +159,25 @@ impl UnifiedAgent {
         })
 
     }
+fn set_sync_observation(&mut self, status: &str, message: String) {
+    self.config.last_sync_status = Some(status.to_string());
+    self.config.last_sync_message = Some(message);
+}
 
-    fn set_sync_observation(&mut self, status: &str, message: String) {
-        self.config.last_sync_status = Some(status.to_string());
-        self.config.last_sync_message = Some(message);
+fn get_active_interfaces(&self) -> Vec<String> {
+    if self.config.multi_tunnel {
+        let base = self.config.interface_name.trim_end_matches(|c: char| c.is_numeric());
+        vec![
+            self.config.interface_name.clone(),
+            format!("{}1", base),
+            format!("{}2", base),
+            format!("{}3", base),
+        ]
+    } else {
+        vec![self.config.interface_name.clone()]
+    }
+}
+
         self.config.last_sync_at = Some(current_unix_timestamp());
     }
 
@@ -449,9 +464,15 @@ impl UnifiedAgent {
                 
                 _ = sighup.recv() => {
                     tracing::info!("SIGHUP received, reloading config...");
+                    let old_interval = self.config.sync_interval;
                     if let Err(e) = self.reload_config().await {
                         tracing::error!("Config reload failed: {:?}", e);
                     } else {
+                        if self.config.sync_interval != old_interval {
+                            sync_interval = tokio::time::interval(self.config.sync_interval);
+                            sync_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                            tracing::info!("Applied new sync interval: {:?}", self.config.sync_interval);
+                        }
                         metrics::record_config_reload();
                     }
                 }
@@ -459,8 +480,18 @@ impl UnifiedAgent {
                 maybe_command = remote_command_rx.recv() => {
                     match maybe_command {
                         Some(envelope) => {
+                            let old_interval = self.config.sync_interval;
                             let response = self.execute_remote_command(envelope.request).await;
-                            if envelope.reply_tx.send(response).is_err() {
+
+                            // 检查 sync_interval 是否变更（可能通过 config_reload 命令）
+                            if self.config.sync_interval != old_interval {
+                                sync_interval = tokio::time::interval(self.config.sync_interval);
+                                sync_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                                tracing::info!("Applied new sync interval after remote command: {:?}", self.config.sync_interval);
+                            }
+
+                            if let Err(e) = envelope.response_tx.send(response) {
+
                                 tracing::warn!("Remote command response receiver dropped");
                             }
                         }
@@ -1634,22 +1665,19 @@ impl UnifiedAgent {
     async fn sync_peers(&mut self, new_peers: &[GrpcPeerInfo]) -> Result<()> {
         let new_peers = new_peers.to_vec();
         let multi_tunnel = self.config.multi_tunnel;
+        let interfaces = self.get_active_interfaces();
         let wg_managers = self.wg_managers.clone();
+        let base_iface = self.config.interface_name.clone();
+        let listen_port = self.config.listen_port;
 
         let result = tokio::task::spawn_blocking(move || -> Result<(usize, usize, usize, usize)> {
-            // 确定要配置的接口列表
-            let interfaces = if multi_tunnel {
-                vec!["aria0", "aria1", "aria2", "aria3"]
-            } else {
-                vec!["aria0"]
-            };
             let interface_count = interfaces.len();
 
             let mut total_added = 0;
             let mut total_removed = 0;
             let mut total_updated = 0;
 
-            for iface in interfaces {
+            for iface in &interfaces {
                 let mgr = wg_managers.get(iface)
                     .unwrap_or_else(|| panic!("WireGuardManager for {} not found", iface));
                 let mut wg = mgr.blocking_lock();
@@ -1661,12 +1689,12 @@ impl UnifiedAgent {
                 
                 // 删除 peer
                 for peer in &to_remove {
-                    if iface == "aria0" {
+                    if iface == &base_iface {
                         tracing::info!("Removing peer {} from {}...", &peer[..16.min(peer.len())], iface);
                     }
                     wg.remove_peer(&peer)
                         .context("Failed to remove peer")?;
-                    if iface == "aria0" {
+                    if iface == &base_iface {
                         metrics::record_wireguard_peer_change("remove");
                     }
                 }
@@ -1674,7 +1702,7 @@ impl UnifiedAgent {
                 
                 // 添加 peer
                 for peer in &to_add {
-                    if iface == "aria0" {
+                    if iface == &base_iface {
                         tracing::info!("Adding peer {} to {}...", &peer.public_key[..16.min(peer.public_key.len())], iface);
                     }
                     
@@ -1683,7 +1711,7 @@ impl UnifiedAgent {
                     
                     // 根据 iface 编号调整 endpoint 端口
                     let endpoint = if !peer.endpoint.is_empty() {
-                        let adjusted_endpoint = Self::adjust_endpoint_port(&peer.endpoint, iface);
+                        let adjusted_endpoint = Self::adjust_endpoint_port_static(&peer.endpoint, iface, &base_iface, listen_port);
                         Some(adjusted_endpoint)
                     } else {
                         None
@@ -1698,7 +1726,7 @@ impl UnifiedAgent {
                     
                     wg.add_peer(peer_config)
                         .context("Failed to add peer")?;
-                    if iface == "aria0" {
+                    if iface == &base_iface {
                         metrics::record_wireguard_peer_change("add");
                     }
                 }
@@ -1706,7 +1734,7 @@ impl UnifiedAgent {
                 
                 // 更新 peer
                 for peer in &to_update {
-                    if iface == "aria0" {
+                    if iface == &base_iface {
                         tracing::debug!("Updating peer {} on {}...", &peer.public_key[..16.min(peer.public_key.len())], iface);
                     }
                     
@@ -1718,7 +1746,7 @@ impl UnifiedAgent {
                     
                     // 根据 iface 编号调整 endpoint 端口
                     let endpoint = if !peer.endpoint.is_empty() {
-                        let adjusted_endpoint = Self::adjust_endpoint_port(&peer.endpoint, iface);
+                        let adjusted_endpoint = Self::adjust_endpoint_port_static(&peer.endpoint, iface, &base_iface, listen_port);
                         Some(adjusted_endpoint)
                     } else {
                         None
@@ -1733,7 +1761,7 @@ impl UnifiedAgent {
                     
                     wg.add_peer(peer_config)
                         .context("Failed to add updated peer")?;
-                    if iface == "aria0" {
+                    if iface == &base_iface {
                         metrics::record_wireguard_peer_change("update");
                     }
                 }
@@ -1762,21 +1790,31 @@ impl UnifiedAgent {
         Ok(())
     }
     
-    fn adjust_endpoint_port(endpoint: &str, iface: &str) -> String {
-        // aria0:51820, aria1:51821, aria2:51822, aria3:51823
-        let port_offset = match iface {
-            "aria0" => 0,
-            "aria1" => 1,
-            "aria2" => 2,
-            "aria3" => 3,
-            _ => 0,
+    fn adjust_endpoint_port_static(endpoint: &str, iface: &str, base_iface: &str, base_port: u16) -> String {
+        // Calculate offset based on trailing digit or comparison
+        let offset = if iface == base_iface {
+            0
+        } else if let Some(last_char) = iface.chars().last() {
+            if last_char.is_numeric() {
+                last_char.to_digit(10).unwrap_or(0) as u16
+            } else {
+                0
+            }
+        } else {
+            0
         };
         
         if let Some(colon_pos) = endpoint.rfind(':') {
             let host = &endpoint[..colon_pos];
-            let base_port = 51820u16;
-            let new_port = base_port + port_offset;
-            format!("{}:{}", host, new_port)
+            let port_str = &endpoint[colon_pos + 1..];
+            
+            let port = if let Ok(orig_port) = port_str.parse::<u16>() {
+                orig_port + offset
+            } else {
+                base_port + offset
+            };
+            
+            format!("{}:{}", host, port)
         } else {
             endpoint.to_string()
         }
@@ -1822,8 +1860,6 @@ impl UnifiedAgent {
         use std::collections::HashSet as StdHashSet;
         
         // 收集期望的所有路由
-        // 1. peer 的 VPN IP 路由（/32）
-        // 2. peer 宣告的非 /32 路由
         let mut desired_routes = StdHashSet::new();
         for peer in peers {
             // 添加 peer 的 VPN IP 路由
@@ -1837,13 +1873,8 @@ impl UnifiedAgent {
             }
         }
         
-        // 确定要使用的接口列表（多隧道模式使用所有接口）
-        let interfaces: Vec<String> = if self.config.multi_tunnel {
-            vec!["aria0".to_string(), "aria1".to_string(), "aria2".to_string(), "aria3".to_string()]
-        } else {
-            vec![self.config.interface_name.clone()]
-        };
-        
+        // 确定要使用的接口列表
+        let interfaces = self.get_active_interfaces();
         let multi_tunnel = self.config.multi_tunnel;
         
         // 在单个阻塞任务中完成所有路由操作，保证原子性和性能
@@ -1872,7 +1903,7 @@ impl UnifiedAgent {
             // 添加或更新所有期望的路由（使用 replace，会自动替换旧路由）
             for route in &desired_routes {
                 if multi_tunnel {
-                    // 多隧道模式：使用 ECMP 路由（replace 会自动替换旧路由）
+                    // 多隧道模式：使用 ECMP 路由
                     let interfaces_str: Vec<&str> = interfaces.iter().map(|s| s.as_str()).collect();
                     if let Err(e) = routing_manager.add_ecmp_route(route, &interfaces_str, Some(100)) {
                         tracing::error!("Failed to add ECMP route {}: {:?}", route, e);
@@ -1880,17 +1911,13 @@ impl UnifiedAgent {
                         added_count += 1;
                     }
                 } else {
-                    // 单隧道模式：使用普通路由
+                    // 单接口模式
                     if let Err(e) = routing_manager.add_vpn_route(route) {
                         tracing::error!("Failed to add route {}: {:?}", route, e);
                     } else {
                         added_count += 1;
                     }
                 }
-            }
-            
-            if multi_tunnel && added_count > 0 {
-                tracing::info!("Added/updated {} ECMP routes via {} interfaces", added_count, interfaces.len());
             }
             
             Ok((added_count, removed_count, desired_routes.len()))

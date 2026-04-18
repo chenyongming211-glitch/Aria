@@ -55,7 +55,10 @@ impl GrpcClient {
         tls_server_name: Option<String>,
     ) -> Result<Self> {
         let uses_tls = controller_url.starts_with("https://");
-        let mut endpoint = Endpoint::from_shared(controller_url.clone())?;
+        let mut endpoint = Endpoint::from_shared(controller_url.clone())?
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
+            .tcp_keepalive(Some(Duration::from_secs(60)));
 
         if uses_tls {
             let mut tls_config = ClientTlsConfig::new();

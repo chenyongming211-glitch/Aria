@@ -56,12 +56,18 @@ func (v *Validator) Validate(tokenStr string) (*Token, error) {
 }
 
 func (v *Validator) ConsumeToken(tokenStr, deviceID string) error {
-	token, err := v.Validate(tokenStr)
+	// 直接尝试原子化增加使用次数，数据库会处理 used_count < max_uses 逻辑
+	// 这样可以避免 Validate() 后 IncrementUsage() 之前的竞态窗口
+	err := v.store.IncrementUsage(tokenStr, deviceID)
 	if err != nil {
+		// 如果原子更新失败，再通过 Validate 获取具体原因反馈给用户
+		_, validateErr := v.Validate(tokenStr)
+		if validateErr != nil {
+			return validateErr
+		}
 		return err
 	}
-
-	return v.store.IncrementUsage(token.Token, deviceID)
+	return nil
 }
 
 func (v *Validator) ValidateOnly(tokenStr string) error {

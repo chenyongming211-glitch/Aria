@@ -373,7 +373,7 @@ func NewRateLimiter(addr, password string, db int) (*RateLimiter, error) {
 
 	return &RateLimiter{
 		client: client,
-		ctx:    ctx,
+		ctx:    context.Background(),
 	}, nil
 }
 
