@@ -120,6 +120,7 @@ export default defineStore('node', () => {
       observedMessage: status.observed_message || detail.observed_message || status.last_sync_error || detail.last_sync_error || '',
       observedAt: formatDateTime(status.observed_at || detail.observed_at),
       stateConvergence: status.convergence_status || detail.convergence_status || status.state_convergence || detail.state_convergence || 'idle',
+      learnedRoutes: detail.learned_routes || [],
       lastCommand: status.last_command || detail.last_command || null,
       lastCommandStatus: status.last_command_status || detail.last_command_status || '',
       lastCommandError: status.last_command_error || detail.last_command_error || '',

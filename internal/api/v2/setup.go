@@ -230,26 +230,49 @@ func (r *Router) handleTenantNodes(w http.ResponseWriter, req *http.Request, ten
 	parts := splitPath(req.URL.Path)
 	req2 := withTenantContext(req, tenantID)
 
+	// GET /api/v2/tenants/{tid}/nodes
 	if len(parts) == 5 {
 		if !r.authorizeTenant(w, req, tenantID, false) {
 			return
 		}
-		switch req.Method {
-		case http.MethodGet:
+		if req.Method == http.MethodGet {
 			r.listTenantNodes(w, tenantID)
-		default:
-			v1.WriteError(w, http.StatusNotImplemented, v1.CodeNotImplemented, "Node mutation API will be implemented in the next phase", nil)
+		} else {
+			v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
 		}
 		return
 	}
 
-	if len(parts) == 6 {
+	// 针对单个节点的操作 /api/v2/tenants/{tid}/nodes/{nid}/...
+	if len(parts) >= 6 {
 		nodeID := parts[5]
-		switch req.Method {
-		case http.MethodGet:
-			if !r.authorizeTenant(w, req, tenantID, false) {
+		node, err := r.getTenantNodeRecord(nodeID, tenantID)
+		if err != nil {
+			r.writeNodeLookupError(w, err)
+			return
+		}
+
+		// 检查子路径
+		if len(parts) >= 7 {
+			switch parts[6] {
+			case "security":
+				r.handleTenantNodeSecurity(w, req, tenantID, node, parts)
+				return
+			case "qos":
+				r.handleTenantNodeQoS(w, req, tenantID, node, parts)
+				return
+			case "routes":
+				r.handleTenantNodeRoutes(w, req, tenantID, parts)
+				return
+			case "agent":
+				r.handleTenantNodeAgent(w, req, tenantID, parts)
 				return
 			}
+		}
+
+		// 如果没有子路径，则是对节点本身的 CRUD
+		switch req.Method {
+		case http.MethodGet:
 			r.getTenantNodeByID(w, tenantID, nodeID)
 		case http.MethodPut:
 			if !r.authorizeTenantAdmin(w, req, tenantID) {
@@ -264,26 +287,6 @@ func (r *Router) handleTenantNodes(w http.ResponseWriter, req *http.Request, ten
 		default:
 			v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
 		}
-		return
-	}
-
-	if len(parts) >= 7 && parts[6] == "routes" {
-		r.handleTenantNodeRoutes(w, req2, tenantID, parts)
-		return
-	}
-
-	if len(parts) >= 7 && parts[6] == "security" {
-		r.handleTenantNodeSecurity(w, req2, tenantID, parts)
-		return
-	}
-
-	if len(parts) >= 7 && parts[6] == "qos" {
-		r.handleTenantNodeQoS(w, req2, tenantID, parts)
-		return
-	}
-
-	if len(parts) >= 7 && parts[6] == "agent" {
-		r.handleTenantNodeAgent(w, req2, tenantID, parts)
 		return
 	}
 
@@ -619,48 +622,6 @@ func (r *Router) listTenantNodes(w http.ResponseWriter, tenantID uuid.UUID) {
 	v1.WriteSuccess(w, items, fmt.Sprintf("%d nodes retrieved", len(items)))
 }
 
-func (r *Router) handleTenantNodeSecurity(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, parts []string) {
-	if len(parts) < 8 {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid security path", nil)
-		return
-	}
-
-	node, err := r.getTenantNodeRecord(parts[5], tenantID)
-	if err != nil {
-		r.writeNodeLookupError(w, err)
-		return
-	}
-
-	switch parts[7] {
-	case "acls":
-		r.handleTenantNodeACLs(w, req, tenantID, node, parts)
-	case "blacklist":
-		r.handleTenantNodeBlacklist(w, req, tenantID, node, parts)
-	default:
-		v1.WriteError(w, http.StatusNotFound, v1.CodeEndpointNotFound, "Unknown security endpoint", nil)
-	}
-}
-
-func (r *Router) handleTenantNodeQoS(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, parts []string) {
-	if len(parts) < 8 {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid QoS path", nil)
-		return
-	}
-
-	node, err := r.getTenantNodeRecord(parts[5], tenantID)
-	if err != nil {
-		r.writeNodeLookupError(w, err)
-		return
-	}
-
-	switch parts[7] {
-	case "service", "peers", "ip":
-		r.handleTenantNodeQoSCategory(w, req, tenantID, node, parts)
-	default:
-		v1.WriteError(w, http.StatusNotFound, v1.CodeEndpointNotFound, "Unknown QoS endpoint", nil)
-	}
-}
-
 func (r *Router) listAllTenants(w http.ResponseWriter) {
 	rows, err := r.store.DB().Query(`SELECT id, name, code, status, resource_quota, created_at, updated_at FROM tenants ORDER BY created_at DESC`)
 	if err != nil {
@@ -960,552 +921,6 @@ func (r *Router) updateTenantNode(w http.ResponseWriter, req *http.Request, tena
 		"role":              role,
 		"advertised_routes": routes,
 	}, "Node updated successfully")
-}
-
-func (r *Router) handleTenantNodeACLs(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, parts []string) {
-	nodeRef := node.PublicKey
-	if len(parts) == 8 {
-		switch req.Method {
-		case http.MethodGet:
-			if !r.authorizeTenant(w, req, tenantID, false) {
-				return
-			}
-			rows, err := r.store.DB().Query(
-				`SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
-				        COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
-				   FROM acl_rules
-				  WHERE tenant_id = $1 AND (src_node = $2 OR dst_node = $2)
-				  ORDER BY priority ASC, id ASC`,
-				tenantID, nodeRef,
-			)
-			if err != nil {
-				v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetACLRulesFailed, "Failed to list ACL rules", nil)
-				return
-			}
-			defer rows.Close()
-
-			var rules []map[string]interface{}
-			for rows.Next() {
-				var rule controllerstorage.ACLRule
-				if err := rows.Scan(
-					&rule.ID, &rule.Name, &rule.SrcNode, &rule.SrcNet, &rule.DstNode, &rule.DstNet, &rule.Protocol,
-					&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Enabled, &rule.Priority,
-					&rule.Description, &rule.CreatedAt, &rule.UpdatedAt,
-				); err != nil {
-					v1.WriteError(w, http.StatusInternalServerError, v1.CodeScanACLRuleFailed, "Failed to scan ACL rule", nil)
-					return
-				}
-				rules = append(rules, map[string]interface{}{
-					"id":          rule.ID,
-					"name":        rule.Name,
-					"node_id":     node.ID.String(),
-					"src_node":    rule.SrcNode,
-					"src_net":     rule.SrcNet,
-					"dst_node":    rule.DstNode,
-					"dst_net":     rule.DstNet,
-					"protocol":    rule.Protocol,
-					"min_port":    rule.MinPort,
-					"max_port":    rule.MaxPort,
-					"action":      rule.Action,
-					"enabled":     rule.Enabled,
-					"priority":    rule.Priority,
-					"description": rule.Description,
-					"created_at":  rule.CreatedAt,
-					"updated_at":  rule.UpdatedAt,
-				})
-			}
-			if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "acl", rules, "id"); err != nil {
-				v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetACLRulesFailed, "Failed to load ACL delivery history", nil)
-				return
-			}
-			if summary, err := r.buildNodeOperationsSummary(node); err == nil {
-				attachNodeSummaryToPolicyItems(rules, summary)
-			}
-			v1.WriteSuccess(w, rules, fmt.Sprintf("%d ACL rules retrieved", len(rules)))
-		case http.MethodPost:
-			if !r.authorizeTenantAdmin(w, req, tenantID) {
-				return
-			}
-			var body controllerstorage.ACLRule
-			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-				v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, "Invalid request body", nil)
-				return
-			}
-			if body.SrcNet == "" || body.DstNet == "" {
-				v1.WriteError(w, http.StatusBadRequest, v1.CodeValidationFailed, "src_net and dst_net are required", map[string]string{
-					"src_net": "required",
-					"dst_net": "required",
-				})
-				return
-			}
-			if body.Action == "" {
-				body.Action = "allow"
-			}
-			if body.Priority == 0 {
-				body.Priority = 100
-			}
-			if !body.Enabled {
-				body.Enabled = true
-			}
-			if body.SrcNode == "" && body.DstNode == "" {
-				body.SrcNode = nodeRef
-			}
-			body.SrcNode = normalizeNodeRef(body.SrcNode, node)
-			body.DstNode = normalizeNodeRef(body.DstNode, node)
-
-			rewritten := cloneRequestWithPath(req, "/api/v1/tenant-management/acl-rules")
-			reqBody, _ := json.Marshal(body)
-			rewritten.Body = newReadCloser(reqBody)
-			r.proxyLegacyPolicyMutation(
-				w,
-				rewritten,
-				node,
-				"acl",
-				"create",
-				map[string]interface{}{
-					"node_id":     node.ID.String(),
-					"rule_name":   body.Name,
-					"src_net":     body.SrcNet,
-					"dst_net":     body.DstNet,
-					"rule_action": body.Action,
-				},
-				r.tenantMgmt.CreateTenantACLRule,
-			)
-		default:
-			v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
-		}
-		return
-	}
-
-	if len(parts) == 9 {
-		ruleID := parts[8]
-		switch req.Method {
-		case http.MethodDelete:
-			if !r.authorizeTenantAdmin(w, req, tenantID) {
-				return
-			}
-			var count int
-			err := r.store.DB().QueryRow(
-				`SELECT COUNT(*) FROM acl_rules WHERE id = $1 AND tenant_id = $2 AND (src_node = $3 OR dst_node = $3)`,
-				ruleID, tenantID, nodeRef,
-			).Scan(&count)
-			if err != nil || count == 0 {
-				v1.WriteError(w, http.StatusNotFound, v1.CodeEndpointNotFound, "ACL rule not found", nil)
-				return
-			}
-			rewritten := cloneRequestWithPath(req, "/api/v1/tenant-management/acl-rules/"+ruleID)
-			r.proxyLegacyPolicyMutation(
-				w,
-				rewritten,
-				node,
-				"acl",
-				"delete",
-				map[string]interface{}{
-					"node_id": node.ID.String(),
-					"rule_id": ruleID,
-				},
-				r.tenantMgmt.DeleteTenantACLRule,
-			)
-		default:
-			v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
-		}
-		return
-	}
-
-	v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid ACL path", nil)
-}
-
-func (r *Router) handleTenantNodeBlacklist(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, parts []string) {
-	if len(parts) < 9 {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid blacklist path", nil)
-		return
-	}
-
-	scope := parts[8]
-	if err := controllerstorage.ValidateBlacklistScope(scope); err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, err.Error(), nil)
-		return
-	}
-
-	if len(parts) == 9 {
-		switch req.Method {
-		case http.MethodGet:
-			if !r.authorizeTenant(w, req, tenantID, false) {
-				return
-			}
-			r.listTenantNodeBlacklistRules(w, tenantID, node, scope)
-		case http.MethodPost:
-			if !r.authorizeTenantAdmin(w, req, tenantID) {
-				return
-			}
-			r.createTenantNodeBlacklistRule(w, req, tenantID, node, scope)
-		default:
-			v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
-		}
-		return
-	}
-
-	if len(parts) == 10 {
-		if !r.authorizeTenantAdmin(w, req, tenantID) {
-			return
-		}
-		switch req.Method {
-		case http.MethodDelete:
-			r.deleteTenantNodeBlacklistRule(w, tenantID, node, scope, parts[9])
-		default:
-			v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
-		}
-		return
-	}
-
-	v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid blacklist path", nil)
-}
-
-func (r *Router) handleTenantNodeQoSCategory(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, parts []string) {
-	category := parts[7]
-	if len(parts) == 8 {
-		switch req.Method {
-		case http.MethodGet:
-			if !r.authorizeTenant(w, req, tenantID, false) {
-				return
-			}
-			r.listTenantNodeQoS(w, tenantID, node, category)
-		case http.MethodPost:
-			if !r.authorizeTenantAdmin(w, req, tenantID) {
-				return
-			}
-			r.createTenantNodeQoS(w, req, tenantID, node, category)
-		default:
-			v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
-		}
-		return
-	}
-
-	if len(parts) == 9 {
-		if !r.authorizeTenantAdmin(w, req, tenantID) {
-			return
-		}
-		switch req.Method {
-		case http.MethodDelete:
-			r.deleteTenantNodeQoS(w, tenantID, node, category, parts[8])
-		default:
-			v1.WriteError(w, http.StatusMethodNotAllowed, v1.CodeMethodNotAllowed, "Method not allowed", nil)
-		}
-		return
-	}
-
-	v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidPath, "Invalid QoS path", nil)
-}
-
-func (r *Router) listTenantNodeQoS(w http.ResponseWriter, tenantID uuid.UUID, node *controllerstorage.Node, category string) {
-	if err := controllerstorage.ValidateQoSCategory(category); err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, err.Error(), nil)
-		return
-	}
-
-	rules, err := r.store.ListTenantNodeQoSRules(tenantID, node.ID, category)
-	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetLimitsFailed, "Failed to list QoS rules", nil)
-		return
-	}
-	var items []map[string]interface{}
-	for _, rule := range rules {
-		items = append(items, map[string]interface{}{
-			"id":             rule.ID.String(),
-			"node_id":        node.ID.String(),
-			"tenant_id":      tenantID.String(),
-			"src_ip":         rule.SrcCIDR,
-			"dst_ip":         rule.DstCIDR,
-			"src_port":       rule.SrcPort,
-			"dst_port":       rule.DstPort,
-			"protocol":       rule.Protocol,
-			"bandwidth_mbps": rule.BandwidthMbps,
-			"enabled":        rule.Enabled,
-			"description":    rule.Description,
-			"created_at":     rule.CreatedAt,
-			"updated_at":     rule.UpdatedAt,
-			"category":       category,
-		})
-	}
-	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "qos", items, "id"); err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetLimitsFailed, "Failed to load QoS delivery history", nil)
-		return
-	}
-	if summary, err := r.buildNodeOperationsSummary(node); err == nil {
-		attachNodeSummaryToPolicyItems(items, summary)
-	}
-
-	v1.WriteSuccess(w, items, fmt.Sprintf("%d QoS rules retrieved", len(items)))
-}
-
-func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, category string) {
-	if err := controllerstorage.ValidateQoSCategory(category); err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, err.Error(), nil)
-		return
-	}
-
-	var body struct {
-		SrcIP         string `json:"src_ip,omitempty"`
-		DstIP         string `json:"dst_ip,omitempty"`
-		SrcPort       int    `json:"src_port,omitempty"`
-		DstPort       int    `json:"dst_port,omitempty"`
-		Protocol      int    `json:"protocol,omitempty"`
-		Bandwidth     int    `json:"bandwidth,omitempty"`
-		BandwidthMbps int    `json:"bandwidth_mbps,omitempty"`
-		Enabled       *bool  `json:"enabled,omitempty"`
-		Description   string `json:"description,omitempty"`
-	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, "Invalid request body", nil)
-		return
-	}
-
-	bandwidth := body.Bandwidth
-	if bandwidth <= 0 {
-		bandwidth = body.BandwidthMbps
-	}
-	if bandwidth <= 0 {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidBandwidth, "bandwidth_mbps must be greater than 0", nil)
-		return
-	}
-
-	srcIP := strings.TrimSpace(body.SrcIP)
-	dstIP := strings.TrimSpace(body.DstIP)
-	defaultIP := primaryNodeIP(node)
-	if srcIP == "" {
-		srcIP = defaultIP
-	}
-	if srcIP == "" {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, "Node has no usable IP for QoS scoping", nil)
-		return
-	}
-
-	switch category {
-	case "service":
-		if dstIP == "" {
-			v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, "dst_ip is required for service QoS", nil)
-			return
-		}
-		if body.DstPort <= 0 {
-			v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, "dst_port is required for service QoS", nil)
-			return
-		}
-		if body.Protocol == 0 {
-			body.Protocol = 6
-		}
-	case "peers":
-		if dstIP == "" {
-			v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, "dst_ip is required for peer QoS", nil)
-			return
-		}
-		body.SrcPort = 0
-		body.DstPort = 0
-		body.Protocol = 0
-	case "ip":
-		dstIP = ""
-		body.SrcPort = 0
-		body.DstPort = 0
-		body.Protocol = 0
-	}
-
-	enabled := true
-	if body.Enabled != nil {
-		enabled = *body.Enabled
-	}
-
-	created, err := r.store.CreateTenantNodeQoSRule(&controllerstorage.QoSRuleRecord{
-		TenantID:      tenantID,
-		NodeID:        node.ID,
-		Category:      category,
-		SrcCIDR:       srcIP,
-		DstCIDR:       dstIP,
-		SrcPort:       body.SrcPort,
-		DstPort:       body.DstPort,
-		Protocol:      body.Protocol,
-		BandwidthMbps: bandwidth,
-		Enabled:       enabled,
-		Description:   body.Description,
-	})
-	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeLimitApplyFailed, "Failed to create QoS rule: "+err.Error(), nil)
-		return
-	}
-
-	r.writePolicyMutationSuccess(w, node, "qos", "create", map[string]interface{}{
-		"id":             created.ID.String(),
-		"node_id":        node.ID.String(),
-		"tenant_id":      tenantID.String(),
-		"category":       category,
-		"src_ip":         created.SrcCIDR,
-		"dst_ip":         created.DstCIDR,
-		"src_port":       created.SrcPort,
-		"dst_port":       created.DstPort,
-		"protocol":       created.Protocol,
-		"bandwidth_mbps": created.BandwidthMbps,
-		"enabled":        created.Enabled,
-		"description":    created.Description,
-	}, "QoS rule created successfully", map[string]interface{}{
-		"node_id":  node.ID.String(),
-		"rule_id":  created.ID.String(),
-		"category": category,
-	})
-}
-
-func (r *Router) deleteTenantNodeQoS(w http.ResponseWriter, tenantID uuid.UUID, node *controllerstorage.Node, category, id string) {
-	if err := controllerstorage.ValidateQoSCategory(category); err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, err.Error(), nil)
-		return
-	}
-
-	ruleID, err := uuid.Parse(id)
-	if err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, "Invalid QoS rule ID", nil)
-		return
-	}
-
-	if err := r.store.DeleteTenantNodeQoSRule(tenantID, node.ID, category, ruleID); err != nil {
-		if err == sql.ErrNoRows {
-			v1.WriteError(w, http.StatusNotFound, v1.CodeEndpointNotFound, "QoS rule not found", nil)
-			return
-		}
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeLimitApplyFailed, "Failed to delete QoS rule", nil)
-		return
-	}
-
-	r.writePolicyMutationSuccess(w, node, "qos", "delete", map[string]interface{}{
-		"id":       ruleID.String(),
-		"status":   "deleted",
-		"node_id":  node.ID.String(),
-		"category": category,
-	}, "QoS rule deleted successfully", map[string]interface{}{
-		"node_id":  node.ID.String(),
-		"rule_id":  ruleID.String(),
-		"category": category,
-	})
-}
-
-func (r *Router) listTenantNodeBlacklistRules(w http.ResponseWriter, tenantID uuid.UUID, node *controllerstorage.Node, scope string) {
-	rules, err := r.store.ListTenantNodeBlacklistRules(tenantID, node.ID, scope)
-	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeGetACLRulesFailed, "Failed to list blacklist rules", nil)
-		return
-	}
-
-	items := make([]map[string]interface{}, 0, len(rules))
-	for _, rule := range rules {
-		items = append(items, map[string]interface{}{
-			"id":          rule.ID.String(),
-			"tenant_id":   tenantID.String(),
-			"node_id":     node.ID.String(),
-			"scope":       rule.Scope,
-			"cidr":        rule.CIDR,
-			"port":        rule.Port,
-			"enabled":     rule.Enabled,
-			"description": rule.Description,
-			"created_at":  rule.CreatedAt,
-			"updated_at":  rule.UpdatedAt,
-		})
-	}
-
-	v1.WriteSuccess(w, items, fmt.Sprintf("%d blacklist rules retrieved", len(items)))
-}
-
-func (r *Router) createTenantNodeBlacklistRule(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, scope string) {
-	var body struct {
-		CIDR        string `json:"cidr,omitempty"`
-		SrcIP       string `json:"src_ip,omitempty"`
-		DstIP       string `json:"dst_ip,omitempty"`
-		Port        int    `json:"port,omitempty"`
-		Enabled     *bool  `json:"enabled,omitempty"`
-		Description string `json:"description,omitempty"`
-	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, "Invalid request body", nil)
-		return
-	}
-
-	record := &controllerstorage.BlacklistRuleRecord{
-		TenantID:    tenantID,
-		NodeID:      node.ID,
-		Scope:       scope,
-		Description: body.Description,
-		Enabled:     true,
-	}
-	if body.Enabled != nil {
-		record.Enabled = *body.Enabled
-	}
-
-	switch scope {
-	case controllerstorage.BlacklistScopeSrc:
-		record.CIDR = strings.TrimSpace(firstNonEmpty(body.CIDR, body.SrcIP))
-		if record.CIDR == "" {
-			v1.WriteError(w, http.StatusBadRequest, v1.CodeValidationFailed, "cidr is required for source blacklist", nil)
-			return
-		}
-	case controllerstorage.BlacklistScopeDst:
-		record.CIDR = strings.TrimSpace(firstNonEmpty(body.CIDR, body.DstIP))
-		if record.CIDR == "" {
-			v1.WriteError(w, http.StatusBadRequest, v1.CodeValidationFailed, "cidr is required for destination blacklist", nil)
-			return
-		}
-	case controllerstorage.BlacklistScopePorts:
-		if body.Port <= 0 || body.Port > 65535 {
-			v1.WriteError(w, http.StatusBadRequest, v1.CodeValidationFailed, "port must be between 1 and 65535", nil)
-			return
-		}
-		record.Port = body.Port
-	}
-
-	created, err := r.store.CreateTenantNodeBlacklistRule(record)
-	if err != nil {
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeUpdateNodeFailed, "Failed to create blacklist rule: "+err.Error(), nil)
-		return
-	}
-
-	v1.WriteSuccess(w, map[string]interface{}{
-		"id":          created.ID.String(),
-		"tenant_id":   tenantID.String(),
-		"node_id":     node.ID.String(),
-		"scope":       created.Scope,
-		"cidr":        created.CIDR,
-		"port":        created.Port,
-		"enabled":     created.Enabled,
-		"description": created.Description,
-	}, "Blacklist rule created successfully")
-}
-
-func (r *Router) deleteTenantNodeBlacklistRule(w http.ResponseWriter, tenantID uuid.UUID, node *controllerstorage.Node, scope, identifier string) {
-	if scope == controllerstorage.BlacklistScopePorts {
-		if port, err := parsePortIdentifier(identifier); err == nil {
-			if err := r.store.DeleteTenantNodePortBlacklistRule(tenantID, node.ID, port); err != nil {
-				if err == sql.ErrNoRows {
-					v1.WriteError(w, http.StatusNotFound, v1.CodeEndpointNotFound, "Blacklist rule not found", nil)
-					return
-				}
-				v1.WriteError(w, http.StatusInternalServerError, v1.CodeUpdateNodeFailed, "Failed to delete blacklist rule", nil)
-				return
-			}
-			v1.WriteSuccess(w, map[string]string{"port": identifier, "status": "deleted"}, "Blacklist rule deleted successfully")
-			return
-		}
-	}
-
-	ruleID, err := uuid.Parse(identifier)
-	if err != nil {
-		v1.WriteError(w, http.StatusBadRequest, v1.CodeInvalidRequest, "Invalid blacklist rule identifier", nil)
-		return
-	}
-
-	if err := r.store.DeleteTenantNodeBlacklistRuleByID(tenantID, node.ID, scope, ruleID); err != nil {
-		if err == sql.ErrNoRows {
-			v1.WriteError(w, http.StatusNotFound, v1.CodeEndpointNotFound, "Blacklist rule not found", nil)
-			return
-		}
-		v1.WriteError(w, http.StatusInternalServerError, v1.CodeUpdateNodeFailed, "Failed to delete blacklist rule", nil)
-		return
-	}
-
-	v1.WriteSuccess(w, map[string]string{"id": ruleID.String(), "status": "deleted"}, "Blacklist rule deleted successfully")
 }
 
 func (r *Router) handleTenantNodeRoutes(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, parts []string) {

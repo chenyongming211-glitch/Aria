@@ -110,10 +110,11 @@ func NewDiagnoseConnectivityTool(store *controllerstorage.Storage) Tool {
 				if !rule.Enabled || rule.Action != "deny" {
 					continue
 				}
-				// 简单的 IP/CIDR 匹配逻辑（简化版）
-				if rule.SourceID == srcNode.ID.String() && rule.DestinationID == dstNode.ID.String() {
+				// 使用真实的字段：SrcNode 和 DstNode 进行匹配
+				if (rule.SrcNode == srcNode.Hostname || rule.SrcNet == srcNode.AssignedIP+"/32") &&
+					(rule.DstNode == dstNode.Hostname || rule.DstNet == dstNode.AssignedIP+"/32") {
 					blocked = true
-					results = append(results, fmt.Sprintf("❌ 发现拦截规则: ACL ID %s 禁止了从 %s 到 %s 的访问", rule.ID.String(), srcNode.Hostname, dstNode.Hostname))
+					results = append(results, fmt.Sprintf("❌ 发现拦截规则: ACL ID %d (%s) 禁止了从 %s 到 %s 的访问", rule.ID, rule.Name, srcNode.Hostname, dstNode.Hostname))
 					break
 				}
 			}

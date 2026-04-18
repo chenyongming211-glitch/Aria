@@ -370,6 +370,60 @@
           </div>
         </div>
 
+        <!-- 宣告的路由 -->
+        <div class="detail-section">
+          <h4 class="section-title">
+            <el-icon><Upload /></el-icon>
+            Advertised Routes (Site-to-Site)
+          </h4>
+          <div class="routes-list">
+            <el-empty v-if="!selectedNode.routes || selectedNode.routes.length === 0" :image-size="40" description="No advertised routes" />
+            <el-tag
+              v-for="route in selectedNode.routes"
+              :key="route"
+              class="route-tag"
+              type="info"
+              effect="plain"
+            >
+              {{ route }}
+            </el-tag>
+          </div>
+        </div>
+
+        <!-- 学习到的路由 -->
+        <div class="detail-section">
+          <h4 class="section-title">
+            <el-icon><Position /></el-icon>
+            Learned Routes (Mesh)
+          </h4>
+          <el-table
+            :data="selectedNode.learnedRoutes || []"
+            size="small"
+            empty-text="No routes learned from peers"
+            class="learned-routes-table"
+          >
+            <el-table-column prop="cidr" label="CIDR" width="150">
+              <template #default="{ row }">
+                <code class="route-code">{{ row.cidr }}</code>
+              </template>
+            </el-table-column>
+            <el-table-column prop="next_hop_node" label="Next Hop Node" min-width="120" />
+            <el-table-column prop="next_hop_ip" label="VPN IP" width="120" />
+            <el-table-column prop="region" label="Region" width="100">
+              <template #default="{ row }">
+                <span class="region-badge">{{ row.region.toUpperCase() }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="Status" width="100">
+              <template #default="{ row }">
+                <span class="status-badge" :class="row.status">
+                  {{ row.status }}
+                </span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+
         <div class="detail-section">
           <h4 class="section-title">
             <el-icon><Timer /></el-icon>

@@ -1,6 +1,14 @@
 # Aria API v2 完整接口白皮书
 
-本文档用于定义 Aria `API v2` 的统一接口边界。它不是对当前 `v1` 与旧接口混用状态的描述，而是作为后续重构与实现的目标规范。
+> **v0.1.0 实施进度摘要**
+> - [x] **Auth Domain**: JWT 登录与刷新逻辑已就绪。
+> - [x] **Topology Domain**: 节点管理 (Nodes) 与 Mesh 路由发现 (Learned Routes) 已完成。
+> - [x] **Monitoring Domain**: 状态收敛 (Convergence) 计算与实时流量 (bps) 查询已闭环。
+> - [x] **AIOps Domain**: 专家诊断工具已集成。
+> - [ ] **Security/QoS Domain**: 接口定义已完成，正在推进 eBPF Map 的动态下发对接。
+
+本文档用于定义 Aria `API v2` 的统一接口边界。
+它不是对当前 `v1` 与旧接口混用状态的描述，而是作为后续重构与实现的目标规范。
 
 ## 0. 多租户强隔离原则
 

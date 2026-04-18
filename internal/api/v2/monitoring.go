@@ -136,6 +136,28 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 	}
 	data["recent_policy_deliveries"] = pdItems
 
+	// 计算已学习的路由 (Learned Routes)
+	// 在 Mesh 网络中，本节点会学习到同租户其他所有节点宣告的路由
+	tenantNodes, err := r.store.GetNodesByTenant(tenantID)
+	if err == nil {
+		learnedRoutes := make([]map[string]interface{}, 0)
+		for _, tn := range tenantNodes {
+			if tn.ID == node.ID {
+				continue // 跳过自己
+			}
+			for _, route := range tn.AdvertisedRoutes {
+				learnedRoutes = append(learnedRoutes, map[string]interface{}{
+					"cidr":           route,
+					"next_hop_node":  tn.Hostname,
+					"next_hop_ip":    tn.AssignedIP,
+					"region":         tn.Region,
+					"status":         nodeAvailabilityStatus(tn),
+				})
+			}
+		}
+		data["learned_routes"] = learnedRoutes
+	}
+
 	v1.WriteSuccess(w, data, "Node monitoring detail retrieved")
 }
 

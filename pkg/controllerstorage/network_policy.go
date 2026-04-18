@@ -20,20 +20,36 @@ const (
 )
 
 type QoSRuleRecord struct {
-	ID            uuid.UUID
-	TenantID      uuid.UUID
-	NodeID        uuid.UUID
-	Category      string
-	SrcCIDR       string
-	DstCIDR       string
-	SrcPort       int
-	DstPort       int
-	Protocol      int
-	BandwidthMbps int
-	Enabled       bool
-	Description   string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID            uuid.UUID `json:"id"`
+	TenantID      uuid.UUID `json:"tenant_id"`
+	NodeID        uuid.UUID `json:"node_id"`
+	Category      string    `json:"category"`
+	SrcCIDR       string    `json:"src_cidr"`
+	DstCIDR       string    `json:"dst_cidr"`
+	SrcPort       int       `json:"src_port"`
+	DstPort       int       `json:"dst_port"`
+	Protocol      int       `json:"protocol"`
+	BandwidthMbps int       `json:"bandwidth_mbps"`
+	Enabled       bool      `json:"enabled"`
+	Description   string    `json:"description"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type ACLRuleRecord struct {
+	ID          uuid.UUID `json:"id"`
+	TenantID    uuid.UUID `json:"tenant_id"`
+	NodeID      uuid.UUID `json:"node_id"`
+	Action      string    `json:"action"` // "allow", "deny"
+	SrcCIDR     string    `json:"src_cidr"`
+	DstCIDR     string    `json:"dst_cidr"`
+	DstPort     int       `json:"dst_port"`
+	Protocol    int       `json:"protocol"`
+	Priority    int       `json:"priority"`
+	Enabled     bool      `json:"enabled"`
+	Description string    `json:"description"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type BlacklistRuleRecord struct {
@@ -113,6 +129,10 @@ func (s *Storage) CreateTenantNodeQoSRule(rule *QoSRuleRecord) (*QoSRuleRecord, 
 	if err != nil {
 		return nil, err
 	}
+
+	// 自动提升版本
+	_ = s.bumpNodeDesiredVersion(rule.TenantID, rule.NodeID)
+
 	return created, nil
 }
 
@@ -131,6 +151,88 @@ func (s *Storage) DeleteTenantNodeQoSRule(tenantID, nodeID uuid.UUID, category s
 	if rowsAffected == 0 {
 		return sql.ErrNoRows
 	}
+
+	// 自动提升版本
+	_ = s.bumpNodeDesiredVersion(tenantID, nodeID)
+
+	return nil
+}
+
+// ACL Methods
+
+func (s *Storage) ListTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRuleRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT id, tenant_id, node_id, action, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+		        COALESCE(dst_port, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
+		        created_at, updated_at
+		   FROM acl_rules
+		  WHERE tenant_id = $1 AND node_id = $2
+		  ORDER BY priority DESC, created_at DESC`,
+		tenantID, nodeID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var rules []*ACLRuleRecord
+	for rows.Next() {
+		rule := &ACLRuleRecord{}
+		err := rows.Scan(
+			&rule.ID, &rule.TenantID, &rule.NodeID, &rule.Action, &rule.SrcCIDR, &rule.DstCIDR,
+			&rule.DstPort, &rule.Protocol, &rule.Priority, &rule.Enabled, &rule.Description,
+			&rule.CreatedAt, &rule.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		rules = append(rules, rule)
+	}
+	return rules, rows.Err()
+}
+
+func (s *Storage) CreateTenantNodeACLRule(rule *ACLRuleRecord) (*ACLRuleRecord, error) {
+	created := &ACLRuleRecord{}
+	err := s.db.QueryRow(
+		`INSERT INTO acl_rules (tenant_id, node_id, action, src_cidr, dst_cidr, dst_port, protocol, priority, enabled, description)
+		 VALUES ($1, $2, $3, NULLIF($4, '')::cidr, NULLIF($5, '')::cidr, $6, $7, $8, $9, $10)
+		 RETURNING id, tenant_id, node_id, action, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+		           COALESCE(dst_port, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
+		           created_at, updated_at`,
+		rule.TenantID, rule.NodeID, rule.Action,
+		strings.TrimSpace(rule.SrcCIDR), strings.TrimSpace(rule.DstCIDR),
+		nullableInt(rule.DstPort), nullableInt(rule.Protocol), rule.Priority,
+		rule.Enabled, strings.TrimSpace(rule.Description),
+	).Scan(
+		&created.ID, &created.TenantID, &created.NodeID, &created.Action, &created.SrcCIDR, &created.DstCIDR,
+		&created.DstPort, &created.Protocol, &created.Priority, &created.Enabled, &created.Description,
+		&created.CreatedAt, &created.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	_ = s.bumpNodeDesiredVersion(rule.TenantID, rule.NodeID)
+	return created, nil
+}
+
+func (s *Storage) DeleteTenantNodeACLRuleByID(tenantID, nodeID uuid.UUID, ruleID uuid.UUID) error {
+	result, err := s.db.Exec(
+		`DELETE FROM acl_rules WHERE id = $1 AND tenant_id = $2 AND node_id = $3`,
+		ruleID, tenantID, nodeID,
+	)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+
+	_ = s.bumpNodeDesiredVersion(tenantID, nodeID)
 	return nil
 }
 
@@ -356,4 +458,21 @@ func nullableInt(value int) interface{} {
 		return nil
 	}
 	return value
+}
+
+func (s *Storage) bumpNodeDesiredVersion(tenantID, nodeID uuid.UUID) error {
+	newVersion := uuid.New().String()
+	_, err := s.db.Exec(
+		`INSERT INTO node_control_states (tenant_id, node_id, desired_state_version, desired_state_updated_at, updated_at)
+		 VALUES ($1, $2, $3, NOW(), NOW())
+		 ON CONFLICT (tenant_id, node_id) DO UPDATE SET
+		    desired_state_version = EXCLUDED.desired_state_version,
+		    desired_state_updated_at = NOW(),
+		    updated_at = NOW()`,
+		tenantID, nodeID, newVersion,
+	)
+	if err != nil {
+		fmt.Printf("[storage] failed to bump version for node %s: %v\n", nodeID, err)
+	}
+	return err
 }

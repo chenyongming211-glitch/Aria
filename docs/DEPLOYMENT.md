@@ -222,6 +222,20 @@ docker compose logs -f aria_controller
 docker compose restart aria_controller
 
 # Agent
+systemctl status aria-agent
+systemctl restart aria-agent
+aria-agent peers
+```
+--
+
+## 5. 常用命令
+
+```bash
+# Controller
+docker compose logs -f aria_controller
+docker compose restart aria_controller
+
+# Agent
 systemctl status aria
 systemctl restart aria
 aria peers
