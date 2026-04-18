@@ -5,6 +5,35 @@ All notable changes to the Aria project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-RC1] - 2026-04-18
+
+### 🚀 Milestone: Convergence & Observability
+
+本版本是向 `v0.1.0` 生产就绪版本迈进的核心里程碑，重点解决了“配置是否生效”、“为何不通”以及“全网流量可见性”三大核心痛点。
+
+#### ✨ 状态一致性系统 (Convergence System)
+- **三态模型实现**：建立 `Desired` (期望), `Applied` (已应用), `Observed` (已观察) 的全链路状态跟踪。
+- **配置同步可视化**：前端 Node 列表新增同步状态标签，实时显示 `Converged` (已收敛), `Pending` (同步中), `Diverged` (配置偏离)。
+- **错误回显**：Agent 执行失败时，详细的错误信息（如 eBPF 指令不合法或内核不支持）将实时回传并展示在 Web UI 的 Tooltip 中。
+
+#### 🌐 拓扑可视化 2.0 (Topology 2.0)
+- **实时流量感知**：拓扑图连线粗细现已根据 VictoriaMetrics 中的实时流量 (bps) 动态渲染。
+- **Mesh 连通性分析**：支持在拓扑图中查看任意两个 Peer 之间的流量负载和状态。
+
+#### 🤖 AI 助手专家能力 (AI Diagnostics)
+- **智能诊断工具**：新增 `diagnose_connectivity` 工具，AI 助手现在可以自动诊断两个节点间不通的深层原因（ACL 拦截、离线或版本未收敛）。
+- **工具链增强**：更新 `list_nodes` 工具，使其具备感知节点同步状态和同步错误的能力。
+
+#### 🛠️ Agent 鲁棒性与部署 (Agent & Deployment)
+- **即时重连同步**：Rust Agent 实现在 gRPC 命令流建立或重连成功后立即触发全量 `Sync`，确保状态最快恢复一致。
+- **部署脚本加固**：优化 `deploy-agent.sh`，新增 eBPF 所需的 Linux Capabilities 声明、内核版本预检（5.4+）以及多隧道环境的自动清理。
+
+#### 🔧 后端与存储
+- **API v2 增强**：在节点详情和监控接口中注入了收敛状态和已学习路由 (Learned Routes) 明细。
+- **原子化更新**：优化了 `NodeControlState` 的存储逻辑，支持版本化的状态报告。
+
+---
+
 ## [0.3.0] - 2026-03-03
 
 ### 🚀 重大架构重构

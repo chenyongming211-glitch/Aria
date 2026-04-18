@@ -82,11 +82,14 @@ uninstall() {
         info "Service disabled"
     fi
 
-    # Remove WireGuard interface
-    if ip link show aria0 &>/dev/null; then
-        ip link del aria0 2>/dev/null || true
-        info "WireGuard interface aria0 removed"
-    fi
+    # Remove WireGuard interfaces (including multi-tunnel)
+    for i in {0..3}; do
+        iface="aria${i}"
+        if ip link show "${iface}" &>/dev/null; then
+            ip link del "${iface}" 2>/dev/null || true
+            info "WireGuard interface ${iface} removed"
+        fi
+    done
 
     # Clean files
     rm -f "${SERVICE_FILE}"
@@ -109,6 +112,13 @@ fi
 [[ "${EUID}" -ne 0 ]] && error "This script must be run as root"
 [[ -z "${SERVER}" ]] && error "--server is required"
 [[ -z "${TOKEN}" ]] && error "--token is required"
+
+# Check kernel version (minimal 5.4 for eBPF features)
+KERNEL_MAJOR=$(uname -r | cut -d. -f1)
+KERNEL_MINOR=$(uname -r | cut -d. -f2)
+if (( KERNEL_MAJOR < 5 )) || { (( KERNEL_MAJOR == 5 )) && (( KERNEL_MINOR < 4 )); }; then
+    warn "Kernel version $(uname -r) is older than 5.4. eBPF features (QoS/ACL) may not work correctly."
+fi
 
 # Determine binary path
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -232,10 +242,16 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/aria-agent up --interface aria0 --config /etc/aria/agent.yaml
-ExecStopPost=/bin/bash -c 'ip link del aria0 2>/dev/null || true'
+# 清理逻辑：删除所有可能的 aria 接口
+ExecStopPost=/bin/bash -c 'for i in {0..3}; do ip link del aria$i 2>/dev/null || true; done'
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
+
+# Security & Capabilities for eBPF/WireGuard
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_BPF CAP_SYS_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_BPF CAP_SYS_ADMIN
+NoNewPrivileges=yes
 
 # Logging
 StandardOutput=journal
