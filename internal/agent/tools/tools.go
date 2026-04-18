@@ -101,15 +101,28 @@ func NewListNodesToolWithStore(store *controllerstorage.Storage) Tool {
 					status = node.Status
 				}
 
+				// 获取收敛状态
+				convergenceStatus := "unknown"
+				lastSyncError := ""
+				if controlState, err := store.GetNodeControlState(node.TenantID, node.ID); err == nil && controlState != nil {
+					isOnline := status == "online"
+					convergenceStatus = string(controlState.GetConvergenceStatus(isOnline))
+					lastSyncError = controlState.LastSyncError
+				}
+
 				nodeInfo := map[string]interface{}{
-					"name":        node.Hostname,
-					"public_key":  node.PublicKey,
-					"endpoint":    node.Endpoint,
-					"assigned_ip": node.AssignedIP,
-					"region":      node.Region,
-					"status":      status,
-					"role":        node.Role,
-					"last_seen":   node.LastSeen,
+					"name":               node.Hostname,
+					"public_key":         node.PublicKey,
+					"endpoint":           node.Endpoint,
+					"assigned_ip":        node.AssignedIP,
+					"region":             node.Region,
+					"status":             status,
+					"convergence_status": convergenceStatus,
+					"role":               node.Role,
+					"last_seen":          node.LastSeen,
+				}
+				if lastSyncError != "" {
+					nodeInfo["last_sync_error"] = lastSyncError
 				}
 				if node.PublicIP != "" {
 					nodeInfo["public_ip"] = node.PublicIP

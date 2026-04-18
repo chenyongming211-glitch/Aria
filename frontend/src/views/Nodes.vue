@@ -113,18 +113,35 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="Config" width="120">
+        <el-table-column label="Sync" width="120">
           <template #default="{ row }">
-            <el-tag size="small" :type="getConfigTagType(row.configurationStatus)">
-              {{ formatConfigStatus(row.configurationStatus) }}
+            <el-tooltip
+              v-if="row.observedMessage || row.lastCommandError"
+              :content="row.observedMessage || row.lastCommandError"
+              placement="top"
+            >
+              <el-tag size="small" :type="getConvergenceTagType(row.stateConvergence)">
+                {{ formatConvergence(row.stateConvergence) }}
+              </el-tag>
+            </el-tooltip>
+            <el-tag v-else size="small" :type="getConvergenceTagType(row.stateConvergence)">
+              {{ formatConvergence(row.stateConvergence) }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="Desired / Applied" width="180">
           <template #default="{ row }">
-            <div class="state-version-cell">
-              <div>{{ shortStateVersion(row.desiredStateVersion) }}</div>
-              <div class="muted-line">{{ shortStateVersion(row.appliedStateVersion) }}</div>
+            <div class="state-version-cell" :class="{ 'version-mismatch': row.desiredStateVersion !== row.appliedStateVersion }">
+              <div class="version-line desired">
+                <el-tooltip content="Desired State Version" placement="left">
+                  <span>{{ shortStateVersion(row.desiredStateVersion) }}</span>
+                </el-tooltip>
+              </div>
+              <div class="version-line applied muted-line">
+                <el-tooltip content="Applied State Version" placement="left">
+                  <span>{{ shortStateVersion(row.appliedStateVersion) }}</span>
+                </el-tooltip>
+              </div>
             </div>
           </template>
         </el-table-column>
@@ -879,6 +896,29 @@ onMounted(() => {
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+.state-version-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 11px;
+}
+
+.version-mismatch .desired {
+  color: var(--el-color-warning);
+  font-weight: 600;
+}
+
+.version-line {
+  display: flex;
+  align-items: center;
+}
+
+.muted-line {
+  color: var(--aria-text-secondary);
+  opacity: 0.7;
 }
 
 /* Action Buttons */

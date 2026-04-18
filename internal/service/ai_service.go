@@ -54,8 +54,9 @@ func NewAIService(store *controllerstorage.Storage) AIService {
 	myAgent.RegisterTool(tools.NewCreatePolicyTool(store))
 	myAgent.RegisterTool(tools.NewDeletePolicyTool(store))
 
-	// 监控
+	// 监控与诊断
 	myAgent.RegisterTool(tools.NewGetMonitorStatsTool(store))
+	myAgent.RegisterTool(tools.NewDiagnoseConnectivityTool(store))
 
 	return &aiServiceImpl{
 		agent: myAgent,

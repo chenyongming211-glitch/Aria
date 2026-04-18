@@ -10,6 +10,15 @@ import (
 	"github.com/google/uuid"
 )
 
+type ConvergenceStatus string
+
+const (
+	StatusConverged ConvergenceStatus = "converged"
+	StatusPending   ConvergenceStatus = "pending"
+	StatusDiverged  ConvergenceStatus = "diverged"
+	StatusOffline   ConvergenceStatus = "offline"
+)
+
 type NodeControlState struct {
 	TenantID              uuid.UUID              `json:"tenant_id"`
 	NodeID                uuid.UUID              `json:"node_id"`
@@ -25,6 +34,19 @@ type NodeControlState struct {
 	LastSyncError         string                 `json:"last_sync_error,omitempty"`
 	CreatedAt             time.Time              `json:"created_at"`
 	UpdatedAt             time.Time              `json:"updated_at"`
+}
+
+func (s *NodeControlState) GetConvergenceStatus(isOnline bool) ConvergenceStatus {
+	if !isOnline {
+		return StatusOffline
+	}
+	if s.LastSyncError != "" {
+		return StatusDiverged
+	}
+	if s.DesiredStateVersion == "" || s.DesiredStateVersion == s.AppliedStateVersion {
+		return StatusConverged
+	}
+	return StatusPending
 }
 
 type NodeControlStateReport struct {

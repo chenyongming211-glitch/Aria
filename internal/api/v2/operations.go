@@ -513,7 +513,7 @@ func (r *Router) buildNodeOperationsSummary(node *controllerstorage.Node) (map[s
 		summary["observed_message"] = controlState.ObservedMessage
 		summary["observed_at"] = controlState.ObservedAt
 		summary["last_sync_error"] = controlState.LastSyncError
-		summary["state_convergence"] = stateConvergenceStatus(controlState, configurationStatus)
+		summary["state_convergence"] = stateConvergenceStatus(node, controlState, configurationStatus)
 	} else {
 		summary["desired_state_version"] = ""
 		summary["desired_state_updated_at"] = nil
@@ -635,20 +635,24 @@ func deriveConfigurationStatus(
 	return "idle"
 }
 
-func stateConvergenceStatus(controlState *controllerstorage.NodeControlState, configurationStatus string) string {
+func stateConvergenceStatus(node *controllerstorage.Node, controlState *controllerstorage.NodeControlState, configurationStatus string) string {
+	isOnline := nodeAvailabilityStatus(node) == "online"
 	if controlState == nil {
-		return "idle"
+		if isOnline {
+			return string(controllerstorage.StatusConverged)
+		}
+		return string(controllerstorage.StatusOffline)
 	}
-	if configurationStatus == "error" {
-		return "diverged"
+
+	// 优先使用存储层定义的计算逻辑
+	status := controlState.GetConvergenceStatus(isOnline)
+
+	// 如果有未完成命令，且存储层认为是收敛的，强制降级为 pending
+	if status == controllerstorage.StatusConverged && configurationStatus == "in_progress" {
+		return string(controllerstorage.StatusPending)
 	}
-	if controlState.DesiredStateVersion == "" {
-		return "idle"
-	}
-	if controlState.DesiredStateVersion == controlState.AppliedStateVersion {
-		return "converged"
-	}
-	return "pending"
+
+	return string(status)
 }
 
 func firstNonEmptyString(values ...string) string {

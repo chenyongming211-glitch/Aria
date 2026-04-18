@@ -534,16 +534,63 @@ func (r *Router) handleMonitoringTopology(w http.ResponseWriter, req *http.Reque
 
 	// 构建全连接 peer 关系（WireGuard mesh）
 	links := make([]map[string]interface{}, 0)
+	
+	// 获取实时流量数据（如果有 VM 客户端）
+	peerTraffic := make(map[string]float64) // key: "src_pubkey:dst_pubkey", value: bps
+	if r.vmClient != nil {
+		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+		defer cancel()
+		
+		// 查询所有 peer 的发送速率
+		// 注意：此处不按 instance 过滤，而是获取所有数据后在内存中按租户节点匹配
+		query := `rate(wireguard_peer_tx_bytes[5m]) * 8`
+		result, err := r.vmClient.QueryInstant(ctx, query)
+		if err == nil && result != nil {
+			for _, item := range result.Data.Result {
+				metrics := item.Metric
+				valStr, ok := item.Value[1].(string)
+				if !ok {
+					continue
+				}
+				val, _ := strconv.ParseFloat(valStr, 64)
+				
+				// 我们需要知道发送者是谁，接收者是谁
+				// 假设 instance 包含发送者的 IP，public_key 是接收者的公钥
+				instance := metrics["instance"]
+				remotePubKey := metrics["public_key"]
+				
+				if instance != "" && remotePubKey != "" {
+					// 去掉 instance 的端口号
+					host := instance
+					if idx := strings.Index(instance, ":"); idx != -1 {
+						host = instance[:idx]
+					}
+					peerTraffic[host+":"+remotePubKey] = val
+				}
+			}
+		}
+	}
+
 	for i := 0; i < len(nodes); i++ {
 		for j := i + 1; j < len(nodes); j++ {
+			nodeA := nodes[i]
+			nodeB := nodes[j]
+			
 			status := "inactive"
-			if nodeAvailabilityStatus(nodes[i]) == "online" && nodeAvailabilityStatus(nodes[j]) == "online" {
+			if nodeAvailabilityStatus(nodeA) == "online" && nodeAvailabilityStatus(nodeB) == "online" {
 				status = "active"
 			}
+			
+			// 计算两个方向的流量之和
+			trafficAB := peerTraffic[nodeA.PublicIP+":"+nodeB.PublicKey]
+			trafficBA := peerTraffic[nodeB.PublicIP+":"+nodeA.PublicKey]
+			totalTraffic := trafficAB + trafficBA
+			
 			links = append(links, map[string]interface{}{
-				"source": nodes[i].ID.String(),
-				"target": nodes[j].ID.String(),
-				"status": status,
+				"source":  nodeA.ID.String(),
+				"target":  nodeB.ID.String(),
+				"status":  status,
+				"traffic": math.Round(totalTraffic*100) / 100, // bps
 			})
 		}
 	}

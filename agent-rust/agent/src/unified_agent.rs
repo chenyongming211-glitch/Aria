@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tokio::signal;
 use tokio::signal::unix::{signal, SignalKind};
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot, Notify};
 use tokio_util::sync::CancellationToken;
 use aya::{
     include_bytes_aligned,
@@ -74,6 +74,7 @@ pub struct UnifiedAgent {
     last_sync_peers: Arc<Mutex<Vec<GrpcPeerInfo>>>,
     
     cancel_token: CancellationToken,
+    sync_now: Arc<Notify>,
     log_handle: Arc<StdMutex<Option<reload::Handle<EnvFilter, Registry>>>>,
     current_log_level: Arc<StdMutex<String>>,
 }
@@ -136,9 +137,10 @@ impl UnifiedAgent {
         tracing::info!("✅ Routing manager created");
         
         let cancel_token = CancellationToken::new();
+        let sync_now = Arc::new(Notify::new());
         let current_log_level = Arc::new(StdMutex::new("info".to_string()));
         let last_sync_peers = Arc::new(Mutex::new(Vec::new()));
-        
+
         Ok(Self {
             config,
             config_path,
@@ -151,9 +153,11 @@ impl UnifiedAgent {
             unix_socket_path: "/run/aria-agent.sock".to_string(),
             last_sync_peers,
             cancel_token,
+            sync_now,
             log_handle,
             current_log_level,
         })
+
     }
 
     fn set_sync_observation(&mut self, status: &str, message: String) {
@@ -422,8 +426,22 @@ impl UnifiedAgent {
                         metrics::record_sync_success(self.last_sync_peers.lock().await.len());
                     }
                 }
-                
+
+                _ = self.sync_now.notified() => {
+                    tracing::info!("External sync notification received, syncing now...");
+                    if let Err(e) = self.sync().await {
+                        tracing::error!("Immediate sync failed: {:?}", e);
+                        self.set_sync_observation("error", e.to_string());
+                    } else {
+                        tracing::info!("✅ Immediate sync completed");
+                        metrics::record_sync_success(self.last_sync_peers.lock().await.len());
+                        // 重置定时器，避免刚同步完又立即触发定时同步
+                        sync_interval.reset();
+                    }
+                }
+
                 _ = metrics_timer.tick() => {
+
                     if let Err(e) = self.collect_and_report_metrics().await {
                         tracing::error!("Metrics collection failed: {:?}", e);
                     }
@@ -468,6 +486,7 @@ impl UnifiedAgent {
     fn start_command_stream_task(&self, remote_command_tx: mpsc::Sender<RemoteCommandEnvelope>) {
         let grpc_client = self.grpc_client.clone();
         let cancel_token = self.cancel_token.clone();
+        let sync_now = self.sync_now.clone();
         let node_id = self.config.node_id.clone();
         let public_key = self.config.public_key.clone();
 
@@ -483,6 +502,9 @@ impl UnifiedAgent {
                 {
                     Ok((response_tx, mut request_stream)) => {
                         tracing::info!("Controller command stream connected");
+                        
+                        // 连接成功，通知主循环立即执行一次 Sync
+                        sync_now.notify_one();
 
                         loop {
                             tokio::select! {

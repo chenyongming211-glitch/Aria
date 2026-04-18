@@ -116,14 +116,25 @@ const renderChart = (nodes, links) => {
     _raw: n
   }))
 
-  const chartLinks = links.map(l => ({
-    source: l.source,
-    target: l.target,
-    lineStyle: l.status === 'active'
-      ? { color: '#22C55E', width: 2, type: 'solid' }
-      : { color: '#CBD5E1', width: 1.5, type: 'dashed' },
-    _status: l.status
-  }))
+  const chartLinks = links.map(l => {
+    // 根据流量计算线宽 (bps -> 1-10px)
+    // 假设 1Mbps 以上加粗，10Mbps 封顶
+    const traffic = l.traffic || 0
+    let width = 1.5
+    if (l.status === 'active') {
+      width = 1.5 + Math.min(Math.round(traffic / 1_000_000 * 2), 8)
+    }
+
+    return {
+      source: l.source,
+      target: l.target,
+      lineStyle: l.status === 'active'
+        ? { color: '#22C55E', width: width, type: 'solid', opacity: 0.8 }
+        : { color: '#CBD5E1', width: 1.5, type: 'dashed', opacity: 0.4 },
+      _status: l.status,
+      _traffic: traffic
+    }
+  })
 
   const option = {
     backgroundColor: 'transparent',
@@ -145,12 +156,24 @@ const renderChart = (nodes, links) => {
           const src = nodeMap[params.data.source]
           const tgt = nodeMap[params.data.target]
           const status = params.data._status || 'unknown'
+          const traffic = params.data._traffic || 0
           const statusColor = status === 'active' ? '#22C55E' : '#94A3B8'
+          
+          let trafficDisplay = '0 bps'
+          if (traffic >= 1_000_000) {
+            trafficDisplay = (traffic / 1_000_000).toFixed(2) + ' Mbps'
+          } else if (traffic >= 1_000) {
+            trafficDisplay = (traffic / 1_000).toFixed(2) + ' Kbps'
+          } else if (traffic > 0) {
+            trafficDisplay = traffic.toFixed(0) + ' bps'
+          }
+
           return `
             <div style="font-weight:600;margin-bottom:4px">Connection</div>
             <div>Source: ${src?.hostname || params.data.source}</div>
             <div>Target: ${tgt?.hostname || params.data.target}</div>
             <div>Status: <span style="color:${statusColor};font-weight:600">${status}</span></div>
+            <div>Traffic: <span style="font-weight:600;color:#3B82F6">${trafficDisplay}</span></div>
           `
         }
         return ''

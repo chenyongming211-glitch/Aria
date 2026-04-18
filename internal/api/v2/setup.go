@@ -852,6 +852,13 @@ func (r *Router) buildTenantNodeResponse(node *controllerstorage.Node) map[strin
 		response["last_command_error"] = summary["last_command_error"]
 		response["configuration_status"] = summary["configuration_status"]
 		response["last_sync_at"] = summary["last_sync_at"]
+		response["convergence_status"] = summary["state_convergence"]
+		response["last_sync_error"] = summary["last_sync_error"]
+	} else {
+		response["convergence_status"] = string(controllerstorage.StatusOffline)
+		if nodeAvailabilityStatus(node) == "online" {
+			response["convergence_status"] = string(controllerstorage.StatusConverged)
+		}
 	}
 
 	return response
