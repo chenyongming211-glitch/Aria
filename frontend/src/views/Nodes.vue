@@ -161,13 +161,13 @@
                 size="small"
                 link
                 type="primary"
-                @click="editNode(row)"
+                @click="handleEditNode(row)"
               >
                 <el-icon><Edit /></el-icon>
               </el-button>
               <el-popconfirm
                 title="Are you sure to delete this node?"
-                @confirm="deleteNode(row.id)"
+                @confirm="handleDeleteNode(row.id)"
               >
                 <template #reference>
                   <el-button
@@ -201,123 +201,38 @@
     <el-dialog
       v-model="detailDialogVisible"
       title="Node Details"
-      width="60%"
-      :before-close="closeDetailDialog"
-      class="node-detail-dialog"
+      width="800px"
+      custom-class="node-detail-dialog"
+      @closed="closeDetailDialog"
     >
       <div v-if="selectedNode" class="node-detail-content">
-        <div class="detail-toolbar">
-          <el-button size="small" type="primary" :loading="commandLoading" @click="runQuickCommand('sync')">
-            Sync
-          </el-button>
-          <el-button size="small" :loading="commandLoading" @click="runQuickCommand('health_check')">
-            Health Check
-          </el-button>
-          <el-button size="small" :loading="commandLoading" @click="runQuickCommand('config_reload')">
-            Reload Config
-          </el-button>
-        </div>
-
-        <!-- 基本信息 -->
+        <!-- 基础信息 -->
         <div class="detail-section">
           <h4 class="section-title">
             <el-icon><InfoFilled /></el-icon>
             Basic Information
           </h4>
           <el-descriptions :column="2" border>
-            <el-descriptions-item label="Hostname">
-              {{ selectedNode.hostname }}
-            </el-descriptions-item>
-            <el-descriptions-item label="Public IP">
-              {{ selectedNode.publicIp }}
-            </el-descriptions-item>
-            <el-descriptions-item label="VPN IP">
-              {{ selectedNode.vpnIp }}
-            </el-descriptions-item>
+            <el-descriptions-item label="Hostname">{{ selectedNode.hostname }}</el-descriptions-item>
             <el-descriptions-item label="Region">
               <span class="region-badge">{{ selectedNode.region.toUpperCase() }}</span>
             </el-descriptions-item>
-            <el-descriptions-item label="Mode">
-              <div class="mode-badge">
-                {{ selectedNode.mode }}
-                <el-tag
-                  v-if="selectedNode.mode === 'kernel'"
-                  size="small"
-                  type="success"
-                  effect="plain"
-                >
-                  Optimized
-                </el-tag>
-              </div>
-            </el-descriptions-item>
+            <el-descriptions-item label="Public IP">{{ selectedNode.publicIp }}</el-descriptions-item>
+            <el-descriptions-item label="VPN IP">{{ selectedNode.vpnIp }}</el-descriptions-item>
             <el-descriptions-item label="Status">
               <span class="status-badge" :class="selectedNode.status">
                 {{ selectedNode.status }}
               </span>
             </el-descriptions-item>
-            <el-descriptions-item label="Version">
-              {{ selectedNode.version }}
-            </el-descriptions-item>
-            <el-descriptions-item label="Last Seen">
-              {{ selectedNode.lastSeen }}
-            </el-descriptions-item>
-            <el-descriptions-item label="Uptime" :span="2">
-              {{ selectedNode.uptime }}
-            </el-descriptions-item>
-            <el-descriptions-item label="Config Status">
-              <el-tag size="small" :type="getConfigTagType(selectedNode.configurationStatus)">
-                {{ formatConfigStatus(selectedNode.configurationStatus) }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="Pending Commands">
-              {{ selectedNode.pendingCmds }}
-            </el-descriptions-item>
-            <el-descriptions-item label="Last Sync">
-              {{ selectedNode.lastSyncAt }}
-            </el-descriptions-item>
-            <el-descriptions-item label="Last Command Status">
-              <span v-if="selectedNode.lastCommandStatus">{{ selectedNode.lastCommandStatus }}</span>
-              <span v-else>N/A</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="Last Command Error" :span="2">
-              {{ selectedNode.lastCommandError || 'N/A' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="Desired Version">
-              {{ selectedNode.desiredStateVersion || 'N/A' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="Desired Updated">
-              {{ selectedNode.desiredStateUpdatedAt || 'N/A' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="Applied Version">
-              {{ selectedNode.appliedStateVersion || 'N/A' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="Applied Updated">
-              {{ selectedNode.appliedStateUpdatedAt || 'N/A' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="Observed State">
-              <el-tag size="small" :type="getObservedTagType(selectedNode.observedState)">
-                {{ formatObservedState(selectedNode.observedState) }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="Convergence">
-              <el-tag size="small" :type="getConvergenceTagType(selectedNode.stateConvergence)">
-                {{ formatConvergence(selectedNode.stateConvergence) }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="Observed At">
-              {{ selectedNode.observedAt || 'N/A' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="Observed Message" :span="2">
-              {{ selectedNode.observedMessage || 'N/A' }}
-            </el-descriptions-item>
+            <el-descriptions-item label="Uptime">{{ selectedNode.uptime }}</el-descriptions-item>
           </el-descriptions>
         </div>
 
-        <!-- 网络统计 -->
+        <!-- 实时监控指标 -->
         <div class="detail-section">
           <h4 class="section-title">
             <el-icon><TrendCharts /></el-icon>
-            Network Statistics
+            Real-time Metrics
           </h4>
           <div class="stats-grid">
             <div class="stat-box">
@@ -325,7 +240,7 @@
                 <el-icon><Upload /></el-icon>
               </div>
               <div class="stat-info">
-                <div class="stat-box-value">{{ selectedNode.bandwidth.upload }} Mbps</div>
+                <div class="stat-box-value">{{ selectedNode.bandwidth?.upload || 0 }} Mbps</div>
                 <div class="stat-box-label">Upload</div>
               </div>
             </div>
@@ -334,7 +249,7 @@
                 <el-icon><Download /></el-icon>
               </div>
               <div class="stat-info">
-                <div class="stat-box-value">{{ selectedNode.bandwidth.download }} Mbps</div>
+                <div class="stat-box-value">{{ selectedNode.bandwidth?.download || 0 }} Mbps</div>
                 <div class="stat-box-label">Download</div>
               </div>
             </div>
@@ -343,20 +258,21 @@
                 <el-icon><Timer /></el-icon>
               </div>
               <div class="stat-info">
-                <div class="stat-box-value">{{ selectedNode.latency }} ms</div>
+                <div class="stat-box-value">{{ selectedNode.latency || 0 }} ms</div>
                 <div class="stat-box-label">Latency</div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- 路由信息 -->
+        <!-- 路由信息 (Site-to-Site) -->
         <div class="detail-section">
           <h4 class="section-title">
-            <el-icon><Position /></el-icon>
-            Advertised Routes
+            <el-icon><Upload /></el-icon>
+            Advertised Routes (Site-to-Site)
           </h4>
           <div class="routes-list">
+            <el-empty v-if="!selectedNode.routes || selectedNode.routes.length === 0" :image-size="40" description="No advertised routes" />
             <el-tag
               v-for="route in selectedNode.routes"
               :key="route"
@@ -370,27 +286,7 @@
           </div>
         </div>
 
-        <!-- 宣告的路由 -->
-        <div class="detail-section">
-          <h4 class="section-title">
-            <el-icon><Upload /></el-icon>
-            Advertised Routes (Site-to-Site)
-          </h4>
-          <div class="routes-list">
-            <el-empty v-if="!selectedNode.routes || selectedNode.routes.length === 0" :image-size="40" description="No advertised routes" />
-            <el-tag
-              v-for="route in selectedNode.routes"
-              :key="route"
-              class="route-tag"
-              type="info"
-              effect="plain"
-            >
-              {{ route }}
-            </el-tag>
-          </div>
-        </div>
-
-        <!-- 学习到的路由 -->
+        <!-- 学习到的路由 (Mesh) -->
         <div class="detail-section">
           <h4 class="section-title">
             <el-icon><Position /></el-icon>
@@ -424,19 +320,36 @@
           </el-table>
         </div>
 
+        <!-- 最近命令 -->
         <div class="detail-section">
-          <h4 class="section-title">
-            <el-icon><Timer /></el-icon>
-            Recent Commands
-          </h4>
+          <div class="section-header">
+            <h4 class="section-title">
+              <el-icon><Timer /></el-icon>
+              Recent Commands
+            </h4>
+            <div class="detail-toolbar">
+              <el-button size="small" type="primary" :loading="commandLoading" @click="runQuickCommand('sync')">
+                Force Sync
+              </el-button>
+              <el-button size="small" :loading="commandLoading" @click="runQuickCommand('health_check')">
+                Health Check
+              </el-button>
+            </div>
+          </div>
           <el-table
             :data="selectedNode.recentCommands || []"
             size="small"
             empty-text="No commands yet"
           >
             <el-table-column prop="command" label="Command" min-width="120" />
-            <el-table-column prop="status" label="Status" width="120" />
-            <el-table-column prop="message" label="Message" min-width="220" />
+            <el-table-column prop="status" label="Status" width="120">
+              <template #default="{ row }">
+                <el-tag :type="row.status === 'completed' ? 'success' : 'warning'" size="small">
+                  {{ row.status }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="message" label="Message" min-width="220" show-overflow-tooltip />
             <el-table-column label="Created" width="180">
               <template #default="{ row }">
                 {{ formatCommandTime(row.created_at) }}
@@ -446,11 +359,61 @@
         </div>
       </div>
     </el-dialog>
+
+    <!-- 节点编辑对话框 -->
+    <el-dialog
+      v-model="editDialogVisible"
+      title="Edit Node Settings"
+      width="550px"
+    >
+      <el-form :model="editForm" label-width="140px" ref="editFormRef">
+        <el-form-item label="Hostname">
+          <el-input v-model="editForm.hostname" />
+        </el-form-item>
+        <el-form-item label="Region">
+          <el-input v-model="editForm.region" placeholder="e.g. cn-shanghai" />
+        </el-form-item>
+        <el-form-item label="Advertised Routes">
+          <div class="edit-routes-container">
+            <el-tag
+              v-for="tag in editForm.advertised_routes"
+              :key="tag"
+              closable
+              :disable-transitions="false"
+              @close="handleRemoveRoute(tag)"
+              class="route-edit-tag"
+            >
+              {{ tag }}
+            </el-tag>
+            <el-input
+              v-if="inputVisible"
+              ref="InputRef"
+              v-model="inputValue"
+              class="new-route-input"
+              size="small"
+              @keyup.enter="handleInputConfirm"
+              @blur="handleInputConfirm"
+              placeholder="e.g. 192.168.1.0/24"
+            />
+            <el-button v-else class="button-new-tag" size="small" @click="showInput">
+              + New Route
+            </el-button>
+          </div>
+          <p class="form-help">设置节点向 Mesh 网络宣告的本地子网路由</p>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editDialogVisible = false">Cancel</el-button>
+        <el-button type="primary" @click="saveNodeChanges" :loading="submitting">
+          Save Changes
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, reactive, nextTick } from 'vue'
 import {
   Search,
   Refresh,
@@ -488,6 +451,21 @@ const detailDialogVisible = ref(false)
 const selectedNode = ref(null)
 const commandLoading = ref(false)
 
+// 编辑相关状态
+const editDialogVisible = ref(false)
+const submitting = ref(false)
+const editForm = reactive({
+  id: '',
+  hostname: '',
+  region: '',
+  advertised_routes: []
+})
+
+// 路由输入相关
+const inputVisible = ref(false)
+const inputValue = ref('')
+const InputRef = ref(null)
+
 // 计算属性
 const onlineCount = computed(() => nodes.value.filter(n => n.status === 'online').length)
 const offlineCount = computed(() => nodes.value.filter(n => n.status === 'offline').length)
@@ -518,8 +496,8 @@ const refreshNodes = async () => {
 }
 
 const addNode = () => {
-  ElMessageBox.alert('Add node functionality will be implemented here.', 'Info', {
-    confirmButtonText: 'OK',
+  ElMessageBox.alert('To add a node, please generate an Enrollment Token and run aria-agent init on your node.', 'Registration Guide', {
+    confirmButtonText: 'Got it',
   })
 }
 
@@ -531,17 +509,13 @@ const viewNodeDetails = async (node) => {
       const metrics = await useMonitorApi.getNodeMetrics(node.id)
       if (metrics && selectedNode.value) {
         selectedNode.value.bandwidth = {
-          upload: metrics.upload_mbps != null ? Number(metrics.upload_mbps.toFixed(2)) : 'N/A',
-          download: metrics.download_mbps != null ? Number(metrics.download_mbps.toFixed(2)) : 'N/A'
+          upload: metrics.upload_mbps != null ? Number(metrics.upload_mbps.toFixed(2)) : 0,
+          download: metrics.download_mbps != null ? Number(metrics.download_mbps.toFixed(2)) : 0
         }
-        selectedNode.value.latency = metrics.latency_ms != null ? Number(metrics.latency_ms.toFixed(1)) : 'N/A'
+        selectedNode.value.latency = metrics.latency_ms != null ? Number(metrics.latency_ms.toFixed(1)) : 0
       }
     } catch (metricsError) {
       console.error('Failed to load node metrics:', metricsError)
-      if (selectedNode.value) {
-        selectedNode.value.bandwidth = { upload: 'N/A', download: 'N/A' }
-        selectedNode.value.latency = 'N/A'
-      }
     }
     detailDialogVisible.value = true
   } catch (error) {
@@ -550,15 +524,68 @@ const viewNodeDetails = async (node) => {
   }
 }
 
-const editNode = (node) => {
-  ElMessageBox.alert(`Edit node functionality for ${node.hostname} will be implemented here.`, 'Info', {
-    confirmButtonText: 'OK',
+// 编辑逻辑
+const handleEditNode = (node) => {
+  editForm.id = node.id
+  editForm.hostname = node.hostname
+  editForm.region = node.region
+  // 确保是数组拷贝
+  editForm.advertised_routes = Array.isArray(node.routes) ? [...node.routes] : []
+  editDialogVisible.value = true
+}
+
+const handleRemoveRoute = (tag) => {
+  editForm.advertised_routes.splice(editForm.advertised_routes.indexOf(tag), 1)
+}
+
+const showInput = () => {
+  inputVisible.value = true
+  nextTick(() => {
+    InputRef.value?.focus()
   })
 }
 
-const deleteNode = (id) => {
-  nodes.value = nodes.value.filter(node => node.id !== id)
-  ElMessage.success('Node deleted')
+const handleInputConfirm = () => {
+  if (inputValue.value) {
+    // 简单的 CIDR 校验逻辑
+    if (!/^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(inputValue.value)) {
+      ElMessage.warning('Please enter a valid CIDR (e.g. 192.168.1.0/24)')
+      return
+    }
+    if (!editForm.advertised_routes.includes(inputValue.value)) {
+      editForm.advertised_routes.push(inputValue.value)
+    }
+  }
+  inputVisible.value = false
+  inputValue.value = ''
+}
+
+const saveNodeChanges = async () => {
+  submitting.value = true
+  try {
+    await nodeStore.updateNodeRemote(editForm.id, {
+      hostname: editForm.hostname,
+      region: editForm.region,
+      advertised_routes: editForm.advertised_routes
+    })
+    ElMessage.success('Node settings updated successfully')
+    editDialogVisible.value = false
+    await refreshNodes()
+  } catch (error) {
+    ElMessage.error('Failed to update node settings')
+  } finally {
+    submitting.value = false
+  }
+}
+
+const handleDeleteNode = async (id) => {
+  try {
+    // 调用删除 API (如果有的话，此处暂模拟本地删除)
+    nodeStore.deleteNode(id)
+    ElMessage.success('Node deleted')
+  } catch (error) {
+    ElMessage.error('Failed to delete node')
+  }
 }
 
 const closeDetailDialog = () => {
@@ -600,56 +627,6 @@ const runQuickCommand = async (command) => {
   }
 }
 
-const formatConfigStatus = (status) => {
-  const map = {
-    applied: 'Applied',
-    pending: 'Pending',
-    in_progress: 'In Progress',
-    error: 'Error',
-    idle: 'Idle'
-  }
-  return map[status] || status || 'Unknown'
-}
-
-const getConfigTagType = (status) => {
-  switch (status) {
-    case 'applied':
-      return 'success'
-    case 'pending':
-    case 'in_progress':
-      return 'warning'
-    case 'error':
-      return 'danger'
-    default:
-      return 'info'
-  }
-}
-
-const formatObservedState = (state) => {
-  const map = {
-    applied: 'Applied',
-    healthy: 'Healthy',
-    error: 'Error',
-    in_progress: 'In Progress',
-    idle: 'Idle'
-  }
-  return map[state] || state || 'Unknown'
-}
-
-const getObservedTagType = (state) => {
-  switch (state) {
-    case 'applied':
-    case 'healthy':
-      return 'success'
-    case 'in_progress':
-      return 'warning'
-    case 'error':
-      return 'danger'
-    default:
-      return 'info'
-  }
-}
-
 const formatConvergence = (state) => {
   const map = {
     converged: 'Converged',
@@ -662,20 +639,16 @@ const formatConvergence = (state) => {
 
 const getConvergenceTagType = (state) => {
   switch (state) {
-    case 'converged':
-      return 'success'
-    case 'pending':
-      return 'warning'
-    case 'diverged':
-      return 'danger'
-    default:
-      return 'info'
+    case 'converged': return 'success'
+    case 'pending': return 'warning'
+    case 'diverged': return 'danger'
+    default: return 'info'
   }
 }
 
 const shortStateVersion = (value) => {
   if (!value) return 'N/A'
-  return value.length > 18 ? `${value.slice(0, 18)}...` : value
+  return value.length > 12 ? `${value.slice(0, 12)}...` : value
 }
 
 const formatCommandTime = (value) => {
@@ -694,469 +667,76 @@ onMounted(() => {
 /* ============================================
    Nodes Page Styles
    ============================================ */
-.nodes-page {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
+.nodes-page { display: flex; flex-direction: column; gap: 20px; }
+.detail-toolbar { display: flex; gap: 12px; }
+.section-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+.section-header .section-title { margin-bottom: 0; }
 
-.detail-toolbar {
+/* Edit Form Styles */
+.edit-routes-container {
   display: flex;
-  gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 4px;
-}
-
-.state-version-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12px;
-}
-
-.muted-line {
-  color: var(--aria-text-secondary);
-}
-
-/* ============================================
-   Page Header
-   ============================================ */
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 20px;
-  flex-wrap: wrap;
-}
-
-.header-content {
-  flex: 1;
-  min-width: 300px;
-}
-
-.page-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 24px;
-  font-weight: 700;
-  margin: 0 0 8px 0;
-  color: var(--aria-text-primary);
-  letter-spacing: -0.3px;
-}
-
-.title-icon {
-  font-size: 28px;
-  color: var(--aria-primary);
-}
-
-.page-subtitle {
-  font-size: 14px;
-  color: var(--aria-text-secondary);
-  margin: 0;
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.search-input {
-  width: 280px;
-}
-
-/* ============================================
-   Stats Cards
-   ============================================ */
-.stats-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-}
-
-.stat-item {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 20px;
-  background: var(--aria-bg-secondary);
-  border: 1px solid var(--aria-border-primary);
-  border-radius: var(--aria-radius-lg);
-  transition: all var(--aria-transition-base);
-}
-
-.stat-item:hover {
-  border-color: var(--aria-border-hover);
-  transform: translateY(-2px);
-  box-shadow: var(--aria-shadow);
-}
-
-.stat-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: var(--aria-radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 28px;
-  flex-shrink: 0;
-}
-
-.stat-icon.blue {
-  background: rgba(59, 130, 246, 0.15);
-  color: #3B82F6;
-}
-
-.stat-icon.green {
-  background: rgba(34, 197, 94, 0.15);
-  color: #22C55E;
-}
-
-.stat-icon.orange {
-  background: rgba(245, 158, 11, 0.15);
-  color: #F59E0B;
-}
-
-.stat-icon.purple {
-  background: rgba(139, 92, 246, 0.15);
-  color: #8B5CF6;
-}
-
-.stat-content {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.stat-value {
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--aria-text-primary);
-  line-height: 1;
-}
-
-.stat-label {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--aria-text-secondary);
-}
-
-/* ============================================
-   Nodes Table
-   ============================================ */
-.nodes-card {
-  background: var(--aria-bg-secondary);
-  border: 1px solid var(--aria-border-primary);
-  border-radius: var(--aria-radius-lg);
-}
-
-:deep(.nodes-table) {
-  background: transparent;
-}
-
-:deep(.nodes-table .el-table__header) {
-  background: var(--aria-bg-tertiary);
-}
-
-:deep(.nodes-table .el-table__header th) {
-  background: transparent;
-  color: var(--aria-text-secondary);
-  font-weight: 600;
-  font-size: 13px;
-  border-bottom: 1px solid var(--aria-border-primary);
-}
-
-:deep(.nodes-table .el-table__body tr) {
-  background: transparent;
-  transition: background-color var(--aria-transition-fast);
-}
-
-:deep(.nodes-table .el-table__body tr:hover > td) {
-  background: var(--aria-bg-tertiary);
-}
-
-:deep(.nodes-table .el-table__body td) {
-  border-bottom: 1px solid var(--aria-border-primary);
-  color: var(--aria-text-secondary);
-}
-
-/* Region Badge */
-.region-badge {
-  display: inline-block;
-  padding: 4px 10px;
-  background: rgba(59, 130, 246, 0.1);
-  color: #3B82F6;
-  border-radius: var(--radius-full);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-}
-
-/* Mode Badge */
-.mode-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* Status Badge */
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border-radius: var(--radius-full);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.status-badge::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-
-.status-badge.online {
-  background: rgba(34, 197, 94, 0.15);
-  color: #22C55E;
-}
-
-.status-badge.online::before {
-  background: #22C55E;
-  animation: pulse-dot 2s ease-in-out infinite;
-}
-
-.status-badge.offline {
-  background: rgba(239, 68, 68, 0.15);
-  color: #EF4444;
-}
-
-.status-badge.offline::before {
-  background: #EF4444;
-}
-
-.status-badge.maintenance {
-  background: rgba(245, 158, 11, 0.15);
-  color: #F59E0B;
-}
-
-.status-badge.maintenance::before {
-  background: #F59E0B;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-.state-version-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 11px;
-}
-
-.version-mismatch .desired {
-  color: var(--el-color-warning);
-  font-weight: 600;
-}
-
-.version-line {
-  display: flex;
-  align-items: center;
-}
-
-.muted-line {
-  color: var(--aria-text-secondary);
-  opacity: 0.7;
-}
-
-/* Action Buttons */
-.action-buttons {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-/* Pagination */
-.pagination-wrapper {
-  display: flex;
-  justify-content: flex-end;
-  padding-top: 20px;
-  border-top: 1px solid var(--aria-border-primary);
-}
-
-/* ============================================
-   Node Detail Dialog
-   ============================================ */
-:deep(.node-detail-dialog) {
-  background: var(--aria-bg-secondary);
-}
-
-:deep(.node-detail-dialog .el-dialog__header) {
-  border-bottom: 1px solid var(--aria-border-primary);
-  padding: 20px 24px;
-}
-
-:deep(.node-detail-dialog .el-dialog__title) {
-  color: var(--aria-text-primary);
-  font-weight: 600;
-}
-
-:deep(.node-detail-dialog .el-dialog__body) {
-  padding: 24px;
-}
-
-.node-detail-content {
-  max-height: 600px;
-  overflow-y: auto;
-}
-
-/* Detail Section */
-.detail-section {
-  margin-bottom: 32px;
-}
-
-.section-title {
-  display: flex;
-  align-items: center;
   gap: 8px;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--aria-text-primary);
-  margin: 0 0 16px 0;
+  border: 1px solid var(--el-border-color);
+  padding: 8px;
+  border-radius: 4px;
+  min-height: 40px;
 }
+.route-edit-tag { margin: 2px; }
+.new-route-input { width: 140px; margin: 2px; vertical-align: middle; }
+.button-new-tag { margin: 2px; height: 24px; line-height: 22px; padding-top: 0; padding-bottom: 0; }
+.form-help { font-size: 12px; color: #909399; margin-top: 4px; line-height: 1.4; }
 
-.section-title .el-icon {
-  color: var(--aria-primary);
-}
+/* Existing Styles ... */
+.page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
+.header-content { flex: 1; min-width: 300px; }
+.page-title { display: flex; align-items: center; gap: 12px; font-size: 24px; font-weight: 700; margin: 0 0 8px 0; color: var(--aria-text-primary); }
+.title-icon { font-size: 28px; color: var(--aria-primary); }
+.page-subtitle { font-size: 14px; color: var(--aria-text-secondary); margin: 0; }
+.header-actions { display: flex; align-items: center; gap: 12px; }
+.search-input { width: 280px; }
 
-:deep(.detail-section .el-descriptions) {
-  --el-descriptions-table-border-color: var(--aria-border-primary);
-  --el-descriptions-item-bordered-label-bg: var(--aria-bg-tertiary);
-}
+.stats-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+.stat-item { display: flex; align-items: center; gap: 16px; padding: 20px; background: var(--aria-bg-secondary); border: 1px solid var(--aria-border-primary); border-radius: var(--aria-radius-lg); transition: all var(--aria-transition-base); }
+.stat-item:hover { border-color: var(--aria-border-hover); transform: translateY(-2px); box-shadow: var(--aria-shadow); }
+.stat-icon { width: 56px; height: 56px; border-radius: var(--aria-radius-md); display: flex; align-items: center; justify-content: center; font-size: 28px; flex-shrink: 0; }
+.stat-icon.blue { background: rgba(59, 130, 246, 0.15); color: #3B82F6; }
+.stat-icon.green { background: rgba(34, 197, 94, 0.15); color: #22C55E; }
+.stat-icon.orange { background: rgba(245, 158, 11, 0.15); color: #F59E0B; }
+.stat-icon.purple { background: rgba(139, 92, 246, 0.15); color: #8B5CF6; }
+.stat-value { font-size: 28px; font-weight: 700; color: var(--aria-text-primary); line-height: 1; }
+.stat-label { font-size: 13px; font-weight: 500; color: var(--aria-text-secondary); }
 
-:deep(.detail-section .el-descriptions__label) {
-  color: var(--aria-text-secondary);
-  font-weight: 500;
-}
+.nodes-card { background: var(--aria-bg-secondary); border: 1px solid var(--aria-border-primary); border-radius: var(--aria-radius-lg); }
+.region-badge { display: inline-block; padding: 4px 10px; background: rgba(59, 130, 246, 0.1); color: #3B82F6; border-radius: var(--radius-full); font-size: 12px; font-weight: 600; }
+.status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: var(--radius-full); font-size: 12px; font-weight: 500; }
+.status-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
+.status-badge.online { background: rgba(34, 197, 94, 0.15); color: #22C55E; }
+.status-badge.online::before { background: #22C55E; animation: pulse-dot 2s ease-in-out infinite; }
+.status-badge.offline { background: rgba(239, 68, 68, 0.15); color: #EF4444; }
+.status-badge.offline::before { background: #EF4444; }
 
-:deep(.detail-section .el-descriptions__content) {
-  color: var(--aria-text-primary);
-}
+.state-version-cell { display: flex; flex-direction: column; gap: 2px; font-family: monospace; font-size: 11px; }
+.version-mismatch .desired { color: var(--el-color-warning); font-weight: 600; }
+.muted-line { color: var(--aria-text-secondary); opacity: 0.7; }
+.action-buttons { display: flex; align-items: center; gap: 4px; }
+.pagination-wrapper { display: flex; justify-content: flex-end; padding-top: 20px; border-top: 1px solid var(--aria-border-primary); }
 
-/* Stats Grid */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-}
+.node-detail-content { max-height: 600px; overflow-y: auto; }
+.detail-section { margin-bottom: 32px; }
+.section-title { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; color: var(--aria-text-primary); margin: 0 0 16px 0; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+.stat-box { display: flex; align-items: center; gap: 16px; padding: 20px; background: var(--aria-bg-tertiary); border: 1px solid var(--aria-border-primary); border-radius: var(--aria-radius-lg); }
+.stat-icon-box { width: 48px; height: 48px; border-radius: var(--aria-radius-md); display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0; }
+.stat-icon-box.upload { background: rgba(59, 130, 246, 0.15); color: #3B82F6; }
+.stat-icon-box.download { background: rgba(34, 197, 94, 0.15); color: #22C55E; }
+.stat-icon-box.latency { background: rgba(245, 158, 11, 0.15); color: #F59E0B; }
+.stat-box-value { font-size: 20px; font-weight: 700; color: var(--aria-text-primary); }
+.stat-box-label { font-size: 12px; color: var(--aria-text-secondary); }
+.routes-list { display: flex; flex-wrap: wrap; gap: 10px; }
+.route-tag { font-family: monospace; }
+.route-code { color: #cf9236; }
 
-.stat-box {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 20px;
-  background: var(--aria-bg-tertiary);
-  border: 1px solid var(--aria-border-primary);
-  border-radius: var(--aria-radius-lg);
-}
-
-.stat-icon-box {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--aria-radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-  flex-shrink: 0;
-}
-
-.stat-icon-box.upload {
-  background: rgba(59, 130, 246, 0.15);
-  color: #3B82F6;
-}
-
-.stat-icon-box.download {
-  background: rgba(34, 197, 94, 0.15);
-  color: #22C55E;
-}
-
-.stat-icon-box.latency {
-  background: rgba(245, 158, 11, 0.15);
-  color: #F59E0B;
-}
-
-.stat-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.stat-box-value {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--aria-text-primary);
-  line-height: 1;
-}
-
-.stat-box-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--aria-text-secondary);
-}
-
-/* Routes List */
-.routes-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.route-tag {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-}
-
-/* ============================================
-   Responsive
-   ============================================ */
-@media (max-width: 1024px) {
-  .page-header {
-    flex-direction: column;
-  }
-
-  .header-actions {
-    width: 100%;
-  }
-
-  .search-input {
-    flex: 1;
-    width: auto;
-  }
-}
-
-@media (max-width: 768px) {
-  .stats-cards {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .stats-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 480px) {
-  .stats-cards {
-    grid-template-columns: 1fr;
-  }
-
-  .action-buttons {
-    flex-direction: column;
-  }
-}
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+@media (max-width: 768px) { .stats-cards { grid-template-columns: repeat(2, 1fr); } .stats-grid { grid-template-columns: 1fr; } }
 </style>

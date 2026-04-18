@@ -196,6 +196,29 @@ export default defineStore('node', () => {
     nodes.value = nodes.value.filter(node => node.id !== id)
   }
 
+  async function updateNodeRemote(id, data) {
+    loading.value = true
+    try {
+      const tenantId = requireCurrentTenantId()
+      const response = await api.put(API_ENDPOINTS.TENANT.NODE_DETAIL(tenantId, id), data)
+      const updatedData = response.data?.data || response.data
+      
+      // 更新本地状态
+      const index = nodes.value.findIndex(node => node.id === id)
+      if (index !== -1) {
+        // 部分更新本地字段
+        nodes.value[index] = { ...nodes.value[index], ...data }
+      }
+      
+      return updatedData
+    } catch (error) {
+      console.error('[Node Store] Failed to update node:', error)
+      throw error
+    } finally {
+      loading.value = false
+    }
+  }
+
   function setCurrentNode(node) {
     currentNode.value = node
   }

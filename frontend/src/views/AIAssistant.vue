@@ -439,10 +439,17 @@ const scrollToBottom = async () => {
 // 格式化消息
 const formatMessage = (content) => {
   if (!content) return ''
-  return content
+  
+  // 处理代码块和粗体，同时转义 HTML 避免注入，但保留我们要的标签
+  let formatted = String(content)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
     .replace(/\n/g, '<br>')
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
+
+  return formatted
 }
 
 onMounted(() => {

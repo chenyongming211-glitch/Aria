@@ -207,16 +207,15 @@ import {
   Setting,
   Plus,
   Download,
-  Connection,
   DataAnalysis,
-  Lock,
-  Warning as WarningIcon
+  Warning
 } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
+import { useRouter } from 'vue-router'
 import { useMonitorApi } from '@/composables/useMonitorApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 
-
+const router = useRouter()
 const trafficLoading = ref(false)
 const healthLoading = ref(false)
 const timeRange = ref('24h')
@@ -340,28 +339,28 @@ const quickActions = [
     icon: Plus,
     bgColor: 'rgba(59, 130, 246, 0.1)',
     iconColor: '#3B82F6',
-    handler: () => {}
+    handler: () => router.push('/nodes')
   },
   {
     name: 'Create Route',
     icon: Position,
     bgColor: 'rgba(34, 197, 94, 0.1)',
     iconColor: '#22C55E',
-    handler: () => {}
+    handler: () => router.push('/routing')
   },
   {
     name: 'View Logs',
     icon: DataAnalysis,
     bgColor: 'rgba(245, 158, 11, 0.1)',
     iconColor: '#F59E0B',
-    handler: () => {}
+    handler: () => router.push('/monitoring')
   },
   {
     name: 'System Config',
     icon: Setting,
     bgColor: 'rgba(139, 92, 246, 0.1)',
     iconColor: '#8B5CF6',
-    handler: () => {}
+    handler: () => router.push('/settings')
   }
 ]
 
@@ -600,12 +599,14 @@ const renderTrafficChart = (data) => {
 }
 
 // 初始化图表
+const handleResize = () => {
+  chartInstance?.resize()
+}
+
 const initTrafficChart = () => {
   if (trafficChartRef.value) {
     chartInstance = echarts.init(trafficChartRef.value)
-    window.addEventListener('resize', () => {
-      chartInstance?.resize()
-    })
+    window.addEventListener('resize', handleResize)
   }
 }
 
@@ -642,11 +643,11 @@ onBeforeUnmount(() => {
     clearInterval(healthTimer)
     healthTimer = null
   }
+  window.removeEventListener('resize', handleResize)
   if (chartInstance) {
     chartInstance.dispose()
     chartInstance = null
   }
-  window.removeEventListener('resize', () => {})
 })
 </script>
 
