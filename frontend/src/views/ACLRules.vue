@@ -9,6 +9,17 @@
     </div>
 
     <div class="filter-section">
+      <el-select v-model="filters.node_id" placeholder="选择节点 (必选)" style="width: 220px" @change="handleNodeChange">
+        <el-option
+          v-for="node in tenantNodes"
+          :key="node.id"
+          :label="node.hostname || node.public_key || node.id"
+          :value="node.id"
+        />
+      </el-select>
+
+      <el-divider direction="vertical" />
+
       <el-input
         v-model="filters.name"
         placeholder="搜索规则名称"
@@ -199,6 +210,7 @@ const submitting = ref(false)
 const formRef = ref(null)
 
 const filters = reactive({
+  node_id: '',
   name: '',
   action: '',
   enabled: undefined
@@ -258,8 +270,9 @@ const dialogTitle = computed(() => form.id ? '编辑规则' : '新建规则')
 const loadNodes = async () => {
   try {
     tenantNodes.value = await useTenantApi.getTenantNodes()
-    if (!form.node_id && tenantNodes.value.length > 0) {
-      form.node_id = tenantNodes.value[0].id
+    if (!filters.node_id && tenantNodes.value.length > 0) {
+      filters.node_id = tenantNodes.value[0].id
+      loadRules()
     }
   } catch (error) {
     console.error('加载节点失败:', error)
@@ -267,21 +280,30 @@ const loadNodes = async () => {
 }
 
 const loadRules = async () => {
+  if (!filters.node_id) {
+    rules.value = []
+    return
+  }
+
   loading.value = true
   try {
-    const params = { ...filters, page: pagination.page, page_size: pagination.pageSize }
-    Object.keys(params).forEach(key => {
-      if (params[key] === '' || params[key] === undefined) delete params[key]
-    })
+    const f = { ...filters }
+    const nodeId = f.node_id
+    delete f.node_id
     
-    const response = await useAclApi.getACLRules(params)
-    rules.value = Array.isArray(response) ? response : response?.data || []
+    const response = await useAclApi.getACLRulesByNode(nodeId, f)
+    rules.value = response
     pagination.total = rules.value.length
   } catch (error) {
     ElMessage.error('加载规则失败: ' + (error.message || '未知错误'))
   } finally {
     loading.value = false
   }
+}
+
+const handleNodeChange = () => {
+  pagination.page = 1
+  loadRules()
 }
 
 let searchTimer = null

@@ -65,37 +65,46 @@ function normalizeDeliveryFields(rule, nodeState = {}) {
  * ACL 规则管理 API
  */
 export const useAclApi = {
-  getACLRules: async (filters = {}) => {
+  /**
+   * 获取指定节点的 ACL 规则
+   * @param {string} nodeId - 节点ID
+   * @param {Object} filters - 过滤参数
+   */
+  getACLRulesByNode: async (nodeId, filters = {}) => {
     try {
       const tenantId = requireCurrentTenantId()
-      const nodesResponse = await api.get(API_ENDPOINTS.TENANT.NODES(tenantId))
-      const nodes = nodesResponse.data?.data || nodesResponse.data || []
-      const nodeStateMap = new Map(nodes.map((node) => [node.id, node]))
+      if (!nodeId) return []
 
-      const ruleGroups = await Promise.all(
-        nodes.map(async (node) => {
-          const response = await api.get(API_ENDPOINTS.TENANT.NODE_ACLS(tenantId, node.id))
-          const rules = response.data?.data || response.data || []
+      const response = await api.get(API_ENDPOINTS.TENANT.NODE_ACLS(tenantId, nodeId))
+      const rules = response.data?.data || response.data || []
 
-          return rules.map((rule) => {
-            const nodeState = nodeStateMap.get(node.id) || {}
-            const normalizedRule = {
-              ...rule,
-              node_id: node.id,
-              node_name: node.hostname || node.public_key || node.id,
-              ...normalizeDeliveryFields(rule, nodeState)
-            }
-            aclRuleNodeMap.set(normalizedRule.id, { nodeId: node.id, rule: normalizedRule })
-            return normalizedRule
-          })
-        })
-      )
+      // 归一化处理，补充节点信息
+      const normalizedRules = rules.map(rule => {
+        const normalized = {
+          ...rule,
+          node_id: nodeId,
+          ...normalizeDeliveryFields(rule)
+        }
+        // 缓存映射用于后续更新删除
+        aclRuleNodeMap.set(normalized.id, { nodeId, rule: normalized })
+        return normalized
+      })
 
-      return applyFilters(ruleGroups.flat(), filters)
+      return applyFilters(normalizedRules, filters)
     } catch (error) {
-      console.error('获取 ACL 规则失败:', error)
+      console.error('获取节点 ACL 规则失败:', error)
       throw error
     }
+  },
+
+  getACLRules: async (filters = {}) => {
+    // 兼容旧调用，如果 filters 中带了 node_id，则定向查询
+    if (filters.node_id) {
+      return useAclApi.getACLRulesByNode(filters.node_id, filters)
+    }
+    // 否则不再执行全局聚合，提示需要 nodeId
+    console.warn('getACLRules now requires nodeId for performance. Please use getACLRulesByNode.')
+    return []
   },
 
   createACLRule: async (rule) => {
