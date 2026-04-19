@@ -244,23 +244,15 @@ func isTerminalCommandStatus(status string) bool {
 func (s *ControllerServer) ReportMetrics(ctx context.Context, req *agentpb.MetricsReportRequest) (*agentpb.MetricsReportResponse, error) {
 	node, err := s.resolveMetricsNode(req)
 	if err != nil {
-		return nil, err
+		fmt.Printf("[WARN] Dropping metrics from unknown/unauthorized node: %v\n", err)
+		return &agentpb.MetricsReportResponse{Success: false, Message: "Unauthorized node"}, nil
 	}
 
+	// 仅对合法授权节点更新心跳
 	node.LastSeen = time.Now().Unix()
 	if err := s.store.SaveNode(node); err != nil {
-		return nil, fmt.Errorf("failed to update node heartbeat from metrics: %w", err)
+		fmt.Printf("[ERROR] Failed to update node heartbeat: %v\n", err)
 	}
-
-	// TODO: 将指标存储到时序数据库（如 Prometheus, VictoriaMetrics, InfluxDB）
-	// 示例：
-	// - 存储到 VictoriaMetrics: POST /api/v1/import/prometheus
-	// - 使用 Prometheus remote write API
-	// - 存储到 PostgreSQL 的 metrics 表
-
-	// 暂时只记录日志
-	// log.Printf("[Metrics] Agent: %s, CPU: %.2f%%, Memory: %.2f%%, Network TX: %d bytes, RX: %d bytes",
-	// 	req.AgentId, req.CpuUsage, req.MemoryUsage, req.NetworkTxBytes, req.NetworkRxBytes)
 
 	return &agentpb.MetricsReportResponse{
 		Success: true,
@@ -329,35 +321,44 @@ func (s *ControllerServer) resolveRuntimeNode(nodeID, publicKey string) (*contro
 		return nil, fmt.Errorf("controller storage is not configured")
 	}
 
-	var resolvedNode *controllerstorage.Node
+	var nodeByNodeID, nodeByPubKey *controllerstorage.Node
+
+	// 1. 尝试按 node_id 查找
 	if nodeID != "" {
 		parsedNodeID, err := uuid.Parse(nodeID)
-		if err != nil {
-			return nil, fmt.Errorf("invalid node_id: %w", err)
-		}
-		resolvedNode, err = s.store.GetNodeByID(parsedNodeID)
-		if err != nil {
-			return nil, fmt.Errorf("node not found for node_id %s: %w", nodeID, err)
+		if err == nil {
+			nodeByNodeID, _ = s.store.GetNodeByID(parsedNodeID)
 		}
 	}
 
-	if publicKey == "" {
-		if resolvedNode == nil {
-			return nil, fmt.Errorf("node_id or public_key is required")
+	// 2. 尝试按 public_key 查找
+	if publicKey != "" {
+		nodeByPubKey, _ = s.store.GetNode(publicKey)
+	}
+
+	// 3. 身份冲突校验
+	if nodeByNodeID != nil && nodeByPubKey != nil {
+		if nodeByNodeID.ID != nodeByPubKey.ID {
+			return nil, fmt.Errorf("SECURITY ALERT: identity mismatch between node_id and public_key")
 		}
-		return resolvedNode, nil
 	}
 
-	legacyNode, err := s.store.GetNode(publicKey)
-	if err != nil {
-		return nil, fmt.Errorf("node not found for public_key: %w", err)
+	// 4. 确定最终节点对象
+	resolvedNode := nodeByNodeID
+	if resolvedNode == nil {
+		resolvedNode = nodeByPubKey
 	}
 
-	if resolvedNode != nil && resolvedNode.ID != legacyNode.ID {
-		return nil, fmt.Errorf("node identity mismatch between node_id and public_key")
+	if resolvedNode == nil {
+		return nil, fmt.Errorf("node identity not found (node_id: %s, pubkey: %s)", nodeID, publicKey)
 	}
 
-	return legacyNode, nil
+	// 5. ❌ 状态拦截：禁止已停用节点接入
+	if resolvedNode.Status == "deleted" || resolvedNode.Status == "suspended" || resolvedNode.Status == "banned" {
+		return nil, fmt.Errorf("node access denied: current status is '%s'", resolvedNode.Status)
+	}
+
+	return resolvedNode, nil
 }
 
 func (s *ControllerServer) resolveLegacyAgentIdentity(agentID string) (*controllerstorage.Node, error) {
