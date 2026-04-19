@@ -159,26 +159,24 @@ impl UnifiedAgent {
         })
 
     }
-fn set_sync_observation(&mut self, status: &str, message: String) {
-    self.config.last_sync_status = Some(status.to_string());
-    self.config.last_sync_message = Some(message);
-}
-
-fn get_active_interfaces(&self) -> Vec<String> {
-    if self.config.multi_tunnel {
-        let base = self.config.interface_name.trim_end_matches(|c: char| c.is_numeric());
-        vec![
-            self.config.interface_name.clone(),
-            format!("{}1", base),
-            format!("{}2", base),
-            format!("{}3", base),
-        ]
-    } else {
-        vec![self.config.interface_name.clone()]
-    }
-}
-
+    fn set_sync_observation(&mut self, status: &str, message: String) {
+        self.config.last_sync_status = Some(status.to_string());
+        self.config.last_sync_message = Some(message);
         self.config.last_sync_at = Some(current_unix_timestamp());
+    }
+
+    fn get_active_interfaces(&self) -> Vec<String> {
+        if self.config.multi_tunnel {
+            let base = self.config.interface_name.trim_end_matches(|c: char| c.is_numeric());
+            vec![
+                self.config.interface_name.clone(),
+                format!("{}1", base),
+                format!("{}2", base),
+                format!("{}3", base),
+            ]
+        } else {
+            vec![self.config.interface_name.clone()]
+        }
     }
 
     fn persist_runtime_state(&self) -> Result<()> {
