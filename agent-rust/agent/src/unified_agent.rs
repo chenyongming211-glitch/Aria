@@ -83,7 +83,7 @@ impl UnifiedAgent {
     pub async fn new(
         config: AgentConfig,
         config_path: String,
-        interface: &str,
+        _interface: &str,
         log_handle: Arc<StdMutex<Option<reload::Handle<EnvFilter, Registry>>>>,
     ) -> Result<Self> {
         tracing::info!("Creating UnifiedAgent...");
@@ -185,6 +185,7 @@ impl UnifiedAgent {
         Ok(())
     }
     
+    #[allow(dead_code)]
     fn load_ebpf_programs(interface: &str) -> Result<(
         Arc<Mutex<AclManager>>,
         Arc<Mutex<QoSManager>>,
@@ -394,6 +395,7 @@ impl UnifiedAgent {
         self.run_main_loop(remote_command_rx).await
     }
     
+    #[allow(dead_code)]
     async fn ensure_interface(&self) -> Result<()> {
         let mut wg = self.wg_manager.lock().await;
         
@@ -502,7 +504,7 @@ impl UnifiedAgent {
                                 tracing::info!("Applied new sync interval after remote command: {:?}", self.config.sync_interval);
                             }
 
-                            if let Err(e) = envelope.reply_tx.send(response) {
+                            if let Err(_) = envelope.reply_tx.send(response) {
 
                                 tracing::warn!("Remote command response receiver dropped");
                             }
@@ -1676,7 +1678,7 @@ impl UnifiedAgent {
     
     async fn sync_peers(&mut self, new_peers: &[GrpcPeerInfo]) -> Result<()> {
         let new_peers = new_peers.to_vec();
-        let multi_tunnel = self.config.multi_tunnel;
+        let _multi_tunnel = self.config.multi_tunnel;
         let interfaces = self.get_active_interfaces();
         let wg_managers = self.wg_managers.clone();
         let base_iface = self.config.interface_name.clone();
