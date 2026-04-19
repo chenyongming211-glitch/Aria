@@ -26,7 +26,7 @@ func (r *Router) handleTenantNodeSecurity(w http.ResponseWriter, req *http.Reque
 	case "acls":
 		r.handleTenantNodeACLs(w, req, tenantID, node, parts)
 	case "blacklist":
-		apibase.WriteError(w, http.StatusNotImplemented, apibase.CodeNotImplemented, "Blacklist API not implemented yet", nil)
+		r.handleTenantNodeBlacklist(w, req, tenantID, node, parts)
 	default:
 		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Unknown security sub-endpoint", nil)
 	}
@@ -138,6 +138,104 @@ func (r *Router) deleteTenantNodeACL(w http.ResponseWriter, tenantID, nodeID uui
 	}
 
 	apibase.WriteSuccess(w, map[string]string{"id": ruleIDStr, "status": "deleted"}, "ACL rule deleted successfully")
+}
+
+// Blacklist Handlers
+
+func (r *Router) handleTenantNodeBlacklist(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, parts []string) {
+	if len(parts) < 9 {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidPath, "Blacklist scope is required (src, dst, ports)", nil)
+		return
+	}
+	scope := parts[8]
+	if err := controllerstorage.ValidateBlacklistScope(scope); err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
+		return
+	}
+
+	ruleIDStr := ""
+	if len(parts) > 9 {
+		ruleIDStr = parts[9]
+	}
+
+	switch req.Method {
+	case http.MethodGet:
+		r.listTenantNodeBlacklistRules(w, tenantID, node.ID, scope)
+	case http.MethodPost:
+		r.createTenantNodeBlacklistRule(w, req, tenantID, node.ID, scope)
+	case http.MethodDelete:
+		if ruleIDStr == "" {
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Rule ID is required for deletion", nil)
+			return
+		}
+		r.deleteTenantNodeBlacklistRule(w, tenantID, node.ID, scope, ruleIDStr)
+	default:
+		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+	}
+}
+
+func (r *Router) listTenantNodeBlacklistRules(w http.ResponseWriter, tenantID, nodeID uuid.UUID, scope string) {
+	rules, err := r.store.ListTenantNodeBlacklistRules(tenantID, nodeID, scope)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to list blacklist rules: "+err.Error(), nil)
+		return
+	}
+	apibase.WriteSuccess(w, rules, fmt.Sprintf("%d blacklist rules retrieved", len(rules)))
+}
+
+func (r *Router) createTenantNodeBlacklistRule(w http.ResponseWriter, req *http.Request, tenantID, nodeID uuid.UUID, scope string) {
+	var body struct {
+		CIDR        string `json:"cidr"`
+		Port        int    `json:"port"`
+		Description string `json:"description"`
+	}
+
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
+		return
+	}
+
+	if scope != "ports" && body.CIDR == "" {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "CIDR is required for src/dst scope", nil)
+		return
+	}
+	if scope == "ports" && body.Port == 0 {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Port is required for ports scope", nil)
+		return
+	}
+
+	rule := &controllerstorage.BlacklistRuleRecord{
+		TenantID:    tenantID,
+		NodeID:      nodeID,
+		Scope:       scope,
+		CIDR:        body.CIDR,
+		Port:        body.Port,
+		Enabled:     true,
+		Description: body.Description,
+	}
+
+	created, err := r.store.CreateTenantNodeBlacklistRule(rule)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to create blacklist rule: "+err.Error(), nil)
+		return
+	}
+
+	apibase.WriteSuccess(w, created, "Blacklist rule created successfully")
+}
+
+func (r *Router) deleteTenantNodeBlacklistRule(w http.ResponseWriter, tenantID, nodeID uuid.UUID, scope string, ruleIDStr string) {
+	ruleID, err := uuid.Parse(ruleIDStr)
+	if err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid rule ID format", nil)
+		return
+	}
+
+	if err := r.store.DeleteTenantNodeBlacklistRuleByID(tenantID, nodeID, scope, ruleID); err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to delete blacklist rule: "+err.Error(), nil)
+		return
+	}
+
+	apibase.WriteSuccess(w, map[string]string{"id": ruleIDStr, "status": "deleted"}, "Blacklist rule deleted successfully")
 }
 
 // QoS Handlers

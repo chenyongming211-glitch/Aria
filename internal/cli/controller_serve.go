@@ -335,7 +335,6 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	mux.HandleFunc("/register", controller.HandleRegister)
 	mux.HandleFunc("/unregister", controller.HandleUnregister)
 	mux.HandleFunc("/network/manage", controller.HandleNetworkManage)
-	mux.HandleFunc("/version", handleVersion)
 	mux.HandleFunc("/api/version", handleVersion)
 
 	// Initialize API v2 skeleton
@@ -358,17 +357,19 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 		// DingTalk Integration
 		if cfg.DingTalk.Enabled {
 			controller.dingtalkHandler = im.NewDingTalkHandler(aiService, cfg.DingTalk.Webhook, cfg.DingTalk.Secret)
-			// 注册钉钉 Webhook
+			// 注册钉钉 Webhook（v2 新路径 + v1 兼容）
+			mux.HandleFunc("/api/v2/integrations/dingtalk/webhook", controller.dingtalkHandler.HandleWebhook)
 			mux.HandleFunc("/v1/im/dingtalk", controller.dingtalkHandler.HandleWebhook)
-			logger.Info("DingTalk integration enabled: /v1/im/dingtalk")
+			logger.Info("DingTalk integration enabled: /api/v2/integrations/dingtalk/webhook (legacy: /v1/im/dingtalk)")
 		}
 
 		// Feishu Integration
 		if cfg.Feishu.Enabled {
 			controller.feishuHandler = im.NewFeishuHandler(aiService, cfg.Feishu.AppID, cfg.Feishu.AppSecret, cfg.Feishu.EncryptKey, cfg.Feishu.VerifyToken)
-			// 注册飞书 Webhook
+			// 注册飞书 Webhook（v2 新路径 + v1 兼容）
+			mux.HandleFunc("/api/v2/integrations/feishu/webhook", controller.feishuHandler.HandleWebhook)
 			mux.HandleFunc("/v1/im/feishu", controller.feishuHandler.HandleWebhook)
-			logger.Info("Feishu integration enabled: /v1/im/feishu")
+			logger.Info("Feishu integration enabled: /api/v2/integrations/feishu/webhook (legacy: /v1/im/feishu)")
 		}
 	}
 

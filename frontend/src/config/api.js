@@ -159,15 +159,15 @@ export const API_ENDPOINTS = {
     CONFIRM: (tenantId) => buildTenantPath(tenantId, '/ai/confirm')
   },
 
-  // 即时通讯 Webhook (Legacy /v1 for external bot compatibility)
+  // 即时通讯 Webhook
   IM: {
-    DINGTALK: '/v1/im/dingtalk',
-    FEISHU: '/v1/im/feishu'
+    DINGTALK: '/v2/integrations/dingtalk/webhook',
+    FEISHU: '/v2/integrations/feishu/webhook'
   },
 
   // 健康检查
   HEALTH: '/health',
 
   // 版本
-  VERSION: '/version'
+  VERSION: '/api/version'
 };

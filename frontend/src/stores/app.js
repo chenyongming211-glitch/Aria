@@ -1,6 +1,8 @@
 // src/stores/app.js
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import api from '@/composables/useApi'
+import { API_ENDPOINTS } from '@/config/api'
 
 export default defineStore('app', () => {
   const lang = ref(localStorage.getItem('aria-lang') || 'zh')
@@ -18,8 +20,8 @@ export default defineStore('app', () => {
 
   const fetchVersion = async () => {
     try {
-      const response = await fetch('/api/version')
-      const data = await response.json()
+      const response = await api.get(API_ENDPOINTS.VERSION)
+      const data = response.data
       if (data.version) {
         version.value = data.version
       }
