@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aria SD-WAN - Dashboard</title>
+  <link rel="stylesheet" href="mockup.css">
+  <style>
+    /* Dashboard-specific overrides */
+    .nav-group { margin-bottom: 4px; }
+    .nav-group-toggle {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      color: #94a3b8;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 14px;
+      margin-bottom: 2px;
+      width: 100%;
+      background: none;
+      border: none;
+      text-align: left;
+    }
+    .nav-group-toggle:hover { background: rgba(255,255,255,0.05); color: #e2e8f0; }
+    .nav-group-toggle .arrow {
+      margin-left: auto;
+      font-size: 10px;
+      transition: transform 0.2s;
+    }
+    .nav-group.open .nav-group-toggle .arrow { transform: rotate(90deg); }
+    .nav-sub {
+      display: none;
+      padding-left: 24px;
+    }
+    .nav-group.open .nav-sub { display: block; }
+    .nav-sub .nav-item {
+      font-size: 13px;
+      padding: 7px 16px;
+    }
+
+    /* Stat card enhancements */
+    .stat-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    /* Time range buttons */
+    .time-range {
+      display: flex;
+      gap: 4px;
+    }
+    .time-btn {
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid #e5e7eb;
+      background: white;
+      color: #6b7280;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .time-btn.active {
+      background: #3b82f6;
+      color: white;
+      border-color: #3b82f6;
+    }
+    .time-btn:hover:not(.active) {
+      border-color: #3b82f6;
+      color: #3b82f6;
+    }
+
+    .export-btn {
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      border: 1px solid #e5e7eb;
+      background: white;
+      color: #6b7280;
+      cursor: pointer;
+    }
+    .export-btn:hover {
+      border-color: #3b82f6;
+      color: #3b82f6;
+    }
+
+    /* Chart */
+    .chart-area {
+      height: 260px;
+      position: relative;
+      margin-top: 16px;
+    }
+    .chart-area svg {
+      width: 100%;
+      height: 100%;
+    }
+    .chart-legend {
+      display: flex;
+      gap: 24px;
+      margin-top: 16px;
+      justify-content: center;
+    }
+    .chart-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #6b7280;
+    }
+    .chart-legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    /* Region progress bars */
+    .region-item {
+      margin-bottom: 16px;
+    }
+    .region-item:last-child { margin-bottom: 0; }
+    .region-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .region-name {
+      font-size: 14px;
+      font-weight: 500;
+      color: #374151;
+    }
+    .region-count {
+      font-size: 13px;
+      color: #6b7280;
+    }
+    .progress-bar.region {
+      height: 10px;
+      background: #f3f4f6;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    .progress-fill.us-east { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
+    .progress-fill.us-west { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
+    .progress-fill.eu-west { background: linear-gradient(90deg, #06b6d4, #22d3ee); }
+    .progress-fill.ap-south { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+
+    /* System health mini cards */
+    .health-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-top: 20px;
+    }
+    .health-card {
+      background: white;
+      border-radius: 10px;
+      padding: 16px 20px;
+      border: 1px solid #e5e7eb;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .health-card .health-label {
+      font-size: 12px;
+      color: #6b7280;
+      margin-bottom: 6px;
+    }
+    .health-card .health-value {
+      font-size: 22px;
+      font-weight: 700;
+    }
+    .health-card .health-value.good { color: #22c55e; }
+    .health-card .health-value.warn { color: #eab308; }
+    .health-card .health-value.danger { color: #ef4444; }
+    .health-card .health-value.info { color: #3b82f6; }
+
+    /* Timeline enhancements for dashboard */
+    .timeline-item.success::before {
+      border-color: #22c55e;
+      background: #dcfce7;
+    }
+    .timeline-item.info::before {
+      border-color: #3b82f6;
+      background: #dbeafe;
+    }
+    .timeline-item.warning::before {
+      border-color: #eab308;
+      background: #fef3c7;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">A</div>
+      <h1>Aria</h1>
+      <span class="pro-badge">SD-WAN</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div class="nav-item active">
+        <span class="icon">&#9638;</span> Dashboard
+      </div>
+
+      <div class="nav-item">
+        <span class="icon">&#9601;</span> Nodes
+      </div>
+
+      <div class="nav-group open">
+        <div class="nav-group-toggle">
+          <span class="icon">&#9740;</span> Connectivity
+          <span class="arrow">&#9654;</span>
+        </div>
+        <div class="nav-sub">
+          <div class="nav-item">Routing</div>
+          <div class="nav-item">VPN Topology</div>
+        </div>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-group-toggle">
+          <span class="icon">&#9878;</span> Policy Center
+          <span class="arrow">&#9654;</span>
+        </div>
+        <div class="nav-sub">
+          <div class="nav-item">Policies</div>
+          <div class="nav-item">ACL</div>
+          <div class="nav-item">Bandwidth</div>
+        </div>
+      </div>
+
+      <div class="nav-item">
+        <span class="icon">&#9672;</span> Monitoring
+      </div>
+
+      <div class="nav-item">
+        <span class="icon">&#10024;</span> AI Copilot
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-group-toggle">
+          <span class="icon">&#9881;</span> Platform
+          <span class="arrow">&#9654;</span>
+        </div>
+        <div class="nav-sub">
+          <div class="nav-item">Tokens</div>
+          <div class="nav-item">Tenants</div>
+          <div class="nav-item">Roles</div>
+          <div class="nav-item">Settings</div>
+        </div>
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="status-indicator">
+        <div class="status-dot"></div>
+        <span>System Online</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <div class="main">
+    <!-- Top header -->
+    <header class="top-header">
+      <span class="page-title">Dashboard</span>
+      <div class="header-actions">
+        <span class="header-btn" title="Help">? Help</span>
+        <span class="lang-toggle">EN / 中文</span>
+        <span class="version-badge">v0.1.0</span>
+        <select class="tenant-selector">
+          <option>Default Tenant</option>
+          <option>Acme Corp</option>
+          <option>Branch Office</option>
+        </select>
+        <div class="user-avatar">A</div>
+      </div>
+    </header>
+
+    <!-- Content area -->
+    <div class="content">
+
+      <!-- Stat cards row -->
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-icon blue">&#128187;</div>
+          <div class="label">Total Nodes</div>
+          <div class="value">24</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon green">&#10003;</div>
+          <div class="label">Online</div>
+          <div class="value">22</div>
+          <div class="change up">+2 this week</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon yellow">&#128664;</div>
+          <div class="label">Advertised Routes</div>
+          <div class="value">48</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon purple">&#9889;</div>
+          <div class="label">Bandwidth</div>
+          <div class="value">1.2 Gbps</div>
+        </div>
+      </div>
+
+      <!-- Network Traffic Chart -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Network Traffic</span>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <div class="time-range">
+              <button class="time-btn active">1H</button>
+              <button class="time-btn">24H</button>
+              <button class="time-btn">7D</button>
+              <button class="time-btn">30D</button>
+            </div>
+            <button class="export-btn">Export</button>
+          </div>
+        </div>
+        <div class="chart-area">
+          <svg viewBox="0 0 800 240" preserveAspectRatio="none">
+            <!-- Grid lines -->
+            <line x1="0" y1="48" x2="800" y2="48" stroke="#f1f5f9" stroke-width="1"/>
+            <line x1="0" y1="96" x2="800" y2="96" stroke="#f1f5f9" stroke-width="1"/>
+            <line x1="0" y1="144" x2="800" y2="144" stroke="#f1f5f9" stroke-width="1"/>
+            <line x1="0" y1="192" x2="800" y2="192" stroke="#f1f5f9" stroke-width="1"/>
+
+            <!-- Y-axis labels -->
+            <text x="4" y="46" font-size="10" fill="#94a3b8">800</text>
+            <text x="4" y="94" font-size="10" fill="#94a3b8">600</text>
+            <text x="4" y="142" font-size="10" fill="#94a3b8">400</text>
+            <text x="4" y="190" font-size="10" fill="#94a3b8">200</text>
+            <text x="4" y="238" font-size="10" fill="#94a3b8">0</text>
+
+            <!-- X-axis labels -->
+            <text x="100" y="238" font-size="10" fill="#94a3b8" text-anchor="middle">10:00</text>
+            <text x="260" y="238" font-size="10" fill="#94a3b8" text-anchor="middle">10:15</text>
+            <text x="420" y="238" font-size="10" fill="#94a3b8" text-anchor="middle">10:30</text>
+            <text x="580" y="238" font-size="10" fill="#94a3b8" text-anchor="middle">10:45</text>
+            <text x="740" y="238" font-size="10" fill="#94a3b8" text-anchor="middle">11:00</text>
+
+            <!-- Upload line (blue) - area fill -->
+            <defs>
+              <linearGradient id="blueGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.15"/>
+                <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+              </linearGradient>
+              <linearGradient id="purpleGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.15"/>
+                <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+
+            <!-- Upload area -->
+            <path d="M40,140 L120,110 L200,130 L280,85 L360,95 L440,70 L520,90 L600,60 L680,80 L760,55 L760,224 L40,224 Z"
+                  fill="url(#blueGrad)"/>
+            <!-- Upload line -->
+            <polyline points="40,140 120,110 200,130 280,85 360,95 440,70 520,90 600,60 680,80 760,55"
+                      fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+            <!-- Download area -->
+            <path d="M40,170 L120,150 L200,160 L280,120 L360,135 L440,105 L520,125 L600,90 L680,110 L760,75 L760,224 L40,224 Z"
+                  fill="url(#purpleGrad)"/>
+            <!-- Download line -->
+            <polyline points="40,170 120,150 200,160 280,120 360,135 440,105 520,125 600,90 680,110 760,75"
+                      fill="none" stroke="#8b5cf6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+            <!-- Data point dots - upload -->
+            <circle cx="40" cy="140" r="3" fill="#3b82f6"/>
+            <circle cx="200" cy="130" r="3" fill="#3b82f6"/>
+            <circle cx="360" cy="95" r="3" fill="#3b82f6"/>
+            <circle cx="520" cy="90" r="3" fill="#3b82f6"/>
+            <circle cx="680" cy="80" r="3" fill="#3b82f6"/>
+            <circle cx="760" cy="55" r="3" fill="#3b82f6"/>
+
+            <!-- Data point dots - download -->
+            <circle cx="40" cy="170" r="3" fill="#8b5cf6"/>
+            <circle cx="200" cy="160" r="3" fill="#8b5cf6"/>
+            <circle cx="360" cy="135" r="3" fill="#8b5cf6"/>
+            <circle cx="520" cy="125" r="3" fill="#8b5cf6"/>
+            <circle cx="680" cy="110" r="3" fill="#8b5cf6"/>
+            <circle cx="760" cy="75" r="3" fill="#8b5cf6"/>
+          </svg>
+        </div>
+        <div class="chart-legend">
+          <div class="chart-legend-item">
+            <div class="chart-legend-dot" style="background:#3b82f6;"></div>
+            Upload
+          </div>
+          <div class="chart-legend-item">
+            <div class="chart-legend-dot" style="background:#8b5cf6;"></div>
+            Download
+          </div>
+        </div>
+      </div>
+
+      <!-- Two column grid: Activity + Region -->
+      <div class="grid-2">
+        <!-- Recent Activity -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Recent Activity</span>
+            <button class="btn btn-text">View All</button>
+          </div>
+          <div class="timeline">
+            <div class="timeline-item success">
+              <div class="time">2 minutes ago</div>
+              <div class="desc">Node <strong>edge-us-east-03</strong> registered and came online</div>
+            </div>
+            <div class="timeline-item info">
+              <div class="time">15 minutes ago</div>
+              <div class="desc">ACL rule <strong>"deny-telnet"</strong> updated on 6 nodes</div>
+            </div>
+            <div class="timeline-item warning">
+              <div class="time">1 hour ago</div>
+              <div class="desc">New route <strong>10.42.0.0/16</strong> added to routing table</div>
+            </div>
+            <div class="timeline-item info">
+              <div class="time">2 hours ago</div>
+              <div class="desc">Bandwidth policy <strong>"voip-priority"</strong> applied to 12 nodes</div>
+            </div>
+            <div class="timeline-item success">
+              <div class="time">3 hours ago</div>
+              <div class="desc">Node <strong>edge-eu-west-02</strong> firmware updated to v2.4.1</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Region Distribution -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Region Distribution</span>
+            <span style="font-size:13px; color:#6b7280;">24 nodes total</span>
+          </div>
+          <div class="region-item">
+            <div class="region-header">
+              <span class="region-name">us-east</span>
+              <span class="region-count">8 nodes (33%)</span>
+            </div>
+            <div class="progress-bar region">
+              <div class="progress-fill us-east" style="width:33%;"></div>
+            </div>
+          </div>
+          <div class="region-item">
+            <div class="region-header">
+              <span class="region-name">us-west</span>
+              <span class="region-count">6 nodes (25%)</span>
+            </div>
+            <div class="progress-bar region">
+              <div class="progress-fill us-west" style="width:25%;"></div>
+            </div>
+          </div>
+          <div class="region-item">
+            <div class="region-header">
+              <span class="region-name">eu-west</span>
+              <span class="region-count">5 nodes (21%)</span>
+            </div>
+            <div class="progress-bar region">
+              <div class="progress-fill eu-west" style="width:21%;"></div>
+            </div>
+          </div>
+          <div class="region-item">
+            <div class="region-header">
+              <span class="region-name">ap-south</span>
+              <span class="region-count">5 nodes (21%)</span>
+            </div>
+            <div class="progress-bar region">
+              <div class="progress-fill ap-south" style="width:21%;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- System Health -->
+      <div class="health-row">
+        <div class="health-card">
+          <div class="health-label">Node Online Rate</div>
+          <div class="health-value good">91.7%</div>
+        </div>
+        <div class="health-card">
+          <div class="health-label">Sync Success Rate</div>
+          <div class="health-value info">98.2%</div>
+        </div>
+        <div class="health-card">
+          <div class="health-label">Active Alerts</div>
+          <div class="health-value warn">3</div>
+        </div>
+        <div class="health-card">
+          <div class="health-label">Failed Commands</div>
+          <div class="health-value danger">1</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</body>
+</html>

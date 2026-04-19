@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aria SD-WAN - Monitoring Center</title>
+  <link rel="stylesheet" href="mockup.css">
+  <style>
+    .stats-scroll-row {
+      display: flex;
+      gap: 16px;
+      overflow-x: auto;
+      padding-bottom: 8px;
+      margin-bottom: 24px;
+    }
+    .stats-scroll-row .stat-card {
+      min-width: 170px;
+      flex-shrink: 0;
+    }
+    .event-feed { display: flex; flex-direction: column; gap: 12px; }
+    .event-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      background: white;
+      border-radius: 10px;
+      padding: 16px 20px;
+      border: 1px solid #e5e7eb;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    .event-severity {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+    .event-severity.critical { background: #fef2f2; color: #dc2626; }
+    .event-severity.warning   { background: #fefce8; color: #ca8a04; }
+    .event-severity.info      { background: #eff6ff; color: #2563eb; }
+    .event-body { flex: 1; }
+    .event-desc { font-size: 14px; color: #1f2937; line-height: 1.5; }
+    .event-desc strong { color: #111827; }
+    .event-meta { display: flex; align-items: center; gap: 12px; margin-top: 6px; font-size: 12px; color: #9ca3af; }
+    .event-actions { flex-shrink: 0; display: flex; align-items: center; }
+    .severity-label {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .severity-label.critical { background: #fee2e2; color: #991b1b; }
+    .severity-label.warning  { background: #fef3c7; color: #92400e; }
+    .severity-label.info     { background: #dbeafe; color: #1e40af; }
+  </style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<nav class="sidebar">
+  <div class="sidebar-header">
+    <div class="logo">A</div>
+    <h1>Aria SD-WAN</h1>
+    <span class="pro-badge">v0.1.0</span>
+  </div>
+  <div class="sidebar-nav">
+    <div class="nav-group-title">Overview</div>
+    <a class="nav-item" href="01-dashboard.html">
+      <span class="icon">&#9632;</span> Dashboard
+    </a>
+    <div class="nav-group-title">Management</div>
+    <a class="nav-item" href="03-nodes.html">
+      <span class="icon">&#9656;</span> Nodes
+    </a>
+    <a class="nav-item" href="04-acl.html">
+      <span class="icon">&#9656;</span> ACL Rules
+    </a>
+    <a class="nav-item" href="05-qos.html">
+      <span class="icon">&#9656;</span> QoS Policies
+    </a>
+    <a class="nav-item" href="06-routes.html">
+      <span class="icon">&#9656;</span> Routes
+    </a>
+    <div class="nav-group-title">Tools</div>
+    <a class="nav-item" href="07-topology.html">
+      <span class="icon">&#8226;</span> Topology
+    </a>
+    <a class="nav-item active" href="08-monitoring.html">
+      <span class="icon">&#8226;</span> Monitoring Center
+    </a>
+    <a class="nav-item" href="09-ai-assistant.html">
+      <span class="icon">&#8226;</span> AI Assistant
+    </a>
+    <div class="nav-group-title">System</div>
+    <a class="nav-item" href="10-settings.html">
+      <span class="icon">&#9881;</span> Settings
+    </a>
+    <a class="nav-item" href="11-users.html">
+      <span class="icon">&#9881;</span> Users &amp; Roles
+    </a>
+  </div>
+  <div class="sidebar-footer">
+    <div class="status-indicator">
+      <div class="status-dot"></div>
+      <span>System Healthy</span>
+    </div>
+  </div>
+</nav>
+
+<!-- Main Content -->
+<div class="main">
+
+  <!-- Top Header -->
+  <header class="top-header">
+    <div class="page-title">Monitoring Center</div>
+    <div class="header-actions">
+      <span class="version-badge">v0.1.0</span>
+      <select class="tenant-selector">
+        <option>Default Tenant</option>
+      </select>
+      <div class="user-avatar">AD</div>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <div class="content">
+
+    <!-- Stat Cards (scrollable row) -->
+    <div class="stats-scroll-row">
+      <div class="stat-card">
+        <div class="stat-icon blue">&#9656;</div>
+        <div class="label">Node Status</div>
+        <div class="value">24/22</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon green">&#10003;</div>
+        <div class="label">Sync Rate</div>
+        <div class="value">98.2%</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon purple">&#8644;</div>
+        <div class="label">Peers</div>
+        <div class="value">48</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon blue">&#9776;</div>
+        <div class="label">ACL Rules</div>
+        <div class="value">156</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon yellow">&#9889;</div>
+        <div class="label">QoS Rules</div>
+        <div class="value">42</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon red">&#10005;</div>
+        <div class="label">Failed Cmds</div>
+        <div class="value">1</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon red">&#9888;</div>
+        <div class="label">Active Alerts</div>
+        <div class="value">3</div>
+      </div>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+      <select>
+        <option value="">All Event Types</option>
+        <option value="node">Node</option>
+        <option value="acl">ACL</option>
+        <option value="qos">QoS</option>
+        <option value="route">Route</option>
+        <option value="system">System</option>
+      </select>
+      <select>
+        <option value="">All Severities</option>
+        <option value="info">Info</option>
+        <option value="warning">Warning</option>
+        <option value="critical">Critical</option>
+      </select>
+      <button class="btn btn-outline">&#8635; Refresh</button>
+    </div>
+
+    <!-- Event Feed -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Event Feed</div>
+        <span style="font-size:13px; color:#6b7280;">Showing recent events</span>
+      </div>
+      <div class="event-feed">
+
+        <!-- Critical: node offline -->
+        <div class="event-card" style="border-left: 4px solid #dc2626;">
+          <div class="event-severity critical">&#9888;</div>
+          <div class="event-body">
+            <div class="event-desc">
+              <span class="severity-label critical">Critical</span>&nbsp;
+              Node <strong>edge-us-02</strong> went offline
+            </div>
+            <div class="event-meta">
+              <span>Node &middot; us-west</span>
+              <span>&middot;</span>
+              <span>2 hours ago</span>
+            </div>
+          </div>
+          <div class="event-actions">
+            <button class="btn btn-sm btn-danger">Resolve</button>
+          </div>
+        </div>
+
+        <!-- Warning: ACL delivery pending -->
+        <div class="event-card" style="border-left: 4px solid #ca8a04;">
+          <div class="event-severity warning">&#9888;</div>
+          <div class="event-body">
+            <div class="event-desc">
+              <span class="severity-label warning">Warning</span>&nbsp;
+              ACL rule <strong>#45</strong> delivery pending on <strong>relay-ap-01</strong>
+            </div>
+            <div class="event-meta">
+              <span>ACL &middot; ap-south</span>
+              <span>&middot;</span>
+              <span>15 min ago</span>
+            </div>
+          </div>
+          <div class="event-actions">
+            <button class="btn btn-sm btn-outline" style="border-color:#ca8a04; color:#ca8a04;">Resolve</button>
+          </div>
+        </div>
+
+        <!-- Info: node synced -->
+        <div class="event-card" style="border-left: 4px solid #2563eb;">
+          <div class="event-severity info">&#8505;</div>
+          <div class="event-body">
+            <div class="event-desc">
+              <span class="severity-label info">Info</span>&nbsp;
+              Node <strong>gateway-us-01</strong> synced successfully
+            </div>
+            <div class="event-meta">
+              <span>Node &middot; us-east</span>
+              <span>&middot;</span>
+              <span>5 min ago</span>
+            </div>
+          </div>
+          <div class="event-actions"></div>
+        </div>
+
+        <!-- Info: QoS rule created -->
+        <div class="event-card" style="border-left: 4px solid #2563eb;">
+          <div class="event-severity info">&#8505;</div>
+          <div class="event-body">
+            <div class="event-desc">
+              <span class="severity-label info">Info</span>&nbsp;
+              QoS rule created on <strong>node-eu-01</strong>
+            </div>
+            <div class="event-meta">
+              <span>QoS &middot; eu-west</span>
+              <span>&middot;</span>
+              <span>20 min ago</span>
+            </div>
+          </div>
+          <div class="event-actions"></div>
+        </div>
+
+        <!-- Warning: route conflict -->
+        <div class="event-card" style="border-left: 4px solid #ca8a04;">
+          <div class="event-severity warning">&#9888;</div>
+          <div class="event-body">
+            <div class="event-desc">
+              <span class="severity-label warning">Warning</span>&nbsp;
+              Route conflict detected: <strong>10.0.1.0/24</strong>
+            </div>
+            <div class="event-meta">
+              <span>Route</span>
+              <span>&middot;</span>
+              <span>30 min ago</span>
+            </div>
+          </div>
+          <div class="event-actions">
+            <button class="btn btn-sm btn-outline" style="border-color:#ca8a04; color:#ca8a04;">Resolve</button>
+          </div>
+        </div>
+
+        <!-- Info: new node registered -->
+        <div class="event-card" style="border-left: 4px solid #2563eb;">
+          <div class="event-severity info">&#8505;</div>
+          <div class="event-body">
+            <div class="event-desc">
+              <span class="severity-label info">Info</span>&nbsp;
+              New node registered: <strong>hub-eu-02</strong>
+            </div>
+            <div class="event-meta">
+              <span>Node &middot; eu-west</span>
+              <span>&middot;</span>
+              <span>1 hour ago</span>
+            </div>
+          </div>
+          <div class="event-actions"></div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

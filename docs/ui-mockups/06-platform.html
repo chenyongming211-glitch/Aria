@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aria SD-WAN - Platform (Tokens, Tenants, Roles)</title>
+  <link rel="stylesheet" href="mockup.css">
+  <style>
+    /* Page-specific styles */
+    .section-title { font-size: 20px; font-weight: 600; color: #1f2937; margin-bottom: 20px; }
+    .token-masked { font-family: 'JetBrains Mono', 'SF Mono', monospace; font-size: 13px; color: #6b7280; }
+    .uuid { font-family: 'JetBrains Mono', 'SF Mono', monospace; font-size: 12px; color: #9ca3af; }
+    .perm-tags { display: flex; flex-wrap: wrap; gap: 4px; max-width: 400px; }
+    .perm-tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-family: 'JetBrains Mono', 'SF Mono', monospace; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+    .actions-cell { display: flex; gap: 6px; }
+    .toggle { width: 44px; height: 24px; border-radius: 12px; background: #d1d5db; position: relative; cursor: pointer; display: inline-block; }
+    .toggle.on { background: #3b82f6; }
+    .toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: white; transition: 0.2s; }
+    .toggle.on::after { left: 22px; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .inline-icon { margin-right: 6px; font-size: 14px; }
+    .user-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f3f4f6; }
+    .user-avatar-sm { width: 28px; height: 28px; border-radius: 50%; background: #e0e7ff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #4338ca; }
+    .usage-cell { display: flex; align-items: center; gap: 8px; }
+    .usage-bar { width: 60px; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; }
+    .usage-bar-fill { height: 100%; border-radius: 3px; }
+    .usage-bar-fill.green { background: #22c55e; }
+    .usage-bar-fill.yellow { background: #eab308; }
+    .usage-bar-fill.red { background: #ef4444; }
+    .no-actions { color: #d1d5db; font-size: 12px; font-style: italic; }
+  </style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="logo">A</div>
+    <h1>Aria</h1>
+    <span class="pro-badge">SD-WAN</span>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-group-title">Overview</div>
+    <a class="nav-item" href="#"><span class="icon">&#9776;</span> Dashboard</a>
+    <a class="nav-item" href="#"><span class="icon">&#9881;</span> Topology</a>
+    <div class="nav-group-title">Network</div>
+    <a class="nav-item" href="#"><span class="icon">&#128187;</span> Nodes</a>
+    <a class="nav-item" href="#"><span class="icon">&#128279;</span> Routes</a>
+    <a class="nav-item" href="#"><span class="icon">&#128737;</span> ACLs</a>
+    <a class="nav-item" href="#"><span class="icon">&#9889;</span> QoS</a>
+    <div class="nav-group-title">Observability</div>
+    <a class="nav-item" href="#"><span class="icon">&#128200;</span> Monitoring</a>
+    <a class="nav-item" href="#"><span class="icon">&#128221;</span> Audit Log</a>
+    <div class="nav-group-title">Platform</div>
+    <a class="nav-item active" href="#"><span class="icon">&#128272;</span> Tokens</a>
+    <a class="nav-item active" href="#"><span class="icon">&#127970;</span> Tenants</a>
+    <a class="nav-item active" href="#"><span class="icon">&#128101;</span> Roles</a>
+    <div class="nav-group-title">System</div>
+    <a class="nav-item" href="07-settings-ai.html"><span class="icon">&#9881;</span> Settings</a>
+    <a class="nav-item" href="07-settings-ai.html"><span class="icon">&#129302;</span> AI Assistant</a>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="status-indicator">
+      <span class="status-dot"></span>
+      <span>System Healthy</span>
+    </div>
+  </div>
+</aside>
+
+<!-- Main Content -->
+<div class="main">
+  <!-- Top Header -->
+  <header class="top-header">
+    <span class="page-title">Platform Management</span>
+    <div class="header-actions">
+      <span class="version-badge">v0.4.0-RC1</span>
+      <span class="lang-toggle">EN / 中</span>
+      <div class="user-avatar">A</div>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <div class="content">
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('tokens', this)">Token Management</div>
+      <div class="tab" onclick="switchTab('tenants', this)">Tenant Management</div>
+      <div class="tab" onclick="switchTab('roles', this)">Role Management</div>
+    </div>
+
+    <!-- ==================== TAB 1: Tokens ==================== -->
+    <div id="panel-tokens" class="tab-panel active">
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Token Management</span>
+          <button class="btn btn-primary" onclick="document.getElementById('dialog-create-token').style.display='flex'">+ Create Token</button>
+        </div>
+
+        <!-- Filter -->
+        <div class="filter-bar">
+          <input class="search-input" type="text" placeholder="Search by ID, token, or tag...">
+          <select>
+            <option>All Statuses</option>
+            <option>Active</option>
+            <option>Expired</option>
+            <option>Exhausted</option>
+            <option>Revoked</option>
+          </select>
+          <select>
+            <option>All Tenants</option>
+            <option>tenant-001</option>
+            <option>tenant-002</option>
+          </select>
+        </div>
+
+        <!-- Table -->
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Token</th>
+                <th>Tenant ID</th>
+                <th>Tag</th>
+                <th>Usage</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Expires</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Row 1 -->
+              <tr>
+                <td><span class="uuid">a1b2c3d4-e5f6...</span></td>
+                <td><span class="token-masked">tk_a1b2c3...f3e4</span></td>
+                <td>tenant-001</td>
+                <td><span class="tag tag-info">prod-boot</span></td>
+                <td>
+                  <div class="usage-cell">
+                    <span>3/5</span>
+                    <div class="usage-bar"><div class="usage-bar-fill green" style="width:60%"></div></div>
+                  </div>
+                </td>
+                <td><span class="tag tag-success">Active</span></td>
+                <td>2024-01-15</td>
+                <td>2024-01-22</td>
+                <td>
+                  <div class="actions-cell">
+                    <button class="btn btn-sm btn-text">View</button>
+                    <button class="btn btn-sm btn-text danger">Revoke</button>
+                  </div>
+                </td>
+              </tr>
+              <!-- Row 2 -->
+              <tr>
+                <td><span class="uuid">d4e5f6a7-b8c9...</span></td>
+                <td><span class="token-masked">tk_d4e5f6...a7b8</span></td>
+                <td>tenant-001</td>
+                <td><span class="tag tag-purple">staging</span></td>
+                <td>
+                  <div class="usage-cell">
+                    <span>5/5</span>
+                    <div class="usage-bar"><div class="usage-bar-fill red" style="width:100%"></div></div>
+                  </div>
+                </td>
+                <td><span class="tag tag-warning">Exhausted</span></td>
+                <td>2024-01-10</td>
+                <td>2024-01-17</td>
+                <td>
+                  <div class="actions-cell">
+                    <button class="btn btn-sm btn-text">View</button>
+                  </div>
+                </td>
+              </tr>
+              <!-- Row 3 -->
+              <tr>
+                <td><span class="uuid">g7h8i9j0-k1l2...</span></td>
+                <td><span class="token-masked">tk_g7h8i9...j0k1</span></td>
+                <td>tenant-002</td>
+                <td><span class="tag tag-gray">office</span></td>
+                <td>
+                  <div class="usage-cell">
+                    <span>1/10</span>
+                    <div class="usage-bar"><div class="usage-bar-fill green" style="width:10%"></div></div>
+                  </div>
+                </td>
+                <td><span class="tag tag-success">Active</span></td>
+                <td>2024-01-18</td>
+                <td>2024-02-18</td>
+                <td>
+                  <div class="actions-cell">
+                    <button class="btn btn-sm btn-text">View</button>
+                    <button class="btn btn-sm btn-text danger">Revoke</button>
+                  </div>
+                </td>
+              </tr>
+              <!-- Row 4 - Expired -->
+              <tr>
+                <td><span class="uuid">m3n4o5p6-q7r8...</span></td>
+                <td><span class="token-masked">tk_m3n4o5...p6q7</span></td>
+                <td>tenant-001</td>
+                <td><span class="tag tag-gray">dev-test</span></td>
+                <td>
+                  <div class="usage-cell">
+                    <span>2/3</span>
+                    <div class="usage-bar"><div class="usage-bar-fill yellow" style="width:66%"></div></div>
+                  </div>
+                </td>
+                <td><span class="tag tag-danger">Expired</span></td>
+                <td>2024-01-05</td>
+                <td>2024-01-06</td>
+                <td>
+                  <div class="actions-cell">
+                    <button class="btn btn-sm btn-text">View</button>
+                  </div>
+                </td>
+              </tr>
+              <!-- Row 5 - Revoked -->
+              <tr>
+                <td><span class="uuid">s9t0u1v2-w3x4...</span></td>
+                <td><span class="token-masked">tk_s9t0u1...v2w3</span></td>
+                <td>tenant-002</td>
+                <td><span class="tag tag-danger">old-prod</span></td>
+                <td>
+                  <div class="usage-cell">
+                    <span>4/5</span>
+                    <div class="usage-bar"><div class="usage-bar-fill yellow" style="width:80%"></div></div>
+                  </div>
+                </td>
+                <td><span class="tag tag-gray">Revoked</span></td>
+                <td>2024-01-02</td>
+                <td>2024-01-09</td>
+                <td>
+                  <div class="actions-cell">
+                    <button class="btn btn-sm btn-text">View</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Create Token Dialog -->
+      <div id="dialog-create-token" class="dialog-overlay" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+        <div class="dialog">
+          <div class="dialog-title">Create Token</div>
+          <div class="form-group">
+            <label class="form-label">Tag</label>
+            <input class="form-input" type="text" placeholder="e.g. prod-boot, staging, office">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Max Uses</label>
+            <input class="form-input" type="number" value="5" min="1" max="100">
+          </div>
+          <div class="form-group">
+            <label class="form-label">TTL (Time to Live)</label>
+            <select class="form-select">
+              <option value="1h">1 hour</option>
+              <option value="24h" selected>24 hours</option>
+              <option value="7d">7 days</option>
+              <option value="30d">30 days</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tenant ID</label>
+            <select class="form-select">
+              <option>tenant-001</option>
+              <option>tenant-002</option>
+            </select>
+          </div>
+          <div class="dialog-footer">
+            <button class="btn btn-outline" onclick="document.getElementById('dialog-create-token').style.display='none'">Cancel</button>
+            <button class="btn btn-primary">Create Token</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /panel-tokens -->
+
+
+    <!-- ==================== TAB 2: Tenants ==================== -->
+    <div id="panel-tenants" class="tab-panel">
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Tenant Management</span>
+          <button class="btn btn-primary">+ Add Tenant</button>
+        </div>
+
+        <!-- Filter -->
+        <div class="filter-bar">
+          <input class="search-input" type="text" placeholder="Search by name, code, or description...">
+          <select>
+            <option>All Statuses</option>
+            <option>Active</option>
+            <option>Suspended</option>
+          </select>
+        </div>
+
+        <!-- Table -->
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Code</th>
+                <th>Status</th>
+                <th>Nodes</th>
+                <th>Tokens</th>
+                <th>Created</th>
+                <th>Description</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Row 1 -->
+              <tr>
+                <td><span class="inline-icon">&#127970;</span><strong>Aria Corp</strong></td>
+                <td><code>aria-corp</code></td>
+                <td><span class="tag tag-success">Active</span></td>
+                <td>15</td>
+                <td>8</td>
+                <td>2024-01-01</td>
+                <td>Main tenant</td>
+                <td>
+                  <div class="actions-cell">
+                    <button class="btn btn-sm btn-text">View</button>
+                    <button class="btn btn-sm btn-text" onclick="document.getElementById('dialog-edit-tenant').style.display='flex'">Edit</button>
+                    <button class="btn btn-sm btn-text" onclick="document.getElementById('dialog-access-tenant').style.display='flex'">Manage</button>
+                  </div>
+                </td>
+              </tr>
+              <!-- Row 2 -->
+              <tr>
+                <td><span class="inline-icon">&#127970;</span><strong>Acme Inc</strong></td>
+                <td><code>acme-inc</code></td>
+                <td><span class="tag tag-success">Active</span></td>
+                <td>6</td>
+                <td>3</td>
+                <td>2024-01-10</td>
+                <td>Partner</td>
+                <td>
+                  <div class="actions-cell">
+                    <button class="btn btn-sm btn-text">View</button>
+                    <button class="btn btn-sm btn-text" onclick="document.getElementById('dialog-edit-tenant').style.display='flex'">Edit</button>
+                    <button class="btn btn-sm btn-text" onclick="document.getElementById('dialog-access-tenant').style.display='flex'">Manage</button>
+                  </div>
+                </td>
+              </tr>
+              <!-- Row 3 -->
+              <tr>
+                <td><span class="inline-icon">&#127970;</span><strong>Test Lab</strong></td>
+                <td><code>test-lab</code></td>
+                <td><span class="tag tag-warning">Suspended</span></td>
+                <td>3</td>
+                <td>2</td>
+                <td>2024-01-15</td>
+                <td>Testing</td>
+                <td>
+                  <div class="actions-cell">
+                    <button class="btn btn-sm btn-text">View</button>
+                    <button class="btn btn-sm btn-text">Activate</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Edit Tenant Dialog -->
+      <div id="dialog-edit-tenant" class="dialog-overlay" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+        <div class="dialog">
+          <div class="dialog-title">Edit Tenant</div>
+          <div class="form-group">
+            <label class="form-label">Name</label>
+            <input class="form-input" type="text" value="Aria Corp">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Code</label>
+            <input class="form-input" type="text" value="aria-corp">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea class="form-input" rows="3" style="resize:vertical">Main tenant</textarea>
+          </div>
+          <div class="dialog-footer">
+            <button class="btn btn-outline" onclick="document.getElementById('dialog-edit-tenant').style.display='none'">Cancel</button>
+            <button class="btn btn-primary">Save Changes</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Access Management Dialog -->
+      <div id="dialog-access-tenant" class="dialog-overlay" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+        <div class="dialog" style="max-width:700px">
+          <div class="dialog-title">Access Management &mdash; Aria Corp</div>
+
+          <!-- Existing Users -->
+          <div style="margin-bottom:20px">
+            <h4 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151">Assigned Users</h4>
+            <div class="user-row">
+              <div class="user-avatar-sm">JD</div>
+              <div style="flex:1">
+                <div style="font-weight:500;font-size:14px">John Doe</div>
+                <div style="font-size:12px;color:#6b7280">john.doe@aria.corp</div>
+              </div>
+              <span class="tag tag-info">admin</span>
+              <button class="btn btn-sm btn-text danger">Remove</button>
+            </div>
+            <div class="user-row">
+              <div class="user-avatar-sm">SK</div>
+              <div style="flex:1">
+                <div style="font-weight:500;font-size:14px">Sara Kim</div>
+                <div style="font-size:12px;color:#6b7280">sara.kim@aria.corp</div>
+              </div>
+              <span class="tag tag-success">operator</span>
+              <button class="btn btn-sm btn-text danger">Remove</button>
+            </div>
+            <div class="user-row">
+              <div class="user-avatar-sm">ML</div>
+              <div style="flex:1">
+                <div style="font-weight:500;font-size:14px">Mike Lee</div>
+                <div style="font-size:12px;color:#6b7280">mike.lee@aria.corp</div>
+              </div>
+              <span class="tag tag-gray">viewer</span>
+              <button class="btn btn-sm btn-text danger">Remove</button>
+            </div>
+          </div>
+
+          <!-- Add User Form -->
+          <h4 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151">Add User</h4>
+          <div style="display:flex;gap:12px;align-items:flex-end">
+            <div style="flex:1">
+              <label class="form-label">Email</label>
+              <input class="form-input" type="email" placeholder="user@example.com">
+            </div>
+            <div style="flex:1">
+              <label class="form-label">Role</label>
+              <select class="form-select">
+                <option>admin</option>
+                <option>operator</option>
+                <option>viewer</option>
+                <option>network-ops</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" style="margin-bottom:1px">Add</button>
+          </div>
+
+          <div class="dialog-footer">
+            <button class="btn btn-outline" onclick="document.getElementById('dialog-access-tenant').style.display='none'">Close</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /panel-tenants -->
+
+
+    <!-- ==================== TAB 3: Roles ==================== -->
+    <div id="panel-roles" class="tab-panel">
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Role Management</span>
+          <button class="btn btn-primary" onclick="document.getElementById('dialog-create-role').style.display='flex'">+ Create Role</button>
+        </div>
+
+        <!-- Table -->
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Role Name</th>
+                <th>Description</th>
+                <th>Type</th>
+                <th>Permissions</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Admin -->
+              <tr>
+                <td><strong>admin</strong></td>
+                <td>Full system access</td>
+                <td><span class="tag tag-info">System</span></td>
+                <td>
+                  <div class="perm-tags">
+                    <span class="perm-tag">nodes:read</span>
+                    <span class="perm-tag">nodes:write</span>
+                    <span class="perm-tag">nodes:delete</span>
+                    <span class="perm-tag">routes:read</span>
+                    <span class="perm-tag">routes:write</span>
+                    <span class="perm-tag">routes:delete</span>
+                    <span class="perm-tag">acls:read</span>
+                    <span class="perm-tag">acls:write</span>
+                    <span class="perm-tag">acls:delete</span>
+                    <span class="perm-tag">qos:read</span>
+                    <span class="perm-tag">qos:write</span>
+                    <span class="perm-tag">qos:delete</span>
+                    <span class="perm-tag">monitoring:read</span>
+                    <span class="perm-tag">monitoring:write</span>
+                    <span class="perm-tag">commands:write</span>
+                    <span class="perm-tag">ai:use</span>
+                    <span class="perm-tag">policies:read</span>
+                    <span class="perm-tag">policies:write</span>
+                    <span class="perm-tag">policies:delete</span>
+                    <span class="perm-tag">tenants:read</span>
+                    <span class="perm-tag">tenants:write</span>
+                    <span class="perm-tag">roles:read</span>
+                    <span class="perm-tag">roles:write</span>
+                  </div>
+                </td>
+                <td><span class="no-actions">&mdash;</span></td>
+              </tr>
+              <!-- Operator -->
+              <tr>
+                <td><strong>operator</strong></td>
+                <td>Network operations</td>
+                <td><span class="tag tag-info">System</span></td>
+                <td>
+                  <div class="perm-tags">
+                    <span class="perm-tag">nodes:read</span>
+                    <span class="perm-tag">nodes:write</span>
+                    <span class="perm-tag">routes:read</span>
+                    <span class="perm-tag">routes:write</span>
+                    <span class="perm-tag">acls:read</span>
+                    <span class="perm-tag">acls:write</span>
+                    <span class="perm-tag">qos:read</span>
+                    <span class="perm-tag">qos:write</span>
+                    <span class="perm-tag">monitoring:read</span>
+                    <span class="perm-tag">commands:write</span>
+                    <span class="perm-tag">ai:use</span>
+                    <span class="perm-tag">policies:read</span>
+                  </div>
+                </td>
+                <td><span class="no-actions">&mdash;</span></td>
+              </tr>
+              <!-- Viewer -->
+              <tr>
+                <td><strong>viewer</strong></td>
+                <td>Read only access</td>
+                <td><span class="tag tag-info">System</span></td>
+                <td>
+                  <div class="perm-tags">
+                    <span class="perm-tag">nodes:read</span>
+                    <span class="perm-tag">routes:read</span>
+                    <span class="perm-tag">acls:read</span>
+                    <span class="perm-tag">qos:read</span>
+                    <span class="perm-tag">monitoring:read</span>
+                    <span class="perm-tag">policies:read</span>
+                    <span class="perm-tag">ai:use</span>
+                  </div>
+                </td>
+                <td><span class="no-actions">&mdash;</span></td>
+              </tr>
+              <!-- Custom Role -->
+              <tr>
+                <td><strong>network-ops</strong></td>
+                <td>Custom network role</td>
+                <td><span class="tag tag-success">Custom</span></td>
+                <td>
+                  <div class="perm-tags">
+                    <span class="perm-tag">nodes:read</span>
+                    <span class="perm-tag">nodes:write</span>
+                    <span class="perm-tag">routes:read</span>
+                    <span class="perm-tag">routes:write</span>
+                    <span class="perm-tag">acls:read</span>
+                    <span class="perm-tag">acls:write</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="actions-cell">
+                    <button class="btn btn-sm btn-text" onclick="document.getElementById('dialog-create-role').style.display='flex'">Edit</button>
+                    <button class="btn btn-sm btn-text danger">Delete</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Create Role Dialog -->
+      <div id="dialog-create-role" class="dialog-overlay" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+        <div class="dialog" style="max-width:700px">
+          <div class="dialog-title">Create Role</div>
+
+          <div class="form-group">
+            <label class="form-label">Role Name</label>
+            <input class="form-input" type="text" placeholder="e.g. network-ops">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea class="form-input" rows="2" style="resize:vertical" placeholder="Describe this role's purpose"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Permission Matrix</label>
+            <div class="perm-matrix">
+              <!-- Nodes -->
+              <div class="perm-group">
+                <div class="perm-group-label">Nodes</div>
+                <div class="perm-item">
+                  <div class="perm-checkbox checked">&#10003;</div>
+                  <span>View (nodes:read)</span>
+                </div>
+                <div class="perm-item">
+                  <div class="perm-checkbox checked">&#10003;</div>
+                  <span>Manage (nodes:write)</span>
+                </div>
+                <div class="perm-item">
+                  <div class="perm-checkbox"></div>
+                  <span>Delete (nodes:delete)</span>
+                </div>
+              </div>
+              <!-- Routes -->
+              <div class="perm-group">
+                <div class="perm-group-label">Routes</div>
+                <div class="perm-item">
+                  <div class="perm-checkbox checked">&#10003;</div>
+                  <span>View (routes:read)</span>
+                </div>
+                <div class="perm-item">
+                  <div class="perm-checkbox checked">&#10003;</div>
+                  <span>Manage (routes:write)</span>
+                </div>
+                <div class="perm-item">
+                  <div class="perm-checkbox"></div>
+                  <span>Delete (routes:delete)</span>
+                </div>
+              </div>
+              <!-- ACL -->
+              <div class="perm-group">
+                <div class="perm-group-label">ACL</div>
+                <div class="perm-item">
+                  <div class="perm-checkbox checked">&#10003;</div>
+                  <span>View (acls:read)</span>
+                </div>
+                <div class="perm-item">
+                  <div class="perm-checkbox checked">&#10003;</div>
+                  <span>Manage (acls:write)</span>
+                </div>
+                <div class="perm-item">
+                  <div class="perm-checkbox"></div>
+                  <span>Delete (acls:delete)</span>
+                </div>
+              </div>
+              <!-- QoS -->
+              <div class="perm-group">
+                <div class="perm-group-label">QoS</div>
+                <div class="perm-item">
+                  <div class="perm-checkbox checked">&#10003;</div>
+                  <span>View (qos:read)</span>
+                </div>
+                <div class="perm-item">
+                  <div class="perm-checkbox"></div>
+                  <span>Manage (qos:write)</span>
+                </div>
+                <div class="perm-item">
+                  <div class="perm-checkbox"></div>
+                  <span>Delete (qos:delete)</span>
+                </div>
+              </div>
+              <!-- Monitoring -->
+              <div class="perm-group">
+                <div class="perm-group-label">Monitoring</div>
+                <div class="perm-item">
+                  <div class="perm-checkbox checked">&#10003;</div>
+                  <span>View (monitoring:read)</span>
+                </div>
+                <div class="perm-item">
+                  <div class="perm-checkbox"></div>
+                  <span>Manage (monitoring:write)</span>
+                </div>
+              </div>
+              <!-- Commands -->
+              <div class="perm-group">
+                <div class="perm-group-label">Commands</div>
+                <div class="perm-item">
+                  <div class="perm-checkbox"></div>
+                  <span>Execute (commands:write)</span>
+                </div>
+              </div>
+              <!-- AI -->
+              <div class="perm-group">
+                <div class="perm-group-label">AI</div>
+                <div class="perm-item">
+                  <div class="perm-checkbox checked">&#10003;</div>
+                  <span>Use AI (ai:use)</span>
+                </div>
+              </div>
+              <!-- Policies -->
+              <div class="perm-group">
+                <div class="perm-group-label">Policies</div>
+                <div class="perm-item">
+                  <div class="perm-checkbox"></div>
+                  <span>View (policies:read)</span>
+                </div>
+                <div class="perm-item">
+                  <div class="perm-checkbox"></div>
+                  <span>Manage (policies:write)</span>
+                </div>
+                <div class="perm-item">
+                  <div class="perm-checkbox"></div>
+                  <span>Delete (policies:delete)</span>
+                </div>
+              </div>
+              <!-- Tenants -->
+              <div class="perm-group">
+                <div class="perm-group-label">Tenants</div>
+                <div class="perm-item">
+                  <div class="perm-checkbox"></div>
+                  <span>View (tenants:read)</span>
+                </div>
+                <div class="perm-item">
+                  <div class="perm-checkbox"></div>
+                  <span>Manage (tenants:write)</span>
+                </div>
+              </div>
+              <!-- Roles -->
+              <div class="perm-group">
+                <div class="perm-group-label">Roles</div>
+                <div class="perm-item">
+                  <div class="perm-checkbox"></div>
+                  <span>View (roles:read)</span>
+                </div>
+                <div class="perm-item">
+                  <div class="perm-checkbox"></div>
+                  <span>Manage (roles:write)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dialog-footer">
+            <button class="btn btn-outline" onclick="document.getElementById('dialog-create-role').style.display='none'">Cancel</button>
+            <button class="btn btn-primary">Create Role</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /panel-roles -->
+
+    <div class="page-note">
+      <strong>Platform Management</strong> &mdash; This page consolidates Token, Tenant, and Role management under a single tabbed interface.
+      System roles (admin, operator, viewer) cannot be edited or deleted. Custom roles support full CRUD operations.
+      Token usage shows current/max with a visual progress bar.
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
+<script>
+function switchTab(name, tabEl) {
+  // Hide all panels
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  // Deactivate all tabs
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  // Show selected panel
+  document.getElementById('panel-' + name).classList.add('active');
+  // Activate tab
+  tabEl.classList.add('active');
+}
+</script>
+
+</body>
+</html>

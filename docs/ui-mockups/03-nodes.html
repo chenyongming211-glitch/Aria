@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aria SD-WAN - Node Management</title>
+  <link rel="stylesheet" href="mockup.css">
+  <style>
+    .dialog-large { max-width: 860px; }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+    .detail-item .detail-label { font-size: 12px; color: #6b7280; margin-bottom: 4px; }
+    .detail-item .detail-value { font-size: 14px; font-weight: 600; color: #1f2937; }
+    .metric-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .metric-row .metric-label { width: 100px; font-size: 13px; color: #6b7280; }
+    .metric-row .progress-bar { flex: 1; }
+    .metric-row .metric-value { width: 80px; font-size: 13px; font-weight: 600; color: #1f2937; text-align: right; }
+    .route-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 13px; font-family: 'JetBrains Mono', monospace; color: #374151; margin: 4px; }
+    .routes-list { display: flex; flex-wrap: wrap; gap: 4px; }
+    .section-divider { margin: 20px 0; border: none; border-top: 1px solid #e5e7eb; }
+    .section-title { font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<nav class="sidebar">
+  <div class="sidebar-header">
+    <div class="logo">A</div>
+    <h1>Aria SD-WAN</h1>
+    <span class="pro-badge">v0.1.0</span>
+  </div>
+  <div class="sidebar-nav">
+    <div class="nav-group-title">Overview</div>
+    <a class="nav-item" href="01-dashboard.html">
+      <span class="icon">&#9632;</span> Dashboard
+    </a>
+    <div class="nav-group-title">Management</div>
+    <a class="nav-item active" href="03-nodes.html">
+      <span class="icon">&#9656;</span> Nodes
+    </a>
+    <a class="nav-item" href="04-acl.html">
+      <span class="icon">&#9656;</span> ACL Rules
+    </a>
+    <a class="nav-item" href="05-qos.html">
+      <span class="icon">&#9656;</span> QoS Policies
+    </a>
+    <a class="nav-item" href="06-routes.html">
+      <span class="icon">&#9656;</span> Routes
+    </a>
+    <div class="nav-group-title">Tools</div>
+    <a class="nav-item" href="07-topology.html">
+      <span class="icon">&#8226;</span> Topology
+    </a>
+    <a class="nav-item" href="08-monitoring.html">
+      <span class="icon">&#8226;</span> Monitoring
+    </a>
+    <a class="nav-item" href="09-ai-assistant.html">
+      <span class="icon">&#8226;</span> AI Assistant
+    </a>
+    <div class="nav-group-title">System</div>
+    <a class="nav-item" href="10-settings.html">
+      <span class="icon">&#9881;</span> Settings
+    </a>
+    <a class="nav-item" href="11-users.html">
+      <span class="icon">&#9881;</span> Users &amp; Roles
+    </a>
+  </div>
+  <div class="sidebar-footer">
+    <div class="status-indicator">
+      <div class="status-dot"></div>
+      <span>System Healthy</span>
+    </div>
+  </div>
+</nav>
+
+<!-- Main Content -->
+<div class="main">
+
+  <!-- Top Header -->
+  <header class="top-header">
+    <div class="page-title">Node Management</div>
+    <div class="header-actions">
+      <span class="version-badge">v0.1.0</span>
+      <select class="tenant-selector">
+        <option>Default Tenant</option>
+      </select>
+      <div class="user-avatar">AD</div>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <div class="content">
+
+    <!-- Stat Cards -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-icon blue">&#9656;</div>
+        <div class="label">Total Nodes</div>
+        <div class="value">24</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon green">&#10003;</div>
+        <div class="label">Online</div>
+        <div class="value">22</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon red">&#10005;</div>
+        <div class="label">Offline</div>
+        <div class="value">1</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon yellow">&#9888;</div>
+        <div class="label">Maintenance</div>
+        <div class="value">1</div>
+      </div>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+      <input type="text" class="search-input" placeholder="Search nodes by hostname, IP, region...">
+      <select>
+        <option value="">All Regions</option>
+        <option value="us-east">us-east</option>
+        <option value="us-west">us-west</option>
+        <option value="eu-west">eu-west</option>
+        <option value="ap-south">ap-south</option>
+      </select>
+      <select>
+        <option value="">All Status</option>
+        <option value="online">Online</option>
+        <option value="offline">Offline</option>
+        <option value="maintenance">Maintenance</option>
+      </select>
+      <button class="btn btn-outline">&#8635; Refresh</button>
+      <button class="btn btn-primary">+ Add Node</button>
+    </div>
+
+    <!-- Nodes Table -->
+    <div class="card">
+      <div class="table-wrapper">
+        <table class="table-striped">
+          <thead>
+            <tr>
+              <th>Hostname</th>
+              <th>Public IP</th>
+              <th>VPN IP</th>
+              <th>Region</th>
+              <th>Version</th>
+              <th>Mode</th>
+              <th>Status</th>
+              <th>Sync State</th>
+              <th>Desired Ver</th>
+              <th>Applied Ver</th>
+              <th>Pending</th>
+              <th>Last Seen</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>gateway-us-01</strong></td>
+              <td><code>203.0.113.10</code></td>
+              <td><code>100.64.0.1</code></td>
+              <td>us-east</td>
+              <td>v0.1.0</td>
+              <td>kernel</td>
+              <td><span class="tag tag-success">Online</span></td>
+              <td><span class="tag tag-success">Synced</span></td>
+              <td><code>abc123</code></td>
+              <td><code>abc123</code></td>
+              <td>0</td>
+              <td>2 min ago</td>
+              <td>
+                <button class="btn btn-text btn-sm">View</button>
+                <button class="btn btn-text btn-sm">Edit</button>
+                <button class="btn btn-text btn-sm danger">Delete</button>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>node-eu-01</strong></td>
+              <td><code>198.51.100.20</code></td>
+              <td><code>100.64.0.2</code></td>
+              <td>eu-west</td>
+              <td>v0.1.0</td>
+              <td>kernel</td>
+              <td><span class="tag tag-success">Online</span></td>
+              <td><span class="tag tag-success">Synced</span></td>
+              <td><code>def456</code></td>
+              <td><code>def456</code></td>
+              <td>0</td>
+              <td>5 min ago</td>
+              <td>
+                <button class="btn btn-text btn-sm">View</button>
+                <button class="btn btn-text btn-sm">Edit</button>
+                <button class="btn btn-text btn-sm danger">Delete</button>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>relay-ap-01</strong></td>
+              <td><code>192.0.2.30</code></td>
+              <td><code>100.64.0.3</code></td>
+              <td>ap-south</td>
+              <td>v0.1.0</td>
+              <td>eBPF</td>
+              <td><span class="tag tag-success">Online</span></td>
+              <td><span class="tag tag-warning">Pending</span></td>
+              <td><code>ghi789</code></td>
+              <td><code>abc111</code></td>
+              <td>2</td>
+              <td>1 min ago</td>
+              <td>
+                <button class="btn btn-text btn-sm">View</button>
+                <button class="btn btn-text btn-sm">Edit</button>
+                <button class="btn btn-text btn-sm danger">Delete</button>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>edge-us-02</strong></td>
+              <td><code>203.0.113.40</code></td>
+              <td><code>100.64.0.4</code></td>
+              <td>us-west</td>
+              <td>v0.1.0</td>
+              <td>kernel</td>
+              <td><span class="tag tag-danger">Offline</span></td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td>2 hours ago</td>
+              <td>
+                <button class="btn btn-text btn-sm">View</button>
+                <button class="btn btn-text btn-sm">Edit</button>
+                <button class="btn btn-text btn-sm danger">Delete</button>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>hub-eu-02</strong></td>
+              <td><code>198.51.100.50</code></td>
+              <td><code>100.64.0.5</code></td>
+              <td>eu-west</td>
+              <td>v0.1.0</td>
+              <td>kernel</td>
+              <td><span class="tag tag-warning">Maintenance</span></td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td>30 min ago</td>
+              <td>
+                <button class="btn btn-text btn-sm">View</button>
+                <button class="btn btn-text btn-sm">Edit</button>
+                <button class="btn btn-text btn-sm danger">Delete</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Node Detail Dialog -->
+    <div class="dialog-overlay">
+      <div class="dialog dialog-large">
+
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="dialog-title">Node Detail: gateway-us-01</div>
+          <button class="btn btn-outline btn-sm">&#10005; Close</button>
+        </div>
+
+        <!-- Basic Info -->
+        <div class="section-title">Basic Information</div>
+        <div class="detail-grid">
+          <div class="detail-item">
+            <div class="detail-label">Hostname</div>
+            <div class="detail-value">gateway-us-01</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Public IP</div>
+            <div class="detail-value">203.0.113.10</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">VPN IP</div>
+            <div class="detail-value">100.64.0.1</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Region</div>
+            <div class="detail-value">us-east</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Mode</div>
+            <div class="detail-value">kernel</div>
+          </div>
+          <div class="detail-item">
+            <div class="detail-label">Kernel Version</div>
+            <div class="detail-value">6.1.0-17-amd64</div>
+          </div>
+        </div>
+
+        <hr class="section-divider">
+
+        <!-- Real-time Metrics -->
+        <div class="section-title">Real-time Metrics</div>
+        <div class="metric-row">
+          <span class="metric-label">Upload</span>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: 35%; background: #22c55e;"></div>
+          </div>
+          <span class="metric-value">35 Mbps</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Download</span>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: 62%; background: #3b82f6;"></div>
+          </div>
+          <span class="metric-value">124 Mbps</span>
+        </div>
+
+        <hr class="section-divider">
+
+        <!-- Advertised Routes -->
+        <div class="section-title">Advertised Routes</div>
+        <div class="routes-list">
+          <span class="route-chip">10.0.1.0/24</span>
+          <span class="route-chip">10.0.2.0/24</span>
+          <span class="route-chip">172.16.0.0/16</span>
+          <span class="route-chip">192.168.1.0/24</span>
+        </div>
+
+        <hr class="section-divider">
+
+        <!-- Recent Commands -->
+        <div class="section-title">Recent Commands</div>
+        <div class="table-wrapper">
+          <table class="table-striped">
+            <thead>
+              <tr>
+                <th>Command ID</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Requested</th>
+                <th>Completed</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>cmd-a1b2c3</code></td>
+                <td>config_sync</td>
+                <td><span class="tag tag-success">Completed</span></td>
+                <td>2 min ago</td>
+                <td>2 min ago</td>
+              </tr>
+              <tr>
+                <td><code>cmd-d4e5f6</code></td>
+                <td>route_update</td>
+                <td><span class="tag tag-success">Completed</span></td>
+                <td>15 min ago</td>
+                <td>15 min ago</td>
+              </tr>
+              <tr>
+                <td><code>cmd-g7h8i9</code></td>
+                <td>interface_reconfig</td>
+                <td><span class="tag tag-info">In Progress</span></td>
+                <td>1 min ago</td>
+                <td>-</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="dialog-footer">
+          <button class="btn btn-outline">Close</button>
+          <button class="btn btn-primary">Edit Node</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

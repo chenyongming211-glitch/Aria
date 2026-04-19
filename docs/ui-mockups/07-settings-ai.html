@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aria SD-WAN - Settings & AI Assistant</title>
+  <link rel="stylesheet" href="mockup.css">
+  <style>
+    /* Page-specific styles */
+    .section-divider { border: 0; border-top: 3px solid #e5e7eb; margin: 48px 0 32px; }
+    .section-heading { font-size: 22px; font-weight: 600; color: #1f2937; margin-bottom: 24px; }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid #f3f4f6; }
+    .toggle-row:last-child { border-bottom: none; }
+    .toggle-label { font-size: 14px; color: #374151; }
+    .toggle-label .sub { font-size: 12px; color: #9ca3af; margin-top: 2px; }
+    .toggle { width: 44px; height: 24px; border-radius: 12px; background: #d1d5db; position: relative; cursor: pointer; display: inline-block; flex-shrink: 0; }
+    .toggle.on { background: #3b82f6; }
+    .toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: white; transition: 0.2s; }
+    .toggle.on::after { left: 22px; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .radio-group { display: flex; gap: 24px; }
+    .radio-item { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #374151; cursor: pointer; }
+    .radio-circle { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #d1d5db; display: flex; align-items: center; justify-content: center; }
+    .radio-circle.selected { border-color: #3b82f6; }
+    .radio-circle.selected::after { content: ''; width: 10px; height: 10px; border-radius: 50%; background: #3b82f6; }
+    .checkbox-item { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #374151; margin-bottom: 10px; }
+    .checkbox { width: 18px; height: 18px; border: 2px solid #d1d5db; border-radius: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .checkbox.checked { background: #3b82f6; border-color: #3b82f6; color: white; font-size: 11px; }
+    .drop-zone { border: 2px dashed #d1d5db; border-radius: 12px; padding: 40px; text-align: center; color: #9ca3af; background: #fafbfc; margin-bottom: 20px; cursor: pointer; transition: border-color 0.2s; }
+    .drop-zone:hover { border-color: #3b82f6; color: #6b7280; }
+    .drop-zone .dz-icon { font-size: 36px; margin-bottom: 10px; }
+    .drop-zone .dz-text { font-size: 14px; }
+    .drop-zone .dz-hint { font-size: 12px; margin-top: 6px; color: #d1d5db; }
+
+    /* AI Assistant styles */
+    .ai-welcome { text-align: center; padding: 30px 20px 20px; }
+    .ai-welcome h2 { font-size: 24px; font-weight: 600; color: #1f2937; margin-bottom: 8px; }
+    .ai-welcome p { font-size: 14px; color: #6b7280; margin-bottom: 24px; }
+    .capability-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; max-width: 700px; margin: 0 auto 24px; }
+    .capability-card { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.2s; }
+    .capability-card:hover { border-color: #3b82f6; background: #eff6ff; }
+    .capability-card .cap-icon { font-size: 28px; margin-bottom: 8px; }
+    .capability-card .cap-title { font-size: 14px; font-weight: 600; color: #1f2937; margin-bottom: 4px; }
+    .capability-card .cap-desc { font-size: 12px; color: #6b7280; }
+    .chat-area { max-width: 800px; margin: 0 auto; }
+    .chat-msg { margin-bottom: 20px; display: flex; gap: 12px; }
+    .chat-msg.user { flex-direction: row-reverse; }
+    .chat-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+    .chat-avatar.ai { background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: white; }
+    .chat-avatar.human { background: #e0e7ff; color: #4338ca; font-weight: 600; }
+    .chat-bubble { max-width: 70%; padding: 14px 18px; border-radius: 12px; font-size: 14px; line-height: 1.6; }
+    .chat-bubble.assistant { background: #f1f5f9; color: #1f2937; border-bottom-left-radius: 4px; }
+    .chat-bubble.user-msg { background: #3b82f6; color: white; border-bottom-right-radius: 4px; }
+    .tool-call-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; margin-top: 12px; font-size: 13px; }
+    .tool-call-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .tool-call-header .tool-icon { color: #8b5cf6; font-size: 14px; }
+    .tool-call-header .tool-name { font-weight: 600; color: #374151; font-size: 13px; }
+    .tool-call-header .tool-status { font-size: 11px; color: #22c55e; margin-left: auto; }
+    .tool-result { background: #f8fafc; border-radius: 6px; padding: 10px 12px; font-family: 'JetBrains Mono', 'SF Mono', monospace; font-size: 12px; color: #475569; line-height: 1.5; }
+    .chat-input-bar { display: flex; gap: 12px; padding: 16px 0; max-width: 800px; margin: 0 auto; border-top: 1px solid #e5e7eb; }
+    .chat-textarea { flex: 1; padding: 10px 16px; border: 1px solid #d1d5db; border-radius: 10px; font-size: 14px; font-family: inherit; resize: none; min-height: 44px; }
+    .chat-textarea:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+    .chat-send-btn { align-self: flex-end; }
+    .chat-hint { text-align: center; font-size: 12px; color: #d1d5db; margin-top: 4px; max-width: 800px; margin-left: auto; margin-right: auto; }
+  </style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="logo">A</div>
+    <h1>Aria</h1>
+    <span class="pro-badge">SD-WAN</span>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-group-title">Overview</div>
+    <a class="nav-item" href="#"><span class="icon">&#9776;</span> Dashboard</a>
+    <a class="nav-item" href="#"><span class="icon">&#9881;</span> Topology</a>
+    <div class="nav-group-title">Network</div>
+    <a class="nav-item" href="#"><span class="icon">&#128187;</span> Nodes</a>
+    <a class="nav-item" href="#"><span class="icon">&#128279;</span> Routes</a>
+    <a class="nav-item" href="#"><span class="icon">&#128737;</span> ACLs</a>
+    <a class="nav-item" href="#"><span class="icon">&#9889;</span> QoS</a>
+    <div class="nav-group-title">Observability</div>
+    <a class="nav-item" href="#"><span class="icon">&#128200;</span> Monitoring</a>
+    <a class="nav-item" href="#"><span class="icon">&#128221;</span> Audit Log</a>
+    <div class="nav-group-title">Platform</div>
+    <a class="nav-item" href="06-platform.html"><span class="icon">&#128272;</span> Tokens</a>
+    <a class="nav-item" href="06-platform.html"><span class="icon">&#127970;</span> Tenants</a>
+    <a class="nav-item" href="06-platform.html"><span class="icon">&#128101;</span> Roles</a>
+    <div class="nav-group-title">System</div>
+    <a class="nav-item active" href="#"><span class="icon">&#9881;</span> Settings</a>
+    <a class="nav-item active" href="#ai-section"><span class="icon">&#129302;</span> AI Assistant</a>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="status-indicator">
+      <span class="status-dot"></span>
+      <span>System Healthy</span>
+    </div>
+  </div>
+</aside>
+
+<!-- Main Content -->
+<div class="main">
+  <!-- Top Header -->
+  <header class="top-header">
+    <span class="page-title">Settings & AI Assistant</span>
+    <div class="header-actions">
+      <span class="version-badge">v0.4.0-RC1</span>
+      <span class="lang-toggle">EN / 中</span>
+      <div class="user-avatar">A</div>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <div class="content">
+
+    <!-- ================================================================== -->
+    <!-- SECTION 1: SETTINGS                                                -->
+    <!-- ================================================================== -->
+    <div class="section-heading">System Settings</div>
+
+    <div class="tabs">
+      <div class="tab active" onclick="switchSettingsTab('general', this)">General</div>
+      <div class="tab" onclick="switchSettingsTab('network', this)">Network</div>
+      <div class="tab" onclick="switchSettingsTab('security', this)">Security</div>
+      <div class="tab" onclick="switchSettingsTab('notifications', this)">Notifications</div>
+      <div class="tab" onclick="switchSettingsTab('backup', this)">Backup</div>
+    </div>
+
+    <!-- ===== General Tab ===== -->
+    <div id="settings-general" class="tab-panel active">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">General Settings</span>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">System Name</label>
+            <input class="form-input" type="text" value="Aria Controller">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Language</label>
+            <select class="form-select">
+              <option selected>English</option>
+              <option>Chinese</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Default Region</label>
+            <select class="form-select">
+              <option>us-east-1</option>
+              <option>us-west-2</option>
+              <option>eu-west-1</option>
+              <option>ap-southeast-1</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Timezone</label>
+            <select class="form-select">
+              <option>UTC (Coordinated Universal Time)</option>
+              <option>America/New_York (EST/EDT)</option>
+              <option>America/Los_Angeles (PST/PDT)</option>
+              <option>Asia/Shanghai (CST)</option>
+              <option>Europe/London (GMT/BST)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:8px">
+          <label class="form-label">Theme</label>
+          <div class="radio-group" style="margin-top:8px">
+            <label class="radio-item">
+              <div class="radio-circle"></div>
+              <span>Light</span>
+            </label>
+            <label class="radio-item">
+              <div class="radio-circle"></div>
+              <span>Dark</span>
+            </label>
+            <label class="radio-item">
+              <div class="radio-circle selected"></div>
+              <span>Auto</span>
+            </label>
+          </div>
+        </div>
+        <div style="display:flex;gap:12px;margin-top:24px">
+          <button class="btn btn-primary">Save Changes</button>
+          <button class="btn btn-outline">Reset</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Network Tab ===== -->
+    <div id="settings-network" class="tab-panel">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Network Settings</span>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Listen Port</label>
+            <input class="form-input" type="number" value="51820">
+          </div>
+          <div class="form-group">
+            <label class="form-label">MTU Size</label>
+            <input class="form-input" type="number" value="1420">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Encryption</label>
+            <select class="form-select">
+              <option selected>AES-256-GCM</option>
+              <option>AES-128-GCM</option>
+              <option>ChaCha20-Poly1305</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Compression</label>
+            <select class="form-select">
+              <option selected>Disabled</option>
+              <option>Zstd</option>
+              <option>LZ4</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <div class="toggle-row">
+            <div>
+              <div class="toggle-label">NAT Traversal</div>
+              <div class="toggle-label sub">Automatically traverse NAT gateways</div>
+            </div>
+            <div class="toggle on"></div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">STUN Server</label>
+          <input class="form-input" type="text" placeholder="e.g. stun:stun.l.google.com:19302">
+        </div>
+        <div style="display:flex;gap:12px;margin-top:24px">
+          <button class="btn btn-primary">Save Changes</button>
+          <button class="btn btn-outline">Reset</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Security Tab ===== -->
+    <div id="settings-security" class="tab-panel">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Security Settings</span>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Firewall</div>
+            <div class="toggle-label sub">Enable built-in firewall rules</div>
+          </div>
+          <div class="toggle on"></div>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">DDoS Protection</div>
+            <div class="toggle-label sub">Automatic DDoS mitigation</div>
+          </div>
+          <div class="toggle on"></div>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Block Suspicious IPs</div>
+            <div class="toggle-label sub">Auto-block IPs flagged by threat intelligence</div>
+          </div>
+          <div class="toggle"></div>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Two-Factor Authentication</div>
+            <div class="toggle-label sub">Require 2FA for all users</div>
+          </div>
+          <div class="toggle"></div>
+        </div>
+        <div class="grid-2" style="margin-top:20px">
+          <div class="form-group">
+            <label class="form-label">Connection Limit</label>
+            <input class="form-input" type="number" value="1000">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Rate Limit</label>
+            <input class="form-input" type="text" value="100/min">
+          </div>
+        </div>
+        <div style="display:flex;gap:12px;margin-top:24px">
+          <button class="btn btn-primary">Save Changes</button>
+          <button class="btn btn-outline">Reset</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Notifications Tab ===== -->
+    <div id="settings-notifications" class="tab-panel">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Notification Settings</span>
+        </div>
+
+        <h4 style="font-size:15px;font-weight:600;color:#374151;margin-bottom:16px">Email Notifications</h4>
+        <div class="toggle-row">
+          <div class="toggle-label">Enable Email Notifications</div>
+          <div class="toggle"></div>
+        </div>
+        <div class="form-group" style="margin-top:16px">
+          <label class="form-label">Email Address</label>
+          <input class="form-input" type="email" placeholder="admin@example.com">
+        </div>
+
+        <hr style="border:0;border-top:1px solid #e5e7eb;margin:24px 0">
+
+        <h4 style="font-size:15px;font-weight:600;color:#374151;margin-bottom:16px">Webhook</h4>
+        <div class="toggle-row">
+          <div class="toggle-label">Enable Webhook</div>
+          <div class="toggle"></div>
+        </div>
+        <div class="form-group" style="margin-top:16px">
+          <label class="form-label">Webhook URL</label>
+          <input class="form-input" type="url" placeholder="https://hooks.example.com/aria">
+        </div>
+
+        <hr style="border:0;border-top:1px solid #e5e7eb;margin:24px 0">
+
+        <h4 style="font-size:15px;font-weight:600;color:#374151;margin-bottom:16px">Notification Types</h4>
+        <div class="checkbox-item">
+          <div class="checkbox checked">&#10003;</div>
+          <span>Alerts</span>
+        </div>
+        <div class="checkbox-item">
+          <div class="checkbox checked">&#10003;</div>
+          <span>Warnings</span>
+        </div>
+        <div class="checkbox-item">
+          <div class="checkbox"></div>
+          <span>Maintenance</span>
+        </div>
+        <div class="checkbox-item">
+          <div class="checkbox checked">&#10003;</div>
+          <span>Security</span>
+        </div>
+
+        <div style="display:flex;gap:12px;margin-top:24px">
+          <button class="btn btn-primary">Save Changes</button>
+          <button class="btn btn-outline">Reset</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Backup Tab ===== -->
+    <div id="settings-backup" class="tab-panel">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Backup &amp; Restore</span>
+          <button class="btn btn-primary">+ Create Backup</button>
+        </div>
+
+        <!-- Upload zone -->
+        <div class="drop-zone">
+          <div class="dz-icon">&#128193;</div>
+          <div class="dz-text">Drag &amp; drop backup files here or click to upload</div>
+          <div class="dz-hint">Supported formats: .json, .ariaconfig (max 50MB)</div>
+        </div>
+
+        <!-- Backup History -->
+        <h4 style="font-size:15px;font-weight:600;color:#374151;margin:24px 0 16px">Backup History</h4>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Filename</th>
+                <th>Size</th>
+                <th>Created At</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span style="color:#3b82f6">&#128196;</span> aria-backup-2024-01-18-full.json</td>
+                <td>2.4 MB</td>
+                <td>2024-01-18 14:32:05</td>
+                <td>
+                  <div style="display:flex;gap:6px">
+                    <button class="btn btn-sm btn-text">Download</button>
+                    <button class="btn btn-sm btn-text">Restore</button>
+                    <button class="btn btn-sm btn-text danger">Delete</button>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td><span style="color:#3b82f6">&#128196;</span> aria-backup-2024-01-15-full.json</td>
+                <td>2.1 MB</td>
+                <td>2024-01-15 09:12:47</td>
+                <td>
+                  <div style="display:flex;gap:6px">
+                    <button class="btn btn-sm btn-text">Download</button>
+                    <button class="btn btn-sm btn-text">Restore</button>
+                    <button class="btn btn-sm btn-text danger">Delete</button>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td><span style="color:#3b82f6">&#128196;</span> aria-backup-2024-01-10-full.json</td>
+                <td>1.8 MB</td>
+                <td>2024-01-10 16:45:30</td>
+                <td>
+                  <div style="display:flex;gap:6px">
+                    <button class="btn btn-sm btn-text">Download</button>
+                    <button class="btn btn-sm btn-text">Restore</button>
+                    <button class="btn btn-sm btn-text danger">Delete</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ================================================================== -->
+    <!-- SECTION 2: AI ASSISTANT                                            -->
+    <!-- ================================================================== -->
+    <hr class="section-divider" id="ai-section">
+    <div class="section-heading">Aria AI Assistant</div>
+
+    <div class="card" style="padding:0;overflow:hidden">
+      <!-- Welcome Section -->
+      <div class="ai-welcome">
+        <h2>How can I help you?</h2>
+        <p>I can assist with network diagnostics, security analysis, performance optimization, and configuration guidance.</p>
+        <div class="capability-grid">
+          <div class="capability-card">
+            <div class="cap-icon">&#128268;</div>
+            <div class="cap-title">Network Diagnostics</div>
+            <div class="cap-desc">Analyze connectivity and troubleshoot issues</div>
+          </div>
+          <div class="capability-card">
+            <div class="cap-icon">&#128737;</div>
+            <div class="cap-title">Security Analysis</div>
+            <div class="cap-desc">Review policies and detect vulnerabilities</div>
+          </div>
+          <div class="capability-card">
+            <div class="cap-icon">&#9889;</div>
+            <div class="cap-title">Performance Optimization</div>
+            <div class="cap-desc">Tune routes, QoS, and resource usage</div>
+          </div>
+          <div class="capability-card">
+            <div class="cap-icon">&#128736;</div>
+            <div class="cap-title">Configuration Help</div>
+            <div class="cap-desc">Guide setup and validate configs</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat Messages -->
+      <div style="padding:0 24px 20px">
+        <div class="chat-area">
+
+          <!-- User message 1 -->
+          <div class="chat-msg user">
+            <div class="chat-avatar human">U</div>
+            <div class="chat-bubble user-msg">Check the status of all nodes in us-east region</div>
+          </div>
+
+          <!-- Assistant response 1 -->
+          <div class="chat-msg">
+            <div class="chat-avatar ai">&#129302;</div>
+            <div class="chat-bubble assistant">
+              I've checked all 8 nodes in the <strong>us-east</strong> region. Here's a summary:<br><br>
+              &bull; 7 nodes are online and healthy<br>
+              &bull; 1 node (<code>edge-us-02</code>) is currently offline<br>
+              &bull; Last sync was 5 minutes ago for active nodes<br>
+              &bull; No pending ACL rules
+            </div>
+          </div>
+
+          <!-- User message 2 -->
+          <div class="chat-msg user">
+            <div class="chat-avatar human">U</div>
+            <div class="chat-bubble user-msg">What happened to edge-us-02?</div>
+          </div>
+
+          <!-- Assistant response 2 with tool call -->
+          <div class="chat-msg">
+            <div class="chat-avatar ai">&#129302;</div>
+            <div class="chat-bubble assistant">
+              Let me check the diagnostics for that node.
+              <div class="tool-call-card">
+                <div class="tool-call-header">
+                  <span class="tool-icon">&#128295;</span>
+                  <span class="tool-name">check_node_diagnostics</span>
+                  <span class="tool-status">&#10003; Completed</span>
+                </div>
+                <div class="tool-result">
+node: edge-us-02<br>
+status: offline<br>
+last_seen: 2024-01-19 08:42:15 UTC<br>
+reason: connection_timeout<br>
+uptime_before: 14d 6h 32m<br>
+auto_recovery: attempted (failed)<br>
+alerts: 3 critical in last 24h
+                </div>
+              </div>
+              <div style="margin-top:12px">
+                The node <code>edge-us-02</code> went offline at <strong>08:42 UTC</strong> due to a connection timeout. It had been running for 14 days prior. The auto-recovery mechanism was triggered but failed. There are <strong>3 critical alerts</strong> in the last 24 hours.<br><br>
+                Recommended actions:<br>
+                &bull; Verify the physical connectivity at the site<br>
+                &bull; Check if the ISP link is down<br>
+                &bull; Manually restart the WireGuard interface if the link is restored
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Input Bar -->
+      <div style="padding:0 24px 4px">
+        <div class="chat-input-bar" style="border-top:1px solid #e5e7eb;padding:16px 0">
+          <textarea class="chat-textarea" rows="1" placeholder="Ask Aria AI anything about your network..."></textarea>
+          <button class="btn btn-primary chat-send-btn">Send</button>
+        </div>
+        <div class="chat-hint" style="padding-bottom:16px">Press Ctrl+Enter to send</div>
+      </div>
+    </div>
+
+    <div class="page-note">
+      <strong>Settings &amp; AI Assistant</strong> &mdash; System settings are organized into five tabs: General, Network, Security, Notifications, and Backup.
+      The AI Assistant provides conversational access to network diagnostics, security analysis, performance optimization, and configuration guidance.
+      Tool call results are rendered inline within the chat flow.
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
+<script>
+function switchSettingsTab(name, tabEl) {
+  // Hide all settings panels
+  document.querySelectorAll('[id^="settings-"]').forEach(p => p.classList.remove('active'));
+  // Deactivate all tabs
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  // Show selected panel
+  document.getElementById('settings-' + name).classList.add('active');
+  // Activate tab
+  tabEl.classList.add('active');
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aria SD-WAN - Connectivity</title>
+  <link rel="stylesheet" href="mockup.css">
+  <style>
+    /* Connectivity page specific styles */
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .content-tabs { display: flex; gap: 4px; margin-bottom: 24px; }
+    .content-tab {
+      padding: 10px 24px;
+      font-size: 14px;
+      color: #6b7280;
+      cursor: pointer;
+      border-radius: 8px 8px 0 0;
+      border: 1px solid transparent;
+      border-bottom: none;
+      background: transparent;
+      transition: all 0.2s;
+    }
+    .content-tab.active {
+      color: #3b82f6;
+      background: white;
+      border-color: #e5e7eb;
+      font-weight: 500;
+      box-shadow: 0 -2px 4px rgba(0,0,0,0.04);
+    }
+    .content-tab:hover:not(.active) {
+      background: rgba(59,130,246,0.05);
+      color: #3b82f6;
+    }
+    /* Topology specific */
+    .topology-canvas {
+      height: 560px;
+      background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+      border-radius: 12px;
+      position: relative;
+      overflow: hidden;
+      border: 1px solid #334155;
+    }
+    .topo-grid-line {
+      position: absolute;
+      background: rgba(148,163,184,0.04);
+    }
+    .topo-grid-line.h { left: 0; right: 0; height: 1px; }
+    .topo-grid-line.v { top: 0; bottom: 0; width: 1px; }
+    .topo-connection {
+      position: absolute;
+      height: 2px;
+      background: linear-gradient(90deg, rgba(59,130,246,0.6), rgba(139,92,246,0.6));
+      transform-origin: left center;
+      z-index: 1;
+    }
+    .topo-connection.inactive {
+      background: rgba(100,116,139,0.2);
+    }
+    .topo-pulse {
+      position: absolute;
+      width: 6px; height: 6px;
+      background: #3b82f6;
+      border-radius: 50%;
+      box-shadow: 0 0 8px #3b82f6;
+      z-index: 2;
+    }
+    .topo-node {
+      position: absolute;
+      width: 120px;
+      text-align: center;
+      z-index: 5;
+      transition: transform 0.2s;
+    }
+    .topo-node:hover { transform: scale(1.08); }
+    .topo-node .dot {
+      width: 48px; height: 48px;
+      border-radius: 50%;
+      margin: 0 auto 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 700;
+      position: relative;
+    }
+    .topo-node .dot.online {
+      background: rgba(34,197,94,0.15);
+      border: 2px solid #22c55e;
+      color: #22c55e;
+      box-shadow: 0 0 16px rgba(34,197,94,0.3);
+    }
+    .topo-node .dot.offline {
+      background: rgba(239,68,68,0.15);
+      border: 2px solid #ef4444;
+      color: #ef4444;
+    }
+    .topo-node .dot::after {
+      content: '';
+      position: absolute;
+      bottom: 2px; right: 2px;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      border: 2px solid #0f172a;
+    }
+    .topo-node .dot.online::after { background: #22c55e; }
+    .topo-node .dot.offline::after { background: #ef4444; }
+    .topo-node .name { color: #e2e8f0; font-size: 12px; font-weight: 500; }
+    .topo-node .ip { color: #64748b; font-size: 10px; font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+    .topo-tooltip {
+      position: absolute;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 12px 16px;
+      z-index: 20;
+      min-width: 180px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    .topo-tooltip .tt-title { color: #f8fafc; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+    .topo-tooltip .tt-row { color: #94a3b8; font-size: 12px; padding: 2px 0; display: flex; justify-content: space-between; }
+    .topo-tooltip .tt-row span:last-child { color: #e2e8f0; font-family: 'JetBrains Mono', monospace; }
+    .topo-tooltip::before {
+      content: '';
+      position: absolute;
+      top: -6px; left: 20px;
+      width: 12px; height: 12px;
+      background: #1e293b;
+      border-left: 1px solid #334155;
+      border-top: 1px solid #334155;
+      transform: rotate(45deg);
+    }
+    .topo-legend {
+      position: absolute;
+      bottom: 20px; left: 20px;
+      background: rgba(15,23,42,0.8);
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 12px 16px;
+      z-index: 10;
+    }
+    .topo-legend-title { color: #94a3b8; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .topo-legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #cbd5e1; margin-bottom: 4px; }
+    .topo-legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .topo-legend-line { width: 20px; height: 2px; border-radius: 1px; }
+    .topo-stats {
+      position: absolute;
+      top: 20px; right: 20px;
+      display: flex; flex-direction: column;
+      gap: 8px;
+      z-index: 10;
+    }
+    .topo-stat-card {
+      background: rgba(15,23,42,0.8);
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 10px 16px;
+      text-align: right;
+    }
+    .topo-stat-card .ts-value { font-size: 20px; font-weight: 700; color: #f8fafc; }
+    .topo-stat-card .ts-label { font-size: 11px; color: #64748b; }
+    /* Actions column */
+    .action-group { display: flex; gap: 4px; }
+    /* Filter highlight */
+    .filter-highlight {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #1e40af;
+    }
+    .filter-highlight .remove {
+      cursor: pointer;
+      font-weight: bold;
+      margin-left: 4px;
+    }
+    /* Status dot inline */
+    .status-inline {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .status-inline .dot-sm {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+    }
+    .status-inline .dot-sm.green { background: #22c55e; }
+    .status-inline .dot-sm.yellow { background: #eab308; }
+    .status-inline .dot-sm.red { background: #ef4444; }
+    /* Section header with icon */
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .section-header .sh-icon {
+      width: 32px; height: 32px;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+    }
+    .section-header h2 { font-size: 16px; font-weight: 600; color: #1f2937; }
+    .section-header .sh-desc { font-size: 13px; color: #6b7280; margin-left: auto; }
+  </style>
+</head>
+<body>
+
+<!-- ========== SIDEBAR ========== -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="logo">A</div>
+    <h1>Aria SD-WAN</h1>
+    <span class="pro-badge">PRO</span>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-group-title">Overview</div>
+    <a class="nav-item" href="#"><span class="icon">&#9776;</span> Dashboard</a>
+    <a class="nav-item" href="#"><span class="icon">&#9881;</span> Nodes</a>
+
+    <div class="nav-group-title">Connectivity</div>
+    <a class="nav-item active" href="#"><span class="icon">&#128279;</span> Routing</a>
+    <a class="nav-item" href="#"><span class="icon">&#128737;</span> VPN Topology</a>
+
+    <div class="nav-group-title">Policy</div>
+    <a class="nav-item" href="#"><span class="icon">&#128196;</span> Policy Center</a>
+    <a class="nav-item" href="#"><span class="icon">&#128253;</span> ACL Rules</a>
+    <a class="nav-item" href="#"><span class="icon">&#9889;</span> Bandwidth (QoS)</a>
+
+    <div class="nav-group-title">Observability</div>
+    <a class="nav-item" href="#"><span class="icon">&#128200;</span> Monitoring</a>
+    <a class="nav-item" href="#"><span class="icon">&#128172;</span> Logs &amp; Events</a>
+    <a class="nav-item" href="#"><span class="icon">&#129302;</span> AI Diagnostics</a>
+
+    <div class="nav-group-title">System</div>
+    <a class="nav-item" href="#"><span class="icon">&#128101;</span> Users &amp; Roles</a>
+    <a class="nav-item" href="#"><span class="icon">&#9881;</span> Settings</a>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="status-indicator">
+      <span class="status-dot"></span>
+      <span>Controller Online</span>
+      <span style="margin-left:auto; font-family:monospace; font-size:11px; color:#64748b;">v0.4.0</span>
+    </div>
+  </div>
+</aside>
+
+<!-- ========== MAIN CONTENT ========== -->
+<main class="main">
+
+  <!-- Top Header -->
+  <header class="top-header">
+    <span class="page-title">Connectivity</span>
+    <div class="header-actions">
+      <span class="version-badge">v0.4.0-RC1</span>
+      <select class="tenant-selector">
+        <option>Tenant: Default</option>
+      </select>
+      <button class="lang-toggle">EN / 中文</button>
+      <span class="header-btn">&#128276;</span>
+      <span class="header-btn">&#9881;</span>
+      <div class="user-avatar">AD</div>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <div class="content">
+
+    <!-- Content Tabs -->
+    <div class="content-tabs">
+      <div class="content-tab active" onclick="showTab('routing')">Routing Management</div>
+      <div class="content-tab" onclick="showTab('vpn')">VPN Topology</div>
+    </div>
+
+    <!-- ==================== TAB 1: Routing Management ==================== -->
+    <div id="tab-routing" class="tab-content active">
+
+      <!-- Section Header -->
+      <div class="section-header">
+        <div class="sh-icon" style="background:#eff6ff;color:#3b82f6;">&#128279;</div>
+        <h2>Routing Management</h2>
+        <span class="sh-desc">Manage advertised routes across all nodes</span>
+      </div>
+
+      <!-- Filter Bar -->
+      <div class="card">
+        <div class="filter-bar">
+          <select>
+            <option>All Nodes</option>
+            <option>gateway-us-01</option>
+            <option>node-eu-01</option>
+            <option>relay-ap-01</option>
+            <option>edge-us-02</option>
+            <option>hub-eu-02</option>
+          </select>
+          <input type="text" class="search-input" placeholder="Search by CIDR, IP, region...">
+          <select>
+            <option>All Actions</option>
+            <option>Add</option>
+            <option>Remove</option>
+          </select>
+          <select>
+            <option>All Status</option>
+            <option>Delivered</option>
+            <option>Pending</option>
+            <option>Failed</option>
+          </select>
+          <button class="btn btn-outline btn-sm">&#8635; Reset</button>
+          <button class="btn btn-primary btn-sm" onclick="document.getElementById('add-route-dialog').style.display='flex'">+ Add Route</button>
+        </div>
+      </div>
+
+      <!-- Routing Table -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Advertised Routes</span>
+          <span style="font-size:13px;color:#6b7280;">Showing 4 of 47 routes</span>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Node Name</th>
+                <th>Public IP</th>
+                <th>Region</th>
+                <th>CIDR</th>
+                <th>Delivery Status</th>
+                <th>Pending Cmds</th>
+                <th>Recent Cmd</th>
+                <th>Error Reason</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>gateway-us-01</strong></td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">203.0.113.10</td>
+                <td><span class="tag tag-info">us-east</span></td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">10.0.1.0/24</td>
+                <td>
+                  <span class="status-inline">
+                    <span class="dot-sm green"></span>
+                    <span class="tag tag-success">Delivered</span>
+                  </span>
+                </td>
+                <td style="text-align:center;">0</td>
+                <td><span class="tag tag-gray">sync</span></td>
+                <td style="color:#9ca3af;">-</td>
+                <td>
+                  <div class="action-group">
+                    <button class="btn-text btn-sm">Edit</button>
+                    <button class="btn-text danger btn-sm">Delete</button>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td><strong>gateway-us-01</strong></td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">203.0.113.10</td>
+                <td><span class="tag tag-info">us-east</span></td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">172.16.0.0/16</td>
+                <td>
+                  <span class="status-inline">
+                    <span class="dot-sm green"></span>
+                    <span class="tag tag-success">Delivered</span>
+                  </span>
+                </td>
+                <td style="text-align:center;">0</td>
+                <td><span class="tag tag-gray">sync</span></td>
+                <td style="color:#9ca3af;">-</td>
+                <td>
+                  <div class="action-group">
+                    <button class="btn-text btn-sm">Edit</button>
+                    <button class="btn-text danger btn-sm">Delete</button>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td><strong>node-eu-01</strong></td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">198.51.100.20</td>
+                <td><span class="tag tag-purple">eu-west</span></td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">10.0.2.0/24</td>
+                <td>
+                  <span class="status-inline">
+                    <span class="dot-sm yellow"></span>
+                    <span class="tag tag-warning">Pending</span>
+                  </span>
+                </td>
+                <td style="text-align:center;">1</td>
+                <td style="color:#9ca3af;">-</td>
+                <td style="color:#9ca3af;">-</td>
+                <td>
+                  <div class="action-group">
+                    <button class="btn-text btn-sm">Edit</button>
+                    <button class="btn-text danger btn-sm">Delete</button>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td><strong>relay-ap-01</strong></td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">192.0.2.30</td>
+                <td><span class="tag" style="background:#fef3c7;color:#92400e;">ap-south</span></td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">10.0.3.0/24</td>
+                <td>
+                  <span class="status-inline">
+                    <span class="dot-sm red"></span>
+                    <span class="tag tag-danger">Failed</span>
+                  </span>
+                </td>
+                <td style="text-align:center;">0</td>
+                <td><span class="tag tag-gray">sync</span></td>
+                <td style="color:#ef4444;font-size:12px;">node unreachable</td>
+                <td>
+                  <div class="action-group">
+                    <button class="btn-text btn-sm">Edit</button>
+                    <button class="btn-text danger btn-sm">Delete</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Add Route Dialog (inline mockup) -->
+      <div id="add-route-dialog" class="card" style="border: 2px dashed #3b82f6; background: #f8faff;">
+        <div class="dialog-title">Add Route Dialog</div>
+        <p style="font-size:13px;color:#6b7280;margin-bottom:20px;">This dialog appears when clicking "+ Add Route". Shown inline for mockup purposes.</p>
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Target Node *</label>
+            <select class="form-select">
+              <option value="">Select a node...</option>
+              <option>gateway-us-01 (203.0.113.10)</option>
+              <option>node-eu-01 (198.51.100.20)</option>
+              <option>relay-ap-01 (192.0.2.30)</option>
+              <option>edge-us-02 (203.0.113.40)</option>
+              <option>hub-eu-02 (198.51.100.50)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">CIDR *</label>
+            <input type="text" class="form-input" placeholder="e.g. 10.0.4.0/24">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Priority</label>
+            <input type="number" class="form-input" placeholder="100" value="100">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description (optional)</label>
+            <input type="text" class="form-input" placeholder="Route description...">
+          </div>
+        </div>
+        <div class="dialog-footer" style="border-top:1px solid #e5e7eb;padding-top:16px;margin-top:8px;">
+          <button class="btn btn-outline" onclick="document.getElementById('add-route-dialog').style.display='none'">Cancel</button>
+          <button class="btn btn-primary">Submit Route</button>
+        </div>
+      </div>
+
+    </div>
+    <!-- END TAB 1 -->
+
+    <!-- ==================== TAB 2: VPN Topology ==================== -->
+    <div id="tab-vpn" class="tab-content">
+
+      <!-- Section Header -->
+      <div class="section-header">
+        <div class="sh-icon" style="background:#f0fdf4;color:#22c55e;">&#128737;</div>
+        <h2>VPN Topology</h2>
+        <span class="sh-desc">Real-time mesh network visualization</span>
+      </div>
+
+      <!-- Topology Stats -->
+      <div class="stats-row" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="stat-card">
+          <div class="stat-icon green">&#128994;</div>
+          <div class="label">Online Nodes</div>
+          <div class="value">4</div>
+          <div class="change up">of 5 total</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon blue">&#128279;</div>
+          <div class="label">Active Links</div>
+          <div class="value">6</div>
+          <div class="change up">mesh connections</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon green">&#128640;</div>
+          <div class="label">Avg Latency</div>
+          <div class="value">23ms</div>
+          <div class="change up">-5ms vs last hr</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon red">&#128308;</div>
+          <div class="label">Offline Nodes</div>
+          <div class="value">1</div>
+          <div class="change down">edge-us-02 down</div>
+        </div>
+      </div>
+
+      <!-- Topology Canvas -->
+      <div class="card" style="padding:0;overflow:hidden;">
+        <div class="topology-canvas">
+
+          <!-- Background grid lines -->
+          <div class="topo-grid-line h" style="top:20%"></div>
+          <div class="topo-grid-line h" style="top:40%"></div>
+          <div class="topo-grid-line h" style="top:60%"></div>
+          <div class="topo-grid-line h" style="top:80%"></div>
+          <div class="topo-grid-line v" style="left:20%"></div>
+          <div class="topo-grid-line v" style="left:40%"></div>
+          <div class="topo-grid-line v" style="left:60%"></div>
+          <div class="topo-grid-line v" style="left:80%"></div>
+
+          <!-- Connection Lines (SVG for accurate lines) -->
+          <svg style="position:absolute;inset:0;width:100%;height:100%;z-index:1;" xmlns="http://www.w3.org/2000/svg">
+            <!-- gateway-us-01 (50%,12%) to node-eu-01 (20%,40%) -->
+            <line x1="50%" y1="14%" x2="20%" y2="38%" stroke="#3b82f6" stroke-width="2" opacity="0.5"/>
+            <!-- gateway-us-01 to relay-ap-01 (80%,40%) -->
+            <line x1="50%" y1="14%" x2="80%" y2="38%" stroke="#3b82f6" stroke-width="2" opacity="0.5"/>
+            <!-- gateway-us-01 to hub-eu-02 (50%,75%) -->
+            <line x1="50%" y1="14%" x2="50%" y2="73%" stroke="#3b82f6" stroke-width="2" opacity="0.5"/>
+            <!-- node-eu-01 to hub-eu-02 -->
+            <line x1="20%" y1="42%" x2="50%" y2="73%" stroke="#3b82f6" stroke-width="2" opacity="0.5"/>
+            <!-- relay-ap-01 to hub-eu-02 -->
+            <line x1="80%" y1="42%" x2="50%" y2="73%" stroke="#3b82f6" stroke-width="2" opacity="0.5"/>
+            <!-- node-eu-01 to relay-ap-01 -->
+            <line x1="22%" y1="40%" x2="78%" y2="40%" stroke="#3b82f6" stroke-width="2" opacity="0.5"/>
+            <!-- edge-us-02 (25%,78%) - offline dashed lines -->
+            <line x1="25%" y1="76%" x2="20%" y2="42%" stroke="#64748b" stroke-width="1" opacity="0.2" stroke-dasharray="6,4"/>
+            <line x1="27%" y1="78%" x2="50%" y2="75%" stroke="#64748b" stroke-width="1" opacity="0.2" stroke-dasharray="6,4"/>
+          </svg>
+
+          <!-- Node: gateway-us-01 (top center, online) -->
+          <div class="topo-node" style="left:calc(50% - 60px); top:5%;">
+            <div class="dot online">G</div>
+            <div class="name">gateway-us-01</div>
+            <div class="ip">100.64.0.1</div>
+          </div>
+
+          <!-- Node: node-eu-01 (left, online) -->
+          <div class="topo-node" style="left:calc(14% - 30px); top:32%;">
+            <div class="dot online">N</div>
+            <div class="name">node-eu-01</div>
+            <div class="ip">100.64.0.2</div>
+          </div>
+
+          <!-- Node: relay-ap-01 (right, online) -->
+          <div class="topo-node" style="left:calc(74%); top:32%;">
+            <div class="dot online">R</div>
+            <div class="name">relay-ap-01</div>
+            <div class="ip">100.64.0.3</div>
+          </div>
+
+          <!-- Node: edge-us-02 (bottom left, offline) -->
+          <div class="topo-node" style="left:calc(19% - 30px); top:70%;">
+            <div class="dot offline">E</div>
+            <div class="name">edge-us-02</div>
+            <div class="ip" style="color:#ef4444;">100.64.0.4</div>
+          </div>
+
+          <!-- Node: hub-eu-02 (bottom center, online) -->
+          <div class="topo-node" style="left:calc(44%); top:68%;">
+            <div class="dot online">H</div>
+            <div class="name">hub-eu-02</div>
+            <div class="ip">100.64.0.5</div>
+          </div>
+
+          <!-- Tooltip Example (positioned near gateway-us-01) -->
+          <div class="topo-tooltip" style="left:calc(50% + 70px); top:2%;">
+            <div class="tt-title">gateway-us-01</div>
+            <div class="tt-row"><span>WireGuard IP</span><span>100.64.0.1</span></div>
+            <div class="tt-row"><span>Region</span><span>us-east</span></div>
+            <div class="tt-row"><span>Peers</span><span>3</span></div>
+            <div class="tt-row"><span>Status</span><span style="color:#22c55e;">Online</span></div>
+            <div class="tt-row"><span>Uptime</span><span>14d 6h 32m</span></div>
+          </div>
+
+          <!-- Legend -->
+          <div class="topo-legend">
+            <div class="topo-legend-title">Legend</div>
+            <div class="topo-legend-item">
+              <span class="topo-legend-dot" style="background:#22c55e;"></span> Online
+            </div>
+            <div class="topo-legend-item">
+              <span class="topo-legend-dot" style="background:#ef4444;"></span> Offline
+            </div>
+            <div class="topo-legend-item">
+              <span class="topo-legend-line" style="background:linear-gradient(90deg,#3b82f6,#8b5cf6);"></span> Active Link
+            </div>
+            <div class="topo-legend-item">
+              <span class="topo-legend-line" style="background:#64748b;opacity:0.4;"></span> Inactive Link
+            </div>
+          </div>
+
+          <!-- Stats overlay -->
+          <div class="topo-stats">
+            <div class="topo-stat-card">
+              <div class="ts-value">23<small style="font-size:12px;color:#64748b;">ms</small></div>
+              <div class="ts-label">Avg Latency</div>
+            </div>
+            <div class="topo-stat-card">
+              <div class="ts-value" style="color:#22c55e;">4/5</div>
+              <div class="ts-label">Nodes Online</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Node Details Table -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Node Details</span>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Node</th>
+                <th>WireGuard IP</th>
+                <th>Public IP</th>
+                <th>Region</th>
+                <th>Status</th>
+                <th>Peers</th>
+                <th>Latency</th>
+                <th>Uptime</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>gateway-us-01</strong></td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">100.64.0.1</td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">203.0.113.10</td>
+                <td><span class="tag tag-info">us-east</span></td>
+                <td><span class="tag tag-success">Online</span></td>
+                <td>3</td>
+                <td>18ms</td>
+                <td>14d 6h</td>
+              </tr>
+              <tr>
+                <td><strong>node-eu-01</strong></td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">100.64.0.2</td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">198.51.100.20</td>
+                <td><span class="tag tag-purple">eu-west</span></td>
+                <td><span class="tag tag-success">Online</span></td>
+                <td>3</td>
+                <td>32ms</td>
+                <td>7d 12h</td>
+              </tr>
+              <tr>
+                <td><strong>relay-ap-01</strong></td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">100.64.0.3</td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">192.0.2.30</td>
+                <td><span class="tag tag-warning">ap-south</span></td>
+                <td><span class="tag tag-success">Online</span></td>
+                <td>3</td>
+                <td>45ms</td>
+                <td>3d 1h</td>
+              </tr>
+              <tr>
+                <td><strong>edge-us-02</strong></td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#9ca3af;">100.64.0.4</td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">203.0.113.40</td>
+                <td><span class="tag tag-info">us-west</span></td>
+                <td><span class="tag tag-danger">Offline</span></td>
+                <td>0</td>
+                <td style="color:#9ca3af;">-</td>
+                <td style="color:#ef4444;">Down 2h 15m</td>
+              </tr>
+              <tr>
+                <td><strong>hub-eu-02</strong></td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">100.64.0.5</td>
+                <td style="font-family:'JetBrains Mono',monospace;font-size:13px;">198.51.100.50</td>
+                <td><span class="tag tag-purple">eu-central</span></td>
+                <td><span class="tag tag-success">Online</span></td>
+                <td>3</td>
+                <td>28ms</td>
+                <td>21d 0h</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+    <!-- END TAB 2 -->
+
+    <div class="page-note">
+      <strong>Mockup Note:</strong> This is a static HTML mockup for the Aria SD-WAN Connectivity page. Both tabs (Routing Management and VPN Topology) are shown side-by-side in development. Click the tabs at the top to switch views. The "Add Route" dialog is displayed inline for review purposes; in production it would appear as a modal overlay.
+    </div>
+
+  </div>
+</main>
+
+<script>
+  function showTab(tab) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.content-tab').forEach(el => el.classList.remove('active'));
+    document.getElementById('tab-' + tab).classList.add('active');
+    const tabs = document.querySelectorAll('.content-tab');
+    if (tab === 'routing') tabs[0].classList.add('active');
+    if (tab === 'vpn') tabs[1].classList.add('active');
+  }
+</script>
+
+</body>
+</html>
