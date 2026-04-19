@@ -83,6 +83,31 @@ export const useQosApi = {
     }
   },
 
+  updateQoSRule: async (nodeId, category, ruleId, rule) => {
+    try {
+      const tenantId = requireCurrentTenantId()
+      const payload = {
+        src_cidr: rule.src_cidr || '',
+        dst_cidr: rule.dst_cidr || '',
+        src_port: Number(rule.src_port || 0),
+        dst_port: Number(rule.dst_port || 0),
+        protocol: Number(rule.protocol || 0),
+        bandwidth_mbps: Number(rule.bandwidth_mbps || rule.bandwidth || 0),
+        description: rule.description || '',
+        enabled: rule.enabled !== false
+      }
+
+      const response = await api.put(
+        API_ENDPOINTS.TENANT.NODE_QOS_RULE(tenantId, nodeId, category, ruleId),
+        payload
+      )
+      return response.data?.data || response.data
+    } catch (error) {
+      console.error('更新 QoS 规则失败:', error)
+      throw error
+    }
+  },
+
   // 辅助转换函数
   getProtocolName: (p) => {
     const map = { 6: 'TCP', 17: 'UDP', 1: 'ICMP', 0: 'Any' }

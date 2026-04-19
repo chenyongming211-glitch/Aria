@@ -44,6 +44,12 @@ func (r *Router) handleTenantNodeACLs(w http.ResponseWriter, req *http.Request, 
 		r.listTenantNodeACLs(w, tenantID, node.ID)
 	case http.MethodPost:
 		r.createTenantNodeACL(w, req, tenantID, node.ID)
+	case http.MethodPut:
+		if ruleIDStr == "" {
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Rule ID is required for update", nil)
+			return
+		}
+		r.updateTenantNodeACL(w, req, tenantID, node.ID, ruleIDStr)
 	case http.MethodDelete:
 		if ruleIDStr == "" {
 			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Rule ID is required for deletion", nil)
@@ -123,6 +129,75 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 	}
 
 	apibase.WriteSuccess(w, created, "ACL rule created successfully")
+}
+
+func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, tenantID, nodeID uuid.UUID, ruleIDStr string) {
+	ruleID, err := uuid.Parse(ruleIDStr)
+	if err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid rule ID format", nil)
+		return
+	}
+
+	var body struct {
+		Action      string `json:"action"`
+		SrcCIDR     string `json:"src_cidr"`
+		DstCIDR     string `json:"dst_cidr"`
+		SrcNet      string `json:"src_net"`
+		DstNet      string `json:"dst_net"`
+		DstPort     int    `json:"dst_port"`
+		MaxPort     int    `json:"max_port"`
+		Protocol    int    `json:"protocol"`
+		Priority    int    `json:"priority"`
+		Description string `json:"description"`
+		Enabled     *bool  `json:"enabled"`
+	}
+
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
+		return
+	}
+
+	src := body.SrcCIDR
+	if src == "" {
+		src = body.SrcNet
+	}
+	dst := body.DstCIDR
+	if dst == "" {
+		dst = body.DstNet
+	}
+	port := body.DstPort
+	if port == 0 {
+		port = body.MaxPort
+	}
+
+	if body.Action != "" && body.Action != "allow" && body.Action != "deny" {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Action must be 'allow' or 'deny'", nil)
+		return
+	}
+
+	rule := &controllerstorage.ACLRuleRecord{
+		TenantID:    tenantID,
+		NodeID:      nodeID,
+		Action:      body.Action,
+		SrcCIDR:     src,
+		DstCIDR:     dst,
+		DstPort:     port,
+		Protocol:    body.Protocol,
+		Priority:    body.Priority,
+		Description: body.Description,
+		Enabled:     true,
+	}
+	if body.Enabled != nil {
+		rule.Enabled = *body.Enabled
+	}
+
+	updated, err := r.store.UpdateTenantNodeACLRule(tenantID, nodeID, ruleID, rule)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to update ACL rule: "+err.Error(), nil)
+		return
+	}
+
+	apibase.WriteSuccess(w, updated, "ACL rule updated successfully")
 }
 
 func (r *Router) deleteTenantNodeACL(w http.ResponseWriter, tenantID, nodeID uuid.UUID, ruleIDStr string) {
@@ -265,6 +340,12 @@ func (r *Router) handleTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		r.listTenantNodeQoS(w, tenantID, node.ID, category)
 	case http.MethodPost:
 		r.createTenantNodeQoS(w, req, tenantID, node.ID, category)
+	case http.MethodPut:
+		if ruleIDStr == "" {
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Rule ID is required for update", nil)
+			return
+		}
+		r.updateTenantNodeQoS(w, req, tenantID, node.ID, category, ruleIDStr)
 	case http.MethodDelete:
 		if ruleIDStr == "" {
 			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Rule ID is required for deletion", nil)
@@ -322,6 +403,55 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	}
 
 	apibase.WriteSuccess(w, created, "QoS rule created successfully")
+}
+
+func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, tenantID, nodeID uuid.UUID, category, ruleIDStr string) {
+	ruleID, err := uuid.Parse(ruleIDStr)
+	if err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid rule ID format", nil)
+		return
+	}
+
+	var body struct {
+		SrcCIDR       string `json:"src_cidr"`
+		DstCIDR       string `json:"dst_cidr"`
+		SrcPort       int    `json:"src_port"`
+		DstPort       int    `json:"dst_port"`
+		Protocol      int    `json:"protocol"`
+		BandwidthMbps int    `json:"bandwidth_mbps"`
+		Description   string `json:"description"`
+		Enabled       *bool  `json:"enabled"`
+	}
+
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
+		return
+	}
+
+	rule := &controllerstorage.QoSRuleRecord{
+		TenantID:      tenantID,
+		NodeID:        nodeID,
+		Category:      category,
+		SrcCIDR:       body.SrcCIDR,
+		DstCIDR:       body.DstCIDR,
+		SrcPort:       body.SrcPort,
+		DstPort:       body.DstPort,
+		Protocol:      body.Protocol,
+		BandwidthMbps: body.BandwidthMbps,
+		Description:   body.Description,
+		Enabled:       true,
+	}
+	if body.Enabled != nil {
+		rule.Enabled = *body.Enabled
+	}
+
+	updated, err := r.store.UpdateTenantNodeQoSRule(tenantID, nodeID, ruleID, category, rule)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to update QoS rule: "+err.Error(), nil)
+		return
+	}
+
+	apibase.WriteSuccess(w, updated, "QoS rule updated successfully")
 }
 
 func (r *Router) deleteTenantNodeQoS(w http.ResponseWriter, tenantID uuid.UUID, node *controllerstorage.Node, category, ruleIDStr string) {

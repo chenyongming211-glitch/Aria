@@ -80,10 +80,13 @@ export const API_ENDPOINTS = {
     FORCE_CHANGE_PASSWORD: '/v2/auth/force-change-password'
   },
 
-  // 用户相关 (v2 规划中，目前集成在 tenant-scoped handlers)
-  USER: {
-    PROFILE: '/v2/user/profile',
-    SETTINGS: '/v2/user/settings'
+  // 系统设置 API
+  SETTINGS: {
+    BACKUPS: '/v2/settings/backups',
+    BACKUP_UPLOAD: '/v2/settings/backups/upload',
+    BACKUP_DETAIL: (id) => `/v2/settings/backups/${id}`,
+    BACKUP_DOWNLOAD: (id) => `/v2/settings/backups/${id}/download`,
+    BACKUP_RESTORE: (id) => `/v2/settings/backups/${id}/restore`
   },
 
   // 租户管理 API

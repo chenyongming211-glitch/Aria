@@ -158,6 +158,40 @@ func (s *Storage) DeleteTenantNodeQoSRule(tenantID, nodeID uuid.UUID, category s
 	return nil
 }
 
+func (s *Storage) UpdateTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, category string, rule *QoSRuleRecord) (*QoSRuleRecord, error) {
+	result, err := s.db.Exec(
+		`UPDATE qos_rules SET
+			src_cidr = NULLIF($5, ''), dst_cidr = NULLIF($6, ''),
+			src_port = $7, dst_port = $8, protocol = $9,
+			bandwidth_mbps = $10, description = $11,
+			enabled = $12, updated_at = NOW()
+		 WHERE id = $1 AND tenant_id = $2 AND node_id = $3 AND category = $4`,
+		ruleID, tenantID, nodeID, category,
+		rule.SrcCIDR, rule.DstCIDR,
+		rule.SrcPort, rule.DstPort, rule.Protocol,
+		rule.BandwidthMbps, rule.Description, rule.Enabled,
+	)
+	if err != nil {
+		return nil, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if rowsAffected == 0 {
+		return nil, sql.ErrNoRows
+	}
+
+	_ = s.bumpNodeDesiredVersion(tenantID, nodeID)
+
+	rule.ID = ruleID
+	rule.TenantID = tenantID
+	rule.NodeID = nodeID
+	rule.Category = category
+	rule.UpdatedAt = time.Now()
+	return rule, nil
+}
+
 // ACL Methods
 
 func (s *Storage) ListTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRuleRecord, error) {
@@ -234,6 +268,38 @@ func (s *Storage) DeleteTenantNodeACLRuleByID(tenantID, nodeID uuid.UUID, ruleID
 
 	_ = s.bumpNodeDesiredVersion(tenantID, nodeID)
 	return nil
+}
+
+func (s *Storage) UpdateTenantNodeACLRule(tenantID, nodeID, ruleID uuid.UUID, rule *ACLRuleRecord) (*ACLRuleRecord, error) {
+	result, err := s.db.Exec(
+		`UPDATE acl_rules SET
+			action = $4, src_cidr = NULLIF($5, ''), dst_cidr = NULLIF($6, ''),
+			dst_port = $7, protocol = $8, priority = $9, description = $10,
+			enabled = $11, updated_at = NOW()
+		 WHERE id = $1 AND tenant_id = $2 AND node_id = $3`,
+		ruleID, tenantID, nodeID,
+		rule.Action, rule.SrcCIDR, rule.DstCIDR,
+		rule.DstPort, rule.Protocol, rule.Priority,
+		rule.Description, rule.Enabled,
+	)
+	if err != nil {
+		return nil, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if rowsAffected == 0 {
+		return nil, sql.ErrNoRows
+	}
+
+	_ = s.bumpNodeDesiredVersion(tenantID, nodeID)
+
+	rule.ID = ruleID
+	rule.TenantID = tenantID
+	rule.NodeID = nodeID
+	rule.UpdatedAt = time.Now()
+	return rule, nil
 }
 
 func (s *Storage) ListTenantNodeBlacklistRules(tenantID, nodeID uuid.UUID, scope string) ([]*BlacklistRuleRecord, error) {

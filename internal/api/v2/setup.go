@@ -52,6 +52,7 @@ func SetupRoutes(mux *http.ServeMux, store *controllerstorage.Storage, vmClient 
 	withJWT := middleware.JWTAuthMiddleware
 	mux.HandleFunc("/api/v2/tenants", withJWT(router.HandleTenants))
 	mux.HandleFunc("/api/v2/tenants/", withJWT(router.HandleTenantScoped))
+	mux.HandleFunc("/api/v2/settings/", withJWT(router.HandleSettings))
 }
 
 func (r *Router) HandleTenants(w http.ResponseWriter, req *http.Request) {

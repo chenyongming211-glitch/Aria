@@ -135,9 +135,8 @@ export const useAclApi = {
         throw new Error('node_id is required for ACL rule update')
       }
 
-      await api.delete(API_ENDPOINTS.TENANT.NODE_ACL(tenantId, nodeId, ruleId))
-      const response = await api.post(
-        API_ENDPOINTS.TENANT.NODE_ACLS(tenantId, nodeId),
+      const response = await api.put(
+        API_ENDPOINTS.TENANT.NODE_ACL(tenantId, nodeId, ruleId),
         normalizeRulePayload({ ...mapping?.rule, ...rule, node_id: nodeId })
       )
       return response.data?.data || response.data

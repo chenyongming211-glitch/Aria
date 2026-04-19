@@ -308,7 +308,7 @@ const backupHistory = ref([
   { id: 3, filename: 'aria-config-backup-20240113-0900.json', size: '2.2 MB', createdAt: '2024-01-13 09:00:18' }
 ])
 
-const uploadUrl = ref('/api/settings/upload-backup')
+const uploadUrl = ref('/api/v2/settings/backups/upload')
 const uploadHeaders = ref({
   'Authorization': `Bearer ${localStorage.getItem('aria_token')}`
 })
