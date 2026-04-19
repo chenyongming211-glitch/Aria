@@ -2,11 +2,9 @@ package cli
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -44,10 +42,10 @@ var controllerServeCmd = &cobra.Command{
 	Long: `Start the Aria Controller HTTP service.
 
 The controller provides:
-  - /register   - Agent registration endpoint
-  - /unregister - Agent unregistration endpoint
-  - /api/v2/auth/*    - Authentication APIs
-  - /api/v2/tenants/* - Tenant-scoped management APIs
+  - /api/v2/agents/register   - Agent registration endpoint
+  - /api/v2/agents/unregister - Agent unregistration endpoint
+  - /api/v2/auth/*            - Authentication APIs
+  - /api/v2/tenants/*         - Tenant-scoped management APIs
 
 Examples:
   aria controller serve
@@ -331,10 +329,10 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	// Initialize Bandwidth Management API with tenant awareness
 	// Set up HTTP handlers using a local mux (avoid polluting http.DefaultServeMux)
 	mux := http.NewServeMux()
-	// Southbound API (Agent 南向接口)
-	mux.HandleFunc("/register", controller.HandleRegister)
-	mux.HandleFunc("/unregister", controller.HandleUnregister)
-	mux.HandleFunc("/network/manage", controller.HandleNetworkManage)
+	// Southbound API (Agent 南向接口) — v2 路径
+	mux.HandleFunc("/api/v2/agents/register", controller.HandleRegister)
+	mux.HandleFunc("/api/v2/agents/unregister", controller.HandleUnregister)
+	mux.HandleFunc("/api/v2/agents/network", controller.HandleNetworkManage)
 	mux.HandleFunc("/api/version", handleVersion)
 
 	// Initialize API v2 skeleton
@@ -357,25 +355,21 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 		// DingTalk Integration
 		if cfg.DingTalk.Enabled {
 			controller.dingtalkHandler = im.NewDingTalkHandler(aiService, cfg.DingTalk.Webhook, cfg.DingTalk.Secret)
-			// 注册钉钉 Webhook（v2 新路径 + v1 兼容）
 			mux.HandleFunc("/api/v2/integrations/dingtalk/webhook", controller.dingtalkHandler.HandleWebhook)
-			mux.HandleFunc("/v1/im/dingtalk", controller.dingtalkHandler.HandleWebhook)
-			logger.Info("DingTalk integration enabled: /api/v2/integrations/dingtalk/webhook (legacy: /v1/im/dingtalk)")
+			logger.Info("DingTalk integration enabled: /api/v2/integrations/dingtalk/webhook")
 		}
 
 		// Feishu Integration
 		if cfg.Feishu.Enabled {
 			controller.feishuHandler = im.NewFeishuHandler(aiService, cfg.Feishu.AppID, cfg.Feishu.AppSecret, cfg.Feishu.EncryptKey, cfg.Feishu.VerifyToken)
-			// 注册飞书 Webhook（v2 新路径 + v1 兼容）
 			mux.HandleFunc("/api/v2/integrations/feishu/webhook", controller.feishuHandler.HandleWebhook)
-			mux.HandleFunc("/v1/im/feishu", controller.feishuHandler.HandleWebhook)
-			logger.Info("Feishu integration enabled: /api/v2/integrations/feishu/webhook (legacy: /v1/im/feishu)")
+			logger.Info("Feishu integration enabled: /api/v2/integrations/feishu/webhook")
 		}
 	}
 
 	listenAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	logger.Info("HTTP API listening on %s", listenAddr)
-	logger.Info("Southbound: POST /register, /unregister, /network/manage")
+	logger.Info("Southbound: /api/v2/agents/register, /unregister, /network")
 	logger.Info("Northbound: /api/v2/auth/*, /api/v2/tenants/*")
 	logger.Info("========================================")
 	logger.Info("Controller ready")
@@ -950,241 +944,6 @@ func handleVersion(w http.ResponseWriter, r *http.Request) {
 		"version": Version,
 	})
 }
-
-func (c *Controller) HandleListNodes(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// 从认证头获取token
-	authHeader := r.Header.Get("Authorization")
-	var tenantID uuid.UUID
-
-	if authHeader != "" {
-		// 解析token (格式: "Bearer token_value")
-		var token string
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			token = strings.TrimPrefix(authHeader, "Bearer ")
-		} else {
-			token = authHeader
-		}
-
-		// 从数据库获取租户ID
-		id, err := c.store.GetTenantIDByToken(token)
-		if err != nil {
-			c.logger.Warn("Failed to get tenant ID from token: %v", err)
-			// 使用匿名方式获取所有节点（向后兼容）
-			peers, err := c.store.GetAllNodes()
-			if err != nil {
-				c.logger.Error("Failed to get nodes: %v", err)
-				peers = []*controllerstorage.Node{}
-			}
-
-			nodeInfos := make([]NodeInfo, 0)
-			for _, peer := range peers {
-				role := peer.Role
-				if role == "" {
-					role = "spoke"
-				}
-				nodeInfos = append(nodeInfos, NodeInfo{
-					PublicKey:         peer.PublicKey,
-					Endpoint:          peer.Endpoint,
-					PrivateIP:         peer.PrivateIP,
-					PublicIP:          peer.PublicIP,
-					Region:            peer.Region,
-					VPCID:             peer.VPCID,
-					Hostname:          peer.Hostname,
-					LastSeen:          peer.LastSeen,
-					AssignedIP:        peer.AssignedIP,
-					Role:              role,
-					RuntimeMode:       peer.RuntimeMode,
-					KernelVersion:     peer.KernelVersion,
-					AdvertisedRoutes:  peer.AdvertisedRoutes,  // Site-to-Site VPN
-					EnrolledWithToken: peer.EnrolledWithToken, // Token used for registration
-				})
-			}
-
-			// Encode the map instead of the struct to include i18n
-			response := make([]map[string]interface{}, 0)
-			for _, nodeInfo := range nodeInfos {
-				nodeInfoMap := map[string]interface{}{
-					"public_key":          nodeInfo.PublicKey,
-					"endpoint":            nodeInfo.Endpoint,
-					"private_ip":          nodeInfo.PrivateIP,
-					"public_ip":           nodeInfo.PublicIP,
-					"region":              nodeInfo.Region,
-					"vpc_id":              nodeInfo.VPCID,
-					"hostname":            nodeInfo.Hostname,
-					"last_seen":           nodeInfo.LastSeen,
-					"assigned_ip":         nodeInfo.AssignedIP,
-					"role":                nodeInfo.Role,
-					"runtime_mode":        nodeInfo.RuntimeMode,
-					"kernel_version":      nodeInfo.KernelVersion,
-					"advertised_routes":   nodeInfo.AdvertisedRoutes,
-					"enrolled_with_token": nodeInfo.EnrolledWithToken,
-					"status":              nodeInfo.Status,
-					"i18n": map[string]interface{}{
-						"status": fmt.Sprintf("node.status.%s", nodeInfo.Status),
-						"role":   fmt.Sprintf("node.role.%s", nodeInfo.Role),
-					},
-				}
-				response = append(response, nodeInfoMap)
-			}
-
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-
-		tenantID = id
-	} else {
-		// 向后兼容：无认证头时返回所有节点
-		peers, err := c.store.GetAllNodes()
-		if err != nil {
-			c.logger.Error("Failed to get nodes: %v", err)
-			peers = []*controllerstorage.Node{}
-		}
-
-		nodeInfos := make([]map[string]interface{}, 0)
-		for _, peer := range peers {
-			role := peer.Role
-			if role == "" {
-				role = "spoke"
-			}
-
-			i18nStatus := peer.Status
-			if i18nStatus == "" {
-				i18nStatus = "online"
-			}
-
-			nodeInfoMap := map[string]interface{}{
-				"public_key":          peer.PublicKey,
-				"endpoint":            peer.Endpoint,
-				"private_ip":          peer.PrivateIP,
-				"public_ip":           peer.PublicIP,
-				"region":              peer.Region,
-				"vpc_id":              peer.VPCID,
-				"hostname":            peer.Hostname,
-				"last_seen":           peer.LastSeen,
-				"assigned_ip":         peer.AssignedIP,
-				"role":                role,
-				"runtime_mode":        peer.RuntimeMode,
-				"kernel_version":      peer.KernelVersion,
-				"advertised_routes":   peer.AdvertisedRoutes,  // Site-to-Site VPN
-				"enrolled_with_token": peer.EnrolledWithToken, // Token used for registration
-				"status":              peer.Status,
-				"i18n": map[string]interface{}{
-					"status": fmt.Sprintf("node.status.%s", i18nStatus),
-					"role":   fmt.Sprintf("node.role.%s", role),
-				},
-			}
-			nodeInfos = append(nodeInfos, nodeInfoMap)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(nodeInfos)
-		return
-	}
-
-	// 根据租户ID过滤节点
-	query := `SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1`
-	rows, err := c.store.DB().Query(query, tenantID)
-	if err != nil {
-		c.logger.Error("Failed to get nodes for tenant %s: %v", tenantID, err)
-		http.Error(w, "Failed to get nodes", http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	nodeInfos := make([]map[string]interface{}, 0)
-	for rows.Next() {
-		node, err := c.store.ScanNodeRows(rows)
-		if err != nil {
-			c.logger.Error("Failed to scan node: %v", err)
-			continue
-		}
-
-		role := node.Role
-		if role == "" {
-			role = "spoke"
-		}
-
-		i18nStatus := node.Status
-		if i18nStatus == "" {
-			i18nStatus = "online"
-		}
-
-		nodeInfoMap := map[string]interface{}{
-			"public_key":          node.PublicKey,
-			"endpoint":            node.Endpoint,
-			"private_ip":          node.PrivateIP,
-			"public_ip":           node.PublicIP,
-			"region":              node.Region,
-			"vpc_id":              node.VPCID,
-			"hostname":            node.Hostname,
-			"last_seen":           node.LastSeen,
-			"assigned_ip":         node.AssignedIP,
-			"role":                node.Role,
-			"runtime_mode":        node.RuntimeMode,
-			"kernel_version":      node.KernelVersion,
-			"advertised_routes":   node.AdvertisedRoutes,  // Site-to-Site VPN
-			"enrolled_with_token": node.EnrolledWithToken, // Token used for registration
-			"status":              node.Status,
-			"i18n": map[string]interface{}{
-				"status": fmt.Sprintf("node.status.%s", i18nStatus),
-				"role":   fmt.Sprintf("node.role.%s", role),
-			},
-		}
-		nodeInfos = append(nodeInfos, nodeInfoMap)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(nodeInfos)
-}
-
-func (c *Controller) HandleConfig(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		response := map[string]string{
-			"base_ip": c.store.GetBaseIP(),
-			"cidr":    c.store.GetCIDR(),
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var config struct {
-		BaseIP string `json:"base_ip"`
-		CIDR   string `json:"cidr"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	c.store.SetBaseIP(config.BaseIP)
-	c.store.SetCIDR(config.CIDR)
-
-	c.logger.Info("Network configuration updated: baseIP=%s, cidr=%s", config.BaseIP, config.CIDR)
-
-	if c.heartbeat != nil {
-		c.heartbeat.PublishConfigChange("default", "config_update", map[string]string{
-			"base_ip": config.BaseIP,
-			"cidr":    config.CIDR,
-		})
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
-}
-
 func (c *Controller) HandleUnregister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1230,245 +989,6 @@ func (c *Controller) HandleUnregister(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
-}
-
-// ========== Token Management Handlers ==========
-
-// CreateTokenRequest is the request payload for token creation
-type CreateTokenRequest struct {
-	Tag     string `json:"tag"`
-	MaxUses int    `json:"max_uses"`
-	TTL     string `json:"ttl"` // e.g., "1h", "24h", "7d"
-}
-
-func generateTokenID() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	return "tk_" + hex.EncodeToString(b)
-}
-
-func parseTTL(ttl string) time.Duration {
-	if ttl == "" {
-		return 24 * time.Hour
-	}
-
-	var multiplier time.Duration
-	var value int
-
-	if len(ttl) < 2 {
-		return 24 * time.Hour
-	}
-
-	unit := ttl[len(ttl)-1]
-	fmt.Sscanf(ttl[:len(ttl)-1], "%d", &value)
-
-	switch unit {
-	case 'h':
-		multiplier = time.Hour
-	case 'd':
-		multiplier = 24 * time.Hour
-	case 'm':
-		multiplier = time.Minute
-	default:
-		return 24 * time.Hour
-	}
-
-	return time.Duration(value) * multiplier
-}
-
-func (c *Controller) HandleTokens(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	switch r.Method {
-	case http.MethodGet:
-		// List all tokens
-		tokens, err := c.tokenStore.List("")
-		if err != nil {
-			c.logger.Error("Failed to list tokens: %v", err)
-			http.Error(w, "Failed to list tokens", http.StatusInternalServerError)
-			return
-		}
-
-		// Update status based on current state
-		for _, t := range tokens {
-			if t.Status == token.StatusActive {
-				if t.IsExpired() {
-					t.Status = token.StatusExpired
-				} else if t.UsedCount >= t.MaxUses && t.MaxUses > 0 {
-					t.Status = token.StatusExhausted
-				}
-			}
-		}
-
-		json.NewEncoder(w).Encode(tokens)
-
-	case http.MethodPost:
-		// Create new token
-		var req CreateTokenRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		maxUses := req.MaxUses
-		if maxUses <= 0 {
-			maxUses = 1
-		}
-
-		ttl := parseTTL(req.TTL)
-		tokenID := generateTokenID()
-
-		newToken := &token.Token{
-			Token:     tokenID,
-			Tag:       req.Tag,
-			MaxUses:   maxUses,
-			UsedCount: 0,
-			ExpiresAt: time.Now().Add(ttl),
-			CreatedAt: time.Now(),
-			Status:    token.StatusActive,
-		}
-
-		if err := c.tokenStore.Create(newToken); err != nil {
-			c.logger.Error("Failed to create token: %v", err)
-			http.Error(w, "Failed to create token", http.StatusInternalServerError)
-			return
-		}
-
-		c.logger.Info("Token created: %s (tag=%s, max_uses=%d, expires=%s)",
-			tokenID[:16], req.Tag, maxUses, newToken.ExpiresAt.Format(time.RFC3339))
-
-		json.NewEncoder(w).Encode(newToken)
-
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-func (c *Controller) HandleTokenRevoke(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		ID    string `json:"id"`
-		Token string `json:"token"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	var err error
-	if req.ID != "" {
-		err = c.tokenStore.RevokeByID(req.ID)
-		if err == nil {
-			c.logger.Info("Token revoked by ID: %s", req.ID)
-		}
-	} else if req.Token != "" {
-		err = c.tokenStore.Revoke(req.Token)
-		if err == nil {
-			c.logger.Info("Token revoked: %s", req.Token[:16])
-		}
-	} else {
-		http.Error(w, "id or token required", http.StatusBadRequest)
-		return
-	}
-
-	if err != nil {
-		c.logger.Error("Failed to revoke token: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
-}
-
-// TokenDetailResponse is the response for token detail API
-type TokenDetailResponse struct {
-	Token     string     `json:"token"`
-	Tag       string     `json:"tag"`
-	MaxUses   int        `json:"max_uses"`
-	UsedCount int        `json:"used_count"`
-	ExpiresAt time.Time  `json:"expires_at"`
-	CreatedAt time.Time  `json:"created_at"`
-	Status    string     `json:"status"`
-	Nodes     []NodeInfo `json:"nodes"` // Nodes that used this token
-}
-
-// HandleTokenDetail returns token details and nodes that used it
-func (c *Controller) HandleTokenDetail(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	tokenStr := r.URL.Query().Get("token")
-	if tokenStr == "" {
-		http.Error(w, "token parameter required", http.StatusBadRequest)
-		return
-	}
-
-	// Get token info
-	tkn, err := c.tokenStore.GetByToken(tokenStr)
-	if err != nil || tkn == nil {
-		http.Error(w, "Token not found", http.StatusNotFound)
-		return
-	}
-
-	// Update status based on current state
-	status := string(tkn.Status)
-	if tkn.Status == token.StatusActive {
-		if tkn.IsExpired() {
-			status = string(token.StatusExpired)
-		} else if tkn.UsedCount >= tkn.MaxUses && tkn.MaxUses > 0 {
-			status = string(token.StatusExhausted)
-		}
-	}
-
-	// Get all nodes that used this token
-	allNodes, err := c.store.GetAllNodes()
-	if err != nil {
-		c.logger.Error("Failed to get nodes: %v", err)
-		allNodes = []*controllerstorage.Node{}
-	}
-
-	var usedByNodes []NodeInfo
-	for _, node := range allNodes {
-		if node.EnrolledWithToken == tokenStr {
-			role := node.Role
-			if role == "" {
-				role = "spoke"
-			}
-			usedByNodes = append(usedByNodes, NodeInfo{
-				PublicKey:   node.PublicKey,
-				Hostname:    node.Hostname,
-				AssignedIP:  node.AssignedIP,
-				Region:      node.Region,
-				PublicIP:    node.PublicIP,
-				LastSeen:    node.LastSeen,
-				Status:      node.Status,
-				RuntimeMode: node.RuntimeMode,
-				Role:        role,
-			})
-		}
-	}
-
-	response := TokenDetailResponse{
-		Token:     tkn.Token,
-		Tag:       tkn.Tag,
-		MaxUses:   tkn.MaxUses,
-		UsedCount: tkn.UsedCount,
-		ExpiresAt: tkn.ExpiresAt,
-		CreatedAt: tkn.CreatedAt,
-		Status:    status,
-		Nodes:     usedByNodes,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
 }
 
 // HandleNetworkManage manages network routes for nodes (Controller-side only)

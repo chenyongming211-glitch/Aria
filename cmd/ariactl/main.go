@@ -161,7 +161,7 @@ func runNetworkAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	body, _ := json.Marshal(reqBody)
-	resp, err := http.Post(controllerURL+"/network/manage", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(controllerURL+"/api/v2/agents/network", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("failed to connect to controller: %w", err)
 	}
@@ -191,7 +191,7 @@ func runNetworkRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	body, _ := json.Marshal(reqBody)
-	resp, err := http.Post(controllerURL+"/network/manage", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(controllerURL+"/api/v2/agents/network", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("failed to connect to controller: %w", err)
 	}

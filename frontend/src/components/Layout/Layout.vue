@@ -244,6 +244,7 @@ const getPageTitle = computed(() => {
     BandwidthControl: t('nav.bandwidthControl'),
     Tokens: t('nav.tokenManagement'),
     TenantManagement: t('nav.tenantManagement'),
+    Roles: t('nav.roleManagement'),
     Monitoring: t('nav.monitoringCenter'),
     AiAssistant: t('nav.aiCopilot'),
     Settings: t('nav.settings')

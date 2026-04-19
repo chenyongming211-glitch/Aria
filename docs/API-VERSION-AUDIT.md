@@ -8,14 +8,12 @@
 
 | 方法 | 路径 | 用途 | 调用方 |
 |------|------|------|--------|
-| ANY | `/register` | Agent 注册 | Rust Agent |
-| ANY | `/unregister` | Agent 注销 | Rust Agent |
-| ANY | `/network/manage` | 网络路由管理 | Rust Agent |
+| ANY | `/api/v2/agents/register` | Agent 注册 | Rust Agent |
+| ANY | `/api/v2/agents/unregister` | Agent 注销 | Rust Agent |
+| ANY | `/api/v2/agents/network` | 网络路由管理 | ariactl CLI |
 | ANY | `/api/version` | 版本信息 | 前端 |
-| ANY | `/v1/im/dingtalk` | 钉钉 Webhook（旧路径，兼容） | 钉钉平台 |
-| ANY | `/v1/im/feishu` | 飞书 Webhook（旧路径，兼容） | 飞书平台 |
-| ANY | `/api/v2/integrations/dingtalk/webhook` | 钉钉 Webhook（新路径） | 钉钉平台 |
-| ANY | `/api/v2/integrations/feishu/webhook` | 飞书 Webhook（新路径） | 飞书平台 |
+| ANY | `/api/v2/integrations/dingtalk/webhook` | 钉钉 Webhook | 钉钉平台 |
+| ANY | `/api/v2/integrations/feishu/webhook` | 飞书 Webhook | 飞书平台 |
 
 ### 北向 v2 路由（v2/setup.go）
 
@@ -120,7 +118,7 @@
 | # | 问题 | 状态 |
 |---|------|------|
 | ~~1~~ | ~~`/version` 和 `/api/version` 重复注册~~ | ✅ 已移除 `/version` |
-| ~~2~~ | ~~IM webhook 在 `/v1/im/` 不在 `/api/v2/`~~ | ✅ 已注册新路径 `/api/v2/integrations/*`，保留旧路径兼容 |
+| ~~2~~ | ~~IM webhook 在 `/v1/im/` 不在 `/api/v2/`~~ | ✅ 已移除旧路径，仅保留 `/api/v2/integrations/*` |
 | ~~3~~ | ~~`api.js` 定义 `VERSION: '/version'` 但 `app.js` 硬编码 `/api/version`~~ | ✅ 已统一使用 `api.js` 常量 |
 
 ---

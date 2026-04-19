@@ -124,22 +124,10 @@ export const API_ENDPOINTS = {
     SYNC: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}/agent/sync`)
   },
 
-  // Controller 管理 API（Agent 注册）
-  CONTROLLER: {
-    REGISTER: '/register',
-    UNREGISTER: '/unregister',
-    CONFIG: '/config'
-  },
-
   // 带宽管理 API
   BANDWIDTH: {
     CATEGORY: (tenantId, nodeId, category) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos/${category}`),
     RULE: (tenantId, nodeId, category, ruleId) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos/${category}/${ruleId}`)
-  },
-
-  // 网络策略 API（旧版）
-  POLICIES: {
-    LIST: (tenantId) => buildTenantPath(tenantId, '/policies')
   },
 
   // 监控 API

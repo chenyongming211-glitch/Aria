@@ -1,5 +1,5 @@
 // src/composables/usePermission.js
-import { useUserStore } from '@/stores/user'
+import { useUserStore } from '@/stores'
 
 export function usePermission() {
   const userStore = useUserStore()
