@@ -8,6 +8,7 @@ export default defineStore('user', () => {
   const user = ref(null)
   const isAuthenticated = ref(false)
   const mustChangePassword = ref(false)
+  const permissions = ref([])
 
   const login = async (credentials) => {
     try {
@@ -46,6 +47,11 @@ export default defineStore('user', () => {
 
         // 存储用户会话
         localStorage.setItem('aria_user', JSON.stringify(user.value))
+
+        // 加载用户权限
+        if (userData?.tenant_id) {
+          loadPermissions(userData.tenant_id, userData.role)
+        }
 
         // 存储租户 ID 到 localStorage（用于 API 请求）
         if (userData?.tenant_id) {
@@ -109,6 +115,8 @@ export default defineStore('user', () => {
     localStorage.removeItem('aria_last_activity')
     localStorage.removeItem('aria_user')
     localStorage.removeItem('aria-current-tenant')
+    localStorage.removeItem('aria_permissions')
+    permissions.value = []
   }
 
   const loadSession = () => {
@@ -118,6 +126,11 @@ export default defineStore('user', () => {
     if (token && userData) {
       user.value = JSON.parse(userData)
       isAuthenticated.value = true
+      // 恢复缓存的权限
+      const cached = localStorage.getItem('aria_permissions')
+      if (cached) {
+        permissions.value = JSON.parse(cached)
+      }
     }
   }
 
@@ -129,6 +142,34 @@ export default defineStore('user', () => {
     } catch (error) {
       console.error('Load tenants error:', error)
       return []
+    }
+  }
+
+  // 加载用户权限（从角色查询）
+  const loadPermissions = async (tenantId, role) => {
+    if (role === 'super_admin') {
+      // super_admin 拥有所有权限
+      permissions.value = ['*']
+      return
+    }
+    try {
+      const roleId = tenantId || JSON.parse(localStorage.getItem('aria-current-tenant'))?.id
+      if (!roleId) return
+      const response = await api.get(API_ENDPOINTS.TENANT.ROLES(roleId))
+      const roles = response.data?.data || []
+      const roleName = role === 'member' || role === 'owner' ? 'operator' : role
+      const matchedRole = roles.find(r => r.name === roleName)
+      if (matchedRole) {
+        permissions.value = matchedRole.permissions || []
+        localStorage.setItem('aria_permissions', JSON.stringify(permissions.value))
+      }
+    } catch (error) {
+      console.error('Load permissions error:', error)
+      // 尝试从缓存加载
+      const cached = localStorage.getItem('aria_permissions')
+      if (cached) {
+        permissions.value = JSON.parse(cached)
+      }
     }
   }
 
@@ -152,11 +193,13 @@ export default defineStore('user', () => {
     user,
     isAuthenticated,
     mustChangePassword,
+    permissions,
     login,
     logout,
     changePassword,
     loadSession,
     loadTenants,
+    loadPermissions,
     refreshToken
   }
 })

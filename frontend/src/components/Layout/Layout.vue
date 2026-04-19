@@ -84,6 +84,10 @@
             <el-icon><User /></el-icon>
             <template #title>{{ t('nav.tenantManagement') }}</template>
           </el-menu-item>
+          <el-menu-item index="/platform/roles">
+            <el-icon><Lock /></el-icon>
+            <template #title>{{ t('nav.roleManagement') }}</template>
+          </el-menu-item>
           <el-menu-item index="/platform/settings">
             <el-icon><Setting /></el-icon>
             <template #title>{{ t('nav.settings') }}</template>

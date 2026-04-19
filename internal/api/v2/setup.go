@@ -121,6 +121,8 @@ func (r *Router) HandleTenantScoped(w http.ResponseWriter, req *http.Request) {
 		r.handleTenantUsers(w, req, tenantID, role)
 	case strings.HasPrefix(rest, "tokens"):
 		r.handleTenantTokens(w, req, tenantID, role)
+	case strings.HasPrefix(rest, "roles"):
+		r.handleTenantRoles(w, req, tenantID)
 	case strings.HasPrefix(rest, "nodes"):
 		r.handleTenantNodes(w, req, tenantID, role)
 	case strings.HasPrefix(rest, "agents"):
@@ -132,6 +134,25 @@ func (r *Router) HandleTenantScoped(w http.ResponseWriter, req *http.Request) {
 	default:
 		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Unknown endpoint", nil)
 	}
+}
+
+func (r *Router) handleTenantRoles(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
+	if !r.authorizeTenant(w, req, tenantID, true) {
+		return
+	}
+
+	parts := splitPath(req.URL.Path)
+	// /api/v2/tenants/{tid}/roles
+	// /api/v2/tenants/{tid}/roles/{rid}
+	if len(parts) >= 7 && parts[6] == "roles" {
+		if len(parts) >= 8 && parts[7] != "" {
+			r.handleRoleDetail(w, req, tenantID, parts[7])
+			return
+		}
+		r.handleRoles(w, req, tenantID, parts)
+		return
+	}
+	apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Unknown roles endpoint", nil)
 }
 
 func (r *Router) handleTenantPolicies(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {

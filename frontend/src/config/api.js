@@ -104,7 +104,9 @@ export const API_ENDPOINTS = {
     NODE_QOS: (tenantId, nodeId, category) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos/${category}`),
     NODE_QOS_RULE: (tenantId, nodeId, category, ruleId) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos/${category}/${ruleId}`),
     AI_CHAT: (tenantId) => buildTenantPath(tenantId, '/ai/chat'),
-    AI_CONFIRM: (tenantId) => buildTenantPath(tenantId, '/ai/confirm')
+    AI_CONFIRM: (tenantId) => buildTenantPath(tenantId, '/ai/confirm'),
+    ROLES: (tenantId) => buildTenantPath(tenantId, '/roles'),
+    ROLE_DETAIL: (tenantId, roleId) => buildTenantPath(tenantId, `/roles/${roleId}`)
   },
 
   // Agent 代理 API

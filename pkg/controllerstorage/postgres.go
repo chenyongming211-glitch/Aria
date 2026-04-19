@@ -104,6 +104,10 @@ func NewStorage(cfg *Config, baseIP, cidr string) (*Storage, error) {
 		return nil, fmt.Errorf("failed to run migrations: %v", err)
 	}
 
+	if err := s.EnsureAllTenantRoles(); err != nil {
+		log.Printf("WARN: failed to ensure tenant roles: %v", err)
+	}
+
 	return s, nil
 }
 
@@ -448,6 +452,18 @@ func (s *Storage) Migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_audit_events_tenant_node ON audit_events(tenant_id, node_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_events_type ON audit_events(event_type)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON audit_events(created_at)`,
+		`CREATE TABLE IF NOT EXISTS roles (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+			name VARCHAR(64) NOT NULL,
+			description TEXT DEFAULT '',
+			is_system BOOLEAN DEFAULT FALSE,
+			permissions TEXT[] NOT NULL DEFAULT '{}',
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			updated_at TIMESTAMPTZ DEFAULT NOW(),
+			UNIQUE(tenant_id, name)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_roles_tenant ON roles(tenant_id)`,
 	}
 
 	for i, migration := range migrations {

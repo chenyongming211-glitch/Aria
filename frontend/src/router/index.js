@@ -71,6 +71,12 @@ const routes = [
         meta: { title: 'Tenant Management', requiresAuth: true, section: 'platform' }
       },
       {
+        path: 'platform/roles',
+        name: 'Roles',
+        component: () => import('@/views/Roles.vue'),
+        meta: { title: 'Role Management', requiresAuth: true, section: 'platform' }
+      },
+      {
         path: 'monitoring',
         name: 'Monitoring',
         component: () => import('@/views/Monitoring.vue'),
