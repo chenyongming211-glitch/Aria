@@ -18,26 +18,35 @@ type AIService interface {
 	ExecuteTool(ctx context.Context, sessionID, toolName string, params map[string]any, confirmed bool) (map[string]any, error)
 }
 
+// aiServiceImpl 是具体实现
 type aiServiceImpl struct {
 	agent     *brain.Agent
 	history   sync.Map // chatID -> []brain.Message
 	maxTokens int      // 历史记录限制
 }
 
+// NewAIService 初始化 AI 服务（依赖注入的构造函数）
 func NewAIService(store *controllerstorage.Storage) AIService {
-	myAgent := brain.NewAgent("Aria Assistant")
-	myAgent.SetSystemPrompt(`你是一个 Aria SD-WAN 网络专家助手。你可以协助用户管理网络节点、配置防火墙规则、QoS策略和路由。`)
+	myAgent := brain.NewAgent()
 
 	// 注册工具
 	// 节点管理
 	myAgent.RegisterTool(tools.NewListNodesToolWithStore(store))
-	myAgent.RegisterTool(tools.NewGetNodeTool(store))
-	myAgent.RegisterTool(tools.NewUpdateNodeTool(store))
+	myAgent.RegisterTool(tools.NewGetNodeDetailTool(store))
+
+	// 网络配置
+	myAgent.RegisterTool(tools.NewGetNetworkConfigTool(store))
 
 	// 令牌管理
 	myAgent.RegisterTool(tools.NewListTokensTool(store))
+	myAgent.RegisterTool(tools.NewGetTokenDetailTool(store))
 	myAgent.RegisterTool(tools.NewCreateTokenTool(store))
-	myAgent.RegisterTool(tools.NewRevokeTokenTool(store))
+
+	// 路由管理
+	myAgent.RegisterTool(tools.NewAddRouteTool(store))
+	myAgent.RegisterTool(tools.NewRemoveRouteTool(store))
+	myAgent.RegisterTool(tools.NewGetNodeRoutesTool(store))
+	myAgent.RegisterTool(tools.NewListAllRoutesTool(store))
 
 	// 策略管理（ACL）
 	myAgent.RegisterTool(tools.NewListPoliciesTool(store))
@@ -50,14 +59,15 @@ func NewAIService(store *controllerstorage.Storage) AIService {
 
 	return &aiServiceImpl{
 		agent:     myAgent,
-		maxTokens: 20, // ✅ 修复 BUG-14：初始化最大上下文令牌数
+		maxTokens: 20,
 	}
 }
 
 func (s *aiServiceImpl) Chat(ctx context.Context, sessionID, prompt string) (string, error) {
-	return s.agent.Chat(ctx, prompt)
+	return s.agent.Think(ctx, prompt)
 }
 
+// ChatWithContext 带上下文的聊天（用于飞书等需要会话的场景）
 func (s *aiServiceImpl) ChatWithContext(ctx context.Context, chatID, prompt string) (string, error) {
 	// 获取历史记录
 	var history []brain.Message
@@ -66,7 +76,7 @@ func (s *aiServiceImpl) ChatWithContext(ctx context.Context, chatID, prompt stri
 	}
 
 	// 执行对话
-	answer, err := s.agent.ChatWithHistory(ctx, prompt, history)
+	answer, err := s.agent.ThinkWithHistory(ctx, prompt, history)
 	if err != nil {
 		return "", err
 	}

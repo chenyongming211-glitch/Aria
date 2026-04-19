@@ -502,7 +502,7 @@ impl UnifiedAgent {
                                 tracing::info!("Applied new sync interval after remote command: {:?}", self.config.sync_interval);
                             }
 
-                            if let Err(e) = envelope.response_tx.send(response) {
+                            if let Err(e) = envelope.reply_tx.send(response) {
 
                                 tracing::warn!("Remote command response receiver dropped");
                             }

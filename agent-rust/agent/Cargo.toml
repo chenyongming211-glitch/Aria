@@ -55,6 +55,7 @@ base64 = "0.22"
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 rand = "0.8"
 ipnetwork = "0.20"
+pnet = "0.35"
 
 # gRPC 客户端
 tonic = { version = "0.13", features = ["tls-aws-lc"] }

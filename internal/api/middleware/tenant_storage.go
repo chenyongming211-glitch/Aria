@@ -248,7 +248,7 @@ func (ts *TenantScopedStorage) SaveTenantACLRule(ctx context.Context, rule *cont
 		return fmt.Errorf("tenant ID not found in context")
 	}
 
-	if rule.ID == 0 {
+	if rule.ID == uuid.Nil {
 		query := `
 			INSERT INTO acl_rules (name, src_node, src_net, dst_node, dst_net, protocol, min_port, max_port, action, enabled, priority, description, tenant_id)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)

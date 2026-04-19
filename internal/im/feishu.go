@@ -267,7 +267,7 @@ func (h *FeishuHandler) processMessage(message, chatID string, w http.ResponseWr
 		reply, err = ctxProvider.ChatWithContext(ctx, chatID, message)
 	} else {
 		// 降级到无上下文模式
-		reply, err = h.aiService.Chat(ctx, message)
+		reply, err = h.aiService.Chat(ctx, "", message)
 	}
 	if err != nil {
 		fmt.Printf("[Feishu] AI 调用失败: %v\n", err)

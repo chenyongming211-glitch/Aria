@@ -106,7 +106,7 @@ func (h *DingTalkHandler) processMessage(message string, w http.ResponseWriter, 
 
 	// 调用 AI Service
 	ctx := r.Context()
-	reply, err := h.aiService.Chat(ctx, message)
+	reply, err := h.aiService.Chat(ctx, "", message)
 	if err != nil {
 		fmt.Printf("[DingTalk] AI 调用失败: %v\n", err)
 		reply = fmt.Sprintf("抱歉，处理您的请求时出错：%v", err)
