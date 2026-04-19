@@ -22,6 +22,8 @@ pub type GrpcCommandResponse = aria::CommandResponse;
 pub struct RegisterResult {
     pub assigned_ip: String,
     pub node_id: Option<String>,
+    pub runtime_token: Option<String>,
+    pub runtime_token_expires_at: Option<i64>,
 }
 
 /// 获取内核版本
@@ -179,17 +181,30 @@ impl GrpcClient {
         let mut client = ControllerServiceClient::new(self.channel.clone());
         let response = client.register(request).await?;
         let resp = response.into_inner();
-        
+
+        let runtime_token = if !resp.runtime_token.trim().is_empty() {
+            Some(resp.runtime_token)
+        } else {
+            None
+        };
+        let runtime_token_expires_at = if resp.runtime_token_expires_at > 0 {
+            Some(resp.runtime_token_expires_at)
+        } else {
+            None
+        };
+
         Ok(RegisterResult {
             assigned_ip: resp.assigned_ip,
             node_id: (!resp.node_id.trim().is_empty()).then_some(resp.node_id),
+            runtime_token,
+            runtime_token_expires_at,
         })
     }
     
     /// 从 Controller 同步配置（不带状态上报，向后兼容）
     #[allow(dead_code)]
-    pub async fn sync(&self, node_id: Option<String>, public_key: String) -> Result<SyncResult> {
-        self.sync_with_state(node_id, public_key, None, None, None).await
+    pub async fn sync(&self, node_id: Option<String>, public_key: String, runtime_token: Option<String>) -> Result<SyncResult> {
+        self.sync_with_state(node_id, public_key, None, None, None, runtime_token).await
     }
 
     pub async fn sync_with_state(
@@ -199,8 +214,9 @@ impl GrpcClient {
         applied_state_version: Option<String>,
         observed_state: Option<String>,
         observed_message: Option<String>,
+        runtime_token: Option<String>,
     ) -> Result<SyncResult> {
-        let request = tonic::Request::new(aria::SyncRequest {
+        let mut request = tonic::Request::new(aria::SyncRequest {
             public_key,
             node_id: node_id.unwrap_or_default(),
             applied_state_version: applied_state_version.unwrap_or_default(),
@@ -208,10 +224,26 @@ impl GrpcClient {
             observed_message: observed_message.unwrap_or_default(),
         });
 
+        if let Some(token) = &runtime_token {
+            let metadata = request.metadata_mut();
+            metadata.insert("authorization", format!("Bearer {}", token).parse().unwrap());
+        }
+
         let mut client = ControllerServiceClient::new(self.channel.clone());
         let response = client.sync(request).await?;
         let resp = response.into_inner();
-        
+
+        let new_runtime_token = if !resp.runtime_token.trim().is_empty() {
+            Some(resp.runtime_token)
+        } else {
+            None
+        };
+        let new_runtime_token_expires_at = if resp.runtime_token_expires_at > 0 {
+            Some(resp.runtime_token_expires_at)
+        } else {
+            None
+        };
+
         Ok(SyncResult {
             peers: resp.peers.into_iter().map(|p| PeerInfo {
                 public_key: p.public_key,
@@ -247,6 +279,8 @@ impl GrpcClient {
                 cidr: r.cidr,
                 port: r.port,
             }).collect(),
+            runtime_token: new_runtime_token,
+            runtime_token_expires_at: new_runtime_token_expires_at,
         })
     }
 
@@ -254,6 +288,7 @@ impl GrpcClient {
         &self,
         node_id: Option<String>,
         public_key: String,
+        runtime_token: Option<String>,
     ) -> Result<(mpsc::Sender<GrpcCommandResponse>, Streaming<GrpcCommandRequest>)> {
         let (tx, rx) = mpsc::channel(16);
 
@@ -280,7 +315,14 @@ impl GrpcClient {
 
         let request_stream = ReceiverStream::new(rx);
         let mut client = ControllerServiceClient::new(self.channel.clone());
-        let response = client.command_stream(request_stream).await?;
+
+        let mut request = tonic::Request::new(request_stream);
+        if let Some(token) = &runtime_token {
+            let metadata = request.metadata_mut();
+            metadata.insert("authorization", format!("Bearer {}", token).parse().unwrap());
+        }
+
+        let response = client.command_stream(request).await?;
 
         Ok((tx, response.into_inner()))
     }
@@ -334,6 +376,8 @@ pub struct SyncResult {
     pub acl_rules: Vec<AclRule>,
     pub qos_rules: Vec<QoSRule>,
     pub blacklist_rules: Vec<BlacklistRule>,
+    pub runtime_token: Option<String>,
+    pub runtime_token_expires_at: Option<i64>,
 }
 
 #[allow(dead_code)]

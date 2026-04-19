@@ -69,6 +69,8 @@ message RegisterResponse {
   string assigned_ip = 1;             // 分配的 VPN IP
   string metrics_push_gateway = 2;    // Prometheus Push Gateway URL
   string node_id = 3;                 // 平台侧稳定节点身份
+  string runtime_token = 4;           // 运行期短期凭据
+  int64 runtime_token_expires_at = 5; // 运行期凭据过期时间戳
 }
 
 // ============ 同步相关 ============
@@ -91,6 +93,8 @@ message SyncResponse {
   repeated QoSRule qos_rules = 6;            // QoS 限速规则
   repeated BlacklistRule blacklist_rules = 7; // 黑名单规则
   string desired_state_version = 8;          // Controller 当前期望配置版本
+  string runtime_token = 9;                  // 刷新后的运行期凭据
+  int64 runtime_token_expires_at = 10;       // 运行期凭据过期时间戳
 }
 
 message PeerInfo {

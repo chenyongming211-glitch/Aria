@@ -1,0 +1,160 @@
+package grpc
+
+import (
+	"context"
+	"strings"
+
+	"aria/internal/auth"
+	controllerstorage "aria/pkg/controllerstorage"
+
+	"github.com/google/uuid"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+)
+
+type contextKey string
+
+const (
+	RuntimeNodeIDKey   contextKey = "runtime_node_id"
+	RuntimeTenantIDKey contextKey = "runtime_tenant_id"
+)
+
+func GetRuntimeNodeID(ctx context.Context) (string, bool) {
+	val := ctx.Value(RuntimeNodeIDKey)
+	if val == nil {
+		return "", false
+	}
+	return val.(string), true
+}
+
+func GetRuntimeTenantID(ctx context.Context) (string, bool) {
+	val := ctx.Value(RuntimeTenantIDKey)
+	if val == nil {
+		return "", false
+	}
+	return val.(string), true
+}
+
+func extractBearerToken(ctx context.Context) (string, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return "", status.Error(codes.Unauthenticated, "missing metadata")
+	}
+
+	values := md.Get("authorization")
+	if len(values) == 0 {
+		return "", status.Error(codes.Unauthenticated, "missing authorization header")
+	}
+
+	token := strings.TrimPrefix(values[0], "Bearer ")
+	if token == values[0] || token == "" {
+		return "", status.Error(codes.Unauthenticated, "invalid authorization format")
+	}
+
+	return token, nil
+}
+
+func validateNodeStatus(store *controllerstorage.Storage, nodeIDStr string) error {
+	parsedNodeID, err := uuid.Parse(nodeIDStr)
+	if err != nil {
+		return status.Errorf(codes.Unauthenticated, "invalid node_id in token")
+	}
+
+	node, err := store.GetNodeByID(parsedNodeID)
+	if err != nil || node == nil {
+		return status.Errorf(codes.Unauthenticated, "node not found")
+	}
+
+	switch node.Status {
+	case "deleted", "suspended", "banned":
+		return status.Errorf(codes.PermissionDenied, "node access denied: status '%s'", node.Status)
+	}
+
+	return nil
+}
+
+func UnaryAuthInterceptor(store *controllerstorage.Storage) grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context,
+		req interface{},
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (interface{}, error) {
+		if isRegisterMethod(info.FullMethod) {
+			return handler(ctx, req)
+		}
+
+		token, err := extractBearerToken(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		claims, err := auth.ValidateRuntimeToken(token)
+		if err != nil {
+			if err == auth.ErrExpiredToken {
+				return nil, status.Error(codes.Unauthenticated, "runtime token expired")
+			}
+			return nil, status.Error(codes.Unauthenticated, "invalid runtime token")
+		}
+
+		if err := validateNodeStatus(store, claims.NodeID); err != nil {
+			return nil, err
+		}
+
+		ctx = context.WithValue(ctx, RuntimeNodeIDKey, claims.NodeID)
+		ctx = context.WithValue(ctx, RuntimeTenantIDKey, claims.TenantID)
+
+		return handler(ctx, req)
+	}
+}
+
+func StreamAuthInterceptor(store *controllerstorage.Storage) grpc.StreamServerInterceptor {
+	return func(
+		srv interface{},
+		ss grpc.ServerStream,
+		info *grpc.StreamServerInfo,
+		handler grpc.StreamHandler,
+	) error {
+		if isRegisterMethod(info.FullMethod) {
+			return handler(srv, ss)
+		}
+
+		token, err := extractBearerToken(ss.Context())
+		if err != nil {
+			return err
+		}
+
+		claims, err := auth.ValidateRuntimeToken(token)
+		if err != nil {
+			if err == auth.ErrExpiredToken {
+				return status.Error(codes.Unauthenticated, "runtime token expired")
+			}
+			return status.Error(codes.Unauthenticated, "invalid runtime token")
+		}
+
+		if err := validateNodeStatus(store, claims.NodeID); err != nil {
+			return err
+		}
+
+		ctx := context.WithValue(ss.Context(), RuntimeNodeIDKey, claims.NodeID)
+		ctx = context.WithValue(ctx, RuntimeTenantIDKey, claims.TenantID)
+
+		wrappedStream := &wrappedServerStream{ServerStream: ss, ctx: ctx}
+		return handler(srv, wrappedStream)
+	}
+}
+
+type wrappedServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (w *wrappedServerStream) Context() context.Context {
+	return w.ctx
+}
+
+func isRegisterMethod(fullMethod string) bool {
+	return fullMethod == "/aria.agent.ControllerService/Register"
+}

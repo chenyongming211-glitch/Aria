@@ -470,7 +470,11 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 		logger.Warn("⚠️  gRPC TLS disabled - using plaintext (not recommended for production)")
 	}
 
-	// Create gRPC server with TLS
+	// Create gRPC server with TLS and auth interceptors
+	grpcServerOpts = append(grpcServerOpts,
+		grpc.UnaryInterceptor(grpcserver.UnaryAuthInterceptor(controller.store)),
+		grpc.StreamInterceptor(grpcserver.StreamAuthInterceptor(controller.store)),
+	)
 	grpcSrv := grpc.NewServer(grpcServerOpts...)
 	grpcController := grpcserver.NewControllerServer(
 		controller.createRegisterAdapter(),

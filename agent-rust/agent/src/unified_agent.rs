@@ -534,6 +534,7 @@ impl UnifiedAgent {
         let sync_now = self.sync_now.clone();
         let node_id = self.config.node_id.clone();
         let public_key = self.config.public_key.clone();
+        let current_credential = self.config.current_credential.clone();
 
         tokio::spawn(async move {
             loop {
@@ -542,7 +543,7 @@ impl UnifiedAgent {
                 }
 
                 match grpc_client
-                    .connect_command_stream(node_id.clone(), public_key.clone())
+                    .connect_command_stream(node_id.clone(), public_key.clone(), current_credential.clone())
                     .await
                 {
                     Ok((response_tx, mut request_stream)) => {
@@ -1492,7 +1493,7 @@ impl UnifiedAgent {
     
     pub async fn sync(&mut self) -> Result<()> {
         tracing::debug!("Syncing with Controller...");
-        
+
         let sync_result = self.grpc_client
             .sync_with_state(
                 self.config.node_id.clone(),
@@ -1500,6 +1501,7 @@ impl UnifiedAgent {
                 self.config.last_applied_version.clone(),
                 self.config.last_sync_status.clone(),
                 self.config.last_sync_message.clone(),
+                self.config.current_credential.clone(),
             )
             .await?;
         
@@ -1551,6 +1553,12 @@ impl UnifiedAgent {
             self.config.last_applied_version = Some(desired_state_version);
         }
         self.set_sync_observation("applied", "sync applied successfully".to_string());
+
+        // 更新运行期凭据
+        if let Some(new_token) = sync_result.runtime_token {
+            self.config.current_credential = Some(new_token);
+        }
+
         if let Err(e) = self.persist_runtime_state() {
             tracing::warn!("Failed to persist runtime state after sync: {:?}", e);
         }

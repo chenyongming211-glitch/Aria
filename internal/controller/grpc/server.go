@@ -8,6 +8,7 @@ import (
 	"io"
 	"time"
 
+	"aria/internal/auth"
 	controllerstorage "aria/pkg/controllerstorage"
 	"aria/pkg/grpc/agentpb"
 	"github.com/google/uuid"
@@ -63,10 +64,30 @@ func (s *ControllerServer) Register(ctx context.Context, req *agentpb.RegisterRe
 		return nil, fmt.Errorf("registration failed: %w", err)
 	}
 
+	nodeID := registeredNodeID(s.store, req.PublicKey)
+
+	// 生成运行期凭据
+	var runtimeToken string
+	var runtimeTokenExpiresAt int64
+	if nodeID != "" {
+		node, nodeErr := s.store.GetNodeByID(parseUUIDOrZero(nodeID))
+		var tenantID string
+		if nodeErr == nil && node != nil {
+			tenantID = node.TenantID.String()
+		}
+		token, expiresAt, tokenErr := auth.GenerateRuntimeToken(nodeID, tenantID)
+		if tokenErr == nil {
+			runtimeToken = token
+			runtimeTokenExpiresAt = expiresAt.Unix()
+		}
+	}
+
 	return &agentpb.RegisterResponse{
-		AssignedIp:         assignedIP,
-		MetricsPushGateway: metricsGateway,
-		NodeId:             registeredNodeID(s.store, req.PublicKey),
+		AssignedIp:            assignedIP,
+		MetricsPushGateway:    metricsGateway,
+		NodeId:                nodeID,
+		RuntimeToken:          runtimeToken,
+		RuntimeTokenExpiresAt: runtimeTokenExpiresAt,
 	}, nil
 }
 
@@ -150,15 +171,20 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 		return nil, fmt.Errorf("failed to determine desired state version: %w", err)
 	}
 
+	// 刷新运行期凭据
+	runtimeToken, runtimeTokenExpiresAt, _ := auth.GenerateRuntimeToken(node.ID.String(), node.TenantID.String())
+
 	return &agentpb.SyncResponse{
-		Peers:               peers,
-		AssignedIp:          assignedIP,
-		LastUpdate:          time.Now().Unix(),
-		AclRules:            aclRules,
-		MetricsPushGateway:  metricsGateway,
-		QosRules:            qosRules,
-		BlacklistRules:      blacklistRules,
-		DesiredStateVersion: desiredVersion,
+		Peers:                 peers,
+		AssignedIp:            assignedIP,
+		LastUpdate:            time.Now().Unix(),
+		AclRules:              aclRules,
+		MetricsPushGateway:    metricsGateway,
+		QosRules:              qosRules,
+		BlacklistRules:        blacklistRules,
+		DesiredStateVersion:   desiredVersion,
+		RuntimeToken:          runtimeToken,
+		RuntimeTokenExpiresAt: runtimeTokenExpiresAt.Unix(),
 	}, nil
 }
 
@@ -271,6 +297,14 @@ func registeredNodeID(store *controllerstorage.Storage, publicKey string) string
 	}
 
 	return node.ID.String()
+}
+
+func parseUUIDOrZero(s string) uuid.UUID {
+	id, err := uuid.Parse(s)
+	if err != nil {
+		return uuid.Nil
+	}
+	return id
 }
 
 func (s *ControllerServer) reportRuntimeSyncState(node *controllerstorage.Node, req *agentpb.SyncRequest) error {

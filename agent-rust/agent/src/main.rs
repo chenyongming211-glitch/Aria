@@ -806,6 +806,9 @@ async fn bootstrap_register(
     }
     state.assigned_ip = Some(registration.assigned_ip.clone());
     state.address = Some(format!("{}/32", registration.assigned_ip));
+    if let Some(runtime_token) = registration.runtime_token {
+        state.current_credential = Some(runtime_token);
+    }
     state.last_desired_version = None;
     state.last_applied_version = None;
     state.last_sync_status = Some("registered".to_string());
