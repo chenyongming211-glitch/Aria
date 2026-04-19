@@ -39,7 +39,7 @@ async fn main() {
                     
                     // 测试 3: 同步配置
                     println!("测试 3: 同步配置...");
-                    match client.sync(registration.node_id.clone(), public_key).await {
+                    match client.sync(registration.node_id.clone(), public_key, None).await {
                         Ok(sync_result) => {
                             println!("✅ 同步成功！");
                             println!("   Peers 数量: {}", sync_result.peers.len());
