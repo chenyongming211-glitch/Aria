@@ -411,6 +411,7 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 	downloadBytes := []float64{}
 	peakBandwidth := 0.0
 
+	// 1. 处理上传流量和初始化时间戳
 	if txResult != nil && len(txResult.Data.Result) > 0 {
 		for _, v := range txResult.Data.Result[0].Values {
 			if len(v) >= 2 {
@@ -429,9 +430,16 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 		}
 	}
 
+	// 2. 处理下载流量（如果 timestamps 仍为空，尝试从 rxResult 补齐）
 	if rxResult != nil && len(rxResult.Data.Result) > 0 {
-		for _, v := range rxResult.Data.Result[0].Values {
+		for i, v := range rxResult.Data.Result[0].Values {
 			if len(v) >= 2 {
+				// 如果上传流量没数据，从这里获取时间戳
+				if len(timestamps) <= i {
+					if ts, ok := v[0].(float64); ok {
+						timestamps = append(timestamps, int64(ts))
+					}
+				}
 				if val, ok := v[1].(string); ok {
 					f, _ := strconv.ParseFloat(val, 64)
 					downloadBytes = append(downloadBytes, f)
@@ -441,6 +449,13 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 					}
 				}
 			}
+		}
+	}
+
+	// 3. 补全缺失的上传数据点
+	if len(uploadBytes) < len(timestamps) {
+		for len(uploadBytes) < len(timestamps) {
+			uploadBytes = append(uploadBytes, 0)
 		}
 	}
 

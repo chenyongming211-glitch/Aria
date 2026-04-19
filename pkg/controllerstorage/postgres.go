@@ -251,7 +251,7 @@ func (s *Storage) Migrate() error {
 		`ALTER TABLE users ALTER COLUMN tenant_id DROP NOT NULL`,
 
 		`CREATE TABLE IF NOT EXISTS acl_rules (
-			id SERIAL PRIMARY KEY,
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			name VARCHAR(100),
 			tenant_id UUID REFERENCES tenants(id),
 			src_net CIDR NOT NULL,
@@ -1195,7 +1195,7 @@ func (s *Storage) GetCIDR() string {
 
 // ACLRule represents a firewall access control rule.
 type ACLRule struct {
-	ID          int       `json:"id"`
+	ID          uuid.UUID `json:"id"`
 	Name        string    `json:"name,omitempty"`
 	SrcNode     string    `json:"src_node,omitempty"`
 	SrcNet      string    `json:"src_net"`
@@ -1214,7 +1214,7 @@ type ACLRule struct {
 
 // SaveACLRule creates or updates an ACL rule.
 func (s *Storage) SaveACLRule(rule *ACLRule) error {
-	if rule.ID == 0 {
+	if rule.ID == uuid.Nil {
 		// Insert new rule
 		query := `
 			INSERT INTO acl_rules (name, src_node, src_net, dst_node, dst_net, protocol, min_port, max_port, action, enabled, priority, description)
@@ -1243,7 +1243,7 @@ func (s *Storage) SaveACLRule(rule *ACLRule) error {
 }
 
 // GetACLRule returns a single ACL rule by ID.
-func (s *Storage) GetACLRule(id int) (*ACLRule, error) {
+func (s *Storage) GetACLRule(id uuid.UUID) (*ACLRule, error) {
 	query := `
 		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
 		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
@@ -1262,7 +1262,7 @@ func (s *Storage) GetACLRule(id int) (*ACLRule, error) {
 }
 
 // GetACLRuleByTenant returns a single ACL rule by ID and tenant ID for tenant isolation.
-func (s *Storage) GetACLRuleByTenant(id int, tenantID uuid.UUID) (*ACLRule, error) {
+func (s *Storage) GetACLRuleByTenant(id uuid.UUID, tenantID uuid.UUID) (*ACLRule, error) {
 	query := `
 		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
 		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at

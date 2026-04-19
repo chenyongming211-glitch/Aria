@@ -592,7 +592,14 @@ func (r *Router) handleTenantNodeRoutes(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	if len(parts) == 7 {
+	// 修复 BUG-15: 处理 CIDR 路由 ID，可能包含 '/'
+	// parts[7:] 包含路由标识符
+	routeID := ""
+	if len(parts) >= 8 {
+		routeID = strings.Join(parts[7:], "/")
+	}
+
+	if routeID == "" {
 		switch req.Method {
 		case http.MethodGet:
 			r.listTenantNodeRoutes(w, tenantID, node)
@@ -604,22 +611,17 @@ func (r *Router) handleTenantNodeRoutes(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	if len(parts) == 8 {
-		routeID := parts[7]
-		switch req.Method {
-		case http.MethodGet:
-			r.getTenantNodeRoute(w, tenantID, nodeID, routeID)
-		case http.MethodPut:
-			r.replaceTenantNodeRoute(w, req, tenantID, nodeID, routeID)
-		case http.MethodDelete:
-			r.deleteTenantNodeRoute(w, tenantID, nodeID, routeID)
-		default:
-			apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
-		}
-		return
+	// 单条路由操作
+	switch req.Method {
+	case http.MethodGet:
+		r.getTenantNodeRoute(w, tenantID, nodeID, routeID)
+	case http.MethodPut:
+		r.replaceTenantNodeRoute(w, req, tenantID, nodeID, routeID)
+	case http.MethodDelete:
+		r.deleteTenantNodeRoute(w, tenantID, nodeID, routeID)
+	default:
+		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
 	}
-
-	apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidPath, "Invalid route path", nil)
 }
 
 func (r *Router) listTenantNodeRoutes(w http.ResponseWriter, tenantID uuid.UUID, node *controllerstorage.Node) {

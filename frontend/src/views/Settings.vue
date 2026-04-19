@@ -310,7 +310,7 @@ const backupHistory = ref([
 
 const uploadUrl = ref('/api/settings/upload-backup')
 const uploadHeaders = ref({
-  'Authorization': `Bearer ${sessionStorage.getItem('aria_token')}`
+  'Authorization': `Bearer ${localStorage.getItem('aria_token')}`
 })
 
 const saveGeneralSettings = () => {

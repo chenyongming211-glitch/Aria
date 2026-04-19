@@ -54,8 +54,8 @@ func (t *TenantAPI) CreateTenant(w http.ResponseWriter, r *http.Request) {
 
 	tenantID := uuid.New()
 
-	query := `INSERT INTO tenants (id, name, code, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW())`
-	_, err := t.store.DB().Exec(query, tenantID, req.Name, req.Code)
+	query := `INSERT INTO tenants (id, name, code, email, phone, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`
+	_, err := t.store.DB().Exec(query, tenantID, req.Name, req.Code, req.Email, req.Phone)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeCreateTenantFailed, "Failed to create tenant: "+err.Error(), nil)
 		return

@@ -69,7 +69,10 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		Action      string `json:"action"`
 		SrcCIDR     string `json:"src_cidr"`
 		DstCIDR     string `json:"dst_cidr"`
+		SrcNet      string `json:"src_net"`  // 兼容前端
+		DstNet      string `json:"dst_net"`  // 兼容前端
 		DstPort     int    `json:"dst_port"`
+		MaxPort     int    `json:"max_port"` // 兼容前端
 		Protocol    int    `json:"protocol"`
 		Priority    int    `json:"priority"`
 		Description string `json:"description"`
@@ -80,13 +83,33 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		return
 	}
 
+	// 字段合并对齐
+	src := body.SrcCIDR
+	if src == "" {
+		src = body.SrcNet
+	}
+	dst := body.DstCIDR
+	if dst == "" {
+		dst = body.DstNet
+	}
+	port := body.DstPort
+	if port == 0 {
+		port = body.MaxPort
+	}
+
+	// 基础验证
+	if body.Action != "allow" && body.Action != "deny" {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Action must be 'allow' or 'deny'", nil)
+		return
+	}
+
 	rule := &controllerstorage.ACLRuleRecord{
 		TenantID:    tenantID,
 		NodeID:      nodeID,
 		Action:      body.Action,
-		SrcCIDR:     body.SrcCIDR,
-		DstCIDR:     body.DstCIDR,
-		DstPort:     body.DstPort,
+		SrcCIDR:     src,
+		DstCIDR:     dst,
+		DstPort:     port,
 		Protocol:    body.Protocol,
 		Priority:    body.Priority,
 		Enabled:     true,

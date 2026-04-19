@@ -351,11 +351,25 @@ fn get_active_interfaces(&self) -> Vec<String> {
         };
 
         for (iface, port) in &all_interfaces {
+            // 自动探测物理网卡名（排除回环和虚拟网卡）
+            let mut phys_iface = "eth0".to_string();
+            if let Ok(interfaces) = std::panic::catch_unwind(|| pnet::datalink::interfaces()) {
+                let filtered: Vec<_> = interfaces.into_iter()
+                    .filter(|i| !i.is_loopback() && !i.name.starts_with("aria") && !i.name.starts_with("lo"))
+                    .collect();
+                if !filtered.is_empty() {
+                    phys_iface = filtered[0].name.clone();
+                }
+            }
+
             let optimizer = crate::system_optimization::SystemOptimizer::new(
                 *port,
-                "eth0".to_string(),
+                phys_iface.clone(),
                 iface.clone(),
             );
+            
+            tracing::debug!("Applying system optimization to physical interface: {}", phys_iface);
+            
             match optimizer.optimize(true) {
                 Ok(result) => {
                     tracing::info!("✅ System optimizations applied for {}", iface);
