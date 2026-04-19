@@ -127,5 +127,28 @@
 
 | 状态 | 数量 | 编号 |
 |------|------|------|
-| 已修复 ✅ | 10 | BUG-1~8, BUG-10~11 |
-| 未修复 🔴 | 10 | BUG-9, BUG-12~20 |
+| 已修复 ✅ | 20 | BUG-1~20 |
+
+> 注：BUG-9, BUG-12~20 经二次验证已全部修复，详见 git log。
+
+## P0 运行期短期动态凭据（已完成 ✅）
+
+**实现日期**: 2026-04-19
+
+| 组件 | 文件 | 说明 |
+|------|------|------|
+| Token 生成/验证 | `internal/auth/runtime_token.go` | 独立密钥 `getRuntimeSecret()`、`rt_` 前缀、issuer 强校验 |
+| gRPC 拦截器 | `internal/controller/grpc/auth_interceptor.go` | Unary/Stream 拦截，Register 跳过，其余验证 Bearer Token |
+| Register 返回 Token | `internal/controller/grpc/server.go` | 注册成功后签发 24h Runtime Token |
+| Sync 刷新 Token | `internal/controller/grpc/server.go` | 每次 Sync 返回新 Token |
+| Agent 存储 Token | `agent-rust/agent/src/main.rs` + `config.rs` | `current_credential` 字段 |
+| Agent 携带 Token | `agent-rust/agent/src/grpc_client.rs` | metadata `authorization: Bearer rt_xxx` |
+| Agent 刷新 Token | `agent-rust/agent/src/unified_agent.rs` | Sync 成功后更新 state |
+
+**Token 体系隔离设计**：
+
+| Token 类型 | 格式 | 密钥 | Issuer | 使用场景 |
+|---|---|---|---|---|
+| User JWT | `eyJ...` | `getSecret()` | `aria-controller` | HTTP REST API |
+| Enrollment | `tk_xxxxxxxx` | 数据库校验 | 无 | Agent 首次注册 |
+| Runtime | `rt_eyJ...` | `getRuntimeSecret()` | `aria-runtime` | gRPC 运行期 |

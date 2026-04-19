@@ -1,6 +1,6 @@
 # 已知问题状态追踪 (UPDATED ✅)
 
-**更新日期**: 2026-04-18
+**更新日期**: 2026-04-19
 **基准文档**: `docs/V0.1.0-PRODUCT-BLUEPRINT.md` 第 13 节
 
 ---
@@ -15,10 +15,15 @@
 
 ## 2. 节点身份与运行鉴权未分离
 
-**状态**: 🛠️ **大部分修复**
+**状态**: ✅ **已完全修复**
 - `node_id` (UUID) 已全面启用
 - mTLS 配置已修复：现在强制要求并验证客户端证书 (BUG-4/B9)
-- **遗留**: 运行期 gRPC 请求（Sync/Metrics）目前仍基于 `node_id` 信誉，尚未引入短期动态凭据
+- **P0 已完成**: 实现了运行期短期动态凭据（Runtime Token）
+  - Controller 注册时签发 24h JWT Runtime Token（`internal/auth/runtime_token.go`）
+  - gRPC 认证拦截器验证所有运行期 RPC（`internal/controller/grpc/auth_interceptor.go`）
+  - Agent 存储并在每次 gRPC 请求中携带 Bearer Token
+  - 每次 Sync 自动刷新 Token
+  - 三重隔离：独立密钥（`getRuntimeSecret()`）、`rt_` 前缀、issuer 强校验
 
 ## 3. Sync 即时拼装，未版本化
 
@@ -76,4 +81,4 @@
 ---
 
 ## 总结
-Aria SD-WAN 目前已完成 v0.1.0 阶段的所有重大重构与 Bug 修复任务。系统处于稳定状态，随时准备进行交付演示。
+Aria SD-WAN 已完成 v0.1.0 蓝图第 13 节全部 6 项结构问题的修复，包括 P0 运行期短期动态凭据。系统处于稳定状态，随时准备进行交付演示。

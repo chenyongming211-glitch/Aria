@@ -11,10 +11,11 @@
 | ANY | `/register` | Agent 注册 | Rust Agent |
 | ANY | `/unregister` | Agent 注销 | Rust Agent |
 | ANY | `/network/manage` | 网络路由管理 | Rust Agent |
-| ANY | `/version` | 版本信息（无人使用） | 无 |
 | ANY | `/api/version` | 版本信息 | 前端 |
-| ANY | `/v1/im/dingtalk` | 钉钉 Webhook | 钉钉平台 |
-| ANY | `/v1/im/feishu` | 飞书 Webhook | 飞书平台 |
+| ANY | `/v1/im/dingtalk` | 钉钉 Webhook（旧路径，兼容） | 钉钉平台 |
+| ANY | `/v1/im/feishu` | 飞书 Webhook（旧路径，兼容） | 飞书平台 |
+| ANY | `/api/v2/integrations/dingtalk/webhook` | 钉钉 Webhook（新路径） | 钉钉平台 |
+| ANY | `/api/v2/integrations/feishu/webhook` | 飞书 Webhook（新路径） | 飞书平台 |
 
 ### 北向 v2 路由（v2/setup.go）
 
@@ -44,7 +45,8 @@
 | `GET/PUT/DELETE .../routes/{rid}` | 路由详情/更新/删除 |
 | `GET/POST /api/v2/tenants/{tid}/nodes/{nid}/security/acls` | ACL 列表/创建 |
 | `DELETE .../security/acls/{rid}` | ACL 删除 |
-| `GET/POST .../security/blacklist` | 黑名单（未实现，返回 501） |
+| `GET/POST .../security/blacklist/{scope}` | 黑名单列表/创建（scope: src/dst/ports） |
+| `DELETE .../security/blacklist/{scope}/{rid}` | 黑名单删除 |
 | `GET/POST .../qos/{category}` | QoS 列表/创建 |
 | `DELETE .../qos/{category}/{rid}` | QoS 删除 |
 | `POST .../nodes/{nid}/agent/command` | 发送远程命令 |
@@ -77,9 +79,9 @@
 | `AUTH.FORCE_CHANGE_PASSWORD` | `/api/v2/auth/force-change-password` | YES |
 | `TENANT.*` | `/api/v2/tenants/...` | YES |
 | `MONITOR.*` | `/api/v2/tenants/{tid}/monitoring/...` | YES |
-| `IM.DINGTALK` = `/v1/im/dingtalk` | `/api/v1/im/dingtalk` | **NO** (后端注册在 `/v1/im/dingtalk`) |
-| `IM.FEISHU` = `/v1/im/feishu` | `/api/v1/im/feishu` | **NO** (后端注册在 `/v1/im/feishu`) |
-| `VERSION` = `/version` | `/api/version` | YES (但 api.js 定义与 app.js 实际调用不一致) |
+| `IM.DINGTALK` = `/v2/integrations/dingtalk/webhook` | `/api/v2/integrations/dingtalk/webhook` | YES |
+| `IM.FEISHU` = `/v2/integrations/feishu/webhook` | `/api/v2/integrations/feishu/webhook` | YES |
+| `VERSION` = `/api/version` | `/api/version` | YES |
 
 ---
 
@@ -115,35 +117,18 @@
 
 ### 不一致
 
-| # | 问题 | 建议 |
+| # | 问题 | 状态 |
 |---|------|------|
-| 1 | `/version` 和 `/api/version` 重复注册 | 移除 `/version` |
-| 2 | IM webhook 在 `/v1/im/` 不在 `/api/v2/` | 低优先级，迁移需同步更新外部平台配置 |
-| 3 | `api.js` 定义 `VERSION: '/version'` 但 `app.js` 硬编码 `/api/version` | 统一使用 `api.js` 常量 |
+| ~~1~~ | ~~`/version` 和 `/api/version` 重复注册~~ | ✅ 已移除 `/version` |
+| ~~2~~ | ~~IM webhook 在 `/v1/im/` 不在 `/api/v2/`~~ | ✅ 已注册新路径 `/api/v2/integrations/*`，保留旧路径兼容 |
+| ~~3~~ | ~~`api.js` 定义 `VERSION: '/version'` 但 `app.js` 硬编码 `/api/version`~~ | ✅ 已统一使用 `api.js` 常量 |
 
 ---
 
 ## 四、修复步骤
 
-### 步骤 1: 修复 MCP 白名单（紧急）
-- 更新 `jwt_auth.go:25` 白名单为 `/api/v2/auth/*` 路径
-
-### 步骤 2: 修复 ACL Schema（紧急）
-- 检查 `acl_rules` 表实际列
-- 补充 migration 添加 `node_id`、`src_cidr`、`dst_cidr` 列（如不存在）
-- 或调整 v2 代码使用已有列名
-
-### 步骤 3: 合并工具包
-- 将 `v1/common.go` 的缺失错误码和工具函数迁入 `apibase/responses.go`
-- 更新 `operations.go`、`security.go` 改为 import `apibase`
-- 此时 `v1/` 目录可整体删除
-
-### 步骤 4: 删除死代码
-- 移除 `controller_serve.go` 中未注册的 handler
-- 移除 `internal/api/v1/` 目录（步骤 3 完成后）
-- 移除 `/version` 重复注册
-
-### 步骤 5: 统一 IM webhook 路径
-- 注册新路径 `/api/v2/integrations/dingtalk/webhook` 等
-- 保留旧路径做兼容
-- 更新外部平台配置后移除旧路径
+### ~~步骤 1: 修复 MCP 白名单（紧急）~~ ✅ 已完成
+### ~~步骤 2: 修复 ACL Schema（紧急）~~ ✅ 已完成
+### ~~步骤 3: 合并工具包~~ ✅ 已完成
+### ~~步骤 4: 删除死代码~~ ✅ 已完成
+### ~~步骤 5: 统一 IM webhook 路径~~ ✅ 已完成
