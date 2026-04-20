@@ -176,6 +176,124 @@ func TestHandleIssueCertificate_MissingAuthReturns401(t *testing.T) {
 	}
 }
 
+func TestHandleIssueCertificate_InvalidRuntimeTokenReturns401(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	controller := &Controller{
+		store:       controllerstorage.NewStorageWithDB(db),
+		certService: newTestCertService(t),
+	}
+
+	body := `{"runtime_token":"invalid-token","csr_pem":"` + jsonEscape(generateCSRPEM(t, "node-invalid-token")) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/certificates/issue", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	controller.HandleIssueCertificate(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleIssueCertificate_RuntimeTokenTenantMismatchReturns401(t *testing.T) {
+	tenantFromToken := uuid.New()
+	nodeTenant := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	runtimeToken, _, err := auth.GenerateRuntimeToken(nodeID.String(), tenantFromToken.String())
+	if err != nil {
+		t.Fatalf("GenerateRuntimeToken failed: %v", err)
+	}
+	expectNodeLookupByID(mock, nodeTenant, nodeID, now)
+
+	controller := &Controller{
+		store:       controllerstorage.NewStorageWithDB(db),
+		certService: newTestCertService(t),
+	}
+
+	body := `{"runtime_token":"` + runtimeToken + `","csr_pem":"` + jsonEscape(generateCSRPEM(t, "node-tenant-mismatch")) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/certificates/issue", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	controller.HandleIssueCertificate(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestHandleIssueCertificate_StorageUpsertFailureReturns500(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	runtimeToken, _, err := auth.GenerateRuntimeToken(nodeID.String(), tenantID.String())
+	if err != nil {
+		t.Fatalf("GenerateRuntimeToken failed: %v", err)
+	}
+	expectNodeLookupByID(mock, tenantID, nodeID, now)
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO node_certificates (
+			tenant_id, node_id, serial_number, cert_pem, ca_pem,
+			not_before, not_after, status, issued_at, renewed_from, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, NOW())
+		ON CONFLICT (node_id) DO UPDATE SET
+			serial_number = EXCLUDED.serial_number,
+			cert_pem = EXCLUDED.cert_pem,
+			ca_pem = EXCLUDED.ca_pem,
+			not_before = EXCLUDED.not_before,
+			not_after = EXCLUDED.not_after,
+			status = EXCLUDED.status,
+			renewed_from = EXCLUDED.renewed_from,
+			updated_at = NOW()
+	`)).
+		WithArgs(
+			tenantID,
+			nodeID,
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			controllerstorage.CertStatusIssued,
+			nil,
+		).
+		WillReturnError(sql.ErrConnDone)
+
+	controller := &Controller{
+		store:       controllerstorage.NewStorageWithDB(db),
+		certService: newTestCertService(t),
+	}
+
+	body := `{"runtime_token":"` + runtimeToken + `","csr_pem":"` + jsonEscape(generateCSRPEM(t, "node-upsert-fail")) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/certificates/issue", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	controller.HandleIssueCertificate(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestHandleRenewCertificate_NoExistingCertReturns404(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
