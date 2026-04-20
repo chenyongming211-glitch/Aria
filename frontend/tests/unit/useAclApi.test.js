@@ -11,6 +11,14 @@ vi.mock('@/composables/useApi', () => ({
   }
 }))
 
+vi.mock('@/config/api', async () => {
+  const actual = await vi.importActual('@/config/api')
+  return {
+    ...actual,
+    requireCurrentTenantId: vi.fn(() => 'tenant-1')
+  }
+})
+
 import api from '@/composables/useApi'
 
 describe('useAclApi', () => {
@@ -21,40 +29,42 @@ describe('useAclApi', () => {
   describe('getACLRules', () => {
     it('应该返回 ACL 规则列表', async () => {
       const mockRules = [
-        { id: 1, name: 'allow-web', action: 'allow' },
-        { id: 2, name: 'deny-ssh', action: 'deny' }
+        { id: 1, name: 'allow-web', action: 'allow', node_id: 'node-1' },
+        { id: 2, name: 'deny-ssh', action: 'deny', node_id: 'node-1' }
       ]
       
       api.get.mockResolvedValue({
         data: { success: true, data: mockRules }
       })
       
-      const rules = await useAclApi.getACLRules()
+      const rules = await useAclApi.getACLRulesByNode('node-1')
       
-      expect(api.get).toHaveBeenCalledWith('/v1/tenant-management/acl-rules')
+      expect(api.get).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/security/acls')
       expect(rules).toEqual(mockRules)
     })
 
     it('应该支持过滤参数', async () => {
-      const mockRules = [{ id: 1, name: 'allow-web', action: 'allow' }]
+      const mockRules = [
+        { id: 1, name: 'allow-web', action: 'allow', node_id: 'node-1' },
+        { id: 2, name: 'deny-ssh', action: 'deny', node_id: 'node-1' }
+      ]
       
       api.get.mockResolvedValue({
         data: { success: true, data: mockRules }
       })
       
-      const filters = { action: 'allow', enabled: true, page: 1, page_size: 10 }
-      const rules = await useAclApi.getACLRules(filters)
+      const filters = { action: 'allow' }
+      const rules = await useAclApi.getACLRulesByNode('node-1', filters)
       
-      expect(api.get).toHaveBeenCalledWith(
-        '/v1/tenant-management/acl-rules?action=allow&enabled=true&page=1&page_size=10'
-      )
-      expect(rules).toEqual(mockRules)
+      expect(api.get).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/security/acls')
+      expect(rules).toEqual([{ id: 1, name: 'allow-web', action: 'allow', node_id: 'node-1' }])
     })
   })
 
   describe('createACLRule', () => {
     it('应该创建新规则', async () => {
       const newRule = {
+        node_id: 'node-1',
         name: 'test-rule',
         src_net: '192.168.1.0/24',
         dst_net: '10.0.0.0/24',
@@ -72,7 +82,18 @@ describe('useAclApi', () => {
       
       const result = await useAclApi.createACLRule(newRule)
       
-      expect(api.post).toHaveBeenCalledWith('/v1/tenant-management/acl-rules', newRule)
+      expect(api.post).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/security/acls', {
+        name: 'test-rule',
+        src_net: '192.168.1.0/24',
+        dst_net: '10.0.0.0/24',
+        protocol: 6,
+        min_port: 0,
+        max_port: 65535,
+        action: 'allow',
+        enabled: true,
+        priority: 100,
+        description: ''
+      })
       expect(result).toEqual(createdRule)
     })
   })
@@ -89,9 +110,20 @@ describe('useAclApi', () => {
         data: { success: true, data: updatedRule }
       })
       
-      const result = await useAclApi.updateACLRule(1, updatedRule)
+      const result = await useAclApi.updateACLRule(1, { ...updatedRule, node_id: 'node-1' })
       
-      expect(api.put).toHaveBeenCalledWith('/v1/tenant-management/acl-rules/1', updatedRule)
+      expect(api.put).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/security/acls/1', {
+        name: 'updated-rule',
+        src_net: undefined,
+        dst_net: undefined,
+        protocol: 0,
+        min_port: 0,
+        max_port: 65535,
+        action: 'deny',
+        enabled: true,
+        priority: 100,
+        description: ''
+      })
       expect(result).toEqual(updatedRule)
     })
   })
@@ -102,9 +134,9 @@ describe('useAclApi', () => {
         data: { success: true, message: 'Rule deleted' }
       })
       
-      const result = await useAclApi.deleteACLRule(1)
+      const result = await useAclApi.deleteACLRule(1, 'node-1')
       
-      expect(api.delete).toHaveBeenCalledWith('/v1/tenant-management/acl-rules/1')
+      expect(api.delete).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/security/acls/1')
       expect(result).toEqual({ success: true, message: 'Rule deleted' })
     })
   })

@@ -11,6 +11,14 @@ vi.mock('@/composables/useApi', () => ({
   }
 }))
 
+vi.mock('@/config/api', async () => {
+  const actual = await vi.importActual('@/config/api')
+  return {
+    ...actual,
+    requireCurrentTenantId: vi.fn(() => 'tenant-1')
+  }
+})
+
 import api from '@/composables/useApi'
 
 describe('useAgentProxyApi', () => {
@@ -37,7 +45,7 @@ describe('useAgentProxyApi', () => {
       
       const result = await useAgentProxyApi.sendAgentCommand('node-1', command)
       
-      expect(api.post).toHaveBeenCalledWith('/v1/agent/node-1/command', command)
+      expect(api.post).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/agent/command', command)
       expect(result).toEqual(mockResponse)
     })
   })
@@ -57,7 +65,7 @@ describe('useAgentProxyApi', () => {
       
       const result = await useAgentProxyApi.getAgentStatus('node-1')
       
-      expect(api.get).toHaveBeenCalledWith('/v1/agent/node-1/status')
+      expect(api.get).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/agent/status')
       expect(result).toEqual(mockStatus)
     })
   })
@@ -84,7 +92,7 @@ describe('useAgentProxyApi', () => {
       
       const result = await useAgentProxyApi.sendBatchCommand(batchCommand)
       
-      expect(api.post).toHaveBeenCalledWith('/v1/agents/command', batchCommand)
+      expect(api.post).toHaveBeenCalledWith('/v2/tenants/tenant-1/agents/command', batchCommand)
       expect(result).toEqual(mockResponse)
     })
   })

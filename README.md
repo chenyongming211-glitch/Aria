@@ -121,13 +121,13 @@ sudo aria ebpf qos limit-port 80 --mbps 100
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/v1/nodes` | GET | 节点列表 |
-| `/api/v1/nodes/:id` | GET | 节点详情 |
-| `/api/v1/policies` | GET/POST | 策略管理 |
-| `/api/v1/bandwidth` | GET/POST | 带宽控制 |
-| `/api/v1/tenants` | GET/POST | 租户管理 |
-| `/api/v1/tokens` | GET/POST | Token 管理 |
-| `/api/v1/chat` | POST | AI 对话 |
+| `/api/v2/tenants/:tid/nodes` | GET | 节点列表 |
+| `/api/v2/tenants/:tid/nodes/:nid` | GET | 节点详情 |
+| `/api/v2/tenants/:tid/policies` | GET | 策略读模型 |
+| `/api/v2/tenants/:tid/nodes/:nid/qos/:category` | GET/POST | 带宽控制 |
+| `/api/v2/tenants` | GET/POST | 租户管理 |
+| `/api/v2/tenants/:tid/tokens` | GET/POST | Token 管理 |
+| `/api/v2/tenants/:tid/ai/chat` | POST | AI 对话 |
 
 ## 目录结构
 
