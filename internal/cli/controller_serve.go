@@ -28,6 +28,7 @@ import (
 	"aria/internal/auth"
 	grpcserver "aria/internal/controller/grpc"
 	"aria/internal/im"
+	"aria/internal/security/certissuance"
 	"aria/internal/service"
 	"aria/internal/token"
 	"aria/pkg/controllerstorage"
@@ -122,6 +123,7 @@ type Controller struct {
 	heartbeat          *controllerstorage.HeartbeatStore
 	tokenStore         *token.Store
 	tokenValidator     *token.Validator
+	certService        *certissuance.Service
 	baseIP             string
 	cidr               string
 	metricsPushGateway string
@@ -147,6 +149,7 @@ type RegisterRequest struct {
 	RuntimeMode   string `json:"runtime_mode,omitempty"`
 	KernelVersion string `json:"kernel_version,omitempty"`
 	HasAESNI      bool   `json:"has_aesni,omitempty"`
+	CSRPEM        string `json:"csr_pem,omitempty"`
 }
 
 // NodeInfo represents a node in the network
@@ -175,6 +178,9 @@ type SyncResponse struct {
 	LastUpdate         int64         `json:"last_update"`
 	ACLRules           []ACLRuleJSON `json:"acl_rules,omitempty"`            // Firewall ACL rules
 	MetricsPushGateway string        `json:"metrics_push_gateway,omitempty"` // VictoriaMetrics push gateway URL
+	CertificatePEM     string        `json:"certificate_pem,omitempty"`
+	CertificateCA      string        `json:"certificate_ca,omitempty"`
+	CertificateNotAfter int64        `json:"certificate_not_after,omitempty"`
 }
 
 // ACLRuleJSON represents an ACL rule in API responses.
@@ -315,6 +321,7 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 		heartbeat:          heartbeat,
 		tokenStore:         tokenStore,
 		tokenValidator:     tokenValidator,
+		certService:        initCertIssuanceService(logger),
 		baseIP:             cfg.Network.BaseIP,
 		cidr:               cfg.Network.CIDR,
 		metricsPushGateway: metricsPushGateway,
@@ -333,6 +340,8 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	mux.HandleFunc("/api/v2/agents/register", controller.HandleRegister)
 	mux.HandleFunc("/api/v2/agents/unregister", controller.HandleUnregister)
 	mux.HandleFunc("/api/v2/agents/network", controller.HandleNetworkManage)
+	mux.HandleFunc("/api/v2/agents/certificates/issue", controller.HandleIssueCertificate)
+	mux.HandleFunc("/api/v2/agents/certificates/renew", controller.HandleRenewCertificate)
 	mux.HandleFunc("/api/version", handleVersion)
 
 	// Initialize API v2 skeleton
@@ -492,6 +501,45 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func initCertIssuanceService(logger *logging.Logger) *certissuance.Service {
+	caCertPath := getEnvOrDefault("ARIA_CERT_CA_CERT", "/etc/aria/certs/ca.crt")
+	caKeyPath := getEnvOrDefault("ARIA_CERT_CA_KEY", "/etc/aria/certs/ca.key")
+	caCertPEM, certErr := os.ReadFile(caCertPath)
+	caKeyPEM, keyErr := os.ReadFile(caKeyPath)
+	if certErr != nil || keyErr != nil {
+		if logger != nil {
+			logger.Warn("Certificate issuance disabled: CA files not ready (cert=%v key=%v)", certErr, keyErr)
+		}
+		return nil
+	}
+
+	validity := parseDurationEnv("ARIA_CERT_VALIDITY", 30*24*time.Hour)
+	renewBefore := parseDurationEnv("ARIA_CERT_RENEW_BEFORE", 72*time.Hour)
+	svc, err := certissuance.NewServiceFromPEM(caCertPEM, caKeyPEM, validity, renewBefore)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("Certificate issuance disabled: %v", err)
+		}
+		return nil
+	}
+	if logger != nil {
+		logger.Info("Certificate issuance enabled (validity=%s renew_before=%s)", validity, renewBefore)
+	}
+	return svc
+}
+
+func parseDurationEnv(key string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return fallback
+	}
+	return d
 }
 
 func (c *Controller) Close() {
@@ -782,6 +830,12 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if c.certService != nil && req.CSRPEM != "" {
+		if _, err := c.issueNodeCertificate(node, req.CSRPEM, nil); err != nil {
+			c.logger.Warn("Certificate issuance during register failed for node %s: %v", req.PublicKey[:8], err)
+		}
+	}
+
 	c.syncNode(&req, assignedIP, w)
 }
 
@@ -871,6 +925,7 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 			ACLRules:           aclRulesJSON,
 			MetricsPushGateway: c.metricsPushGateway,
 		}
+	c.attachNodeCertificateToSyncResponse(req.PublicKey, &response)
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
@@ -932,6 +987,7 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 		ACLRules:           aclRulesJSON,
 		MetricsPushGateway: c.metricsPushGateway,
 	}
+	c.attachNodeCertificateToSyncResponse(req.PublicKey, &response)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
@@ -974,6 +1030,11 @@ func (c *Controller) HandleUnregister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to delete node", http.StatusInternalServerError)
 		return
 	}
+	if node != nil {
+		if err := c.store.RevokeNodeCertificate(node.ID, "node unregistered"); err != nil {
+			c.logger.Warn("Failed to revoke certificate for node %s: %v", req.PublicKey[:8], err)
+		}
+	}
 
 	c.logger.Info("Node marked as deleted: %s (hostname=%s, IP=%s)", req.PublicKey[:8], hostname, assignedIP)
 
@@ -989,6 +1050,186 @@ func (c *Controller) HandleUnregister(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+type certificateIssueRequest struct {
+	NodeID       string `json:"node_id,omitempty"`
+	PublicKey    string `json:"public_key,omitempty"`
+	CSRPEM       string `json:"csr_pem"`
+	RuntimeToken string `json:"runtime_token,omitempty"`
+	Token        string `json:"token,omitempty"`
+}
+
+func (c *Controller) HandleIssueCertificate(w http.ResponseWriter, r *http.Request) {
+	c.handleIssueOrRenewCertificate(w, r, false)
+}
+
+func (c *Controller) HandleRenewCertificate(w http.ResponseWriter, r *http.Request) {
+	c.handleIssueOrRenewCertificate(w, r, true)
+}
+
+func (c *Controller) handleIssueOrRenewCertificate(w http.ResponseWriter, r *http.Request, isRenew bool) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if c.certService == nil {
+		http.Error(w, "Certificate issuance is not enabled", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req certificateIssueRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.CSRPEM == "" {
+		http.Error(w, "csr_pem is required", http.StatusBadRequest)
+		return
+	}
+
+	node, err := c.resolveCertificateRequestNode(r, &req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	var renewedFrom *uuid.UUID
+	if isRenew {
+		existing, err := c.store.GetNodeCertificate(node.ID)
+		if err != nil {
+			http.Error(w, "Failed to load current certificate", http.StatusInternalServerError)
+			return
+		}
+		if existing == nil {
+			http.Error(w, "No existing certificate to renew", http.StatusNotFound)
+			return
+		}
+		renewedFrom = &existing.ID
+	}
+
+	cert, err := c.issueNodeCertificate(node, req.CSRPEM, renewedFrom)
+	if err != nil {
+		http.Error(w, "Failed to issue certificate: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":        "success",
+		"node_id":       node.ID.String(),
+		"serial_number": cert.SerialNumber,
+		"cert_pem":      cert.CertPEM,
+		"ca_pem":        cert.CAPEM,
+		"not_before":    cert.NotBefore.Unix(),
+		"not_after":     cert.NotAfter.Unix(),
+		"renew_before":  int64(c.certService.RenewBefore().Seconds()),
+	})
+}
+
+func (c *Controller) resolveCertificateRequestNode(r *http.Request, req *certificateIssueRequest) (*controllerstorage.Node, error) {
+	runtimeToken := strings.TrimSpace(req.RuntimeToken)
+	if runtimeToken == "" {
+		authz := strings.TrimSpace(r.Header.Get("Authorization"))
+		if strings.HasPrefix(strings.ToLower(authz), "bearer ") {
+			runtimeToken = strings.TrimSpace(authz[7:])
+		}
+	}
+	if runtimeToken != "" {
+		claims, err := auth.ValidateRuntimeToken(runtimeToken)
+		if err != nil {
+			return nil, fmt.Errorf("invalid runtime token")
+		}
+		nodeID, err := uuid.Parse(claims.NodeID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid runtime token node id")
+		}
+		node, err := c.store.GetNodeByID(nodeID)
+		if err != nil || node == nil {
+			return nil, fmt.Errorf("node not found")
+		}
+		if claims.TenantID != "" && node.TenantID.String() != claims.TenantID {
+			return nil, fmt.Errorf("tenant mismatch")
+		}
+		return node, nil
+	}
+
+	if req.Token != "" {
+		if _, err := c.tokenValidator.Validate(req.Token); err != nil {
+			return nil, fmt.Errorf("invalid enrollment token")
+		}
+		tenantID, err := c.store.GetTenantIDByToken(req.Token)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve tenant by token")
+		}
+		node, err := c.resolveNodeByRequest(req)
+		if err != nil || node == nil {
+			return nil, fmt.Errorf("node not found")
+		}
+		if node.TenantID != tenantID {
+			return nil, fmt.Errorf("node tenant mismatch")
+		}
+		return node, nil
+	}
+
+	return nil, fmt.Errorf("runtime_token or token is required")
+}
+
+func (c *Controller) resolveNodeByRequest(req *certificateIssueRequest) (*controllerstorage.Node, error) {
+	if req.NodeID != "" {
+		id, err := uuid.Parse(req.NodeID)
+		if err == nil {
+			return c.store.GetNodeByID(id)
+		}
+	}
+	if req.PublicKey != "" {
+		return c.store.GetNode(req.PublicKey)
+	}
+	return nil, nil
+}
+
+func (c *Controller) issueNodeCertificate(node *controllerstorage.Node, csrPEM string, renewedFrom *uuid.UUID) (*controllerstorage.NodeCertificate, error) {
+	issued, err := c.certService.IssueFromCSR(certissuance.IssueRequest{
+		NodeID:   node.ID.String(),
+		TenantID: node.TenantID.String(),
+		CSRPEM:   []byte(csrPEM),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	certMeta := &controllerstorage.NodeCertificate{
+		TenantID:     node.TenantID,
+		NodeID:       node.ID,
+		SerialNumber: issued.SerialNumber,
+		CertPEM:      issued.CertPEM,
+		CAPEM:        issued.CAPEM,
+		NotBefore:    issued.NotBefore,
+		NotAfter:     issued.NotAfter,
+		Status:       controllerstorage.CertStatusIssued,
+		RenewedFrom:  renewedFrom,
+	}
+	if err := c.store.UpsertNodeCertificate(certMeta); err != nil {
+		return nil, err
+	}
+	return c.store.GetNodeCertificate(node.ID)
+}
+
+func (c *Controller) attachNodeCertificateToSyncResponse(publicKey string, resp *SyncResponse) {
+	if c.certService == nil || resp == nil || publicKey == "" {
+		return
+	}
+	node, err := c.store.GetNode(publicKey)
+	if err != nil || node == nil {
+		return
+	}
+	cert, err := c.store.GetNodeCertificate(node.ID)
+	if err != nil || cert == nil || cert.Status != controllerstorage.CertStatusIssued {
+		return
+	}
+	resp.CertificatePEM = cert.CertPEM
+	resp.CertificateCA = cert.CAPEM
+	resp.CertificateNotAfter = cert.NotAfter.Unix()
 }
 
 // HandleNetworkManage manages network routes for nodes (Controller-side only)
