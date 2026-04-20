@@ -121,6 +121,87 @@ func TestHandleIssueCertificate_SuccessWithRuntimeToken(t *testing.T) {
 	}
 }
 
+func TestHandleIssueCertificate_SuccessWithBearerRuntimeToken(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	certService := newTestCertService(t)
+	runtimeToken, _, err := auth.GenerateRuntimeToken(nodeID.String(), tenantID.String())
+	if err != nil {
+		t.Fatalf("GenerateRuntimeToken failed: %v", err)
+	}
+	csrPEM := generateCSRPEM(t, "node-bearer-"+nodeID.String())
+
+	expectNodeLookupByID(mock, tenantID, nodeID, now)
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO node_certificates (
+			tenant_id, node_id, serial_number, cert_pem, ca_pem,
+			not_before, not_after, status, issued_at, renewed_from, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, NOW())
+		ON CONFLICT (node_id) DO UPDATE SET
+			serial_number = EXCLUDED.serial_number,
+			cert_pem = EXCLUDED.cert_pem,
+			ca_pem = EXCLUDED.ca_pem,
+			not_before = EXCLUDED.not_before,
+			not_after = EXCLUDED.not_after,
+			status = EXCLUDED.status,
+			renewed_from = EXCLUDED.renewed_from,
+			updated_at = NOW()
+	`)).
+		WithArgs(
+			tenantID,
+			nodeID,
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			controllerstorage.CertStatusIssued,
+			nil,
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
+		       not_before, not_after, status, issued_at, revoked_at,
+		       COALESCE(revoke_reason, ''), renewed_from, updated_at
+		FROM node_certificates
+		WHERE node_id = $1
+	`)).
+		WithArgs(nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "serial_number", "cert_pem", "ca_pem",
+			"not_before", "not_after", "status", "issued_at", "revoked_at",
+			"revoke_reason", "renewed_from", "updated_at",
+		}).AddRow(
+			uuid.New(), tenantID, nodeID, "bearer-serial", "bearer-cert", "bearer-ca", now, now.Add(24*time.Hour),
+			controllerstorage.CertStatusIssued, now, nil, "", nil, now,
+		))
+
+	controller := &Controller{
+		store:       controllerstorage.NewStorageWithDB(db),
+		certService: certService,
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/certificates/issue", strings.NewReader(`{"csr_pem":"`+jsonEscape(csrPEM)+`"}`))
+	req.Header.Set("Authorization", "Bearer "+runtimeToken)
+	rr := httptest.NewRecorder()
+	controller.HandleIssueCertificate(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestHandleIssueCertificate_InvalidCSRReturns500(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
