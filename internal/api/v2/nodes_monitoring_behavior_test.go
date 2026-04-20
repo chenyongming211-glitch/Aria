@@ -521,6 +521,50 @@ func TestNodesAPI_GetByIDNotFoundReturnsNodeNotFound(t *testing.T) {
 	}
 }
 
+func TestNodesAPI_GetByIDCrossTenantReturnsNodeNotFound(t *testing.T) {
+	tenantID := uuid.New()
+	otherTenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	// Router-level lookup returns a node from another tenant.
+	mock.ExpectQuery(regexp.QuoteMeta(
+		`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE id = $1`,
+	)).
+		WithArgs(nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+			"created_at", "updated_at",
+		}).AddRow(
+			nodeID, "pub-key-x", "machine-x", otherTenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-x", "node-x", "10.0.0.20", 20,
+			time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "online", int64(0), "{}", "", now, now,
+		))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/nodes/"+nodeID.String(), nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeNodeNotFound {
+		t.Fatalf("expected code %s, got %s", apibase.CodeNodeNotFound, resp.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestNodesAPI_SingleNodePatchReturnsMethodNotAllowed(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
@@ -674,6 +718,49 @@ func TestMonitoringAPI_NodeDetailNotFoundReturnsNodeNotFound(t *testing.T) {
 	)).
 		WithArgs(nodeID).
 		WillReturnError(sql.ErrNoRows)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/nodes/"+nodeID.String(), nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeNodeNotFound {
+		t.Fatalf("expected code %s, got %s", apibase.CodeNodeNotFound, resp.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMonitoringAPI_NodeDetailCrossTenantReturnsNodeNotFound(t *testing.T) {
+	tenantID := uuid.New()
+	otherTenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(
+		`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE id = $1`,
+	)).
+		WithArgs(nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+			"created_at", "updated_at",
+		}).AddRow(
+			nodeID, "pub-key-x", "machine-x", otherTenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-x", "node-x", "10.0.0.20", 20,
+			time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "online", int64(0), "{}", "", now, now,
+		))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/nodes/"+nodeID.String(), nil), tenantID)
@@ -1515,6 +1602,60 @@ func TestMonitoringAPI_AlertResolveGetAlertFailureReturnsInternalError(t *testin
 	`)).
 		WithArgs(alertID).
 		WillReturnError(errors.New("db down"))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts/"+alertID.String()+"/resolve", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeInternalServerError {
+		t.Fatalf("expected code %s, got %s", apibase.CodeInternalServerError, resp.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMonitoringAPI_AlertResolveResolveFailureReturnsInternalError(t *testing.T) {
+	tenantID := uuid.New()
+	alertID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, alert_type, severity, title, COALESCE(message, ''),
+		       context, status, created_at, resolved_at
+		FROM alerts
+		WHERE id = $1
+	`)).
+		WithArgs(alertID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "alert_type", "severity", "title",
+			"message", "context", "status", "created_at", "resolved_at",
+		}).AddRow(
+			alertID, tenantID, nodeID.String(), "high_latency", "warning",
+			"Latency high", "", []byte(`{}`), "active", now, nil,
+		))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		UPDATE alerts
+		SET status = 'resolved', resolved_at = NOW()
+		WHERE id = $1 AND status = 'active'
+		RETURNING id, tenant_id, node_id, alert_type, severity, title, COALESCE(message, ''),
+		          context, status, created_at, resolved_at
+	`)).
+		WithArgs(alertID).
+		WillReturnError(errors.New("resolve failed"))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSuperAdmin(httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts/"+alertID.String()+"/resolve", nil), tenantID)
