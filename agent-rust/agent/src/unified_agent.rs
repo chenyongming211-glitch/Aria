@@ -1635,7 +1635,15 @@ impl UnifiedAgent {
                 success_count,
                 fail_count
             );
-            
+
+            if fail_count > 0 {
+                return Err(anyhow::anyhow!(
+                    "qos sync partially failed: {} success, {} failed",
+                    success_count,
+                    fail_count
+                ));
+            }
+
             Ok(())
         }).await?;
         
@@ -1677,6 +1685,14 @@ impl UnifiedAgent {
                 success_count,
                 fail_count
             );
+
+            if fail_count > 0 {
+                return Err(anyhow::anyhow!(
+                    "blacklist sync partially failed: {} success, {} failed",
+                    success_count,
+                    fail_count
+                ));
+            }
 
             Ok(())
         }).await?;

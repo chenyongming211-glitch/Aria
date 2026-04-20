@@ -48,19 +48,19 @@ func (r *Router) handleTenantNodeACLs(w http.ResponseWriter, req *http.Request, 
 	case http.MethodGet:
 		r.listTenantNodeACLs(w, tenantID, node.ID)
 	case http.MethodPost:
-		r.createTenantNodeACL(w, req, tenantID, node.ID)
+		r.createTenantNodeACL(w, req, tenantID, node)
 	case http.MethodPut:
 		if ruleIDStr == "" {
 			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Rule ID is required for update", nil)
 			return
 		}
-		r.updateTenantNodeACL(w, req, tenantID, node.ID, ruleIDStr)
+		r.updateTenantNodeACL(w, req, tenantID, node, ruleIDStr)
 	case http.MethodDelete:
 		if ruleIDStr == "" {
 			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Rule ID is required for deletion", nil)
 			return
 		}
-		r.deleteTenantNodeACL(w, tenantID, node.ID, ruleIDStr)
+		r.deleteTenantNodeACL(w, tenantID, node, ruleIDStr)
 	default:
 		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
 	}
@@ -75,13 +75,13 @@ func (r *Router) listTenantNodeACLs(w http.ResponseWriter, tenantID, nodeID uuid
 	apibase.WriteSuccess(w, rules, fmt.Sprintf("%d rules retrieved", len(rules)))
 }
 
-func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, tenantID, nodeID uuid.UUID) {
+func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node) {
 	var body struct {
 		Action      string `json:"action"`
 		SrcCIDR     string `json:"src_cidr"`
 		DstCIDR     string `json:"dst_cidr"`
-		SrcNet      string `json:"src_net"`  // 兼容前端
-		DstNet      string `json:"dst_net"`  // 兼容前端
+		SrcNet      string `json:"src_net"` // 兼容前端
+		DstNet      string `json:"dst_net"` // 兼容前端
 		DstPort     int    `json:"dst_port"`
 		MaxPort     int    `json:"max_port"` // 兼容前端
 		Protocol    int    `json:"protocol"`
@@ -116,7 +116,7 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 
 	rule := &controllerstorage.ACLRuleRecord{
 		TenantID:    tenantID,
-		NodeID:      nodeID,
+		NodeID:      node.ID,
 		Action:      body.Action,
 		SrcCIDR:     src,
 		DstCIDR:     dst,
@@ -133,10 +133,27 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		return
 	}
 
-	apibase.WriteSuccess(w, created, "ACL rule created successfully")
+	r.writePolicyMutationSuccess(w, node, "acl", "create", map[string]interface{}{
+		"id":          created.ID.String(),
+		"node_id":     node.ID.String(),
+		"action":      created.Action,
+		"src_cidr":    created.SrcCIDR,
+		"dst_cidr":    created.DstCIDR,
+		"dst_port":    created.DstPort,
+		"protocol":    created.Protocol,
+		"priority":    created.Priority,
+		"enabled":     created.Enabled,
+		"description": created.Description,
+		"created_at":  created.CreatedAt,
+		"updated_at":  created.UpdatedAt,
+	}, "ACL rule created successfully", map[string]interface{}{
+		"node_id":     node.ID.String(),
+		"rule_id":     created.ID.String(),
+		"description": created.Description,
+	})
 }
 
-func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, tenantID, nodeID uuid.UUID, ruleIDStr string) {
+func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, ruleIDStr string) {
 	ruleID, err := uuid.Parse(ruleIDStr)
 	if err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid rule ID format", nil)
@@ -182,7 +199,7 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 
 	rule := &controllerstorage.ACLRuleRecord{
 		TenantID:    tenantID,
-		NodeID:      nodeID,
+		NodeID:      node.ID,
 		Action:      body.Action,
 		SrcCIDR:     src,
 		DstCIDR:     dst,
@@ -196,28 +213,51 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		rule.Enabled = *body.Enabled
 	}
 
-	updated, err := r.store.UpdateTenantNodeACLRule(tenantID, nodeID, ruleID, rule)
+	updated, err := r.store.UpdateTenantNodeACLRule(tenantID, node.ID, ruleID, rule)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to update ACL rule: "+err.Error(), nil)
 		return
 	}
 
-	apibase.WriteSuccess(w, updated, "ACL rule updated successfully")
+	r.writePolicyMutationSuccess(w, node, "acl", "update", map[string]interface{}{
+		"id":          ruleID.String(),
+		"node_id":     node.ID.String(),
+		"action":      updated.Action,
+		"src_cidr":    updated.SrcCIDR,
+		"dst_cidr":    updated.DstCIDR,
+		"dst_port":    updated.DstPort,
+		"protocol":    updated.Protocol,
+		"priority":    updated.Priority,
+		"enabled":     updated.Enabled,
+		"description": updated.Description,
+		"updated_at":  updated.UpdatedAt,
+	}, "ACL rule updated successfully", map[string]interface{}{
+		"node_id":     node.ID.String(),
+		"rule_id":     ruleID.String(),
+		"description": updated.Description,
+	})
 }
 
-func (r *Router) deleteTenantNodeACL(w http.ResponseWriter, tenantID, nodeID uuid.UUID, ruleIDStr string) {
+func (r *Router) deleteTenantNodeACL(w http.ResponseWriter, tenantID uuid.UUID, node *controllerstorage.Node, ruleIDStr string) {
 	ruleID, err := uuid.Parse(ruleIDStr)
 	if err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid rule ID format", nil)
 		return
 	}
 
-	if err := r.store.DeleteTenantNodeACLRuleByID(tenantID, nodeID, ruleID); err != nil {
+	if err := r.store.DeleteTenantNodeACLRuleByID(tenantID, node.ID, ruleID); err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to delete ACL rule: "+err.Error(), nil)
 		return
 	}
 
-	apibase.WriteSuccess(w, map[string]string{"id": ruleIDStr, "status": "deleted"}, "ACL rule deleted successfully")
+	r.writePolicyMutationSuccess(w, node, "acl", "delete", map[string]interface{}{
+		"id":      ruleIDStr,
+		"node_id": node.ID.String(),
+		"status":  "deleted",
+	}, "ACL rule deleted successfully", map[string]interface{}{
+		"node_id": node.ID.String(),
+		"rule_id": ruleIDStr,
+	})
 }
 
 // Blacklist Handlers
@@ -250,13 +290,13 @@ func (r *Router) handleTenantNodeBlacklist(w http.ResponseWriter, req *http.Requ
 	case http.MethodGet:
 		r.listTenantNodeBlacklistRules(w, tenantID, node.ID, scope)
 	case http.MethodPost:
-		r.createTenantNodeBlacklistRule(w, req, tenantID, node.ID, scope)
+		r.createTenantNodeBlacklistRule(w, req, tenantID, node, scope)
 	case http.MethodDelete:
 		if ruleIDStr == "" {
 			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Rule ID is required for deletion", nil)
 			return
 		}
-		r.deleteTenantNodeBlacklistRule(w, tenantID, node.ID, scope, ruleIDStr)
+		r.deleteTenantNodeBlacklistRule(w, tenantID, node, scope, ruleIDStr)
 	default:
 		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
 	}
@@ -271,7 +311,7 @@ func (r *Router) listTenantNodeBlacklistRules(w http.ResponseWriter, tenantID, n
 	apibase.WriteSuccess(w, rules, fmt.Sprintf("%d blacklist rules retrieved", len(rules)))
 }
 
-func (r *Router) createTenantNodeBlacklistRule(w http.ResponseWriter, req *http.Request, tenantID, nodeID uuid.UUID, scope string) {
+func (r *Router) createTenantNodeBlacklistRule(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, scope string) {
 	var body struct {
 		CIDR        string `json:"cidr"`
 		Port        int    `json:"port"`
@@ -294,7 +334,7 @@ func (r *Router) createTenantNodeBlacklistRule(w http.ResponseWriter, req *http.
 
 	rule := &controllerstorage.BlacklistRuleRecord{
 		TenantID:    tenantID,
-		NodeID:      nodeID,
+		NodeID:      node.ID,
 		Scope:       scope,
 		CIDR:        body.CIDR,
 		Port:        body.Port,
@@ -308,22 +348,45 @@ func (r *Router) createTenantNodeBlacklistRule(w http.ResponseWriter, req *http.
 		return
 	}
 
-	apibase.WriteSuccess(w, created, "Blacklist rule created successfully")
+	r.writePolicyMutationSuccess(w, node, "blacklist", "create", map[string]interface{}{
+		"id":          created.ID.String(),
+		"node_id":     node.ID.String(),
+		"scope":       created.Scope,
+		"cidr":        created.CIDR,
+		"port":        created.Port,
+		"enabled":     created.Enabled,
+		"description": created.Description,
+		"created_at":  created.CreatedAt,
+		"updated_at":  created.UpdatedAt,
+	}, "Blacklist rule created successfully", map[string]interface{}{
+		"node_id": node.ID.String(),
+		"rule_id": created.ID.String(),
+		"scope":   created.Scope,
+	})
 }
 
-func (r *Router) deleteTenantNodeBlacklistRule(w http.ResponseWriter, tenantID, nodeID uuid.UUID, scope string, ruleIDStr string) {
+func (r *Router) deleteTenantNodeBlacklistRule(w http.ResponseWriter, tenantID uuid.UUID, node *controllerstorage.Node, scope string, ruleIDStr string) {
 	ruleID, err := uuid.Parse(ruleIDStr)
 	if err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid rule ID format", nil)
 		return
 	}
 
-	if err := r.store.DeleteTenantNodeBlacklistRuleByID(tenantID, nodeID, scope, ruleID); err != nil {
+	if err := r.store.DeleteTenantNodeBlacklistRuleByID(tenantID, node.ID, scope, ruleID); err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to delete blacklist rule: "+err.Error(), nil)
 		return
 	}
 
-	apibase.WriteSuccess(w, map[string]string{"id": ruleIDStr, "status": "deleted"}, "Blacklist rule deleted successfully")
+	r.writePolicyMutationSuccess(w, node, "blacklist", "delete", map[string]interface{}{
+		"id":      ruleIDStr,
+		"node_id": node.ID.String(),
+		"scope":   scope,
+		"status":  "deleted",
+	}, "Blacklist rule deleted successfully", map[string]interface{}{
+		"node_id": node.ID.String(),
+		"rule_id": ruleIDStr,
+		"scope":   scope,
+	})
 }
 
 // QoS Handlers
@@ -356,13 +419,13 @@ func (r *Router) handleTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	case http.MethodGet:
 		r.listTenantNodeQoS(w, tenantID, node.ID, category)
 	case http.MethodPost:
-		r.createTenantNodeQoS(w, req, tenantID, node.ID, category)
+		r.createTenantNodeQoS(w, req, tenantID, node, category)
 	case http.MethodPut:
 		if ruleIDStr == "" {
 			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Rule ID is required for update", nil)
 			return
 		}
-		r.updateTenantNodeQoS(w, req, tenantID, node.ID, category, ruleIDStr)
+		r.updateTenantNodeQoS(w, req, tenantID, node, category, ruleIDStr)
 	case http.MethodDelete:
 		if ruleIDStr == "" {
 			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Rule ID is required for deletion", nil)
@@ -383,7 +446,7 @@ func (r *Router) listTenantNodeQoS(w http.ResponseWriter, tenantID, nodeID uuid.
 	apibase.WriteSuccess(w, rules, fmt.Sprintf("%d QoS rules retrieved", len(rules)))
 }
 
-func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, tenantID, nodeID uuid.UUID, category string) {
+func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, category string) {
 	var body struct {
 		SrcCIDR       string `json:"src_cidr"`
 		DstCIDR       string `json:"dst_cidr"`
@@ -401,7 +464,7 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 
 	rule := &controllerstorage.QoSRuleRecord{
 		TenantID:      tenantID,
-		NodeID:        nodeID,
+		NodeID:        node.ID,
 		Category:      category,
 		SrcCIDR:       body.SrcCIDR,
 		DstCIDR:       body.DstCIDR,
@@ -419,10 +482,28 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		return
 	}
 
-	apibase.WriteSuccess(w, created, "QoS rule created successfully")
+	r.writePolicyMutationSuccess(w, node, "qos", "create", map[string]interface{}{
+		"id":             created.ID.String(),
+		"node_id":        node.ID.String(),
+		"category":       created.Category,
+		"src_cidr":       created.SrcCIDR,
+		"dst_cidr":       created.DstCIDR,
+		"src_port":       created.SrcPort,
+		"dst_port":       created.DstPort,
+		"protocol":       created.Protocol,
+		"bandwidth_mbps": created.BandwidthMbps,
+		"enabled":        created.Enabled,
+		"description":    created.Description,
+		"created_at":     created.CreatedAt,
+		"updated_at":     created.UpdatedAt,
+	}, "QoS rule created successfully", map[string]interface{}{
+		"node_id":  node.ID.String(),
+		"rule_id":  created.ID.String(),
+		"category": created.Category,
+	})
 }
 
-func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, tenantID, nodeID uuid.UUID, category, ruleIDStr string) {
+func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, category, ruleIDStr string) {
 	ruleID, err := uuid.Parse(ruleIDStr)
 	if err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid rule ID format", nil)
@@ -447,7 +528,7 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 
 	rule := &controllerstorage.QoSRuleRecord{
 		TenantID:      tenantID,
-		NodeID:        nodeID,
+		NodeID:        node.ID,
 		Category:      category,
 		SrcCIDR:       body.SrcCIDR,
 		DstCIDR:       body.DstCIDR,
@@ -462,13 +543,30 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		rule.Enabled = *body.Enabled
 	}
 
-	updated, err := r.store.UpdateTenantNodeQoSRule(tenantID, nodeID, ruleID, category, rule)
+	updated, err := r.store.UpdateTenantNodeQoSRule(tenantID, node.ID, ruleID, category, rule)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to update QoS rule: "+err.Error(), nil)
 		return
 	}
 
-	apibase.WriteSuccess(w, updated, "QoS rule updated successfully")
+	r.writePolicyMutationSuccess(w, node, "qos", "update", map[string]interface{}{
+		"id":             ruleID.String(),
+		"node_id":        node.ID.String(),
+		"category":       updated.Category,
+		"src_cidr":       updated.SrcCIDR,
+		"dst_cidr":       updated.DstCIDR,
+		"src_port":       updated.SrcPort,
+		"dst_port":       updated.DstPort,
+		"protocol":       updated.Protocol,
+		"bandwidth_mbps": updated.BandwidthMbps,
+		"enabled":        updated.Enabled,
+		"description":    updated.Description,
+		"updated_at":     updated.UpdatedAt,
+	}, "QoS rule updated successfully", map[string]interface{}{
+		"node_id":  node.ID.String(),
+		"rule_id":  ruleID.String(),
+		"category": updated.Category,
+	})
 }
 
 func (r *Router) deleteTenantNodeQoS(w http.ResponseWriter, tenantID uuid.UUID, node *controllerstorage.Node, category, ruleIDStr string) {
@@ -483,5 +581,14 @@ func (r *Router) deleteTenantNodeQoS(w http.ResponseWriter, tenantID uuid.UUID, 
 		return
 	}
 
-	apibase.WriteSuccess(w, map[string]string{"id": ruleIDStr, "status": "deleted"}, "QoS rule deleted successfully")
+	r.writePolicyMutationSuccess(w, node, "qos", "delete", map[string]interface{}{
+		"id":       ruleIDStr,
+		"node_id":  node.ID.String(),
+		"category": category,
+		"status":   "deleted",
+	}, "QoS rule deleted successfully", map[string]interface{}{
+		"node_id":  node.ID.String(),
+		"rule_id":  ruleIDStr,
+		"category": category,
+	})
 }

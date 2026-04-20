@@ -2,6 +2,7 @@ package v2
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -258,6 +259,64 @@ func expectBumpDesiredState(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 		    updated_at = NOW()`)).
 		WithArgs(tenantID, nodeID, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
+func expectPolicyDispatchSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
+	now := time.Now()
+	desiredMetadata := []byte(`{}`)
+	commandParams := []byte(`{}`)
+	controlStateColumns := []string{
+		"tenant_id", "node_id", "desired_state_version", "desired_state_metadata", "desired_state_updated_at",
+		"applied_state_version", "applied_state_updated_at", "observed_state", "observed_message", "observed_at",
+		"last_sync_at", "last_sync_error", "created_at", "updated_at",
+	}
+
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO node_control_states (`)).
+		WithArgs(tenantID, nodeID, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows(controlStateColumns).AddRow(
+			tenantID, nodeID, "desired-v1", desiredMetadata, now, "", nil, "", "", nil, nil, "", now, now,
+		))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO agent_commands (node_public_key, command, params, status, priority, timeout_seconds)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, created_at, updated_at`)).
+		WithArgs("pub-key-1", "sync", sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, 1, 60).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow("cmd-1", now, now))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO policy_deliveries (`)).
+		WithArgs(tenantID, nodeID, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "cmd-1", controllerstorage.AgentCommandStatusPending, "", sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "policy_domain", "policy_ref", "policy_name", "action", "command_id", "command_status",
+			"last_error", "metadata", "created_at", "updated_at", "completed_at",
+		}).AddRow(uuid.New(), tenantID, nodeID, "acl", "rule-ref", "rule-name", "create", "cmd-1", controllerstorage.AgentCommandStatusPending, "", []byte(`{}`), now, now, nil))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*)
+		FROM agent_commands
+		WHERE node_public_key = $1
+		  AND status IN ($2, $3, $4)`)).
+		WithArgs("pub-key-1", controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, node_public_key, command, params, status, COALESCE(message, ''), priority, timeout_seconds,
+		       created_at, updated_at, sent_at, acknowledged_at, completed_at, result
+		FROM agent_commands
+		WHERE node_public_key = $1
+		ORDER BY created_at DESC
+		LIMIT 1`)).
+		WithArgs("pub-key-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "node_public_key", "command", "params", "status", "message", "priority", "timeout_seconds",
+			"created_at", "updated_at", "sent_at", "acknowledged_at", "completed_at", "result",
+		}).AddRow("cmd-1", "pub-key-1", "sync", commandParams, controllerstorage.AgentCommandStatusPending, "", 1, 60, now, now, nil, nil, nil, []byte(`{}`)))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT tenant_id, node_id, COALESCE(desired_state_version, ''), desired_state_metadata, desired_state_updated_at,
+		       COALESCE(applied_state_version, ''), applied_state_updated_at, COALESCE(observed_state, ''),
+		       COALESCE(observed_message, ''), observed_at, last_sync_at, COALESCE(last_sync_error, ''),
+		       created_at, updated_at
+		FROM node_control_states
+		WHERE tenant_id = $1 AND node_id = $2`)).
+		WithArgs(tenantID, nodeID).
+		WillReturnError(sql.ErrNoRows)
 }
 
 func TestRBACHandlerMatrix_TokensRead(t *testing.T) {
@@ -821,6 +880,7 @@ func TestRBACHandlerMatrix_ACLsWrite(t *testing.T) {
 			if tc.expectStatus == http.StatusOK {
 				expectACLCreateSuccess(mock, tenantID, nodeID)
 				expectBumpDesiredState(mock, tenantID, nodeID)
+				expectPolicyDispatchSuccess(mock, tenantID, nodeID)
 			}
 
 			router := &Router{store: controllerstorage.NewStorageWithDB(db)}
@@ -872,6 +932,7 @@ func TestRBACHandlerMatrix_QoSWrite(t *testing.T) {
 			if tc.expectStatus == http.StatusOK {
 				expectQoSCreateSuccess(mock, tenantID, nodeID)
 				expectBumpDesiredState(mock, tenantID, nodeID)
+				expectPolicyDispatchSuccess(mock, tenantID, nodeID)
 			}
 
 			router := &Router{store: controllerstorage.NewStorageWithDB(db)}
@@ -895,4 +956,3 @@ func TestRBACHandlerMatrix_QoSWrite(t *testing.T) {
 		})
 	}
 }
-
