@@ -832,7 +832,19 @@ func (r *Router) getTenantNodeRecord(nodeID string, tenantID uuid.UUID) (*contro
 		return nil, fmt.Errorf("invalid node id: %w", err)
 	}
 
-	return r.store.GetNodeByID(nodeUUID)
+	node, err := r.store.GetNodeByID(nodeUUID)
+	if err != nil {
+		return nil, err
+	}
+	// Storage returns (nil, nil) for missing rows; normalize to sql.ErrNoRows.
+	if node == nil {
+		return nil, sql.ErrNoRows
+	}
+	// Enforce tenant isolation at lookup stage.
+	if node.TenantID != tenantID {
+		return nil, sql.ErrNoRows
+	}
+	return node, nil
 }
 
 func (r *Router) writeNodeLookupError(w http.ResponseWriter, err error) {
