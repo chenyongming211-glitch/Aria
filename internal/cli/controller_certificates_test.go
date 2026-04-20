@@ -453,6 +453,83 @@ func TestHandleIssueCertificate_EnrollmentTokenWithoutNodeSelectorReturns401(t *
 	}
 }
 
+func TestHandleRegister_CSRUsesPersistedNodeIDForCertUpsert(t *testing.T) {
+	tenantID := uuid.New()
+	persistedNodeID := uuid.New()
+	now := time.Now()
+	publicKey := "pubkey-register-csr-existing-1234567890"
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, persistedNodeID, "online", now)
+	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, persistedNodeID, "online", now)
+	expectSaveNodeSuccess(mock, publicKey, tenantID, persistedNodeID)
+	expectNodeCertificateUpsert(mock, tenantID, persistedNodeID, nil).
+		WillReturnError(sql.ErrConnDone)
+
+	controller := &Controller{
+		store:       controllerstorage.NewStorageWithDB(db),
+		certService: newTestCertService(t),
+	}
+
+	body := `{"public_key":"` + publicKey + `","hostname":"node-a","csr_pem":"` + jsonEscape(generateCSRPEM(t, "register-existing")) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/register", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	controller.HandleRegister(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestHandleRegister_CSRFailureRollsBackFreshEnrollment(t *testing.T) {
+	tenantID := uuid.New()
+	persistedNodeID := uuid.New()
+	now := time.Now()
+	publicKey := "pubkey-register-csr-deleted-1234567890"
+	enrollToken := "tk_register_deleted_reenroll"
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, persistedNodeID, "deleted", now)
+	expectEnrollmentTokenValidate(mock, enrollToken, tenantID, now)
+	expectTenantIDByTokenLookup(mock, enrollToken, tenantID)
+	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, persistedNodeID, "deleted", now)
+	expectSaveNodeSuccess(mock, publicKey, tenantID, persistedNodeID)
+	expectNodeCertificateUpsert(mock, tenantID, persistedNodeID, nil).
+		WillReturnError(sql.ErrConnDone)
+	expectMarkNodeDeleted(mock, publicKey)
+
+	controller := &Controller{
+		store:          controllerstorage.NewStorageWithDB(db),
+		certService:    newTestCertService(t),
+		tokenValidator: token.NewValidator(token.NewStore(db)),
+	}
+
+	body := `{"public_key":"` + publicKey + `","hostname":"node-b","token":"` + enrollToken + `","csr_pem":"` + jsonEscape(generateCSRPEM(t, "register-deleted")) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/register", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	controller.HandleRegister(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestHandleRenewCertificate_NoExistingCertReturns404(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
@@ -688,6 +765,28 @@ func expectNodeLookupByPublicKey(mock sqlmock.Sqlmock, publicKey string, tenantI
 		))
 }
 
+func expectNodeLookupByPublicKeyWithStatusAndID(
+	mock sqlmock.Sqlmock,
+	publicKey string,
+	tenantID uuid.UUID,
+	nodeID uuid.UUID,
+	status string,
+	now time.Time,
+) {
+	mock.ExpectQuery(regexp.QuoteMeta(
+		`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE public_key = $1`,
+	)).
+		WithArgs(publicKey).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+			"created_at", "updated_at",
+		}).AddRow(
+			nodeID, publicKey, "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-1", "10.0.0.10", 10,
+			time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, status, int64(0), "{}", "", now, now,
+		))
+}
+
 func expectEnrollmentTokenValidate(mock sqlmock.Sqlmock, tokenValue string, tenantID uuid.UUID, now time.Time) {
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT id, token, tag, COALESCE(tenant_id::text, ''), max_uses, used_count, expires_at, created_at,
@@ -729,6 +828,38 @@ func expectNodeCertificateUpsert(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUI
 func expectNodeCertificateGetByNodeID(mock sqlmock.Sqlmock, nodeID uuid.UUID) *sqlmock.ExpectedQuery {
 	return mock.ExpectQuery(regexp.QuoteMeta(getNodeCertificateByNodeIDQuery)).
 		WithArgs(nodeID)
+}
+
+func expectSaveNodeSuccess(mock sqlmock.Sqlmock, publicKey string, tenantID, persistedNodeID uuid.UUID) {
+	mock.ExpectQuery(`INSERT INTO nodes \(`).
+		WithArgs(
+			publicKey,
+			sqlmock.AnyArg(),
+			tenantID,
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow(persistedNodeID, time.Now(), time.Now()))
+}
+
+func expectMarkNodeDeleted(mock sqlmock.Sqlmock, publicKey string) {
+	mock.ExpectExec(`UPDATE nodes`).
+		WithArgs(publicKey).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
 func newNodeCertificateRows() *sqlmock.Rows {
