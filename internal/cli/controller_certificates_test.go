@@ -26,6 +26,30 @@ import (
 	"github.com/google/uuid"
 )
 
+const upsertNodeCertificateQuery = `
+		INSERT INTO node_certificates (
+			tenant_id, node_id, serial_number, cert_pem, ca_pem,
+			not_before, not_after, status, issued_at, renewed_from, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, NOW())
+		ON CONFLICT (node_id) DO UPDATE SET
+			serial_number = EXCLUDED.serial_number,
+			cert_pem = EXCLUDED.cert_pem,
+			ca_pem = EXCLUDED.ca_pem,
+			not_before = EXCLUDED.not_before,
+			not_after = EXCLUDED.not_after,
+			status = EXCLUDED.status,
+			renewed_from = EXCLUDED.renewed_from,
+			updated_at = NOW()
+	`
+
+const getNodeCertificateByNodeIDQuery = `
+		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
+		       not_before, not_after, status, issued_at, revoked_at,
+		       COALESCE(revoke_reason, ''), renewed_from, updated_at
+		FROM node_certificates
+		WHERE node_id = $1
+	`
+
 func TestHandleIssueCertificate_SuccessWithRuntimeToken(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
@@ -45,46 +69,10 @@ func TestHandleIssueCertificate_SuccessWithRuntimeToken(t *testing.T) {
 	csrPEM := generateCSRPEM(t, "node-"+nodeID.String())
 
 	expectNodeLookupByID(mock, tenantID, nodeID, now)
-	mock.ExpectExec(regexp.QuoteMeta(`
-		INSERT INTO node_certificates (
-			tenant_id, node_id, serial_number, cert_pem, ca_pem,
-			not_before, not_after, status, issued_at, renewed_from, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, NOW())
-		ON CONFLICT (node_id) DO UPDATE SET
-			serial_number = EXCLUDED.serial_number,
-			cert_pem = EXCLUDED.cert_pem,
-			ca_pem = EXCLUDED.ca_pem,
-			not_before = EXCLUDED.not_before,
-			not_after = EXCLUDED.not_after,
-			status = EXCLUDED.status,
-			renewed_from = EXCLUDED.renewed_from,
-			updated_at = NOW()
-	`)).
-		WithArgs(
-			tenantID,
-			nodeID,
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			controllerstorage.CertStatusIssued,
-			nil,
-		).
+	expectNodeCertificateUpsert(mock, tenantID, nodeID, nil).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
-		       not_before, not_after, status, issued_at, revoked_at,
-		       COALESCE(revoke_reason, ''), renewed_from, updated_at
-		FROM node_certificates
-		WHERE node_id = $1
-	`)).
-		WithArgs(nodeID).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "serial_number", "cert_pem", "ca_pem",
-			"not_before", "not_after", "status", "issued_at", "revoked_at",
-			"revoke_reason", "renewed_from", "updated_at",
-		}).AddRow(
+	expectNodeCertificateGetByNodeID(mock, nodeID).
+		WillReturnRows(newNodeCertificateRows().AddRow(
 			uuid.New(), tenantID, nodeID, "abc123", "cert", "ca", now, now.Add(24*time.Hour),
 			controllerstorage.CertStatusIssued, now, nil, "", nil, now,
 		))
@@ -140,46 +128,10 @@ func TestHandleIssueCertificate_SuccessWithBearerRuntimeToken(t *testing.T) {
 	csrPEM := generateCSRPEM(t, "node-bearer-"+nodeID.String())
 
 	expectNodeLookupByID(mock, tenantID, nodeID, now)
-	mock.ExpectExec(regexp.QuoteMeta(`
-		INSERT INTO node_certificates (
-			tenant_id, node_id, serial_number, cert_pem, ca_pem,
-			not_before, not_after, status, issued_at, renewed_from, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, NOW())
-		ON CONFLICT (node_id) DO UPDATE SET
-			serial_number = EXCLUDED.serial_number,
-			cert_pem = EXCLUDED.cert_pem,
-			ca_pem = EXCLUDED.ca_pem,
-			not_before = EXCLUDED.not_before,
-			not_after = EXCLUDED.not_after,
-			status = EXCLUDED.status,
-			renewed_from = EXCLUDED.renewed_from,
-			updated_at = NOW()
-	`)).
-		WithArgs(
-			tenantID,
-			nodeID,
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			controllerstorage.CertStatusIssued,
-			nil,
-		).
+	expectNodeCertificateUpsert(mock, tenantID, nodeID, nil).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
-		       not_before, not_after, status, issued_at, revoked_at,
-		       COALESCE(revoke_reason, ''), renewed_from, updated_at
-		FROM node_certificates
-		WHERE node_id = $1
-	`)).
-		WithArgs(nodeID).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "serial_number", "cert_pem", "ca_pem",
-			"not_before", "not_after", "status", "issued_at", "revoked_at",
-			"revoke_reason", "renewed_from", "updated_at",
-		}).AddRow(
+	expectNodeCertificateGetByNodeID(mock, nodeID).
+		WillReturnRows(newNodeCertificateRows().AddRow(
 			uuid.New(), tenantID, nodeID, "bearer-serial", "bearer-cert", "bearer-ca", now, now.Add(24*time.Hour),
 			controllerstorage.CertStatusIssued, now, nil, "", nil, now,
 		))
@@ -369,32 +321,7 @@ func TestHandleIssueCertificate_StorageUpsertFailureReturns500(t *testing.T) {
 		t.Fatalf("GenerateRuntimeToken failed: %v", err)
 	}
 	expectNodeLookupByID(mock, tenantID, nodeID, now)
-	mock.ExpectExec(regexp.QuoteMeta(`
-		INSERT INTO node_certificates (
-			tenant_id, node_id, serial_number, cert_pem, ca_pem,
-			not_before, not_after, status, issued_at, renewed_from, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, NOW())
-		ON CONFLICT (node_id) DO UPDATE SET
-			serial_number = EXCLUDED.serial_number,
-			cert_pem = EXCLUDED.cert_pem,
-			ca_pem = EXCLUDED.ca_pem,
-			not_before = EXCLUDED.not_before,
-			not_after = EXCLUDED.not_after,
-			status = EXCLUDED.status,
-			renewed_from = EXCLUDED.renewed_from,
-			updated_at = NOW()
-	`)).
-		WithArgs(
-			tenantID,
-			nodeID,
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			controllerstorage.CertStatusIssued,
-			nil,
-		).
+	expectNodeCertificateUpsert(mock, tenantID, nodeID, nil).
 		WillReturnError(sql.ErrConnDone)
 
 	controller := &Controller{
@@ -430,46 +357,10 @@ func TestHandleIssueCertificate_SuccessWithEnrollmentTokenAndNodeID(t *testing.T
 	expectEnrollmentTokenValidate(mock, enrollToken, tenantID, now)
 	expectTenantIDByTokenLookup(mock, enrollToken, tenantID)
 	expectNodeLookupByID(mock, tenantID, nodeID, now)
-	mock.ExpectExec(regexp.QuoteMeta(`
-		INSERT INTO node_certificates (
-			tenant_id, node_id, serial_number, cert_pem, ca_pem,
-			not_before, not_after, status, issued_at, renewed_from, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, NOW())
-		ON CONFLICT (node_id) DO UPDATE SET
-			serial_number = EXCLUDED.serial_number,
-			cert_pem = EXCLUDED.cert_pem,
-			ca_pem = EXCLUDED.ca_pem,
-			not_before = EXCLUDED.not_before,
-			not_after = EXCLUDED.not_after,
-			status = EXCLUDED.status,
-			renewed_from = EXCLUDED.renewed_from,
-			updated_at = NOW()
-	`)).
-		WithArgs(
-			tenantID,
-			nodeID,
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			controllerstorage.CertStatusIssued,
-			nil,
-		).
+	expectNodeCertificateUpsert(mock, tenantID, nodeID, nil).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
-		       not_before, not_after, status, issued_at, revoked_at,
-		       COALESCE(revoke_reason, ''), renewed_from, updated_at
-		FROM node_certificates
-		WHERE node_id = $1
-	`)).
-		WithArgs(nodeID).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "serial_number", "cert_pem", "ca_pem",
-			"not_before", "not_after", "status", "issued_at", "revoked_at",
-			"revoke_reason", "renewed_from", "updated_at",
-		}).AddRow(
+	expectNodeCertificateGetByNodeID(mock, nodeID).
+		WillReturnRows(newNodeCertificateRows().AddRow(
 			uuid.New(), tenantID, nodeID, "enroll-serial", "enroll-cert", "enroll-ca", now, now.Add(24*time.Hour),
 			controllerstorage.CertStatusIssued, now, nil, "", nil, now,
 		))
@@ -578,14 +469,7 @@ func TestHandleRenewCertificate_NoExistingCertReturns404(t *testing.T) {
 		t.Fatalf("GenerateRuntimeToken failed: %v", err)
 	}
 	expectNodeLookupByID(mock, tenantID, nodeID, now)
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
-		       not_before, not_after, status, issued_at, revoked_at,
-		       COALESCE(revoke_reason, ''), renewed_from, updated_at
-		FROM node_certificates
-		WHERE node_id = $1
-	`)).
-		WithArgs(nodeID).
+	expectNodeCertificateGetByNodeID(mock, nodeID).
 		WillReturnError(sql.ErrNoRows)
 
 	controller := &Controller{
@@ -622,14 +506,7 @@ func TestHandleRenewCertificate_LoadExistingCertFailureReturns500(t *testing.T) 
 		t.Fatalf("GenerateRuntimeToken failed: %v", err)
 	}
 	expectNodeLookupByID(mock, tenantID, nodeID, now)
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
-		       not_before, not_after, status, issued_at, revoked_at,
-		       COALESCE(revoke_reason, ''), renewed_from, updated_at
-		FROM node_certificates
-		WHERE node_id = $1
-	`)).
-		WithArgs(nodeID).
+	expectNodeCertificateGetByNodeID(mock, nodeID).
 		WillReturnError(sql.ErrConnDone)
 
 	controller := &Controller{
@@ -709,62 +586,15 @@ func TestHandleRenewCertificate_SuccessPersistsRenewedFrom(t *testing.T) {
 	csrPEM := generateCSRPEM(t, "node-renew-success")
 
 	expectNodeLookupByID(mock, tenantID, nodeID, now)
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
-		       not_before, not_after, status, issued_at, revoked_at,
-		       COALESCE(revoke_reason, ''), renewed_from, updated_at
-		FROM node_certificates
-		WHERE node_id = $1
-	`)).
-		WithArgs(nodeID).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "serial_number", "cert_pem", "ca_pem",
-			"not_before", "not_after", "status", "issued_at", "revoked_at",
-			"revoke_reason", "renewed_from", "updated_at",
-		}).AddRow(
+	expectNodeCertificateGetByNodeID(mock, nodeID).
+		WillReturnRows(newNodeCertificateRows().AddRow(
 			existingCertID, tenantID, nodeID, "old-serial", "old-cert", "old-ca", now.Add(-24*time.Hour), now.Add(24*time.Hour),
 			controllerstorage.CertStatusIssued, now.Add(-24*time.Hour), nil, "", nil, now.Add(-time.Hour),
 		))
-	mock.ExpectExec(regexp.QuoteMeta(`
-		INSERT INTO node_certificates (
-			tenant_id, node_id, serial_number, cert_pem, ca_pem,
-			not_before, not_after, status, issued_at, renewed_from, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, NOW())
-		ON CONFLICT (node_id) DO UPDATE SET
-			serial_number = EXCLUDED.serial_number,
-			cert_pem = EXCLUDED.cert_pem,
-			ca_pem = EXCLUDED.ca_pem,
-			not_before = EXCLUDED.not_before,
-			not_after = EXCLUDED.not_after,
-			status = EXCLUDED.status,
-			renewed_from = EXCLUDED.renewed_from,
-			updated_at = NOW()
-	`)).
-		WithArgs(
-			tenantID,
-			nodeID,
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			controllerstorage.CertStatusIssued,
-			existingCertID,
-		).
+	expectNodeCertificateUpsert(mock, tenantID, nodeID, existingCertID).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
-		       not_before, not_after, status, issued_at, revoked_at,
-		       COALESCE(revoke_reason, ''), renewed_from, updated_at
-		FROM node_certificates
-		WHERE node_id = $1
-	`)).
-		WithArgs(nodeID).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "serial_number", "cert_pem", "ca_pem",
-			"not_before", "not_after", "status", "issued_at", "revoked_at",
-			"revoke_reason", "renewed_from", "updated_at",
-		}).AddRow(
+	expectNodeCertificateGetByNodeID(mock, nodeID).
+		WillReturnRows(newNodeCertificateRows().AddRow(
 			uuid.New(), tenantID, nodeID, "new-serial", "new-cert", "new-ca", now, now.Add(48*time.Hour),
 			controllerstorage.CertStatusIssued, now, nil, "", existingCertID.String(), now,
 		))
@@ -879,6 +709,34 @@ func expectTenantIDByTokenLookup(mock sqlmock.Sqlmock, tokenValue string, tenant
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT tenant_id FROM tokens WHERE token = $1`)).
 		WithArgs(tokenValue).
 		WillReturnRows(sqlmock.NewRows([]string{"tenant_id"}).AddRow(tenantID))
+}
+
+func expectNodeCertificateUpsert(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, renewedFrom interface{}) *sqlmock.ExpectedExec {
+	return mock.ExpectExec(regexp.QuoteMeta(upsertNodeCertificateQuery)).
+		WithArgs(
+			tenantID,
+			nodeID,
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			controllerstorage.CertStatusIssued,
+			renewedFrom,
+		)
+}
+
+func expectNodeCertificateGetByNodeID(mock sqlmock.Sqlmock, nodeID uuid.UUID) *sqlmock.ExpectedQuery {
+	return mock.ExpectQuery(regexp.QuoteMeta(getNodeCertificateByNodeIDQuery)).
+		WithArgs(nodeID)
+}
+
+func newNodeCertificateRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"id", "tenant_id", "node_id", "serial_number", "cert_pem", "ca_pem",
+		"not_before", "not_after", "status", "issued_at", "revoked_at",
+		"revoke_reason", "renewed_from", "updated_at",
+	})
 }
 
 func generateCSRPEM(t *testing.T, cn string) string {
