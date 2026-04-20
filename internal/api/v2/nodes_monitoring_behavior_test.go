@@ -949,6 +949,73 @@ func TestMonitoringAPI_HealthSuccessReturnsContractFields(t *testing.T) {
 	}
 }
 
+func TestMonitoringAPI_HealthNodeCountFailureFallsBackToDefaultRate(t *testing.T) {
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT
+			COUNT(*) AS total,
+			COUNT(*) FILTER (WHERE last_seen >= EXTRACT(EPOCH FROM NOW()) - 60) AS online,
+			COUNT(*) FILTER (WHERE last_seen < EXTRACT(EPOCH FROM NOW()) - 60 OR last_seen IS NULL) AS offline
+		FROM nodes
+		WHERE tenant_id = $1 AND COALESCE(status, 'online') != 'deleted'
+	`)).
+		WithArgs(tenantID).
+		WillReturnError(errors.New("count unavailable"))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT
+			COUNT(*) FILTER (WHERE ncs.desired_state_version != '' AND ncs.desired_state_version = ncs.applied_state_version) AS synced,
+			COUNT(*) FILTER (WHERE ncs.desired_state_version != '') AS total
+		FROM node_control_states ncs
+		JOIN nodes n ON n.id = ncs.node_id
+		WHERE n.tenant_id = $1
+	`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"synced", "total"}).AddRow(7, 10))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT COUNT(*) FROM alerts WHERE tenant_id = $1 AND status = 'active'
+	`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT COUNT(*)
+		FROM agent_commands ac
+		JOIN nodes n ON n.public_key = ac.node_public_key
+		WHERE n.tenant_id = $1 AND ac.status = 'failed'
+	`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/health", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if data["node_online_rate"] != float64(100) {
+		t.Fatalf("expected default node_online_rate=100, got %#v", data["node_online_rate"])
+	}
+	if data["sync_success_rate"] != float64(70) {
+		t.Fatalf("expected sync_success_rate=70, got %#v", data["sync_success_rate"])
+	}
+	if data["active_alerts_count"] != float64(2) || data["failed_commands_count"] != float64(1) {
+		t.Fatalf("unexpected health counters: %#v", data)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestMonitoringAPI_EventsSuccessReturnsContractFields(t *testing.T) {
 	tenantID := uuid.New()
 	now := time.Now()
@@ -1020,6 +1087,60 @@ func TestMonitoringAPI_EventsSuccessReturnsContractFields(t *testing.T) {
 	detail, ok := item["detail"].(map[string]interface{})
 	if !ok || detail["k"] != "v" {
 		t.Fatalf("unexpected event detail payload: %#v", item["detail"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMonitoringAPI_EventsLimitAndOffsetBoundary(t *testing.T) {
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT (
+			SELECT COUNT(*) FROM alerts WHERE tenant_id = $1
+		) + (
+			SELECT COUNT(*) FROM audit_events WHERE tenant_id = $1
+		)
+	`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, source, event_type, severity, node_id, title, detail, created_at FROM (
+			SELECT id::text, 'alert' AS source, alert_type AS event_type, severity,
+			       COALESCE(node_id::text, '') AS node_id, title, context AS detail, created_at
+			FROM alerts WHERE tenant_id = $1
+			UNION ALL
+			SELECT id::text, 'audit' AS source, event_type, '' AS severity,
+			       COALESCE(node_id::text, '') AS node_id, summary AS title, detail, created_at
+			FROM audit_events WHERE tenant_id = $1
+		) combined
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`)).
+		WithArgs(tenantID, 200, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "source", "event_type", "severity", "node_id", "title", "detail", "created_at",
+		}))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/events?limit=999&offset=-7", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if data["limit"] != float64(200) || data["offset"] != float64(0) {
+		t.Fatalf("expected clamped paging fields, got limit=%#v offset=%#v", data["limit"], data["offset"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
