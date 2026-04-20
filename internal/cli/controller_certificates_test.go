@@ -448,6 +448,39 @@ func TestHandleIssueCertificate_EnrollmentTokenTenantMismatchReturns401(t *testi
 	}
 }
 
+func TestHandleIssueCertificate_EnrollmentTokenWithoutNodeSelectorReturns401(t *testing.T) {
+	tenantID := uuid.New()
+	now := time.Now()
+	enrollToken := "tk_enroll_missing_node_selector"
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectEnrollmentTokenValidate(mock, enrollToken, tenantID, now)
+	expectTenantIDByTokenLookup(mock, enrollToken, tenantID)
+
+	controller := &Controller{
+		store:          controllerstorage.NewStorageWithDB(db),
+		certService:    newTestCertService(t),
+		tokenValidator: token.NewValidator(token.NewStore(db)),
+	}
+
+	body := `{"token":"` + enrollToken + `","csr_pem":"` + jsonEscape(generateCSRPEM(t, "node-enroll-no-selector")) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/certificates/issue", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	controller.HandleIssueCertificate(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestHandleRenewCertificate_NoExistingCertReturns404(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
