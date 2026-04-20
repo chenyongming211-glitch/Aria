@@ -25,19 +25,9 @@ export default defineStore('tenant', () => {
       }
     } catch (error) {
       console.error('Failed to load tenants:', error)
-      // Fallback to mock data for demo
-      tenants.value = [
-        { id: 'tenant-1', name: 'Acme Corp', code: 'acme', status: 'active' },
-        { id: 'tenant-2', name: 'Beta Inc', code: 'beta', status: 'active' },
-        { id: 'tenant-3', name: 'Gamma LLC', code: 'gamma', status: 'suspended' }
-      ]
-
-      const saved = localStorage.getItem('aria-current-tenant')
-      if (saved) {
-        currentTenant.value = JSON.parse(saved)
-      } else if (tenants.value.length > 0) {
-        currentTenant.value = tenants.value[0]
-      }
+      tenants.value = []
+      currentTenant.value = null
+      localStorage.removeItem('aria-current-tenant')
     } finally {
       loading.value = false
     }

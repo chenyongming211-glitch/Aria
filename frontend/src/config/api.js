@@ -162,5 +162,5 @@ export const API_ENDPOINTS = {
   HEALTH: '/health',
 
   // 版本
-  VERSION: '/api/version'
+  VERSION: '/version'
 };
