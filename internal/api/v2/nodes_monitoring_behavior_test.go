@@ -317,6 +317,112 @@ func TestNodesAPI_DeleteReturnsInternalErrorWhenMarkDeletedFails(t *testing.T) {
 	}
 }
 
+func TestNodesAPI_UpdateSuccessReturnsContractFields(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookup(mock, tenantID, nodeID, "{10.1.0.0/24}")
+	expectNodeLookup(mock, tenantID, nodeID, "{10.1.0.0/24}")
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE nodes SET 
+		hostname = COALESCE(NULLIF($1, ''), hostname),
+		endpoint = COALESCE(NULLIF($2, ''), endpoint),
+		private_ip = COALESCE(NULLIF($3, ''), private_ip),
+		public_ip = COALESCE(NULLIF($4, ''), public_ip),
+		region = COALESCE(NULLIF($5, ''), region),
+		vpc_id = COALESCE(NULLIF($6, ''), vpc_id),
+		role = $7,
+		advertised_routes = $8,
+		updated_at = NOW()
+		WHERE id = $9 AND tenant_id = $10`)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(
+		http.MethodPut,
+		"/api/v2/tenants/"+tenantID.String()+"/nodes/"+nodeID.String(),
+		strings.NewReader(`{"hostname":"edge-1","role":"gateway","advertised_routes":["10.10.0.0/16"]}`),
+	), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeOK {
+		t.Fatalf("expected code %s, got %s", apibase.CodeOK, resp.Code)
+	}
+	if data["id"] != nodeID.String() {
+		t.Fatalf("expected id=%s, got %#v", nodeID.String(), data["id"])
+	}
+	if data["tenant_id"] != tenantID.String() {
+		t.Fatalf("expected tenant_id=%s, got %#v", tenantID.String(), data["tenant_id"])
+	}
+	if data["role"] != "gateway" {
+		t.Fatalf("expected role=gateway, got %#v", data["role"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestNodesAPI_DeleteSuccessReturnsDeletedStatus(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT public_key FROM nodes WHERE id = $1 AND tenant_id = $2`)).
+		WithArgs(nodeID, tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"public_key"}).AddRow("pub-key-1"))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE nodes
+		SET status = 'deleted', updated_at = NOW()
+		WHERE public_key = $1
+	`)).
+		WithArgs("pub-key-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(
+		http.MethodDelete,
+		"/api/v2/tenants/"+tenantID.String()+"/nodes/"+nodeID.String(),
+		nil,
+	), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeOK {
+		t.Fatalf("expected code %s, got %s", apibase.CodeOK, resp.Code)
+	}
+	if data["id"] != nodeID.String() {
+		t.Fatalf("expected id=%s, got %#v", nodeID.String(), data["id"])
+	}
+	if data["status"] != "deleted" {
+		t.Fatalf("expected status=deleted, got %#v", data["status"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestMonitoringAPI_InvalidNodeIDParamReturnsBadRequest(t *testing.T) {
 	tenantID := uuid.New()
 	db, _, err := sqlmock.New()
