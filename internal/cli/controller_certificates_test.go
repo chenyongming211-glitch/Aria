@@ -530,6 +530,101 @@ func TestHandleRegister_CSRFailureRollsBackFreshEnrollment(t *testing.T) {
 	}
 }
 
+func TestHandleRegister_CSRSuccessIncludesCertificateInSyncResponse(t *testing.T) {
+	tenantID := uuid.New()
+	persistedNodeID := uuid.New()
+	now := time.Now()
+	publicKey := "pubkey-register-csr-success-1234567890"
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	// HandleRegister pre-check + save + issue
+	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, persistedNodeID, "online", now)
+	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, persistedNodeID, "online", now)
+	expectSaveNodeSuccess(mock, publicKey, tenantID, persistedNodeID)
+	expectNodeCertificateUpsert(mock, tenantID, persistedNodeID, nil).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	expectNodeCertificateGetByNodeID(mock, persistedNodeID).
+		WillReturnRows(newNodeCertificateRows().AddRow(
+			uuid.New(), tenantID, persistedNodeID, "register-serial", "register-cert", "register-ca",
+			now, now.Add(48*time.Hour), controllerstorage.CertStatusIssued, now, nil, "", nil, now,
+		))
+
+	// syncNode fallback path for empty token
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT tenant_id FROM tokens WHERE token = $1`)).
+		WithArgs("").
+		WillReturnError(sql.ErrNoRows)
+	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, persistedNodeID, "online", now)
+
+	// peers query by tenant returns empty
+	mock.ExpectQuery(regexp.QuoteMeta(
+		`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1`,
+	)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+			"created_at", "updated_at",
+		}))
+
+	// tenant ACL query returns empty rule list
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
+		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
+		FROM acl_rules
+		WHERE tenant_id = $1 AND enabled = true
+		ORDER BY priority ASC, id ASC
+	`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "name", "src_node", "src_net", "dst_node", "dst_net", "protocol", "min_port", "max_port", "action", "enabled", "priority", "description", "created_at", "updated_at",
+		}))
+
+	// attachNodeCertificateToSyncResponse
+	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, persistedNodeID, "online", now)
+	expectNodeCertificateGetByNodeID(mock, persistedNodeID).
+		WillReturnRows(newNodeCertificateRows().AddRow(
+			uuid.New(), tenantID, persistedNodeID, "register-serial", "register-cert", "register-ca",
+			now, now.Add(48*time.Hour), controllerstorage.CertStatusIssued, now, nil, "", nil, now,
+		))
+
+	controller := &Controller{
+		store:       controllerstorage.NewStorageWithDB(db),
+		certService: newTestCertService(t),
+	}
+
+	body := `{"public_key":"` + publicKey + `","hostname":"node-c","csr_pem":"` + jsonEscape(generateCSRPEM(t, "register-success")) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/register", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	controller.HandleRegister(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	if payload["certificate_pem"] != "register-cert" {
+		t.Fatalf("expected certificate_pem=register-cert, got %#v", payload["certificate_pem"])
+	}
+	if payload["certificate_ca"] != "register-ca" {
+		t.Fatalf("expected certificate_ca=register-ca, got %#v", payload["certificate_ca"])
+	}
+	if _, ok := payload["certificate_not_after"]; !ok {
+		t.Fatalf("expected certificate_not_after in response")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestHandleRenewCertificate_NoExistingCertReturns404(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
