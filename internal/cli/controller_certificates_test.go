@@ -338,6 +338,89 @@ func TestHandleRenewCertificate_NoExistingCertReturns404(t *testing.T) {
 	}
 }
 
+func TestHandleRenewCertificate_LoadExistingCertFailureReturns500(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	runtimeToken, _, err := auth.GenerateRuntimeToken(nodeID.String(), tenantID.String())
+	if err != nil {
+		t.Fatalf("GenerateRuntimeToken failed: %v", err)
+	}
+	expectNodeLookupByID(mock, tenantID, nodeID, now)
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
+		       not_before, not_after, status, issued_at, revoked_at,
+		       COALESCE(revoke_reason, ''), renewed_from, updated_at
+		FROM node_certificates
+		WHERE node_id = $1
+	`)).
+		WithArgs(nodeID).
+		WillReturnError(sql.ErrConnDone)
+
+	controller := &Controller{
+		store:       controllerstorage.NewStorageWithDB(db),
+		certService: newTestCertService(t),
+	}
+
+	body := `{"runtime_token":"` + runtimeToken + `","csr_pem":"` + jsonEscape(generateCSRPEM(t, "node-renew-load-fail")) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/certificates/renew", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	controller.HandleRenewCertificate(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestHandleRenewCertificate_RuntimeTokenNodeNotFoundReturns401(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	runtimeToken, _, err := auth.GenerateRuntimeToken(nodeID.String(), tenantID.String())
+	if err != nil {
+		t.Fatalf("GenerateRuntimeToken failed: %v", err)
+	}
+
+	mock.ExpectQuery(regexp.QuoteMeta(
+		`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE id = $1`,
+	)).
+		WithArgs(nodeID).
+		WillReturnError(sql.ErrNoRows)
+
+	controller := &Controller{
+		store:       controllerstorage.NewStorageWithDB(db),
+		certService: newTestCertService(t),
+	}
+
+	body := `{"runtime_token":"` + runtimeToken + `","csr_pem":"` + jsonEscape(generateCSRPEM(t, "node-renew-not-found")) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/certificates/renew", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	controller.HandleRenewCertificate(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func newTestCertService(t *testing.T) *certissuance.Service {
 	t.Helper()
 	caCertPEM, caKeyPEM := generateTestCA(t)
