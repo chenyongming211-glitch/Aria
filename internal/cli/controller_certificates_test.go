@@ -19,6 +19,7 @@ import (
 
 	"aria/internal/auth"
 	"aria/internal/security/certissuance"
+	"aria/internal/token"
 	"aria/pkg/controllerstorage"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -333,6 +334,120 @@ func TestHandleIssueCertificate_StorageUpsertFailureReturns500(t *testing.T) {
 	}
 }
 
+func TestHandleIssueCertificate_SuccessWithEnrollmentTokenAndNodeID(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+	enrollToken := "tk_enroll_nodeid"
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectEnrollmentTokenValidate(mock, enrollToken, tenantID, now)
+	expectTenantIDByTokenLookup(mock, enrollToken, tenantID)
+	expectNodeLookupByID(mock, tenantID, nodeID, now)
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO node_certificates (
+			tenant_id, node_id, serial_number, cert_pem, ca_pem,
+			not_before, not_after, status, issued_at, renewed_from, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, NOW())
+		ON CONFLICT (node_id) DO UPDATE SET
+			serial_number = EXCLUDED.serial_number,
+			cert_pem = EXCLUDED.cert_pem,
+			ca_pem = EXCLUDED.ca_pem,
+			not_before = EXCLUDED.not_before,
+			not_after = EXCLUDED.not_after,
+			status = EXCLUDED.status,
+			renewed_from = EXCLUDED.renewed_from,
+			updated_at = NOW()
+	`)).
+		WithArgs(
+			tenantID,
+			nodeID,
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			controllerstorage.CertStatusIssued,
+			nil,
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
+		       not_before, not_after, status, issued_at, revoked_at,
+		       COALESCE(revoke_reason, ''), renewed_from, updated_at
+		FROM node_certificates
+		WHERE node_id = $1
+	`)).
+		WithArgs(nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "serial_number", "cert_pem", "ca_pem",
+			"not_before", "not_after", "status", "issued_at", "revoked_at",
+			"revoke_reason", "renewed_from", "updated_at",
+		}).AddRow(
+			uuid.New(), tenantID, nodeID, "enroll-serial", "enroll-cert", "enroll-ca", now, now.Add(24*time.Hour),
+			controllerstorage.CertStatusIssued, now, nil, "", nil, now,
+		))
+
+	controller := &Controller{
+		store:          controllerstorage.NewStorageWithDB(db),
+		certService:    newTestCertService(t),
+		tokenValidator: token.NewValidator(token.NewStore(db)),
+	}
+
+	body := `{"token":"` + enrollToken + `","node_id":"` + nodeID.String() + `","csr_pem":"` + jsonEscape(generateCSRPEM(t, "node-enroll-nodeid")) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/certificates/issue", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	controller.HandleIssueCertificate(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestHandleIssueCertificate_EnrollmentTokenTenantMismatchReturns401(t *testing.T) {
+	tokenTenantID := uuid.New()
+	nodeTenantID := uuid.New()
+	nodePublicKey := "pub-key-enroll-mismatch"
+	now := time.Now()
+	enrollToken := "tk_enroll_mismatch"
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectEnrollmentTokenValidate(mock, enrollToken, tokenTenantID, now)
+	expectTenantIDByTokenLookup(mock, enrollToken, tokenTenantID)
+	expectNodeLookupByPublicKey(mock, nodePublicKey, nodeTenantID, now)
+
+	controller := &Controller{
+		store:          controllerstorage.NewStorageWithDB(db),
+		certService:    newTestCertService(t),
+		tokenValidator: token.NewValidator(token.NewStore(db)),
+	}
+
+	body := `{"token":"` + enrollToken + `","public_key":"` + nodePublicKey + `","csr_pem":"` + jsonEscape(generateCSRPEM(t, "node-enroll-mismatch")) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/certificates/issue", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	controller.HandleIssueCertificate(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestHandleRenewCertificate_NoExistingCertReturns404(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
@@ -612,6 +727,44 @@ func expectNodeLookupByID(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, now 
 			nodeID, "pub-key-1", "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-1", "10.0.0.10", 10,
 			time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "online", int64(0), "{}", "", now, now,
 		))
+}
+
+func expectNodeLookupByPublicKey(mock sqlmock.Sqlmock, publicKey string, tenantID uuid.UUID, now time.Time) {
+	mock.ExpectQuery(regexp.QuoteMeta(
+		`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE public_key = $1`,
+	)).
+		WithArgs(publicKey).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+			"created_at", "updated_at",
+		}).AddRow(
+			uuid.New(), publicKey, "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-1", "10.0.0.10", 10,
+			time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "online", int64(0), "{}", "", now, now,
+		))
+}
+
+func expectEnrollmentTokenValidate(mock sqlmock.Sqlmock, tokenValue string, tenantID uuid.UUID, now time.Time) {
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, token, tag, COALESCE(tenant_id::text, ''), max_uses, used_count, expires_at, created_at,
+		       COALESCE(created_by::text, ''), status, last_used_at, COALESCE(last_used_by::text, '')
+		FROM tokens
+		WHERE token = $1
+	`)).
+		WithArgs(tokenValue).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "token", "tag", "tenant_id", "max_uses", "used_count", "expires_at", "created_at",
+			"created_by", "status", "last_used_at", "last_used_by",
+		}).AddRow(
+			uuid.New(), tokenValue, "enroll", tenantID.String(), 10, 0, now.Add(2*time.Hour), now.Add(-time.Hour),
+			"tester", string(token.StatusActive), nil, "",
+		))
+}
+
+func expectTenantIDByTokenLookup(mock sqlmock.Sqlmock, tokenValue string, tenantID uuid.UUID) {
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT tenant_id FROM tokens WHERE token = $1`)).
+		WithArgs(tokenValue).
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id"}).AddRow(tenantID))
 }
 
 func generateCSRPEM(t *testing.T, cn string) string {
