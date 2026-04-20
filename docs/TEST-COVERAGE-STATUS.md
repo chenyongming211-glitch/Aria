@@ -24,7 +24,7 @@
   - 错误码契约：`400/404/405/500` 与业务 code 断言
   - 租户隔离：跨租户访问 `404` 行为断言
 - 自动证书签发行为测试（`internal/cli/controller_certificates_test.go`）：
-  - `issue` 鉴权路径：`runtime_token` 与 `enrollment token` 均已覆盖
+  - `issue` 鉴权路径：`runtime_token`（body + `Authorization: Bearer`）与 `enrollment token` 均已覆盖
   - `issue` 成功/失败：成功签发、非法 token、租户不匹配、CSR 非法、存储写入失败
   - `renew` 成功/失败：无历史证书 `404`、历史证书查询失败 `500`、节点不存在 `401`
   - 续签链路：断言 `renewed_from` 证书链路写入（续签 lineage 保持）
@@ -47,5 +47,18 @@
 - gRPC 端到端自动化与性能压测基线报告
 - 覆盖率统计与阈值门禁（如 `go test -cover` + fail-under）
 - 自动证书签发可继续增强：
-  - `Authorization: Bearer <runtime_token>` 头部路径的显式行为测试
   - `renew` 场景下证书内容字段（有效期/用途）更细粒度断言
+  - `token` 鉴权链路的异常细分（如 token 解析成功但租户查询失败）
+  - 与 `register/sync/unregister` 真实生命周期联动的端到端行为测试
+
+## 5. 自动证书签发最终清单（阶段性）
+
+- 已覆盖：
+  - `issue`：`runtime_token`（body + bearer）/ `enrollment token` 成功路径
+  - `issue`：非法 token、租户不匹配、缺少 node selector、非法 CSR、存储失败
+  - `renew`：成功续签 + `renewed_from` lineage 断言
+  - `renew`：无历史证书、历史证书查询失败、节点不存在
+  - 协议与输入守卫：`405/503/400`
+- 待覆盖（非阻塞）：
+  - 证书内容级断言增强（`ClientAuth`、有效期边界）在 API 行为层的二次校验
+  - 生命周期 E2E（注册触发签发、注销触发撤销、同步返回证书）自动化回归
