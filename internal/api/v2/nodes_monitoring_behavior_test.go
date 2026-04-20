@@ -865,6 +865,7 @@ func TestMonitoringAPI_HealthSuccessReturnsContractFields(t *testing.T) {
 func TestMonitoringAPI_EventsSuccessReturnsContractFields(t *testing.T) {
 	tenantID := uuid.New()
 	now := time.Now()
+	eventNodeID := uuid.New()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -896,7 +897,7 @@ func TestMonitoringAPI_EventsSuccessReturnsContractFields(t *testing.T) {
 		WithArgs(tenantID, 50, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "source", "event_type", "severity", "node_id", "title", "detail", "created_at",
-		}).AddRow(uuid.New().String(), "alert", "high_latency", "warning", uuid.New().String(), "Latency high", []byte(`{"k":"v"}`), now))
+		}).AddRow(uuid.New().String(), "alert", "high_latency", "warning", eventNodeID.String(), "Latency high", []byte(`{"k":"v"}`), now))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/events", nil), tenantID)
@@ -915,8 +916,23 @@ func TestMonitoringAPI_EventsSuccessReturnsContractFields(t *testing.T) {
 	if data["total"] != float64(1) || data["limit"] != float64(50) || data["offset"] != float64(0) {
 		t.Fatalf("unexpected paging fields: %#v", data)
 	}
-	if _, ok := data["items"]; !ok {
-		t.Fatalf("expected items field in response data")
+	items := responseDataSlice(t, data["items"])
+	if len(items) != 1 {
+		t.Fatalf("expected one event item, got %d", len(items))
+	}
+	item, ok := items[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected first event item as map, got %#v", items[0])
+	}
+	if item["source"] != "alert" || item["event_type"] != "high_latency" || item["severity"] != "warning" {
+		t.Fatalf("unexpected event item identity: %#v", item)
+	}
+	if item["node_id"] != eventNodeID.String() {
+		t.Fatalf("unexpected event node_id: %#v", item["node_id"])
+	}
+	detail, ok := item["detail"].(map[string]interface{})
+	if !ok || detail["k"] != "v" {
+		t.Fatalf("unexpected event detail payload: %#v", item["detail"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
@@ -995,6 +1011,10 @@ func TestMonitoringAPI_AlertsSuccessReturnsItemContract(t *testing.T) {
 	}
 	if item["alert_type"] != "high_latency" || item["severity"] != "warning" || item["status"] != "active" {
 		t.Fatalf("unexpected item contract fields: %#v", item)
+	}
+	context, ok := item["context"].(map[string]interface{})
+	if !ok || context["threshold_ms"] != float64(200) {
+		t.Fatalf("unexpected alert context payload: %#v", item["context"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
@@ -1146,6 +1166,106 @@ func TestMonitoringAPI_TopologyBoundaryNoNodesReturnsEmptyCollections(t *testing
 	}
 	if len(nodes) != 0 || len(links) != 0 {
 		t.Fatalf("expected empty topology, got nodes=%d links=%d", len(nodes), len(links))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMonitoringAPI_TopologyOneNodeReturnsNodeWithoutLinks(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectTenantNodesQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows([]string{
+		"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+		"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+		"created_at", "updated_at",
+	}).AddRow(
+		nodeID, "pub-key-1", "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-1", "10.0.0.10", 10,
+		time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "online", int64(0), "{10.10.0.0/16}", "", now, now,
+	))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/topology", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+	nodes := responseDataSlice(t, data["nodes"])
+	links := responseDataSlice(t, data["links"])
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if len(nodes) != 1 || len(links) != 0 {
+		t.Fatalf("expected one node and zero links, got nodes=%d links=%d", len(nodes), len(links))
+	}
+	firstNode, ok := nodes[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected first topology node as map, got %#v", nodes[0])
+	}
+	if firstNode["id"] != nodeID.String() || firstNode["status"] != "online" {
+		t.Fatalf("unexpected topology node payload: %#v", firstNode)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMonitoringAPI_TopologyTwoNodesReturnsActiveLink(t *testing.T) {
+	tenantID := uuid.New()
+	nodeAID := uuid.New()
+	nodeBID := uuid.New()
+	now := time.Now()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectTenantNodesQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows([]string{
+		"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+		"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+		"created_at", "updated_at",
+	}).AddRow(
+		nodeAID, "pub-key-a", "machine-a", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-a", "10.0.0.10", 10,
+		time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "online", int64(0), "{}", "", now, now,
+	).AddRow(
+		nodeBID, "pub-key-b", "machine-b", tenantID, "2.2.2.2:51820", "10.0.0.2", "2.2.2.2", "bj", "vpc-2", "node-b", "10.0.0.11", 11,
+		time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "online", int64(0), "{}", "", now, now,
+	))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/topology", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+	links := responseDataSlice(t, data["links"])
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if len(links) != 1 {
+		t.Fatalf("expected one link, got %d", len(links))
+	}
+	link, ok := links[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected first link as map, got %#v", links[0])
+	}
+	if link["status"] != "active" {
+		t.Fatalf("expected active link status, got %#v", link["status"])
+	}
+	if link["source"] != nodeAID.String() || link["target"] != nodeBID.String() {
+		t.Fatalf("unexpected link endpoints: %#v", link)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
