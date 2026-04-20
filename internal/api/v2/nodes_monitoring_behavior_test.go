@@ -49,6 +49,20 @@ func responseDataMap(t *testing.T, resp apibase.APIResponse) map[string]interfac
 	return out
 }
 
+func responseDataSlice(t *testing.T, v interface{}) []interface{} {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("failed to marshal response data slice: %v", err)
+	}
+
+	var out []interface{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("failed to unmarshal response data slice: %v", err)
+	}
+	return out
+}
+
 func expectTenantNodesQuery(mock sqlmock.Sqlmock, tenantID uuid.UUID) *sqlmock.ExpectedQuery {
 	return mock.ExpectQuery(regexp.QuoteMeta(
 		`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND status != 'deleted' ORDER BY last_seen DESC`,
@@ -648,6 +662,123 @@ func TestMonitoringAPI_EventsSuccessReturnsContractFields(t *testing.T) {
 	}
 	if _, ok := data["items"]; !ok {
 		t.Fatalf("expected items field in response data")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMonitoringAPI_AlertsSuccessReturnsItemContract(t *testing.T) {
+	tenantID := uuid.New()
+	alertID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM alerts WHERE tenant_id = $1 AND status = $2")).
+		WithArgs(tenantID, "active").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, alert_type, severity, title, COALESCE(message, ''),
+		       context, status, created_at, resolved_at
+		FROM alerts
+		WHERE tenant_id = $1 AND status = $2
+		ORDER BY created_at DESC
+		LIMIT $3 OFFSET $4
+	`)).
+		WithArgs(tenantID, "active", 50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "alert_type", "severity", "title",
+			"message", "context", "status", "created_at", "resolved_at",
+		}).AddRow(
+			alertID,
+			tenantID,
+			nodeID.String(),
+			"high_latency",
+			"warning",
+			"Latency high",
+			"latency over threshold",
+			[]byte(`{"threshold_ms":200}`),
+			"active",
+			now,
+			nil,
+		))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+	items := responseDataSlice(t, data["items"])
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeOK {
+		t.Fatalf("expected code %s, got %s", apibase.CodeOK, resp.Code)
+	}
+	if data["total"] != float64(1) || data["limit"] != float64(50) || data["offset"] != float64(0) {
+		t.Fatalf("unexpected paging fields: %#v", data)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 alert item, got %d", len(items))
+	}
+
+	item, ok := items[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected first item as map, got %#v", items[0])
+	}
+	if item["id"] != alertID.String() || item["tenant_id"] != tenantID.String() {
+		t.Fatalf("unexpected item identity fields: %#v", item)
+	}
+	if item["alert_type"] != "high_latency" || item["severity"] != "warning" || item["status"] != "active" {
+		t.Fatalf("unexpected item contract fields: %#v", item)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMonitoringAPI_NodeMetricsSuccessReturnsContractFields(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookup(mock, tenantID, nodeID, "{}")
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/nodes/"+nodeID.String()+"/metrics", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeOK {
+		t.Fatalf("expected code %s, got %s", apibase.CodeOK, resp.Code)
+	}
+	if _, ok := data["upload_mbps"]; !ok {
+		t.Fatalf("expected upload_mbps field")
+	}
+	if _, ok := data["download_mbps"]; !ok {
+		t.Fatalf("expected download_mbps field")
+	}
+	if _, ok := data["latency_ms"]; !ok {
+		t.Fatalf("expected latency_ms field")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
