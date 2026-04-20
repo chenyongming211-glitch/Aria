@@ -7,6 +7,7 @@
 - `README.md`：项目总览、核心能力、快速开始。
 - `docs/API-V2-WHITEPAPER.md`：API v2 目标接口白皮书，定义域边界、端点清单与统一响应格式。
 - `docs/API-VERSION-AUDIT.md`：API 版本收敛审计，当前基线为 v2-only。
+- `docs/TEST-COVERAGE-STATUS.md`：测试覆盖现状与 CI 接入状态。
 - `docs/V0.1.0-PRODUCT-BLUEPRINT.md`：v0.1.0 产品蓝图，定义前端导航、后端分层、节点接入、策略与运维闭环。
 - `docs/RBAC-DESIGN.md`：高级 RBAC 设计与落地进度（含 audit/enforce 模式）。
 - `docs/ARCHITECTURE-REFACTOR.md`：Go Controller + Rust Agent 的职责拆分说明。

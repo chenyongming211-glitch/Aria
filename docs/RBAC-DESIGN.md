@@ -127,16 +127,24 @@ CREATE TABLE IF NOT EXISTS roles (
 
 建议上线顺序：`audit` 观察 -> `enforce` 全量。
 
-## 7.2 实施进度（2026-04-20）
+## 7.2 实施进度（2026-04-20，最新）
 
-- ✅ 已完成：RBAC 三态运行模式（off/audit/enforce）骨架
+- ✅ 已完成：RBAC 三态运行模式（`off` / `audit` / `enforce`）
 - ✅ 已完成：后端高优先级接口接入 `authorizeTenantPermission`
   - Roles / Users / Tokens
   - Nodes / Routes
   - Security（ACL / Blacklist）/ QoS
   - Agent Commands / Monitoring / AI
-- ⏳ 进行中：前端菜单、路由与按钮级权限守卫补齐
-- ⏳ 进行中：RBAC 权限矩阵自动化测试
+- ✅ 已完成：前端菜单、路由与按钮级权限守卫补齐
+  - 路由元信息权限检查（router guard）
+  - 侧边栏菜单可见性控制
+  - 关键页面按钮显隐/禁用控制（Nodes / ACL / Tokens / Settings）
+- ✅ 已完成：RBAC 权限矩阵自动化测试（后端 + 前端）
+  - 后端：`off/audit/enforce` 三态下的接口级 `200/403` 与审计头断言
+  - 前端：权限判断、路由守卫、页面级可见性测试
+- ✅ 已完成：`nodes + monitoring` API 行为级测试扩展
+  - 成功路径、参数错误、边界行为、错误码契约、跨租户隔离
+  - 已纳入 CI 流程持续验证
 ## 8. 前端设计
 
 ### usePermission Composable
