@@ -421,6 +421,115 @@ func TestHandleRenewCertificate_RuntimeTokenNodeNotFoundReturns401(t *testing.T)
 	}
 }
 
+func TestHandleRenewCertificate_SuccessPersistsRenewedFrom(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	existingCertID := uuid.New()
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	certService := newTestCertService(t)
+	runtimeToken, _, err := auth.GenerateRuntimeToken(nodeID.String(), tenantID.String())
+	if err != nil {
+		t.Fatalf("GenerateRuntimeToken failed: %v", err)
+	}
+	csrPEM := generateCSRPEM(t, "node-renew-success")
+
+	expectNodeLookupByID(mock, tenantID, nodeID, now)
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
+		       not_before, not_after, status, issued_at, revoked_at,
+		       COALESCE(revoke_reason, ''), renewed_from, updated_at
+		FROM node_certificates
+		WHERE node_id = $1
+	`)).
+		WithArgs(nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "serial_number", "cert_pem", "ca_pem",
+			"not_before", "not_after", "status", "issued_at", "revoked_at",
+			"revoke_reason", "renewed_from", "updated_at",
+		}).AddRow(
+			existingCertID, tenantID, nodeID, "old-serial", "old-cert", "old-ca", now.Add(-24*time.Hour), now.Add(24*time.Hour),
+			controllerstorage.CertStatusIssued, now.Add(-24*time.Hour), nil, "", nil, now.Add(-time.Hour),
+		))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO node_certificates (
+			tenant_id, node_id, serial_number, cert_pem, ca_pem,
+			not_before, not_after, status, issued_at, renewed_from, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, NOW())
+		ON CONFLICT (node_id) DO UPDATE SET
+			serial_number = EXCLUDED.serial_number,
+			cert_pem = EXCLUDED.cert_pem,
+			ca_pem = EXCLUDED.ca_pem,
+			not_before = EXCLUDED.not_before,
+			not_after = EXCLUDED.not_after,
+			status = EXCLUDED.status,
+			renewed_from = EXCLUDED.renewed_from,
+			updated_at = NOW()
+	`)).
+		WithArgs(
+			tenantID,
+			nodeID,
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			controllerstorage.CertStatusIssued,
+			existingCertID,
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
+		       not_before, not_after, status, issued_at, revoked_at,
+		       COALESCE(revoke_reason, ''), renewed_from, updated_at
+		FROM node_certificates
+		WHERE node_id = $1
+	`)).
+		WithArgs(nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "serial_number", "cert_pem", "ca_pem",
+			"not_before", "not_after", "status", "issued_at", "revoked_at",
+			"revoke_reason", "renewed_from", "updated_at",
+		}).AddRow(
+			uuid.New(), tenantID, nodeID, "new-serial", "new-cert", "new-ca", now, now.Add(48*time.Hour),
+			controllerstorage.CertStatusIssued, now, nil, "", existingCertID.String(), now,
+		))
+
+	controller := &Controller{
+		store:       controllerstorage.NewStorageWithDB(db),
+		certService: certService,
+	}
+
+	body := `{"runtime_token":"` + runtimeToken + `","csr_pem":"` + jsonEscape(csrPEM) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/certificates/renew", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	controller.HandleRenewCertificate(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	if payload["status"] != "success" {
+		t.Fatalf("expected status=success, got %#v", payload["status"])
+	}
+	if payload["node_id"] != nodeID.String() {
+		t.Fatalf("expected node_id=%s, got %#v", nodeID.String(), payload["node_id"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func newTestCertService(t *testing.T) *certissuance.Service {
 	t.Helper()
 	caCertPEM, caKeyPEM := generateTestCA(t)
