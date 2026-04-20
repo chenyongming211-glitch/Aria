@@ -27,68 +27,68 @@
           <el-icon><House /></el-icon>
           <template #title>{{ t('nav.dashboard') }}</template>
         </el-menu-item>
-        <el-menu-item index="/nodes">
+        <el-menu-item v-if="canAccess('nodes:read')" index="/nodes">
           <el-icon><Monitor /></el-icon>
           <template #title>{{ t('nav.nodes') }}</template>
         </el-menu-item>
-        <el-sub-menu index="connectivity">
+        <el-sub-menu v-if="canAnyAccess(['routes:read', 'monitoring:read'])" index="connectivity">
           <template #title>
             <el-icon><Position /></el-icon>
             <span>{{ t('nav.connectivity') }}</span>
           </template>
-          <el-menu-item index="/connectivity/routing">
+          <el-menu-item v-if="canAccess('routes:read')" index="/connectivity/routing">
             <el-icon><Position /></el-icon>
             <template #title>{{ t('nav.routingManagement') }}</template>
           </el-menu-item>
-          <el-menu-item index="/connectivity/topology">
+          <el-menu-item v-if="canAccess('monitoring:read')" index="/connectivity/topology">
             <el-icon><Connection /></el-icon>
             <template #title>{{ t('nav.vpnTopology') }}</template>
           </el-menu-item>
         </el-sub-menu>
-        <el-sub-menu index="policy-center">
+        <el-sub-menu v-if="canAnyAccess(['policies:read', 'acls:read', 'qos:read'])" index="policy-center">
           <template #title>
             <el-icon><Tickets /></el-icon>
             <span>{{ t('nav.policyCenter') }}</span>
           </template>
-          <el-menu-item index="/policy-center">
+          <el-menu-item v-if="canAccess('policies:read')" index="/policy-center">
             <el-icon><Tickets /></el-icon>
             <template #title>{{ t('nav.policyCenter') }}</template>
           </el-menu-item>
-          <el-menu-item index="/policy-center/acl-rules">
+          <el-menu-item v-if="canAccess('acls:read')" index="/policy-center/acl-rules">
             <el-icon><Lock /></el-icon>
             <template #title>{{ t('nav.aclManagement') }}</template>
           </el-menu-item>
-          <el-menu-item index="/policy-center/bandwidth-control">
+          <el-menu-item v-if="canAccess('qos:read')" index="/policy-center/bandwidth-control">
             <el-icon><Coin /></el-icon>
             <template #title>{{ t('nav.bandwidthControl') }}</template>
           </el-menu-item>
         </el-sub-menu>
-        <el-menu-item index="/monitoring">
+        <el-menu-item v-if="canAccess('monitoring:read')" index="/monitoring">
           <el-icon><DataLine /></el-icon>
           <template #title>{{ t('nav.monitoringCenter') }}</template>
         </el-menu-item>
-        <el-menu-item index="/ai-copilot">
+        <el-menu-item v-if="canAccess('ai:use')" index="/ai-copilot">
           <el-icon><ChatLineRound /></el-icon>
           <template #title>{{ t('nav.aiCopilot') }}</template>
         </el-menu-item>
-        <el-sub-menu index="platform">
+        <el-sub-menu v-if="canAnyAccess(['tokens:read', 'users:read', 'roles:read', 'settings:read'])" index="platform">
           <template #title>
             <el-icon><Setting /></el-icon>
             <span>{{ t('nav.platform') }}</span>
           </template>
-          <el-menu-item index="/platform/tokens">
+          <el-menu-item v-if="canAccess('tokens:read')" index="/platform/tokens">
             <el-icon><Key /></el-icon>
             <template #title>{{ t('nav.tokenManagement') }}</template>
           </el-menu-item>
-          <el-menu-item index="/platform/tenants">
+          <el-menu-item v-if="canAccess('users:read')" index="/platform/tenants">
             <el-icon><User /></el-icon>
             <template #title>{{ t('nav.tenantManagement') }}</template>
           </el-menu-item>
-          <el-menu-item index="/platform/roles">
+          <el-menu-item v-if="canAccess('roles:read')" index="/platform/roles">
             <el-icon><Lock /></el-icon>
             <template #title>{{ t('nav.roleManagement') }}</template>
           </el-menu-item>
-          <el-menu-item index="/platform/settings">
+          <el-menu-item v-if="canAccess('settings:read')" index="/platform/settings">
             <el-icon><Setting /></el-icon>
             <template #title>{{ t('nav.settings') }}</template>
           </el-menu-item>
@@ -167,7 +167,7 @@
                     <el-icon><User /></el-icon>
                     <span>{{ t('header.profile') }}</span>
                   </el-dropdown-item>
-                  <el-dropdown-item command="settings">
+                  <el-dropdown-item v-if="canAccess('settings:read')" command="settings">
                     <el-icon><Setting /></el-icon>
                     <span>{{ t('nav.settings') }}</span>
                   </el-dropdown-item>
@@ -232,6 +232,19 @@ const currentLang = computed(() => appStore.lang)
 const appVersion = computed(() => appStore.version)
 const sidebarWidth = computed(() => isCollapsed.value ? '72px' : '240px')
 const defaultOpeneds = computed(() => isCollapsed.value ? [] : ['connectivity', 'policy-center', 'platform'])
+const userPermissions = computed(() => userStore.permissions || [])
+
+const canAccess = (permission) => {
+  if (!permission) return true
+  if (userPermissions.value.includes('*')) return true
+  return userPermissions.value.includes(permission)
+}
+
+const canAnyAccess = (permissions) => {
+  if (!Array.isArray(permissions) || permissions.length === 0) return true
+  if (userPermissions.value.includes('*')) return true
+  return permissions.some((permission) => userPermissions.value.includes(permission))
+}
 
 const getPageTitle = computed(() => {
   const routeMap = {

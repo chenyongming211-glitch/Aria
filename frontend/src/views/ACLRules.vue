@@ -2,7 +2,7 @@
   <div class="acl-rules-container">
     <div class="page-header">
       <h2>ACL 规则管理</h2>
-      <el-button type="primary" @click="handleCreate">
+      <el-button v-if="hasPermission('acls:write')" type="primary" @click="handleCreate">
         <el-icon><Plus /></el-icon>
         新建规则
       </el-button>
@@ -74,7 +74,11 @@
       </el-table-column>
       <el-table-column prop="enabled" label="状态" width="80">
         <template #default="{ row }">
-          <el-switch v-model="row.enabled" @change="handleToggleEnabled(row)" />
+          <el-switch
+            v-model="row.enabled"
+            :disabled="!hasPermission('acls:write')"
+            @change="handleToggleEnabled(row)"
+          />
         </template>
       </el-table-column>
       <el-table-column label="下发状态" width="120">
@@ -100,8 +104,8 @@
       <el-table-column prop="last_command_error" label="失败原因" min-width="180" show-overflow-tooltip />
       <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="handleEdit(row)">编辑</el-button>
-          <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
+          <el-button v-if="hasPermission('acls:write')" link type="primary" @click="handleEdit(row)">编辑</el-button>
+          <el-button v-if="hasPermission('acls:write')" link type="danger" @click="handleDelete(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -189,7 +193,14 @@
       
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="handleSubmit">确定</el-button>
+        <el-button
+          v-if="hasPermission('acls:write')"
+          type="primary"
+          :loading="submitting"
+          @click="handleSubmit"
+        >
+          确定
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -201,6 +212,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 import { useAclApi } from '@/composables/useAclApi'
 import { useTenantApi } from '@/composables/useTenantApi'
+import { usePermission } from '@/composables/usePermission'
+
+const { hasPermission } = usePermission()
 
 const loading = ref(false)
 const rules = ref([])

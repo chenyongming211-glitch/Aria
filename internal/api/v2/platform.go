@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"aria/internal/api/apibase"
+	"aria/internal/api/middleware"
 	"aria/internal/token"
 
 	"github.com/google/uuid"
@@ -20,9 +21,12 @@ func (r *Router) handleTenantTokens(w http.ResponseWriter, req *http.Request, te
 	if len(parts) == 5 {
 		switch req.Method {
 		case http.MethodGet:
+			if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermTokensRead) {
+				return
+			}
 			r.listTenantTokens(w, tenantID)
 		case http.MethodPost:
-			if !r.authorizeTenantAdmin(w, req, tenantID) {
+			if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermTokensWrite) {
 				return
 			}
 			r.createTenantToken(w, req, tenantID)
@@ -36,9 +40,12 @@ func (r *Router) handleTenantTokens(w http.ResponseWriter, req *http.Request, te
 		tokenID := parts[5]
 		switch req.Method {
 		case http.MethodGet:
+			if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermTokensRead) {
+				return
+			}
 			r.getTenantTokenDetail(w, tenantID, tokenID)
 		case http.MethodDelete:
-			if !r.authorizeTenantAdmin(w, req, tenantID) {
+			if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermTokensWrite) {
 				return
 			}
 			r.deleteTenantToken(w, tenantID, tokenID)
@@ -155,7 +162,7 @@ func (r *Router) deleteTenantToken(w http.ResponseWriter, tenantID uuid.UUID, to
 
 // handleTenantAI 处理租户作用域的 AI 助手请求
 func (r *Router) handleTenantAI(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
-	if !r.authorizeTenant(w, req, tenantID, false) {
+	if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermAiUse) {
 		return
 	}
 

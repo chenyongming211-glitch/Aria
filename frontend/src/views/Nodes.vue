@@ -28,7 +28,7 @@
         >
           Refresh
         </el-button>
-        <el-button type="primary" :icon="Plus" @click="addNode">
+        <el-button v-if="hasPermission('nodes:write')" type="primary" :icon="Plus" @click="addNode">
           Add Node
         </el-button>
       </div>
@@ -158,6 +158,7 @@
                 <el-icon><View /></el-icon>
               </el-button>
               <el-button
+                v-if="hasPermission('nodes:write')"
                 size="small"
                 link
                 type="primary"
@@ -166,6 +167,7 @@
                 <el-icon><Edit /></el-icon>
               </el-button>
               <el-popconfirm
+                v-if="hasPermission('nodes:write')"
                 title="Are you sure to delete this node?"
                 @confirm="handleDeleteNode(row.id)"
               >
@@ -404,7 +406,7 @@
       </el-form>
       <template #footer>
         <el-button @click="editDialogVisible = false">Cancel</el-button>
-        <el-button type="primary" @click="saveNodeChanges" :loading="submitting">
+        <el-button v-if="hasPermission('nodes:write')" type="primary" @click="saveNodeChanges" :loading="submitting">
           Save Changes
         </el-button>
       </template>
@@ -436,9 +438,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import useNodeStore from '../stores/node'
 import { useAgentProxyApi } from '../composables/useAgentProxyApi'
 import { useMonitorApi } from '../composables/useMonitorApi'
+import { usePermission } from '../composables/usePermission'
 
 // 使用节点 store
 const nodeStore = useNodeStore()
+const { hasPermission } = usePermission()
 
 // 节点数据从 store 获取
 const nodes = computed(() => nodeStore.nodes)

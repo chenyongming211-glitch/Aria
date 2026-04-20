@@ -16,7 +16,7 @@
                 <el-icon><Search /></el-icon>
               </template>
             </el-input>
-            <el-button type="primary" @click="createToken">
+            <el-button v-if="hasPermission('tokens:write')" type="primary" @click="createToken">
               <el-icon><Plus /></el-icon>
               {{ t('common.add') }}
             </el-button>
@@ -56,6 +56,7 @@
           <template #default="{ row }">
             <el-button size="small" @click="viewToken(row)">{{ t('common.view') }}</el-button>
             <el-popconfirm
+              v-if="hasPermission('tokens:write')"
               :title="`Are you sure to revoke this token?`"
               @confirm="revokeToken(row.id)"
             >
@@ -133,7 +134,7 @@
       <template #footer v-if="isCreating">
         <span class="dialog-footer">
           <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
-          <el-button type="primary" @click="saveToken">{{ t('common.create') }}</el-button>
+          <el-button v-if="hasPermission('tokens:write')" type="primary" @click="saveToken">{{ t('common.create') }}</el-button>
         </span>
       </template>
     </el-dialog>
@@ -146,6 +147,9 @@ import { Search, Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElNotification } from 'element-plus'
 import { t } from '@/i18n'
 import { useTokenApi } from '@/composables/useTokenApi'
+import { usePermission } from '@/composables/usePermission'
+
+const { hasPermission } = usePermission()
 
 const tokens = ref([])
 const loading = ref(false)

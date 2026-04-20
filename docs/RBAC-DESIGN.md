@@ -88,15 +88,16 @@ CREATE TABLE IF NOT EXISTS roles (
 
 每个租户创建时自动生成这三个内置角色。
 
-## 6. 认证与授权流程
+## 6. 认证与授权流程（目标）
 
 ```
 请求 → JWTAuthMiddleware → 提取 role + tenantID
-     → RequirePermission(store, "acls:write")
+     → authorizeTenantPermission(..., "acls:write")
+       → 租户边界检查（始终执行）
        → role == "super_admin"? → 放行
        → 查询 roles 表获取 permissions[]
        → "acls:write" ∈ permissions[]? → 放行
-       → 否则 → 403 Forbidden
+       → 否则按 RBAC_ENFORCEMENT 模式处理
 ```
 
 ## 7. API 端点
@@ -110,12 +111,32 @@ CREATE TABLE IF NOT EXISTS roles (
 | PUT | `/api/v2/tenants/{tid}/roles/{rid}` | `roles:write` | 更新角色权限 |
 | DELETE | `/api/v2/tenants/{tid}/roles/{rid}` | `roles:write` | 删除自定义角色 |
 
-### 权限检查集成
+### 权限检查集成（目标）
 
-现有 v2 API 路由的 `authorizeTenant(w, req, tid, requireAdmin)` 调用将替换为：
-- 读操作：`RequirePermission(store, "xxx:read")`
-- 写操作：`RequirePermission(store, "xxx:write")`
+现有 v2 API 路由的 `authorizeTenant(w, req, tid, requireAdmin)` 调用将逐步替换为：
+- 读操作：`authorizeTenantPermission(..., "xxx:read")`
+- 写操作：`authorizeTenantPermission(..., "xxx:write")`
 
+## 7.1 RBAC_ENFORCEMENT 运行模式（新增）
+
+通过环境变量 `RBAC_ENFORCEMENT` 控制权限检查行为：
+
+- `off`：仅做 tenant scope 校验，跳过 permission 拦截（兼容模式）
+- `audit`：执行 permission 判定但不拦截，写 denied 审计日志，并返回 `X-RBAC-Audit-Denied: true`
+- `enforce`：严格执行 permission 拦截（默认）
+
+建议上线顺序：`audit` 观察 -> `enforce` 全量。
+
+## 7.2 实施进度（2026-04-20）
+
+- ✅ 已完成：RBAC 三态运行模式（off/audit/enforce）骨架
+- ✅ 已完成：后端高优先级接口接入 `authorizeTenantPermission`
+  - Roles / Users / Tokens
+  - Nodes / Routes
+  - Security（ACL / Blacklist）/ QoS
+  - Agent Commands / Monitoring / AI
+- ⏳ 进行中：前端菜单、路由与按钮级权限守卫补齐
+- ⏳ 进行中：RBAC 权限矩阵自动化测试
 ## 8. 前端设计
 
 ### usePermission Composable

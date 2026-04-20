@@ -3,21 +3,35 @@ import { useUserStore } from '@/stores'
 
 export function usePermission() {
   const userStore = useUserStore()
+  const getPermissions = () => userStore.permissions || []
+
+  const hasWildcard = () => getPermissions().includes('*')
 
   const hasPermission = (permission) => {
-    const permissions = userStore.permissions || []
-    return permissions.includes(permission)
+    if (!permission) return true
+    const permissions = getPermissions()
+    return permissions.includes(permission) || hasWildcard()
   }
 
   const hasAnyPermission = (perms) => {
-    const permissions = userStore.permissions || []
+    if (!Array.isArray(perms) || perms.length === 0) return true
+    if (hasWildcard()) return true
+    const permissions = getPermissions()
     return perms.some(p => permissions.includes(p))
   }
 
   const hasAllPermissions = (perms) => {
-    const permissions = userStore.permissions || []
+    if (!Array.isArray(perms) || perms.length === 0) return true
+    if (hasWildcard()) return true
+    const permissions = getPermissions()
     return perms.every(p => permissions.includes(p))
   }
 
-  return { hasPermission, hasAnyPermission, hasAllPermissions }
+  const canAccessRoute = (routeMeta) => {
+    const required = routeMeta?.permission
+    if (!required) return true
+    return Array.isArray(required) ? hasAnyPermission(required) : hasPermission(required)
+  }
+
+  return { hasPermission, hasAnyPermission, hasAllPermissions, canAccessRoute }
 }

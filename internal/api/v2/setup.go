@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 
@@ -138,7 +140,11 @@ func (r *Router) HandleTenantScoped(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleTenantRoles(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
-	if !r.authorizeTenant(w, req, tenantID, true) {
+	requiredPermission := middleware.PermRolesRead
+	if req.Method != http.MethodGet {
+		requiredPermission = middleware.PermRolesWrite
+	}
+	if !r.authorizeTenantPermission(w, req, tenantID, requiredPermission) {
 		return
 	}
 
@@ -157,7 +163,7 @@ func (r *Router) handleTenantRoles(w http.ResponseWriter, req *http.Request, ten
 }
 
 func (r *Router) handleTenantPolicies(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
-	if !r.authorizeTenant(w, req, tenantID, false) {
+	if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermPoliciesRead) {
 		return
 	}
 
@@ -172,12 +178,12 @@ func (r *Router) handleTenantPolicies(w http.ResponseWriter, req *http.Request, 
 func (r *Router) handleSingleTenant(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, role string) {
 	switch req.Method {
 	case http.MethodGet:
-		if !r.authorizeTenant(w, req, tenantID, false) {
+		if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermSettingsRead) {
 			return
 		}
 		r.tenantAPI.GetTenant(w, withTenantContext(req, tenantID))
 	case http.MethodPut:
-		if !r.authorizeTenantAdmin(w, req, tenantID) {
+		if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermSettingsWrite) {
 			return
 		}
 		r.updateTenant(w, req, tenantID, role)
@@ -197,7 +203,11 @@ func (r *Router) handleSingleTenant(w http.ResponseWriter, req *http.Request, te
 }
 
 func (r *Router) handleTenantUsers(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, role string) {
-	if !r.authorizeTenantAdmin(w, req, tenantID) {
+	requiredPermission := middleware.PermUsersRead
+	if req.Method != http.MethodGet {
+		requiredPermission = middleware.PermUsersWrite
+	}
+	if !r.authorizeTenantPermission(w, req, tenantID, requiredPermission) {
 		return
 	}
 
@@ -220,7 +230,7 @@ func (r *Router) handleTenantNodes(w http.ResponseWriter, req *http.Request, ten
 
 	// GET /api/v2/tenants/{tid}/nodes
 	if len(parts) == 5 {
-		if !r.authorizeTenant(w, req, tenantID, false) {
+		if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermNodesRead) {
 			return
 		}
 		if req.Method == http.MethodGet {
@@ -261,14 +271,17 @@ func (r *Router) handleTenantNodes(w http.ResponseWriter, req *http.Request, ten
 		// 如果没有子路径，则是对节点本身的 CRUD
 		switch req.Method {
 		case http.MethodGet:
+			if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermNodesRead) {
+				return
+			}
 			r.getTenantNodeByID(w, tenantID, nodeID)
 		case http.MethodPut:
-			if !r.authorizeTenantAdmin(w, req, tenantID) {
+			if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermNodesWrite) {
 				return
 			}
 			r.updateTenantNode(w, req2, tenantID, nodeID)
 		case http.MethodDelete:
-			if !r.authorizeTenantAdmin(w, req, tenantID) {
+			if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermNodesWrite) {
 				return
 			}
 			r.deleteTenantNode(w, tenantID, nodeID)
@@ -604,6 +617,14 @@ func (r *Router) updateTenantNode(w http.ResponseWriter, req *http.Request, tena
 func (r *Router) handleTenantNodeRoutes(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, parts []string) {
 	if len(parts) < 7 || parts[6] != "routes" {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidPath, "Invalid route path", nil)
+		return
+	}
+
+	requiredPermission := middleware.PermRoutesRead
+	if req.Method != http.MethodGet {
+		requiredPermission = middleware.PermRoutesWrite
+	}
+	if !r.authorizeTenantPermission(w, req, tenantID, requiredPermission) {
 		return
 	}
 
@@ -972,6 +993,57 @@ func (r *Router) authorizeTenant(w http.ResponseWriter, req *http.Request, targe
 
 func (r *Router) authorizeTenantAdmin(w http.ResponseWriter, req *http.Request, targetTenantID uuid.UUID) bool {
 	return r.authorizeTenant(w, req, targetTenantID, true)
+}
+
+func (r *Router) authorizeTenantPermission(w http.ResponseWriter, req *http.Request, targetTenantID uuid.UUID, permission string) bool {
+	if !r.authorizeTenant(w, req, targetTenantID, false) {
+		return false
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("RBAC_ENFORCEMENT")))
+	if mode == "" {
+		mode = "enforce"
+	}
+	if mode == "off" || permission == "" {
+		return true
+	}
+
+	role, _ := middleware.GetUserRole(req.Context())
+	if role == "super_admin" {
+		return true
+	}
+
+	roleName := role
+	if roleName == "member" || roleName == "owner" {
+		roleName = controllerstorage.SystemRoleOperator
+	}
+
+	permissions, err := r.store.GetRolePermissions(targetTenantID, roleName)
+	hasPermission := err == nil && containsString(permissions, permission)
+	if hasPermission {
+		return true
+	}
+
+	if mode == "audit" {
+		w.Header().Set("X-RBAC-Audit-Denied", "true")
+		log.Printf(
+			"[RBAC][audit] denied-but-allowed role=%s tenant=%s method=%s path=%s required_permission=%s err=%v",
+			roleName,
+			targetTenantID.String(),
+			req.Method,
+			req.URL.Path,
+			permission,
+			err,
+		)
+		return true
+	}
+
+	if err != nil {
+		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Role permission lookup failed", nil)
+		return false
+	}
+	apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Insufficient permissions", nil)
+	return false
 }
 
 // 辅助工具函数

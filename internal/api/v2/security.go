@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"aria/internal/api/apibase"
+	"aria/internal/api/middleware"
 	"aria/pkg/controllerstorage"
 
 	"github.com/google/uuid"
@@ -13,10 +14,6 @@ import (
 
 // handleTenantNodeSecurity 调度安全相关的请求 (ACLs, Blacklist)
 func (r *Router) handleTenantNodeSecurity(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, parts []string) {
-	if !r.authorizeTenant(w, req, tenantID, false) {
-		return
-	}
-
 	if len(parts) < 8 {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidPath, "Invalid security path", nil)
 		return
@@ -34,6 +31,14 @@ func (r *Router) handleTenantNodeSecurity(w http.ResponseWriter, req *http.Reque
 
 // handleTenantNodeACLs 处理具体 ACL 操作
 func (r *Router) handleTenantNodeACLs(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, parts []string) {
+	requiredPermission := middleware.PermAclsRead
+	if req.Method != http.MethodGet {
+		requiredPermission = middleware.PermAclsWrite
+	}
+	if !r.authorizeTenantPermission(w, req, tenantID, requiredPermission) {
+		return
+	}
+
 	ruleIDStr := ""
 	if len(parts) > 8 {
 		ruleIDStr = parts[8]
@@ -218,6 +223,14 @@ func (r *Router) deleteTenantNodeACL(w http.ResponseWriter, tenantID, nodeID uui
 // Blacklist Handlers
 
 func (r *Router) handleTenantNodeBlacklist(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, parts []string) {
+	requiredPermission := middleware.PermBlacklistRead
+	if req.Method != http.MethodGet {
+		requiredPermission = middleware.PermBlacklistWrite
+	}
+	if !r.authorizeTenantPermission(w, req, tenantID, requiredPermission) {
+		return
+	}
+
 	if len(parts) < 9 {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidPath, "Blacklist scope is required (src, dst, ports)", nil)
 		return
@@ -316,7 +329,11 @@ func (r *Router) deleteTenantNodeBlacklistRule(w http.ResponseWriter, tenantID, 
 // QoS Handlers
 
 func (r *Router) handleTenantNodeQoS(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, parts []string) {
-	if !r.authorizeTenant(w, req, tenantID, false) {
+	requiredPermission := middleware.PermQosRead
+	if req.Method != http.MethodGet {
+		requiredPermission = middleware.PermQosWrite
+	}
+	if !r.authorizeTenantPermission(w, req, tenantID, requiredPermission) {
 		return
 	}
 

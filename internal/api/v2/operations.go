@@ -7,6 +7,7 @@ import (
 	"time"
 
 	apibase "aria/internal/api/apibase"
+	"aria/internal/api/middleware"
 	"aria/pkg/controllerstorage"
 
 	"github.com/google/uuid"
@@ -27,7 +28,7 @@ type v2BatchAgentCommandRequest struct {
 }
 
 func (r *Router) handleTenantAgents(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
-	if !r.authorizeTenantAdmin(w, req, tenantID) {
+	if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermCommandsWrite) {
 		return
 	}
 
@@ -54,17 +55,17 @@ func (r *Router) handleTenantNodeAgent(w http.ResponseWriter, req *http.Request,
 
 	switch parts[7] {
 	case "command":
-		if !r.authorizeTenantAdmin(w, req, tenantID) {
+		if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermCommandsWrite) {
 			return
 		}
 		r.handleTenantNodeAgentCommand(w, req, node)
 	case "commands":
-		if !r.authorizeTenant(w, req, tenantID, false) {
+		if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermMonitoringRead) {
 			return
 		}
 		r.handleTenantNodeAgentCommands(w, req, node)
 	case "status":
-		if !r.authorizeTenant(w, req, tenantID, false) {
+		if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermMonitoringRead) {
 			return
 		}
 		r.handleTenantNodeAgentStatus(w, node)
@@ -227,7 +228,11 @@ func (r *Router) handleTenantBatchAgentCommand(w http.ResponseWriter, req *http.
 }
 
 func (r *Router) handleTenantMonitoring(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
-	if !r.authorizeTenant(w, req, tenantID, false) {
+	requiredPermission := middleware.PermMonitoringRead
+	if req.Method == http.MethodPost {
+		requiredPermission = middleware.PermCommandsWrite
+	}
+	if !r.authorizeTenantPermission(w, req, tenantID, requiredPermission) {
 		return
 	}
 

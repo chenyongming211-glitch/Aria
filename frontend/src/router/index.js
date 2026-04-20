@@ -18,7 +18,7 @@ const routes = [
         path: 'nodes',
         name: 'Nodes',
         component: () => import('@/views/Nodes.vue'),
-        meta: { title: 'Nodes', requiresAuth: true }
+        meta: { title: 'Nodes', requiresAuth: true, permission: 'nodes:read' }
       },
       {
         path: 'connectivity',
@@ -28,31 +28,31 @@ const routes = [
         path: 'connectivity/routing',
         name: 'Routing',
         component: () => import('@/views/Routing.vue'),
-        meta: { title: 'Routing Management', requiresAuth: true, section: 'connectivity' }
+        meta: { title: 'Routing Management', requiresAuth: true, section: 'connectivity', permission: 'routes:read' }
       },
       {
         path: 'connectivity/topology',
         name: 'VpnTopology',
         component: () => import('@/views/VpnTopology.vue'),
-        meta: { title: 'VPN Topology', requiresAuth: true, section: 'connectivity' }
+        meta: { title: 'VPN Topology', requiresAuth: true, section: 'connectivity', permission: 'monitoring:read' }
       },
       {
         path: 'policy-center',
         name: 'Policies',
         component: () => import('@/views/Policies.vue'),
-        meta: { title: 'Policy Center', requiresAuth: true, section: 'policy-center' }
+        meta: { title: 'Policy Center', requiresAuth: true, section: 'policy-center', permission: 'policies:read' }
       },
       {
         path: 'policy-center/bandwidth-control',
         name: 'BandwidthControl',
         component: () => import('@/views/BandwidthControl.vue'),
-        meta: { title: 'Bandwidth Control', requiresAuth: true, section: 'policy-center' }
+        meta: { title: 'Bandwidth Control', requiresAuth: true, section: 'policy-center', permission: 'qos:read' }
       },
       {
         path: 'policy-center/acl-rules',
         name: 'ACLRules',
         component: () => import('@/views/ACLRules.vue'),
-        meta: { title: 'ACL Rules Management', requiresAuth: true, section: 'policy-center' }
+        meta: { title: 'ACL Rules Management', requiresAuth: true, section: 'policy-center', permission: 'acls:read' }
       },
       {
         path: 'platform',
@@ -62,43 +62,43 @@ const routes = [
         path: 'platform/tokens',
         name: 'Tokens',
         component: () => import('@/views/Tokens.vue'),
-        meta: { title: 'Tokens', requiresAuth: true, section: 'platform' }
+        meta: { title: 'Tokens', requiresAuth: true, section: 'platform', permission: 'tokens:read' }
       },
       {
         path: 'platform/tenants',
         name: 'TenantManagement',
         component: () => import('@/views/TenantManagement.vue'),
-        meta: { title: 'Tenant Management', requiresAuth: true, section: 'platform' }
+        meta: { title: 'Tenant Management', requiresAuth: true, section: 'platform', permission: 'users:read' }
       },
       {
         path: 'platform/roles',
         name: 'Roles',
         component: () => import('@/views/Roles.vue'),
-        meta: { title: 'Role Management', requiresAuth: true, section: 'platform' }
+        meta: { title: 'Role Management', requiresAuth: true, section: 'platform', permission: 'roles:read' }
       },
       {
         path: 'monitoring',
         name: 'Monitoring',
         component: () => import('@/views/Monitoring.vue'),
-        meta: { title: 'Monitoring Center', requiresAuth: true }
+        meta: { title: 'Monitoring Center', requiresAuth: true, permission: 'monitoring:read' }
       },
       {
         path: 'monitoring/nodes/:nodeId',
         name: 'NodeMonitorDetail',
         component: () => import('@/views/NodeMonitorDetail.vue'),
-        meta: { title: 'Node Monitor Detail', requiresAuth: true }
+        meta: { title: 'Node Monitor Detail', requiresAuth: true, permission: 'monitoring:read' }
       },
       {
         path: 'ai-copilot',
         name: 'AiAssistant',
         component: () => import('@/views/AIAssistant.vue'),
-        meta: { title: 'AI Assistant', requiresAuth: true }
+        meta: { title: 'AI Assistant', requiresAuth: true, permission: 'ai:use' }
       },
       {
         path: 'platform/settings',
         name: 'Settings',
         component: () => import('@/views/Settings.vue'),
-        meta: { title: 'Settings', requiresAuth: true, section: 'platform' }
+        meta: { title: 'Settings', requiresAuth: true, section: 'platform', permission: 'settings:read' }
       },
       {
         path: 'routing',
@@ -147,6 +147,29 @@ const router = createRouter({
   routes
 })
 
+const readPermissions = () => {
+  try {
+    const raw = localStorage.getItem('aria_permissions')
+    return raw ? JSON.parse(raw) : []
+  } catch (error) {
+    console.warn('Failed to parse cached permissions:', error)
+    return []
+  }
+}
+
+const hasRoutePermission = (to) => {
+  const required = to.meta?.permission
+  if (!required) return true
+
+  const permissions = readPermissions()
+  if (permissions.includes('*')) return true
+
+  if (Array.isArray(required)) {
+    return required.some((p) => permissions.includes(p))
+  }
+  return permissions.includes(required)
+}
+
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('aria_token')
   const expireTime = localStorage.getItem('aria_token_expire_time')
@@ -165,6 +188,9 @@ router.beforeEach((to, from, next) => {
     }
     next('/login')
   } else if (to.path === '/login' && token && !isExpired) {
+    next('/dashboard')
+  } else if (to.meta.requiresAuth && !hasRoutePermission(to)) {
+    console.warn(`Permission denied for route ${to.path}, redirecting to dashboard`)
     next('/dashboard')
   } else {
     next()

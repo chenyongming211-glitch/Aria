@@ -43,8 +43,8 @@
               </el-radio-group>
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="saveGeneralSettings">{{ labels.save }}</el-button>
-              <el-button @click="resetGeneralSettings">{{ labels.reset }}</el-button>
+              <el-button type="primary" :disabled="!canWriteSettings" @click="saveGeneralSettings">{{ labels.save }}</el-button>
+              <el-button :disabled="!canWriteSettings" @click="resetGeneralSettings">{{ labels.reset }}</el-button>
             </el-form-item>
           </el-form>
         </el-tab-pane>
@@ -70,8 +70,8 @@
               <el-input v-model="networkForm.stunServer" placeholder="stun:stun.example.com:19302" />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="saveNetworkSettings">{{ labels.save }}</el-button>
-              <el-button @click="resetNetworkSettings">{{ labels.reset }}</el-button>
+              <el-button type="primary" :disabled="!canWriteSettings" @click="saveNetworkSettings">{{ labels.save }}</el-button>
+              <el-button :disabled="!canWriteSettings" @click="resetNetworkSettings">{{ labels.reset }}</el-button>
             </el-form-item>
           </el-form>
         </el-tab-pane>
@@ -97,8 +97,8 @@
               <el-switch v-model="securityForm.twoFactorAuth" />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="saveSecuritySettings">{{ labels.save }}</el-button>
-              <el-button @click="resetSecuritySettings">{{ labels.reset }}</el-button>
+              <el-button type="primary" :disabled="!canWriteSettings" @click="saveSecuritySettings">{{ labels.save }}</el-button>
+              <el-button :disabled="!canWriteSettings" @click="resetSecuritySettings">{{ labels.reset }}</el-button>
             </el-form-item>
           </el-form>
         </el-tab-pane>
@@ -126,9 +126,9 @@
               </el-checkbox-group>
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="saveNotificationSettings">{{ labels.save }}</el-button>
-              <el-button @click="resetNotificationSettings">{{ labels.reset }}</el-button>
-              <el-button @click="testNotifications" style="float: right;">{{ currentLang === 'zh' ? '测试通知' : 'Test Notifications' }}</el-button>
+              <el-button type="primary" :disabled="!canWriteSettings" @click="saveNotificationSettings">{{ labels.save }}</el-button>
+              <el-button :disabled="!canWriteSettings" @click="resetNotificationSettings">{{ labels.reset }}</el-button>
+              <el-button :disabled="!canWriteSettings" @click="testNotifications" style="float: right;">{{ currentLang === 'zh' ? '测试通知' : 'Test Notifications' }}</el-button>
             </el-form-item>
           </el-form>
         </el-tab-pane>
@@ -141,7 +141,7 @@
               </div>
             </template>
             <p>{{ currentLang === 'zh' ? '创建系统配置备份：' : 'Create a backup of your system configuration:' }}</p>
-            <el-button type="primary" @click="createBackup" icon="Document">
+            <el-button type="primary" :disabled="!canWriteSettings" @click="createBackup" icon="Document">
               {{ labels.backupNow }}
             </el-button>
           </el-card>
@@ -162,6 +162,7 @@
               :headers="uploadHeaders"
               :show-file-list="false"
               accept=".json,.ariaconfig"
+              :disabled="!canWriteSettings"
             >
               <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
               <div class="el-upload__text">
@@ -183,13 +184,13 @@
               <el-table-column prop="actions" label="Actions">
                 <template #default="{ row }">
                   <el-button size="small" @click="downloadBackup(row)">Download</el-button>
-                  <el-button size="small" type="primary" @click="restoreFromBackup(row)">Restore</el-button>
+                  <el-button size="small" type="primary" :disabled="!canWriteSettings" @click="restoreFromBackup(row)">Restore</el-button>
                   <el-popconfirm
                     title="Are you sure to delete this backup?"
                     @confirm="deleteBackup(row.id)"
                   >
                     <template #reference>
-                      <el-button size="small" type="danger">Delete</el-button>
+                      <el-button size="small" type="danger" :disabled="!canWriteSettings">Delete</el-button>
                     </template>
                   </el-popconfirm>
                 </template>
@@ -207,10 +208,13 @@ import { ref, computed } from 'vue'
 import { UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAppStore } from '@/stores'
+import { usePermission } from '@/composables/usePermission'
 
 const appStore = useAppStore()
+const { hasPermission } = usePermission()
 
 const currentLang = computed(() => appStore.lang)
+const canWriteSettings = computed(() => hasPermission('settings:write'))
 
 const labels = computed(() => ({
   general: currentLang.value === 'zh' ? '通用设置' : 'General',
