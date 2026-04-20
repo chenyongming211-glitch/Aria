@@ -438,6 +438,56 @@ func TestNodesAPI_DeleteSuccessReturnsDeletedStatus(t *testing.T) {
 	}
 }
 
+func TestNodesAPI_GetByIDSuccessReturnsContractFields(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	// One lookup in handleTenantNodes and one lookup in getTenantNodeByID.
+	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	// buildTenantNodeResponse best-effort operations summary.
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT COUNT(*)
+		FROM agent_commands
+		WHERE node_public_key = $1
+		  AND status IN ($2, $3, $4)
+	`)).
+		WithArgs("pub-key-1", "pending", "sent", "acknowledged").
+		WillReturnError(errors.New("summary unavailable"))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/nodes/"+nodeID.String(), nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeOK {
+		t.Fatalf("expected code %s, got %s", apibase.CodeOK, resp.Code)
+	}
+	if data["id"] != nodeID.String() {
+		t.Fatalf("expected id=%s, got %#v", nodeID.String(), data["id"])
+	}
+	if data["tenant_id"] != tenantID.String() {
+		t.Fatalf("expected tenant_id=%s, got %#v", tenantID.String(), data["tenant_id"])
+	}
+	if _, ok := data["status"]; !ok {
+		t.Fatalf("expected status field in node payload")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestMonitoringAPI_InvalidNodeIDParamReturnsBadRequest(t *testing.T) {
 	tenantID := uuid.New()
 	db, _, err := sqlmock.New()
@@ -458,6 +508,93 @@ func TestMonitoringAPI_InvalidNodeIDParamReturnsBadRequest(t *testing.T) {
 	}
 	if resp.Code != apibase.CodeBadRequest {
 		t.Fatalf("expected code %s, got %s", apibase.CodeBadRequest, resp.Code)
+	}
+}
+
+func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookup(mock, tenantID, nodeID, "{10.10.0.0/16}")
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT tenant_id, node_id, COALESCE(desired_state_version, ''), desired_state_metadata, desired_state_updated_at,
+		       COALESCE(applied_state_version, ''), applied_state_updated_at, COALESCE(observed_state, ''),
+		       COALESCE(observed_message, ''), observed_at, last_sync_at, COALESCE(last_sync_error, ''),
+		       created_at, updated_at
+		FROM node_control_states
+		WHERE tenant_id = $1 AND node_id = $2
+	`)).
+		WithArgs(tenantID, nodeID).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, node_public_key, command, params, status, COALESCE(message, ''), priority, timeout_seconds,
+		       created_at, updated_at, sent_at, acknowledged_at, completed_at, result
+		FROM agent_commands
+		WHERE node_public_key = $1
+		ORDER BY created_at DESC
+		LIMIT $2
+	`)).
+		WithArgs("pub-key-1", 20).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "node_public_key", "command", "params", "status", "message",
+			"priority", "timeout_seconds", "created_at", "updated_at", "sent_at",
+			"acknowledged_at", "completed_at", "result",
+		}))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, policy_domain, policy_ref, COALESCE(policy_name, ''), action, command_id, command_status,
+		       COALESCE(last_error, ''), metadata, created_at, updated_at, completed_at
+		FROM policy_deliveries
+		WHERE tenant_id = $1 AND node_id = $2
+		ORDER BY created_at DESC
+		LIMIT $3
+	`)).
+		WithArgs(tenantID, nodeID, 20).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "policy_domain", "policy_ref", "policy_name",
+			"action", "command_id", "command_status", "last_error", "metadata",
+			"created_at", "updated_at", "completed_at",
+		}))
+	expectTenantNodesQuery(mock, tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+			"created_at", "updated_at",
+		}).AddRow(
+			nodeID, "pub-key-1", "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-1", "10.0.0.10", 10,
+			time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "online", int64(0), "{}", "", now, now,
+		))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/nodes/"+nodeID.String(), nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeOK {
+		t.Fatalf("expected code %s, got %s", apibase.CodeOK, resp.Code)
+	}
+	if data["node_id"] != nodeID.String() {
+		t.Fatalf("expected node_id=%s, got %#v", nodeID.String(), data["node_id"])
+	}
+	if _, ok := data["recent_commands"]; !ok {
+		t.Fatalf("expected recent_commands field")
+	}
+	if _, ok := data["recent_policy_deliveries"]; !ok {
+		t.Fatalf("expected recent_policy_deliveries field")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
 
