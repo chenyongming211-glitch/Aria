@@ -7,6 +7,7 @@
 - ✅ RBAC 三态（`off/audit/enforce`）已覆盖接口级权限矩阵测试
 - ✅ 前端权限控制已覆盖 composable、路由守卫、页面可见性测试
 - ✅ `nodes + monitoring` 已补齐 API 行为级测试（成功/参数错误/边界/错误码）
+- ✅ 自动证书签发（`issue/renew`）已补齐核心 API 行为测试（鉴权/参数/续签链路/错误契约）
 - ✅ 前端单测已接入 CI（`npm run test:run`）
 
 ## 2. 已覆盖重点
@@ -22,6 +23,12 @@
   - 边界行为：分页钳制、topology 0/1/2 节点、traffic 无节点/节点查询失败降级
   - 错误码契约：`400/404/405/500` 与业务 code 断言
   - 租户隔离：跨租户访问 `404` 行为断言
+- 自动证书签发行为测试（`internal/cli/controller_certificates_test.go`）：
+  - `issue` 鉴权路径：`runtime_token` 与 `enrollment token` 均已覆盖
+  - `issue` 成功/失败：成功签发、非法 token、租户不匹配、CSR 非法、存储写入失败
+  - `renew` 成功/失败：无历史证书 `404`、历史证书查询失败 `500`、节点不存在 `401`
+  - 续签链路：断言 `renewed_from` 证书链路写入（续签 lineage 保持）
+  - 协议守卫：`405 Method Not Allowed`、`503 Service Unavailable`、`400 csr_pem required`
 
 ### 前端（Vue）
 
@@ -39,3 +46,6 @@
 - Monitoring 与 VM 客户端交互的更深集成测试
 - gRPC 端到端自动化与性能压测基线报告
 - 覆盖率统计与阈值门禁（如 `go test -cover` + fail-under）
+- 自动证书签发可继续增强：
+  - `Authorization: Bearer <runtime_token>` 头部路径的显式行为测试
+  - `renew` 场景下证书内容字段（有效期/用途）更细粒度断言
