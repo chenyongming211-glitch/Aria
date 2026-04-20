@@ -116,10 +116,14 @@ jobs:
             protobuf-compiler
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt, clippy, rust-src
-          targets: x86_64-unknown-linux-gnu
+        run: |
+          rustup toolchain install nightly \
+            --profile minimal \
+            --component rustfmt \
+            --component clippy \
+            --component rust-src \
+            --target x86_64-unknown-linux-gnu
+          rustup default nightly
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
