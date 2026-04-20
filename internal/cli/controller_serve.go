@@ -836,17 +836,24 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if c.certService != nil && req.CSRPEM != "" {
+		if _, err := c.issueNodeCertificate(node, req.CSRPEM, nil); err != nil {
+			c.logger.Error("Certificate issuance during register failed for node %s: %v", req.PublicKey[:8], err)
+			if !isReRegistration || requiresFreshEnrollment {
+				if markErr := c.store.MarkNodeDeleted(req.PublicKey); markErr != nil {
+					c.logger.Warn("Failed to roll back node %s after certificate issuance failure: %v", req.PublicKey[:8], markErr)
+				}
+			}
+			http.Error(w, "Failed to issue node certificate", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	// ========== Consume Token ==========
 	if req.Token != "" && (!isReRegistration || requiresFreshEnrollment) {
 		if err := c.tokenValidator.ConsumeToken(req.Token, req.PublicKey); err != nil {
 			c.logger.Warn("Failed to consume token: %v", err)
 			// Don't fail the registration, just log
-		}
-	}
-
-	if c.certService != nil && req.CSRPEM != "" {
-		if _, err := c.issueNodeCertificate(node, req.CSRPEM, nil); err != nil {
-			c.logger.Warn("Certificate issuance during register failed for node %s: %v", req.PublicKey[:8], err)
 		}
 	}
 
@@ -1203,6 +1210,16 @@ func (c *Controller) resolveNodeByRequest(req *certificateIssueRequest) (*contro
 }
 
 func (c *Controller) issueNodeCertificate(node *controllerstorage.Node, csrPEM string, renewedFrom *uuid.UUID) (*controllerstorage.NodeCertificate, error) {
+	if node == nil {
+		return nil, fmt.Errorf("node is required")
+	}
+	if node.ID == uuid.Nil {
+		return nil, fmt.Errorf("node id is required")
+	}
+	if node.TenantID == uuid.Nil {
+		return nil, fmt.Errorf("tenant id is required")
+	}
+
 	issued, err := c.certService.IssueFromCSR(certissuance.IssueRequest{
 		NodeID:   node.ID.String(),
 		TenantID: node.TenantID.String(),

@@ -587,6 +587,10 @@ func (s *Storage) GetOrCreateTenantByCode(code, name string) (uuid.UUID, error) 
 }
 
 func (s *Storage) SaveNode(node *Node) error {
+	if node == nil {
+		return fmt.Errorf("node cannot be nil")
+	}
+
 	query := `
 		INSERT INTO nodes (public_key, machine_id, tenant_id, endpoint, private_ip, public_ip,
 			region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role,
@@ -613,16 +617,22 @@ func (s *Storage) SaveNode(node *Node) error {
 			status = 'online',
 			offline_since = NULL,
 			updated_at = NOW()
+		RETURNING id, created_at, updated_at
 	`
 
-	_, err := s.db.Exec(query,
+	err := s.db.QueryRow(query,
 		node.PublicKey, node.MachineID, node.TenantID, node.Endpoint,
 		node.PrivateIP, node.PublicIP, node.Region, node.VPCID, node.Hostname,
 		node.AssignedIP, node.IPOffset, node.LastSeen, node.RegisteredAt, node.Role,
 		node.RuntimeMode, node.KernelVersion, node.HasAESNI, pq.Array(node.AdvertisedRoutes),
 		node.EnrolledWithToken,
-	)
-	return err
+	).Scan(&node.ID, &node.CreatedAt, &node.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	node.Status = "online"
+	node.OfflineSince = 0
+	return nil
 }
 
 func (s *Storage) GetNode(publicKey string) (*Node, error) {
