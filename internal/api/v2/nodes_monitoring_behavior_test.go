@@ -2,6 +2,7 @@ package v2
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -30,6 +31,20 @@ func decodeAPIResponse(t *testing.T, rr *httptest.ResponseRecorder) apibase.APIR
 		t.Fatalf("failed to decode response: %v, body=%s", err, rr.Body.String())
 	}
 	return resp
+}
+
+func responseDataMap(t *testing.T, resp apibase.APIResponse) map[string]interface{} {
+	t.Helper()
+	raw, err := json.Marshal(resp.Data)
+	if err != nil {
+		t.Fatalf("failed to marshal response data: %v", err)
+	}
+
+	var out map[string]interface{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("failed to unmarshal response data map: %v", err)
+	}
+	return out
 }
 
 func expectTenantNodesQuery(mock sqlmock.Sqlmock, tenantID uuid.UUID) *sqlmock.ExpectedQuery {
@@ -161,6 +176,158 @@ func TestMonitoringAPI_InvalidNodeIDParamReturnsBadRequest(t *testing.T) {
 	}
 	if resp.Code != apibase.CodeBadRequest {
 		t.Fatalf("expected code %s, got %s", apibase.CodeBadRequest, resp.Code)
+	}
+}
+
+func TestMonitoringAPI_EventsInvalidSinceReturnsBadRequest(t *testing.T) {
+	tenantID := uuid.New()
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/events?since=not-rfc3339", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeBadRequest {
+		t.Fatalf("expected code %s, got %s", apibase.CodeBadRequest, resp.Code)
+	}
+}
+
+func TestMonitoringAPI_AlertsLimitAndOffsetBoundary(t *testing.T) {
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM alerts WHERE tenant_id = $1 AND status = $2")).
+		WithArgs(tenantID, "active").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, alert_type, severity, title, COALESCE(message, ''),
+		       context, status, created_at, resolved_at
+		FROM alerts
+		WHERE tenant_id = $1 AND status = $2
+		ORDER BY created_at DESC
+		LIMIT $3 OFFSET $4
+	`)).
+		WithArgs(tenantID, "active", 200, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "alert_type", "severity", "title",
+			"message", "context", "status", "created_at", "resolved_at",
+		}))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts?limit=999&offset=-5", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if data["limit"] != float64(200) {
+		t.Fatalf("expected limit=200, got %#v", data["limit"])
+	}
+	if data["offset"] != float64(0) {
+		t.Fatalf("expected offset=0, got %#v", data["offset"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMonitoringAPI_AlertsInvalidNodeIDReturnsBadRequest(t *testing.T) {
+	tenantID := uuid.New()
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts?node_id=bad-node-id", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeBadRequest {
+		t.Fatalf("expected code %s, got %s", apibase.CodeBadRequest, resp.Code)
+	}
+}
+
+func TestMonitoringAPI_AlertResolveInvalidIDReturnsBadRequest(t *testing.T) {
+	tenantID := uuid.New()
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts/not-a-uuid/resolve", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeBadRequest {
+		t.Fatalf("expected code %s, got %s", apibase.CodeBadRequest, resp.Code)
+	}
+}
+
+func TestMonitoringAPI_AlertResolveNotFoundReturns404(t *testing.T) {
+	tenantID := uuid.New()
+	alertID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, alert_type, severity, title, COALESCE(message, ''),
+		       context, status, created_at, resolved_at
+		FROM alerts
+		WHERE id = $1
+	`)).
+		WithArgs(alertID).
+		WillReturnError(sql.ErrNoRows)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts/"+alertID.String()+"/resolve", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rr.Code)
+	}
+	if resp.Code != "ALERT_NOT_FOUND" {
+		t.Fatalf("expected code ALERT_NOT_FOUND, got %s", resp.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
 
