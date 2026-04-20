@@ -1060,6 +1060,39 @@ func TestMonitoringAPI_NodeMetricsSuccessReturnsContractFields(t *testing.T) {
 	}
 }
 
+func TestMonitoringAPI_NodeMetricsNotFoundReturnsNodeNotFound(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(
+		`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE id = $1`,
+	)).
+		WithArgs(nodeID).
+		WillReturnError(sql.ErrNoRows)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/nodes/"+nodeID.String()+"/metrics", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeNodeNotFound {
+		t.Fatalf("expected code %s, got %s", apibase.CodeNodeNotFound, resp.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestMonitoringAPI_TrafficInvalidRangeReturnsBadRequest(t *testing.T) {
 	tenantID := uuid.New()
 	db, _, err := sqlmock.New()
@@ -1166,6 +1199,34 @@ func TestMonitoringAPI_TopologyBoundaryNoNodesReturnsEmptyCollections(t *testing
 	}
 	if len(nodes) != 0 || len(links) != 0 {
 		t.Fatalf("expected empty topology, got nodes=%d links=%d", len(nodes), len(links))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMonitoringAPI_TopologyReturnsInternalErrorWhenNodeQueryFails(t *testing.T) {
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectTenantNodesQuery(mock, tenantID).WillReturnError(errors.New("query failed"))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/topology", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeInternalServerError {
+		t.Fatalf("expected code %s, got %s", apibase.CodeInternalServerError, resp.Code)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
@@ -1436,6 +1497,43 @@ func TestMonitoringAPI_AlertResolveSuccessReturnsResolvedAlert(t *testing.T) {
 	}
 }
 
+func TestMonitoringAPI_AlertResolveGetAlertFailureReturnsInternalError(t *testing.T) {
+	tenantID := uuid.New()
+	alertID := uuid.New()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, alert_type, severity, title, COALESCE(message, ''),
+		       context, status, created_at, resolved_at
+		FROM alerts
+		WHERE id = $1
+	`)).
+		WithArgs(alertID).
+		WillReturnError(errors.New("db down"))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts/"+alertID.String()+"/resolve", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeInternalServerError {
+		t.Fatalf("expected code %s, got %s", apibase.CodeInternalServerError, resp.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestMonitoringAPI_EventsInvalidSinceReturnsBadRequest(t *testing.T) {
 	tenantID := uuid.New()
 	db, _, err := sqlmock.New()
@@ -1699,6 +1797,38 @@ func TestMonitoringAPI_TrafficBoundaryNoNodesReturnsEmptySeries(t *testing.T) {
 	}
 	if resp.Code != apibase.CodeOK {
 		t.Fatalf("expected code %s, got %s", apibase.CodeOK, resp.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMonitoringAPI_TrafficNodeQueryFailureStillReturnsEmptySeries(t *testing.T) {
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectTenantNodesQuery(mock, tenantID).WillReturnError(errors.New("db timeout"))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/traffic?range=24h", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeOK {
+		t.Fatalf("expected code %s, got %s", apibase.CodeOK, resp.Code)
+	}
+	if data["peak_bandwidth_mbps"] != float64(0) {
+		t.Fatalf("expected peak_bandwidth_mbps=0, got %#v", data["peak_bandwidth_mbps"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
