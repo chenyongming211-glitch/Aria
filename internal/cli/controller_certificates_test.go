@@ -21,6 +21,7 @@ import (
 	"aria/internal/security/certissuance"
 	"aria/internal/token"
 	"aria/pkg/controllerstorage"
+	"aria/pkg/logging"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
@@ -200,6 +201,7 @@ func TestHandleIssueCertificate_MissingAuthReturns401(t *testing.T) {
 	controller := &Controller{
 		store:       controllerstorage.NewStorageWithDB(db),
 		certService: newTestCertService(t),
+		logger:      logging.GetLogger(),
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/certificates/issue", strings.NewReader(`{"csr_pem":"x"}`))
@@ -369,6 +371,7 @@ func TestHandleIssueCertificate_SuccessWithEnrollmentTokenAndNodeID(t *testing.T
 		store:          controllerstorage.NewStorageWithDB(db),
 		certService:    newTestCertService(t),
 		tokenValidator: token.NewValidator(token.NewStore(db)),
+		logger:         logging.GetLogger(),
 	}
 
 	body := `{"token":"` + enrollToken + `","node_id":"` + nodeID.String() + `","csr_pem":"` + jsonEscape(generateCSRPEM(t, "node-enroll-nodeid")) + `"}`
@@ -405,6 +408,7 @@ func TestHandleIssueCertificate_EnrollmentTokenTenantMismatchReturns401(t *testi
 		store:          controllerstorage.NewStorageWithDB(db),
 		certService:    newTestCertService(t),
 		tokenValidator: token.NewValidator(token.NewStore(db)),
+		logger:         logging.GetLogger(),
 	}
 
 	body := `{"token":"` + enrollToken + `","public_key":"` + nodePublicKey + `","csr_pem":"` + jsonEscape(generateCSRPEM(t, "node-enroll-mismatch")) + `"}`
@@ -438,6 +442,7 @@ func TestHandleIssueCertificate_EnrollmentTokenWithoutNodeSelectorReturns401(t *
 		store:          controllerstorage.NewStorageWithDB(db),
 		certService:    newTestCertService(t),
 		tokenValidator: token.NewValidator(token.NewStore(db)),
+		logger:         logging.GetLogger(),
 	}
 
 	body := `{"token":"` + enrollToken + `","csr_pem":"` + jsonEscape(generateCSRPEM(t, "node-enroll-no-selector")) + `"}`
@@ -474,6 +479,7 @@ func TestHandleRegister_CSRUsesPersistedNodeIDForCertUpsert(t *testing.T) {
 	controller := &Controller{
 		store:       controllerstorage.NewStorageWithDB(db),
 		certService: newTestCertService(t),
+		logger:      logging.GetLogger(),
 	}
 
 	body := `{"public_key":"` + publicKey + `","hostname":"node-a","csr_pem":"` + jsonEscape(generateCSRPEM(t, "register-existing")) + `"}`
@@ -515,6 +521,7 @@ func TestHandleRegister_CSRFailureRollsBackFreshEnrollment(t *testing.T) {
 		store:          controllerstorage.NewStorageWithDB(db),
 		certService:    newTestCertService(t),
 		tokenValidator: token.NewValidator(token.NewStore(db)),
+		logger:         logging.GetLogger(),
 	}
 
 	body := `{"public_key":"` + publicKey + `","hostname":"node-b","token":"` + enrollToken + `","csr_pem":"` + jsonEscape(generateCSRPEM(t, "register-deleted")) + `"}`
@@ -595,6 +602,7 @@ func TestHandleRegister_CSRSuccessIncludesCertificateInSyncResponse(t *testing.T
 	controller := &Controller{
 		store:       controllerstorage.NewStorageWithDB(db),
 		certService: newTestCertService(t),
+		logger:      logging.GetLogger(),
 	}
 
 	body := `{"public_key":"` + publicKey + `","hostname":"node-c","csr_pem":"` + jsonEscape(generateCSRPEM(t, "register-success")) + `"}`
@@ -647,6 +655,7 @@ func TestHandleRenewCertificate_NoExistingCertReturns404(t *testing.T) {
 	controller := &Controller{
 		store:       controllerstorage.NewStorageWithDB(db),
 		certService: newTestCertService(t),
+		logger:      logging.GetLogger(),
 	}
 
 	body := `{"runtime_token":"` + runtimeToken + `","csr_pem":"` + jsonEscape(generateCSRPEM(t, "node-renew")) + `"}`
