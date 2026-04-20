@@ -785,6 +785,227 @@ func TestMonitoringAPI_NodeMetricsSuccessReturnsContractFields(t *testing.T) {
 	}
 }
 
+func TestMonitoringAPI_TrafficInvalidRangeReturnsBadRequest(t *testing.T) {
+	tenantID := uuid.New()
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/traffic?range=2h", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeBadRequest {
+		t.Fatalf("expected code %s, got %s", apibase.CodeBadRequest, resp.Code)
+	}
+}
+
+func TestMonitoringAPI_TopologyBoundaryNoNodesReturnsEmptyCollections(t *testing.T) {
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectTenantNodesQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/topology", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+	nodes := responseDataSlice(t, data["nodes"])
+	links := responseDataSlice(t, data["links"])
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeOK {
+		t.Fatalf("expected code %s, got %s", apibase.CodeOK, resp.Code)
+	}
+	if len(nodes) != 0 || len(links) != 0 {
+		t.Fatalf("expected empty topology, got nodes=%d links=%d", len(nodes), len(links))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMonitoringAPI_AlertResolveAlreadyResolvedReturns400(t *testing.T) {
+	tenantID := uuid.New()
+	alertID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, alert_type, severity, title, COALESCE(message, ''),
+		       context, status, created_at, resolved_at
+		FROM alerts
+		WHERE id = $1
+	`)).
+		WithArgs(alertID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "alert_type", "severity", "title",
+			"message", "context", "status", "created_at", "resolved_at",
+		}).AddRow(
+			alertID, tenantID, nodeID.String(), "high_latency", "warning",
+			"Latency high", "", []byte(`{}`), "resolved", now, now,
+		))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts/"+alertID.String()+"/resolve", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if resp.Code != "ALERT_ALREADY_RESOLVED" {
+		t.Fatalf("expected code ALERT_ALREADY_RESOLVED, got %s", resp.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMonitoringAPI_AlertResolveCrossTenantReturns404(t *testing.T) {
+	tenantID := uuid.New()
+	otherTenantID := uuid.New()
+	alertID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, alert_type, severity, title, COALESCE(message, ''),
+		       context, status, created_at, resolved_at
+		FROM alerts
+		WHERE id = $1
+	`)).
+		WithArgs(alertID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "alert_type", "severity", "title",
+			"message", "context", "status", "created_at", "resolved_at",
+		}).AddRow(
+			alertID, otherTenantID, nodeID.String(), "high_latency", "warning",
+			"Latency high", "", []byte(`{}`), "active", now, nil,
+		))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts/"+alertID.String()+"/resolve", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rr.Code)
+	}
+	if resp.Code != "ALERT_NOT_FOUND" {
+		t.Fatalf("expected code ALERT_NOT_FOUND, got %s", resp.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMonitoringAPI_AlertResolveSuccessReturnsResolvedAlert(t *testing.T) {
+	tenantID := uuid.New()
+	alertID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, alert_type, severity, title, COALESCE(message, ''),
+		       context, status, created_at, resolved_at
+		FROM alerts
+		WHERE id = $1
+	`)).
+		WithArgs(alertID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "alert_type", "severity", "title",
+			"message", "context", "status", "created_at", "resolved_at",
+		}).AddRow(
+			alertID, tenantID, nodeID.String(), "high_latency", "warning",
+			"Latency high", "", []byte(`{}`), "active", now, nil,
+		))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		UPDATE alerts
+		SET status = 'resolved', resolved_at = NOW()
+		WHERE id = $1 AND status = 'active'
+		RETURNING id, tenant_id, node_id, alert_type, severity, title, COALESCE(message, ''),
+		          context, status, created_at, resolved_at
+	`)).
+		WithArgs(alertID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "alert_type", "severity", "title",
+			"message", "context", "status", "created_at", "resolved_at",
+		}).AddRow(
+			alertID, tenantID, nodeID.String(), "high_latency", "warning",
+			"Latency high", "", []byte(`{}`), "resolved", now, now,
+		))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, tenant_id, node_id, event_type, actor, summary, detail, created_at
+	`)).
+		WithArgs(tenantID, nodeID, "alert_resolved", "user", "Alert resolved: Latency high", sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at",
+		}).AddRow(uuid.New(), tenantID, nodeID.String(), "alert_resolved", "user", "Alert resolved: Latency high", []byte(`{}`), now))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts/"+alertID.String()+"/resolve", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeOK {
+		t.Fatalf("expected code %s, got %s", apibase.CodeOK, resp.Code)
+	}
+	if data["id"] != alertID.String() || data["status"] != "resolved" {
+		t.Fatalf("unexpected resolved alert payload: %#v", data)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestMonitoringAPI_EventsInvalidSinceReturnsBadRequest(t *testing.T) {
 	tenantID := uuid.New()
 	db, _, err := sqlmock.New()
