@@ -176,6 +176,45 @@ func TestHandleIssueCertificate_MissingAuthReturns401(t *testing.T) {
 	}
 }
 
+func TestHandleIssueCertificate_MethodNotAllowedReturns405(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	controller := &Controller{
+		store:       controllerstorage.NewStorageWithDB(db),
+		certService: newTestCertService(t),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/agents/certificates/issue", nil)
+	rr := httptest.NewRecorder()
+	controller.HandleIssueCertificate(rr, req)
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rr.Code)
+	}
+}
+
+func TestHandleIssueCertificate_ServiceDisabledReturns503(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	controller := &Controller{
+		store: controllerstorage.NewStorageWithDB(db),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/certificates/issue", strings.NewReader(`{"runtime_token":"x","csr_pem":"y"}`))
+	rr := httptest.NewRecorder()
+	controller.HandleIssueCertificate(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rr.Code)
+	}
+}
+
 func TestHandleIssueCertificate_InvalidRuntimeTokenReturns401(t *testing.T) {
 	db, _, err := sqlmock.New()
 	if err != nil {
@@ -527,6 +566,26 @@ func TestHandleRenewCertificate_SuccessPersistsRenewedFrom(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestHandleRenewCertificate_CSRRequiredReturns400(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	controller := &Controller{
+		store:       controllerstorage.NewStorageWithDB(db),
+		certService: newTestCertService(t),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/certificates/renew", strings.NewReader(`{"runtime_token":"x"}`))
+	rr := httptest.NewRecorder()
+	controller.HandleRenewCertificate(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
 	}
 }
 
