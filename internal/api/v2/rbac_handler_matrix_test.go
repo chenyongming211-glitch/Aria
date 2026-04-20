@@ -205,6 +205,61 @@ func expectQoSListSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 		}).AddRow(uuid.New(), tenantID, nodeID, "service", "", "", 0, 443, 6, 200, true, "https limit", now, now))
 }
 
+func expectRolesCreateSuccess(mock sqlmock.Sqlmock, tenantID uuid.UUID) {
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO roles (tenant_id, name, description, is_system, permissions)
+		VALUES ($1, $2, $3, false, $4)
+		RETURNING id, tenant_id, name, description, is_system, permissions, created_at, updated_at`)).
+		WithArgs(tenantID, "custom-operator", "custom", sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "name", "description", "is_system", "permissions", "created_at", "updated_at",
+		}).AddRow(uuid.New(), tenantID, "custom-operator", "custom", false, "{roles:read,roles:write}", now, now))
+}
+
+func expectUsersCreateSuccess(mock sqlmock.Sqlmock, tenantID uuid.UUID) {
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO users (id, username, password_hash, tenant_id, role, email, created_at) 
+			  VALUES ($1, $2, $3, $4, $5, $6, NOW())`)).
+		WithArgs(sqlmock.AnyArg(), "bob", sqlmock.AnyArg(), tenantID, "member", "bob@example.com").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
+func expectACLCreateSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO acl_rules (tenant_id, node_id, action, src_cidr, dst_cidr, dst_port, protocol, priority, enabled, description)
+		 VALUES ($1, $2, $3, NULLIF($4, '')::cidr, NULLIF($5, '')::cidr, $6, $7, $8, $9, $10)
+		 RETURNING id, tenant_id, node_id, action, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+		           COALESCE(dst_port, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
+		           created_at, updated_at`)).
+		WithArgs(tenantID, nodeID, "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, 100, true, "allow web").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "priority", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(uuid.New(), tenantID, nodeID, "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, 100, true, "allow web", now, now))
+}
+
+func expectQoSCreateSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO qos_rules (tenant_id, node_id, category, src_cidr, dst_cidr, src_port, dst_port, protocol, bandwidth_mbps, enabled, description)
+		 VALUES ($1, $2, $3, NULLIF($4, '')::cidr, NULLIF($5, '')::cidr, $6, $7, $8, $9, $10, $11)
+		 RETURNING id, tenant_id, node_id, category, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+		           COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
+		           bandwidth_mbps, enabled, COALESCE(description, ''), created_at, updated_at`)).
+		WithArgs(tenantID, nodeID, "service", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), 200, true, "qos web").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "category", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(uuid.New(), tenantID, nodeID, "service", "", "", 0, 443, 6, 200, true, "qos web", now, now))
+}
+
+func expectBumpDesiredState(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO node_control_states (tenant_id, node_id, desired_state_version, desired_state_updated_at, updated_at)
+		 VALUES ($1, $2, $3, NOW(), NOW())
+		 ON CONFLICT (node_id) DO UPDATE SET
+		    desired_state_version = EXCLUDED.desired_state_version,
+		    desired_state_updated_at = NOW(),
+		    updated_at = NOW()`)).
+		WithArgs(tenantID, nodeID, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
 func TestRBACHandlerMatrix_TokensRead(t *testing.T) {
 	tenantID := uuid.New()
 	cases := []handlerMatrixCase{
@@ -578,6 +633,253 @@ func TestRBACHandlerMatrix_QoSRead(t *testing.T) {
 
 			router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 			req := withAuthContext(httptest.NewRequest(http.MethodGet, path, nil), tc.role, tenantID)
+			rr := httptest.NewRecorder()
+			router.HandleTenantScoped(rr, req)
+
+			if rr.Code != tc.expectStatus {
+				t.Fatalf("expected status %d, got %d", tc.expectStatus, rr.Code)
+			}
+			if tc.expectAudit && rr.Header().Get("X-RBAC-Audit-Denied") != "true" {
+				t.Fatalf("expected audit denied header")
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("unmet sql expectations: %v", err)
+			}
+		})
+	}
+}
+
+func TestRBACHandlerMatrix_RolesWrite(t *testing.T) {
+	tenantID := uuid.New()
+	cases := []handlerMatrixCase{
+		{name: "off mode bypasses roles write permission", mode: "off", role: "member", expectStatus: http.StatusOK},
+		{name: "audit mode allows denied roles write with marker", mode: "audit", role: "viewer", permissions: []string{"roles:read"}, expectStatus: http.StatusOK, expectAudit: true},
+		{name: "enforce mode denies missing roles write permission", mode: "enforce", role: "viewer", permissions: []string{"roles:read"}, expectStatus: http.StatusForbidden},
+		{name: "enforce mode allows roles write permission", mode: "enforce", role: "admin", permissions: []string{"roles:write"}, expectStatus: http.StatusOK},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("RBAC_ENFORCEMENT", tc.mode)
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New failed: %v", err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+
+			if tc.mode != "off" && tc.role != "super_admin" {
+				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
+			}
+			if tc.expectStatus == http.StatusOK {
+				expectRolesCreateSuccess(mock, tenantID)
+			}
+
+			router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+			req := withAuthContext(httptest.NewRequest(
+				http.MethodPost,
+				"/x/x/x/x/x/x/roles",
+				strings.NewReader(`{"name":"custom-operator","description":"custom","permissions":["roles:read","roles:write"]}`),
+			), tc.role, tenantID)
+			rr := httptest.NewRecorder()
+			router.handleTenantRoles(rr, req, tenantID)
+
+			if rr.Code != tc.expectStatus {
+				t.Fatalf("expected status %d, got %d", tc.expectStatus, rr.Code)
+			}
+			if tc.expectAudit && rr.Header().Get("X-RBAC-Audit-Denied") != "true" {
+				t.Fatalf("expected audit denied header")
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("unmet sql expectations: %v", err)
+			}
+		})
+	}
+}
+
+func TestRBACHandlerMatrix_UsersWrite(t *testing.T) {
+	tenantID := uuid.New()
+	cases := []handlerMatrixCase{
+		{name: "off mode bypasses users write permission", mode: "off", role: "member", expectStatus: http.StatusOK},
+		{name: "audit mode allows denied users write with marker", mode: "audit", role: "viewer", permissions: []string{"users:read"}, expectStatus: http.StatusOK, expectAudit: true},
+		{name: "enforce mode denies missing users write permission", mode: "enforce", role: "viewer", permissions: []string{"users:read"}, expectStatus: http.StatusForbidden},
+		{name: "enforce mode allows users write permission", mode: "enforce", role: "admin", permissions: []string{"users:write"}, expectStatus: http.StatusOK},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("RBAC_ENFORCEMENT", tc.mode)
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New failed: %v", err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+
+			if tc.mode != "off" && tc.role != "super_admin" {
+				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
+			}
+			if tc.expectStatus == http.StatusOK {
+				expectUsersCreateSuccess(mock, tenantID)
+			}
+
+			store := controllerstorage.NewStorageWithDB(db)
+			router := &Router{
+				store:     store,
+				tenantAPI: handlers.NewTenantAPI(store),
+			}
+			req := withAuthContext(httptest.NewRequest(
+				http.MethodPost,
+				"/x/x/x/x",
+				strings.NewReader(`{"username":"bob","password":"P@ssw0rd","email":"bob@example.com","role":"member"}`),
+			), tc.role, tenantID)
+			rr := httptest.NewRecorder()
+			router.handleTenantUsers(rr, req, tenantID, tc.role)
+
+			if rr.Code != tc.expectStatus {
+				t.Fatalf("expected status %d, got %d", tc.expectStatus, rr.Code)
+			}
+			if tc.expectAudit && rr.Header().Get("X-RBAC-Audit-Denied") != "true" {
+				t.Fatalf("expected audit denied header")
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("unmet sql expectations: %v", err)
+			}
+		})
+	}
+}
+
+func TestRBACHandlerMatrix_RoutesWrite(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/routes"
+	cases := []handlerMatrixCase{
+		{name: "off mode bypasses routes write permission", mode: "off", role: "member", expectStatus: http.StatusOK},
+		{name: "audit mode allows denied routes write with marker", mode: "audit", role: "viewer", permissions: []string{"routes:read"}, expectStatus: http.StatusOK, expectAudit: true},
+		{name: "enforce mode denies missing routes write permission", mode: "enforce", role: "viewer", permissions: []string{"routes:read"}, expectStatus: http.StatusForbidden},
+		{name: "enforce mode allows routes write permission", mode: "enforce", role: "admin", permissions: []string{"routes:write"}, expectStatus: http.StatusOK},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("RBAC_ENFORCEMENT", tc.mode)
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New failed: %v", err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+
+			expectNodeLookup(mock, tenantID, nodeID, "{10.0.0.0/24}")
+			if tc.mode != "off" && tc.role != "super_admin" {
+				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
+			}
+			if tc.expectStatus == http.StatusOK {
+				// Route POST hits addTenantNodeRoute with secondary lookup.
+				expectNodeLookup(mock, tenantID, nodeID, "{10.0.0.0/24}")
+			}
+
+			router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+			req := withAuthContext(httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"cidr":"10.0.0.0/24"}`)), tc.role, tenantID)
+			rr := httptest.NewRecorder()
+			router.HandleTenantScoped(rr, req)
+
+			if rr.Code != tc.expectStatus {
+				t.Fatalf("expected status %d, got %d", tc.expectStatus, rr.Code)
+			}
+			if tc.expectAudit && rr.Header().Get("X-RBAC-Audit-Denied") != "true" {
+				t.Fatalf("expected audit denied header")
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("unmet sql expectations: %v", err)
+			}
+		})
+	}
+}
+
+func TestRBACHandlerMatrix_ACLsWrite(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/security/acls"
+	cases := []handlerMatrixCase{
+		{name: "off mode bypasses ACL write permission", mode: "off", role: "member", expectStatus: http.StatusOK},
+		{name: "audit mode allows denied ACL write with marker", mode: "audit", role: "viewer", permissions: []string{"acls:read"}, expectStatus: http.StatusOK, expectAudit: true},
+		{name: "enforce mode denies missing ACL write permission", mode: "enforce", role: "viewer", permissions: []string{"acls:read"}, expectStatus: http.StatusForbidden},
+		{name: "enforce mode allows ACL write permission", mode: "enforce", role: "admin", permissions: []string{"acls:write"}, expectStatus: http.StatusOK},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("RBAC_ENFORCEMENT", tc.mode)
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New failed: %v", err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+
+			expectNodeLookup(mock, tenantID, nodeID, "{}")
+			if tc.mode != "off" && tc.role != "super_admin" {
+				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
+			}
+			if tc.expectStatus == http.StatusOK {
+				expectACLCreateSuccess(mock, tenantID, nodeID)
+				expectBumpDesiredState(mock, tenantID, nodeID)
+			}
+
+			router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+			req := withAuthContext(httptest.NewRequest(
+				http.MethodPost,
+				path,
+				strings.NewReader(`{"action":"allow","src_cidr":"10.0.0.0/24","dst_cidr":"0.0.0.0/0","dst_port":443,"protocol":6,"priority":100,"description":"allow web"}`),
+			), tc.role, tenantID)
+			rr := httptest.NewRecorder()
+			router.HandleTenantScoped(rr, req)
+
+			if rr.Code != tc.expectStatus {
+				t.Fatalf("expected status %d, got %d", tc.expectStatus, rr.Code)
+			}
+			if tc.expectAudit && rr.Header().Get("X-RBAC-Audit-Denied") != "true" {
+				t.Fatalf("expected audit denied header")
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("unmet sql expectations: %v", err)
+			}
+		})
+	}
+}
+
+func TestRBACHandlerMatrix_QoSWrite(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/qos/service"
+	cases := []handlerMatrixCase{
+		{name: "off mode bypasses QoS write permission", mode: "off", role: "member", expectStatus: http.StatusOK},
+		{name: "audit mode allows denied QoS write with marker", mode: "audit", role: "viewer", permissions: []string{"qos:read"}, expectStatus: http.StatusOK, expectAudit: true},
+		{name: "enforce mode denies missing QoS write permission", mode: "enforce", role: "viewer", permissions: []string{"qos:read"}, expectStatus: http.StatusForbidden},
+		{name: "enforce mode allows QoS write permission", mode: "enforce", role: "admin", permissions: []string{"qos:write"}, expectStatus: http.StatusOK},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("RBAC_ENFORCEMENT", tc.mode)
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New failed: %v", err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+
+			expectNodeLookup(mock, tenantID, nodeID, "{}")
+			if tc.mode != "off" && tc.role != "super_admin" {
+				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
+			}
+			if tc.expectStatus == http.StatusOK {
+				expectQoSCreateSuccess(mock, tenantID, nodeID)
+				expectBumpDesiredState(mock, tenantID, nodeID)
+			}
+
+			router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+			req := withAuthContext(httptest.NewRequest(
+				http.MethodPost,
+				path,
+				strings.NewReader(`{"dst_port":443,"protocol":6,"bandwidth_mbps":200,"description":"qos web"}`),
+			), tc.role, tenantID)
 			rr := httptest.NewRecorder()
 			router.HandleTenantScoped(rr, req)
 
