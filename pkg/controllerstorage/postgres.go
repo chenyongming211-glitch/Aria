@@ -470,6 +470,25 @@ func (s *Storage) Migrate() error {
 			UNIQUE(tenant_id, name)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_roles_tenant ON roles(tenant_id)`,
+		`CREATE TABLE IF NOT EXISTS node_certificates (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+			node_id UUID NOT NULL UNIQUE REFERENCES nodes(id) ON DELETE CASCADE,
+			serial_number VARCHAR(128) NOT NULL,
+			cert_pem TEXT NOT NULL,
+			ca_pem TEXT NOT NULL,
+			not_before TIMESTAMPTZ NOT NULL,
+			not_after TIMESTAMPTZ NOT NULL,
+			status VARCHAR(16) NOT NULL DEFAULT 'issued',
+			issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			revoked_at TIMESTAMPTZ,
+			revoke_reason TEXT,
+			renewed_from UUID REFERENCES node_certificates(id),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_node_certificates_tenant ON node_certificates(tenant_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_node_certificates_status ON node_certificates(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_node_certificates_not_after ON node_certificates(not_after)`,
 	}
 
 	for i, migration := range migrations {
