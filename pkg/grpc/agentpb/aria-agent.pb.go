@@ -569,6 +569,7 @@ type ACLRule struct {
 	Protocol      uint32                 `protobuf:"varint,3,opt,name=protocol,proto3" json:"protocol,omitempty"`              // IP 协议（6=TCP, 17=UDP, 0=any）
 	MinPort       uint32                 `protobuf:"varint,4,opt,name=min_port,json=minPort,proto3" json:"min_port,omitempty"` // 最小端口（0=any）
 	MaxPort       uint32                 `protobuf:"varint,5,opt,name=max_port,json=maxPort,proto3" json:"max_port,omitempty"` // 最大端口（65535=any）
+	Action        string                 `protobuf:"bytes,6,opt,name=action,proto3" json:"action,omitempty"`                   // 动作：allow 或 deny
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -636,6 +637,13 @@ func (x *ACLRule) GetMaxPort() uint32 {
 		return x.MaxPort
 	}
 	return 0
+}
+
+func (x *ACLRule) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
 }
 
 type QoSRule struct {
@@ -1766,13 +1774,14 @@ const file_aria_agent_proto_rawDesc = "" +
 	"assignedIp\x12\x12\n" +
 	"\x04role\x18\t \x01(\tR\x04role\x12+\n" +
 	"\x11advertised_routes\x18\n" +
-	" \x03(\tR\x10advertisedRoutes\"\x8d\x01\n" +
+	" \x03(\tR\x10advertisedRoutes\"\xa5\x01\n" +
 	"\aACLRule\x12\x17\n" +
 	"\asrc_net\x18\x01 \x01(\tR\x06srcNet\x12\x17\n" +
 	"\adst_net\x18\x02 \x01(\tR\x06dstNet\x12\x1a\n" +
 	"\bprotocol\x18\x03 \x01(\rR\bprotocol\x12\x19\n" +
 	"\bmin_port\x18\x04 \x01(\rR\aminPort\x12\x19\n" +
-	"\bmax_port\x18\x05 \x01(\rR\amaxPort\"\xb0\x01\n" +
+	"\bmax_port\x18\x05 \x01(\rR\amaxPort\x12\x16\n" +
+	"\x06action\x18\x06 \x01(\tR\x06action\"\xb0\x01\n" +
 	"\aQoSRule\x12\x15\n" +
 	"\x06src_ip\x18\x01 \x01(\tR\x05srcIp\x12\x15\n" +
 	"\x06dst_ip\x18\x02 \x01(\tR\x05dstIp\x12\x19\n" +

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"aria/internal/auth"
@@ -146,6 +147,7 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 						Protocol: getUint32(r, "protocol"),
 						MinPort:  getUint32(r, "min_port"),
 						MaxPort:  getUint32(r, "max_port"),
+						Action:   defaultACLAction(getString(r, "action")),
 					})
 				}
 			}
@@ -500,6 +502,14 @@ func getUint32(m map[string]interface{}, key string) uint32 {
 		}
 	}
 	return 0
+}
+
+func defaultACLAction(action string) string {
+	action = strings.ToLower(strings.TrimSpace(action))
+	if action == "" {
+		return "allow"
+	}
+	return action
 }
 
 // getQoSRules 查询适用于该 Agent 的 QoS 规则

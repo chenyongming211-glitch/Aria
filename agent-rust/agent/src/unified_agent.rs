@@ -1969,12 +1969,27 @@ impl UnifiedAgent {
         acl.clear_all_rules()?;
         
         for rule in rules {
-            acl.allow(
-                &rule.src_net,
-                &rule.dst_net,
-                rule.min_port as u16,
-                rule.protocol as u8,
-            )?;
+            match rule.action.trim().to_ascii_lowercase().as_str() {
+                "" | "allow" => {
+                    acl.allow(
+                        &rule.src_net,
+                        &rule.dst_net,
+                        rule.min_port as u16,
+                        rule.protocol as u8,
+                    )?;
+                }
+                "deny" => {
+                    acl.deny(
+                        &rule.src_net,
+                        &rule.dst_net,
+                        rule.min_port as u16,
+                        rule.protocol as u8,
+                    )?;
+                }
+                action => {
+                    return Err(anyhow::anyhow!("invalid ACL action '{}'", action));
+                }
+            }
         }
         
         metrics::record_acl_rule_count(rules.len());

@@ -265,6 +265,7 @@ impl GrpcClient {
                 protocol: r.protocol,
                 min_port: r.min_port,
                 max_port: r.max_port,
+                action: r.action,
             }).collect(),
             qos_rules: resp.qos_rules.into_iter().map(|r| QoSRule {
                 src_ip: r.src_ip,
@@ -405,6 +406,7 @@ pub struct AclRule {
     pub min_port: u32,
     #[allow(dead_code)]
     pub max_port: u32,
+    pub action: String,
 }
 
 #[allow(dead_code)]

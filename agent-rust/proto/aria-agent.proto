@@ -116,6 +116,7 @@ message ACLRule {
   uint32 protocol = 3;                // IP 协议（6=TCP, 17=UDP, 0=any）
   uint32 min_port = 4;                // 最小端口（0=any）
   uint32 max_port = 5;                // 最大端口（65535=any）
+  string action = 6;                  // 动作：allow 或 deny
 }
 
 message QoSRule {

@@ -173,14 +173,14 @@ type NodeInfo struct {
 
 // SyncResponse is the response for sync and register endpoints
 type SyncResponse struct {
-	Peers              []NodeInfo    `json:"peers"`
-	AssignedIP         string        `json:"assigned_ip"`
-	LastUpdate         int64         `json:"last_update"`
-	ACLRules           []ACLRuleJSON `json:"acl_rules,omitempty"`            // Firewall ACL rules
-	MetricsPushGateway string        `json:"metrics_push_gateway,omitempty"` // VictoriaMetrics push gateway URL
-	CertificatePEM     string        `json:"certificate_pem,omitempty"`
-	CertificateCA      string        `json:"certificate_ca,omitempty"`
-	CertificateNotAfter int64        `json:"certificate_not_after,omitempty"`
+	Peers               []NodeInfo    `json:"peers"`
+	AssignedIP          string        `json:"assigned_ip"`
+	LastUpdate          int64         `json:"last_update"`
+	ACLRules            []ACLRuleJSON `json:"acl_rules,omitempty"`            // Firewall ACL rules
+	MetricsPushGateway  string        `json:"metrics_push_gateway,omitempty"` // VictoriaMetrics push gateway URL
+	CertificatePEM      string        `json:"certificate_pem,omitempty"`
+	CertificateCA       string        `json:"certificate_ca,omitempty"`
+	CertificateNotAfter int64         `json:"certificate_not_after,omitempty"`
 }
 
 // ACLRuleJSON represents an ACL rule in API responses.
@@ -190,6 +190,7 @@ type ACLRuleJSON struct {
 	Protocol uint8  `json:"protocol"` // IP protocol (6=TCP, 17=UDP, 0=any)
 	MinPort  uint16 `json:"min_port"` // Min port (0=any)
 	MaxPort  uint16 `json:"max_port"` // Max port (65535=any)
+	Action   string `json:"action"`   // allow or deny
 }
 
 func runControllerServe(cmd *cobra.Command, args []string) error {
@@ -357,7 +358,7 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	if cfg.AI.Enabled {
 		// 初始化 AI Service (生产级架构，注入真实数据源)
 		aiService := service.NewAIService(store)
-		
+
 		// Update v2 router with AI service if needed (v2.SetupRoutes already creates a handler, we might want to override)
 		// Actually, let's keep the existing v2.SetupRoutes as it is for now.
 
@@ -657,10 +658,17 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	// 检查是否为已注册节点（重新注册以同步配置）
 	existingNode, _ := c.store.GetNode(req.PublicKey)
 	isReRegistration := (existingNode != nil)
+	requiresFreshEnrollment := nodeRequiresFreshEnrollment(existingNode)
 	var requestedTenantID uuid.UUID
 
-	// 已注册节点可以无 token 重新注册
-	if !isReRegistration {
+	if nodeRegistrationForbidden(existingNode) {
+		c.logger.Warn("Registration rejected: node %s status is %s", req.PublicKey[:8], existingNode.Status)
+		http.Error(w, "Node registration is disabled", http.StatusForbidden)
+		return
+	}
+
+	// 正常已注册节点可以无 token 重新注册；删除后的节点必须重新携带有效注册 token。
+	if !isReRegistration || requiresFreshEnrollment {
 		if req.Token == "" {
 			c.logger.Warn("Registration rejected: no token provided from %s", req.Hostname)
 			http.Error(w, "Token required", http.StatusUnauthorized)
@@ -699,6 +707,12 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		requestedTenantID = resolvedTenantID
+		if requiresFreshEnrollment && requestedTenantID != existingNode.TenantID {
+			c.logger.Warn("Registration rejected: deleted node %s attempted to switch tenant from %s to %s",
+				req.PublicKey[:8], existingNode.TenantID, requestedTenantID)
+			http.Error(w, "Node tenant ownership is immutable", http.StatusForbidden)
+			return
+		}
 	} else {
 		c.logger.Debug("Re-registration from existing node: %s", req.PublicKey[:8])
 		if req.Token != "" {
@@ -823,7 +837,7 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ========== Consume Token ==========
-	if req.Token != "" && !isReRegistration {
+	if req.Token != "" && (!isReRegistration || requiresFreshEnrollment) {
 		if err := c.tokenValidator.ConsumeToken(req.Token, req.PublicKey); err != nil {
 			c.logger.Warn("Failed to consume token: %v", err)
 			// Don't fail the registration, just log
@@ -925,7 +939,7 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 			ACLRules:           aclRulesJSON,
 			MetricsPushGateway: c.metricsPushGateway,
 		}
-	c.attachNodeCertificateToSyncResponse(req.PublicKey, &response)
+		c.attachNodeCertificateToSyncResponse(req.PublicKey, &response)
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
@@ -1473,6 +1487,7 @@ func (c *Controller) getACLRulesForRegionInNodes(region string, allRules []*cont
 				Protocol: rule.Protocol,
 				MinPort:  rule.MinPort,
 				MaxPort:  rule.MaxPort,
+				Action:   defaultRegistrationACLAction(rule.Action),
 			})
 		}
 		return result
@@ -1493,6 +1508,7 @@ func (c *Controller) getACLRulesForRegionInNodes(region string, allRules []*cont
 				Protocol: rule.Protocol,
 				MinPort:  rule.MinPort,
 				MaxPort:  rule.MaxPort,
+				Action:   defaultRegistrationACLAction(rule.Action),
 			})
 		}
 	}
@@ -1579,9 +1595,14 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 	// Token Validation
 	existingNode, _ := c.store.GetNode(req.PublicKey)
 	isReRegistration := (existingNode != nil)
+	requiresFreshEnrollment := nodeRequiresFreshEnrollment(existingNode)
 	var requestedTenantID uuid.UUID
 
-	if !isReRegistration {
+	if nodeRegistrationForbidden(existingNode) {
+		return "", fmt.Errorf("node registration is disabled")
+	}
+
+	if !isReRegistration || requiresFreshEnrollment {
 		if req.Token == "" {
 			return "", fmt.Errorf("token required")
 		}
@@ -1594,6 +1615,9 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 		requestedTenantID, err = c.store.GetTenantIDByToken(req.Token)
 		if err != nil {
 			return "", fmt.Errorf("failed to get tenant ID by token: %w", err)
+		}
+		if requiresFreshEnrollment && requestedTenantID != existingNode.TenantID {
+			return "", fmt.Errorf("node tenant ownership is immutable")
 		}
 	} else if req.Token != "" {
 		var err error
@@ -1687,7 +1711,7 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 		return "", fmt.Errorf("failed to save node: %w", err)
 	}
 
-	if req.Token != "" && !isReRegistration {
+	if req.Token != "" && (!isReRegistration || requiresFreshEnrollment) {
 		if err := c.tokenStore.IncrementUsage(req.Token, req.PublicKey); err != nil {
 			c.logger.Warn("Failed to increment token usage: %v", err)
 		}
@@ -1758,6 +1782,7 @@ func (c *Controller) processSync(publicKey string) (interface{}, string, interfa
 			"protocol": rule.Protocol,
 			"min_port": rule.MinPort,
 			"max_port": rule.MaxPort,
+			"action":   defaultRegistrationACLAction(rule.Action),
 		})
 	}
 
@@ -1924,4 +1949,28 @@ func ensureDefaultTenant(store *controllerstorage.Storage, logger *logging.Logge
 
 	logger.Info("Default tenant created: Aria Default (code=default)")
 	return nil
+}
+
+func nodeRequiresFreshEnrollment(node *controllerstorage.Node) bool {
+	return node != nil && strings.EqualFold(strings.TrimSpace(node.Status), "deleted")
+}
+
+func nodeRegistrationForbidden(node *controllerstorage.Node) bool {
+	if node == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(node.Status)) {
+	case "suspended", "banned":
+		return true
+	default:
+		return false
+	}
+}
+
+func defaultRegistrationACLAction(action string) string {
+	action = strings.ToLower(strings.TrimSpace(action))
+	if action == "" {
+		return "allow"
+	}
+	return action
 }
