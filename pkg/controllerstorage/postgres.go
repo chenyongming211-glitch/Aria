@@ -128,6 +128,12 @@ func (s *Storage) DB() *sql.DB {
 	return s.db
 }
 
+// NewStorageWithDB creates a storage wrapper from an existing DB handle.
+// Primarily used in unit tests where the DB is mocked.
+func NewStorageWithDB(db *sql.DB) *Storage {
+	return &Storage{db: db}
+}
+
 func ipToInt(ip net.IP) uint32 {
 	if len(ip) == 16 {
 		return uint32(ip[12])<<24 | uint32(ip[13])<<16 | uint32(ip[14])<<8 | uint32(ip[15])

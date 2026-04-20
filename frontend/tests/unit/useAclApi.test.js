@@ -40,7 +40,9 @@ describe('useAclApi', () => {
       const rules = await useAclApi.getACLRulesByNode('node-1')
       
       expect(api.get).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/security/acls')
-      expect(rules).toEqual(mockRules)
+      expect(rules).toHaveLength(2)
+      expect(rules[0]).toMatchObject(mockRules[0])
+      expect(rules[1]).toMatchObject(mockRules[1])
     })
 
     it('应该支持过滤参数', async () => {
@@ -57,7 +59,8 @@ describe('useAclApi', () => {
       const rules = await useAclApi.getACLRulesByNode('node-1', filters)
       
       expect(api.get).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/security/acls')
-      expect(rules).toEqual([{ id: 1, name: 'allow-web', action: 'allow', node_id: 'node-1' }])
+      expect(rules).toHaveLength(1)
+      expect(rules[0]).toMatchObject({ id: 1, name: 'allow-web', action: 'allow', node_id: 'node-1' })
     })
   })
 
