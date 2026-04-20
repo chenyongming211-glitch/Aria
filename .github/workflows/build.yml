@@ -19,10 +19,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6.4.0
         with:
           go-version-file: go.mod
           cache: true
@@ -47,7 +47,7 @@ jobs:
           GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "${{ steps.vars.outputs.ldflags }}" -o bin/aria-controller-linux-arm64 ./cmd
 
       - name: Upload Go artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         continue-on-error: true
         with:
           name: go-binaries
@@ -67,21 +67,21 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Set version
         id: vars
         run: echo "version=$(cat VERSION 2>/dev/null || echo '0.1.0')" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4.1.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Controller image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7.1.0
         with:
           context: .
           file: Dockerfile.controller
@@ -101,7 +101,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Install system dependencies
         run: |
@@ -126,7 +126,7 @@ jobs:
           rustup default nightly
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.1
         with:
           workspaces: "agent-rust -> target"
 
@@ -137,7 +137,7 @@ jobs:
         run: cargo build --release -p aria-agent
 
       - name: Upload Rust artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         continue-on-error: true
         with:
           name: rust-agent-binary
@@ -153,12 +153,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6.4.0
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -172,7 +172,7 @@ jobs:
         run: npm run build
 
       - name: Upload frontend artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         continue-on-error: true
         with:
           name: frontend-dist
