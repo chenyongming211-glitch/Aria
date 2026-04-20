@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -17,26 +18,44 @@ const (
 )
 
 var (
-	runtimeSecret   = []byte("aria-runtime-secret-key-change-in-prod!")
+	runtimeSecret   []byte
 	runtimeSecretMu sync.RWMutex
 )
 
-func getRuntimeSecret() []byte {
+var ErrRuntimeTokenSecretNotConfigured = errors.New("runtime token secret is not configured")
+
+func getRuntimeSecret() ([]byte, error) {
 	runtimeSecretMu.RLock()
 	defer runtimeSecretMu.RUnlock()
-	return runtimeSecret
+	if len(runtimeSecret) == 0 {
+		return nil, ErrRuntimeTokenSecretNotConfigured
+	}
+	return runtimeSecret, nil
 }
 
 func SetRuntimeSecret(secret string) {
+	trimmed := strings.TrimSpace(secret)
 	runtimeSecretMu.Lock()
 	defer runtimeSecretMu.Unlock()
-	runtimeSecret = []byte(secret)
+	if trimmed == "" {
+		runtimeSecret = nil
+		return
+	}
+	runtimeSecret = []byte(trimmed)
+}
+
+func LoadRuntimeSecretFromEnv() error {
+	secret := strings.TrimSpace(os.Getenv("ARIA_RUNTIME_TOKEN_SECRET"))
+	if secret == "" {
+		SetRuntimeSecret("")
+		return ErrRuntimeTokenSecretNotConfigured
+	}
+	SetRuntimeSecret(secret)
+	return nil
 }
 
 func init() {
-	if secret := os.Getenv("ARIA_RUNTIME_TOKEN_SECRET"); secret != "" {
-		SetRuntimeSecret(secret)
-	}
+	_ = LoadRuntimeSecretFromEnv()
 }
 
 type RuntimeClaims struct {
@@ -58,8 +77,13 @@ func GenerateRuntimeToken(nodeID, tenantID string) (string, time.Time, error) {
 		},
 	}
 
+	secret, err := getRuntimeSecret()
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("failed to generate runtime token: %w", err)
+	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString(getRuntimeSecret())
+	tokenString, err := token.SignedString(secret)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("failed to sign runtime token: %w", err)
 	}
@@ -74,12 +98,17 @@ func ValidateRuntimeToken(tokenString string) (*RuntimeClaims, error) {
 	}
 	jwtPart := strings.TrimPrefix(tokenString, RuntimeTokenPrefix)
 
+	secret, err := getRuntimeSecret()
+	if err != nil {
+		return nil, err
+	}
+
 	claims := &RuntimeClaims{}
 	token, err := jwt.ParseWithClaims(jwtPart, claims, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return getRuntimeSecret(), nil
+		return secret, nil
 	}, jwt.WithIssuer(RuntimeIssuer))
 	if err != nil {
 		if err == jwt.ErrTokenExpired {

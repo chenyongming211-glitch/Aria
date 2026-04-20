@@ -51,6 +51,10 @@ const getNodeCertificateByNodeIDQuery = `
 		WHERE node_id = $1
 	`
 
+func init() {
+	auth.SetRuntimeSecret("test-runtime-secret")
+}
+
 func TestHandleIssueCertificate_SuccessWithRuntimeToken(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()

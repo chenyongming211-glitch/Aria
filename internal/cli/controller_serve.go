@@ -253,6 +253,11 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 		logger.Warn("No jwt.secret configured — using default (insecure!)")
 	}
 
+	if err := auth.LoadRuntimeSecretFromEnv(); err != nil {
+		return fmt.Errorf("runtime token secret is required, please set ARIA_RUNTIME_TOKEN_SECRET: %w", err)
+	}
+	logger.Info("Runtime token secret loaded from environment")
+
 	// Check required config
 	if cfg.Storage.Postgres.Host == "" {
 		return fmt.Errorf("PostgreSQL host is required in config")
