@@ -36,6 +36,26 @@
         style="margin-bottom: 20px;"
       />
 
+      <el-alert
+        v-if="hasRouteContext"
+        title="Monitoring Context"
+        type="warning"
+        :closable="false"
+        style="margin-bottom: 20px;"
+      >
+        <div class="context-alert-body">
+          <span>{{ routeContextSummary }}</span>
+          <div class="context-alert-actions">
+            <el-button v-if="selectedPolicy" size="small" @click="openNodeDetail(selectedPolicy)">
+              打开节点详情
+            </el-button>
+            <el-button v-if="selectedPolicy" size="small" type="primary" @click="showDetails(selectedPolicy)">
+              聚焦交付历史
+            </el-button>
+          </div>
+        </div>
+      </el-alert>
+
       <el-row :gutter="16" class="stats-row">
         <el-col :span="4">
           <el-card class="stat-card">
@@ -106,6 +126,7 @@
 
       <el-table
         :data="filteredPolicies"
+        :row-class-name="policyRowClassName"
         stripe
         style="width: 100%"
         v-loading="loading"
@@ -213,7 +234,12 @@
           暂无交付记录
         </div>
         <div v-else class="delivery-history">
-          <div v-for="item in selectedPolicy.deliveryHistory" :key="item.id" class="delivery-item">
+          <div
+            v-for="item in selectedPolicy.deliveryHistory"
+            :key="item.id"
+            class="delivery-item"
+            :class="{ 'delivery-item-match': isDeliveryMatch(item) }"
+          >
             <div class="delivery-main">
               <el-tag size="small" :type="statusTagType(item.command_status)">
                 {{ statusLabel(item.command_status) }}
@@ -251,6 +277,7 @@ const loading = ref(false)
 const policies = ref([])
 const detailVisible = ref(false)
 const selectedPolicy = ref(null)
+const autoFocusedPolicyId = ref('')
 const filters = ref({
   keyword: '',
   kind: '',
@@ -348,6 +375,32 @@ const formatTimestamp = (value) => {
   return date.toLocaleString()
 }
 
+const routeContext = computed(() => ({
+  nodeId: typeof route.query.nodeId === 'string' ? route.query.nodeId : '',
+  policyRef: typeof route.query.policyRef === 'string' ? route.query.policyRef : '',
+  kind: typeof route.query.kind === 'string' ? route.query.kind : '',
+  commandId: typeof route.query.commandId === 'string' ? route.query.commandId : ''
+}))
+
+const hasRouteContext = computed(() => Object.values(routeContext.value).some(Boolean))
+
+const routeContextSummary = computed(() => {
+  const parts = []
+  if (routeContext.value.kind) {
+    parts.push(`Kind: ${routeContext.value.kind}`)
+  }
+  if (routeContext.value.policyRef) {
+    parts.push(`Policy: ${routeContext.value.policyRef}`)
+  }
+  if (routeContext.value.commandId) {
+    parts.push(`Command: ${routeContext.value.commandId}`)
+  }
+  if (routeContext.value.nodeId) {
+    parts.push(`Node: ${routeContext.value.nodeId}`)
+  }
+  return parts.join(' | ')
+})
+
 const summarizePolicy = (policy) => {
   const spec = policy.spec || {}
   switch (policy.kind) {
@@ -399,6 +452,27 @@ const filteredPolicies = computed(() => {
   })
 })
 
+const findContextPolicy = () => {
+  if (!hasRouteContext.value) {
+    return null
+  }
+  return filteredPolicies.value.find((policy) => {
+    if (routeContext.value.nodeId && policy.nodeId !== routeContext.value.nodeId) {
+      return false
+    }
+    if (routeContext.value.kind && policy.kind !== routeContext.value.kind) {
+      return false
+    }
+    if (routeContext.value.policyRef && policy.policyRef !== routeContext.value.policyRef) {
+      return false
+    }
+    if (routeContext.value.commandId && !policy.deliveryHistory.some((item) => item.command_id === routeContext.value.commandId)) {
+      return false
+    }
+    return true
+  }) || null
+}
+
 const stats = computed(() => {
   const current = filteredPolicies.value
   return {
@@ -415,6 +489,8 @@ const fetchPolicies = async () => {
   loading.value = true
   try {
     policies.value = await usePolicyApi.listPolicies()
+    syncSelectedPolicy()
+    focusPolicyFromRoute()
   } catch (error) {
     console.error('Failed to fetch unified policies:', error)
     ElMessage.error(`获取统一策略视图失败: ${error.message || error}`)
@@ -431,6 +507,32 @@ const syncFiltersFromRoute = () => {
   filters.value.nodeId = typeof route.query.nodeId === 'string' ? route.query.nodeId : ''
   filters.value.keyword = typeof route.query.policyRef === 'string' ? route.query.policyRef : ''
   filters.value.kind = typeof route.query.kind === 'string' ? route.query.kind : ''
+}
+
+const syncSelectedPolicy = () => {
+  if (!selectedPolicy.value) {
+    return
+  }
+  const fresh = policies.value.find((policy) => policy.policyId === selectedPolicy.value.policyId)
+  if (fresh) {
+    selectedPolicy.value = fresh
+  }
+}
+
+const focusPolicyFromRoute = () => {
+  if (!hasRouteContext.value) {
+    autoFocusedPolicyId.value = ''
+    return
+  }
+  const matched = findContextPolicy()
+  if (!matched) {
+    return
+  }
+  selectedPolicy.value = matched
+  if (autoFocusedPolicyId.value !== matched.policyId || !detailVisible.value) {
+    detailVisible.value = true
+    autoFocusedPolicyId.value = matched.policyId
+  }
 }
 
 const goToKind = (kind) => {
@@ -459,7 +561,36 @@ const openNodeDetail = (policy) => {
     ElMessage.warning('该策略没有目标节点')
     return
   }
-  router.push({ name: 'NodeMonitorDetail', params: { nodeId: policy.nodeId } })
+  router.push({
+    name: 'NodeMonitorDetail',
+    params: { nodeId: policy.nodeId },
+    query: {
+      ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId, focus: 'policies' } : {}),
+      ...(policy.policyRef ? { policyRef: policy.policyRef } : {}),
+      ...(policy.kind ? { policyDomain: policy.kind } : {})
+    }
+  })
+}
+
+const isDeliveryMatch = (delivery) => {
+  if (!delivery) {
+    return false
+  }
+  if (routeContext.value.commandId && delivery.command_id === routeContext.value.commandId) {
+    return true
+  }
+  if (routeContext.value.policyRef && delivery.policy_ref === routeContext.value.policyRef) {
+    return true
+  }
+  return false
+}
+
+const policyRowClassName = ({ row }) => {
+  if (!row) {
+    return ''
+  }
+  const matched = findContextPolicy()
+  return matched?.policyId === row.policyId ? 'context-match-row' : ''
 }
 
 onMounted(() => {
@@ -469,6 +600,8 @@ onMounted(() => {
 
 watch(() => route.fullPath, () => {
   syncFiltersFromRoute()
+  syncSelectedPolicy()
+  focusPolicyFromRoute()
 })
 </script>
 
@@ -531,6 +664,20 @@ watch(() => route.fullPath, () => {
   width: 320px;
 }
 
+.context-alert-body {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.context-alert-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .section-title {
   margin: 24px 0 12px;
   font-size: 15px;
@@ -559,6 +706,11 @@ watch(() => route.fullPath, () => {
   border: 1px solid #ebeef5;
   border-radius: 8px;
   background: #fafafa;
+}
+
+.delivery-item-match {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.08);
 }
 
 .delivery-main,
@@ -594,5 +746,9 @@ watch(() => route.fullPath, () => {
   margin-top: 20px;
   display: flex;
   gap: 12px;
+}
+
+:deep(.context-match-row > td) {
+  background: rgba(59, 130, 246, 0.10) !important;
 }
 </style>

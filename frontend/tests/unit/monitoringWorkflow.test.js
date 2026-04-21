@@ -5,6 +5,7 @@ const {
   routerPush,
   routeState,
   monitorApiMock,
+  policyApiMock,
   localStorageMock
 } = vi.hoisted(() => ({
   routerPush: vi.fn(),
@@ -73,6 +74,44 @@ const {
       ]
     }))
   },
+  policyApiMock: {
+    listPolicies: vi.fn(async () => ([
+      {
+        policyId: 'policy-1',
+        policyRef: 'acl-1',
+        nodeId: 'node-1',
+        nodeName: 'node-1',
+        kind: 'acl',
+        name: 'ACL 1',
+        status: 'error',
+        stateConvergence: 'diverged',
+        observedState: 'error',
+        observedMessage: 'delivery failed',
+        deliveryHistory: [
+          {
+            id: 'delivery-1',
+            command_id: 'cmd-1',
+            policy_ref: 'acl-1',
+            policy_domain: 'acl',
+            command_status: 'failed',
+            updated_at: '2026-04-21T10:00:00Z'
+          }
+        ]
+      },
+      {
+        policyId: 'policy-2',
+        policyRef: 'route-1',
+        nodeId: 'node-2',
+        nodeName: 'node-2',
+        kind: 'route',
+        name: 'Route 1',
+        status: 'applied',
+        stateConvergence: 'converged',
+        observedState: 'healthy',
+        deliveryHistory: []
+      }
+    ]))
+  },
   localStorageMock: {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -92,6 +131,10 @@ vi.mock('@/composables/useMonitorApi', () => ({
   useMonitorApi: monitorApiMock
 }))
 
+vi.mock('@/composables/usePolicyApi', () => ({
+  usePolicyApi: policyApiMock
+}))
+
 vi.mock('element-plus', () => ({
   ElMessage: {
     success: vi.fn(),
@@ -102,11 +145,13 @@ vi.mock('element-plus', () => ({
 
 import Monitoring from '@/views/Monitoring.vue'
 import NodeMonitorDetail from '@/views/NodeMonitorDetail.vue'
+import Policies from '@/views/Policies.vue'
 
 const elementStubs = {
   'el-row': { template: '<div><slot /></div>' },
   'el-col': { template: '<div><slot /></div>' },
   'el-card': { template: '<div><slot name="header" /><slot /></div>' },
+  'el-input': { template: '<div><slot name="prefix" /><slot name="append" /></div>' },
   'el-select': { template: '<div><slot /></div>' },
   'el-option': { template: '<div></div>' },
   'el-button': { template: '<button @click="$emit(\'click\')"><slot /></button>' },
@@ -115,6 +160,10 @@ const elementStubs = {
   'el-empty': { template: '<div><slot /></div>' },
   'el-alert': { template: '<div><slot /></div>' },
   'el-pagination': { template: '<div></div>' },
+  'el-tooltip': { template: '<div><slot /></div>' },
+  'el-drawer': { template: '<div><slot /></div>' },
+  'el-descriptions': { template: '<div><slot /></div>' },
+  'el-descriptions-item': { template: '<div><slot /></div>' },
   'el-table': { template: '<div><slot /></div>' },
   'el-table-column': {
     template: '<div><slot :row="row" /></div>',
@@ -155,6 +204,7 @@ describe('monitoring workflow routing', () => {
     routerPush.mockReset()
     monitorApiMock.getEvents.mockClear()
     monitorApiMock.getAlerts.mockClear()
+    policyApiMock.listPolicies.mockClear()
     routeState.params = { nodeId: 'node-1' }
     routeState.query = {}
     routeState.fullPath = '/monitoring/nodes/node-1'
@@ -272,6 +322,55 @@ describe('node monitor detail context handling', () => {
         nodeId: 'node-1',
         policyRef: 'acl-1',
         kind: 'acl'
+      }
+    })
+  })
+})
+
+describe('policy center context handling', () => {
+  beforeEach(() => {
+    routerPush.mockReset()
+    routeState.params = { nodeId: 'node-1' }
+    routeState.query = {
+      nodeId: 'node-1',
+      policyRef: 'acl-1',
+      kind: 'acl',
+      commandId: 'cmd-1'
+    }
+    routeState.fullPath = '/policy-center?nodeId=node-1&policyRef=acl-1&kind=acl&commandId=cmd-1'
+  })
+
+  it('syncs route filters and auto-focuses the matching policy drawer', async () => {
+    const wrapper = mountWithStubs(Policies)
+    await flushPromises()
+
+    expect(wrapper.vm.filters.nodeId).toBe('node-1')
+    expect(wrapper.vm.filters.keyword).toBe('acl-1')
+    expect(wrapper.vm.filters.kind).toBe('acl')
+    expect(wrapper.vm.selectedPolicy.policyId).toBe('policy-1')
+    expect(wrapper.vm.detailVisible).toBe(true)
+    expect(wrapper.vm.policyRowClassName({ row: { policyId: 'policy-1' } })).toBe('context-match-row')
+    expect(wrapper.vm.isDeliveryMatch({ command_id: 'cmd-1', policy_ref: 'acl-1' })).toBe(true)
+  })
+
+  it('routes back to node detail while preserving policy delivery context', async () => {
+    const wrapper = mountWithStubs(Policies)
+    await flushPromises()
+
+    wrapper.vm.openNodeDetail({
+      nodeId: 'node-1',
+      policyRef: 'acl-1',
+      kind: 'acl'
+    })
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-1' },
+      query: {
+        commandId: 'cmd-1',
+        focus: 'policies',
+        policyRef: 'acl-1',
+        policyDomain: 'acl'
       }
     })
   })
