@@ -1513,6 +1513,7 @@ impl UnifiedAgent {
 
         self.sync_peers(&sync_result.peers).await?;
         self.sync_advertised_routes(&sync_result.peers).await?;
+        *self.last_sync_peers.lock().await = sync_result.peers.clone();
 
         let mut apply_errors = Vec::new();
         if let Err(e) = self.sync_acl_rules(&sync_result.acl_rules).await {
@@ -1541,9 +1542,7 @@ impl UnifiedAgent {
 
         let desired_state_version = sync_result.desired_state_version.clone();
         let assigned_ip = sync_result.assigned_ip.clone();
-        let peers = sync_result.peers;
 
-        *self.last_sync_peers.lock().await = peers;
         if !assigned_ip.trim().is_empty() {
             self.config.assigned_ip = Some(assigned_ip.clone());
             self.config.address = Some(format!("{}/32", assigned_ip));
