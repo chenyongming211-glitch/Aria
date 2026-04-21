@@ -48,6 +48,12 @@ vi.mock('/src/composables/useMonitorApi', () => ({
   }
 }))
 
+vi.mock('vue-router', () => ({
+  useRouter: () => ({
+    push: vi.fn()
+  })
+}))
+
 vi.mock('@/composables/useTenantApi', () => ({
   useTenantApi: {
     getTenantNodes: vi.fn(async () => [])

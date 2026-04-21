@@ -9,6 +9,29 @@
     </div>
 
     <template v-if="node">
+      <el-card v-if="hasContext" class="context-card light-card" shadow="never">
+        <div class="context-header">
+          <div>
+            <div class="header-title">Monitoring Context</div>
+            <div class="context-description">{{ contextDescription }}</div>
+          </div>
+          <div class="context-actions">
+            <el-button v-if="contextQuery.policyRef" size="small" @click="openPolicyCenter">
+              Open Policy
+            </el-button>
+            <el-button v-if="contextQuery.focus === 'commands'" size="small" @click="scrollToFocusSection">
+              Focus Commands
+            </el-button>
+            <el-button v-if="contextQuery.focus === 'policies'" size="small" @click="scrollToFocusSection">
+              Focus Deliveries
+            </el-button>
+            <el-button v-if="contextQuery.focus === 'alerts'" size="small" @click="scrollToFocusSection">
+              Focus Alerts
+            </el-button>
+          </div>
+        </div>
+      </el-card>
+
       <!-- Node Header -->
       <el-card class="header-card light-card" shadow="never">
         <div class="node-header">
@@ -86,18 +109,23 @@
       </el-card>
 
       <!-- Recent Commands -->
-      <el-card class="table-card light-card" shadow="never">
+      <el-card ref="commandsSectionRef" class="table-card light-card" shadow="never">
         <template #header>
           <span class="header-title">Recent Commands</span>
         </template>
         <el-table
           :data="node.recent_commands || []"
+          :row-class-name="commandRowClassName"
           stripe
           style="width: 100%"
           max-height="360"
           empty-text="No recent commands"
         >
-          <el-table-column prop="command_type" label="Type" width="140" />
+          <el-table-column label="Type" width="140">
+            <template #default="{ row }">
+              {{ row.command || row.command_type || '—' }}
+            </template>
+          </el-table-column>
           <el-table-column prop="status" label="Status" width="120">
             <template #default="{ row }">
               <el-tag :type="cmdStatusType(row.status)" size="small">{{ row.status }}</el-tag>
@@ -111,7 +139,7 @@
           </el-table-column>
           <el-table-column prop="error_message" label="Error" min-width="200">
             <template #default="{ row }">
-              <span v-if="row.error_message" class="error-text">{{ row.error_message }}</span>
+              <span v-if="row.error_message || row.message" class="error-text">{{ row.error_message || row.message }}</span>
               <span v-else class="muted-text">—</span>
             </template>
           </el-table-column>
@@ -119,12 +147,13 @@
       </el-card>
 
       <!-- Recent Policy Deliveries -->
-      <el-card class="table-card light-card" shadow="never">
+      <el-card ref="policiesSectionRef" class="table-card light-card" shadow="never">
         <template #header>
           <span class="header-title">Recent Policy Deliveries</span>
         </template>
         <el-table
           :data="node.recent_policy_deliveries || []"
+          :row-class-name="policyRowClassName"
           stripe
           style="width: 100%"
           max-height="360"
@@ -149,12 +178,13 @@
         </el-table>
       </el-card>
 
-      <el-card class="table-card light-card" shadow="never">
+      <el-card ref="alertsSectionRef" class="table-card light-card" shadow="never">
         <template #header>
           <span class="header-title">Active Alerts</span>
         </template>
         <el-table
           :data="node.active_alerts || []"
+          :row-class-name="alertRowClassName"
           stripe
           style="width: 100%"
           max-height="320"
@@ -181,7 +211,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { useMonitorApi } from '@/composables/useMonitorApi'
@@ -189,9 +219,38 @@ import { useMonitorApi } from '@/composables/useMonitorApi'
 const route = useRoute()
 const router = useRouter()
 
-const nodeId = route.params.nodeId
 const loading = ref(false)
 const node = ref(null)
+const commandsSectionRef = ref(null)
+const policiesSectionRef = ref(null)
+const alertsSectionRef = ref(null)
+
+const nodeId = computed(() => route.params.nodeId)
+const contextQuery = computed(() => ({
+  focus: typeof route.query.focus === 'string' ? route.query.focus : '',
+  commandId: typeof route.query.commandId === 'string' ? route.query.commandId : '',
+  policyRef: typeof route.query.policyRef === 'string' ? route.query.policyRef : '',
+  policyDomain: typeof route.query.policyDomain === 'string' ? route.query.policyDomain : '',
+  alertId: typeof route.query.alertId === 'string' ? route.query.alertId : '',
+  eventType: typeof route.query.eventType === 'string' ? route.query.eventType : ''
+}))
+const hasContext = computed(() => Object.values(contextQuery.value).some(Boolean))
+const contextDescription = computed(() => {
+  const parts = []
+  if (contextQuery.value.eventType) {
+    parts.push(`Event: ${contextQuery.value.eventType}`)
+  }
+  if (contextQuery.value.policyRef) {
+    parts.push(`Policy: ${contextQuery.value.policyRef}`)
+  }
+  if (contextQuery.value.commandId) {
+    parts.push(`Command: ${contextQuery.value.commandId}`)
+  }
+  if (contextQuery.value.alertId) {
+    parts.push(`Alert: ${contextQuery.value.alertId}`)
+  }
+  return parts.join(' | ')
+})
 
 const isDiverged = computed(() => {
   if (!node.value) return false
@@ -213,12 +272,28 @@ const convergenceBadgeType = computed(() => {
 const loadNode = async () => {
   try {
     loading.value = true
-    node.value = await useMonitorApi.getNodeDetail(nodeId)
+    node.value = await useMonitorApi.getNodeDetail(nodeId.value)
   } catch (e) {
     console.error('Failed to load node detail:', e)
     node.value = null
   } finally {
     loading.value = false
+  }
+}
+
+const scrollToFocusSection = async () => {
+  await nextTick()
+  const focus = contextQuery.value.focus
+  const targetRef = focus === 'commands'
+    ? commandsSectionRef.value
+    : focus === 'policies'
+      ? policiesSectionRef.value
+      : focus === 'alerts'
+        ? alertsSectionRef.value
+        : null
+  const target = targetRef?.$el || targetRef
+  if (typeof target?.scrollIntoView === 'function') {
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 }
 
@@ -248,8 +323,50 @@ const alertSeverityType = (severity) => {
   }
 }
 
+const commandRowClassName = ({ row }) => {
+  if (!contextQuery.value.commandId) return ''
+  return String(row.id) === contextQuery.value.commandId ? 'context-match-row' : ''
+}
+
+const policyRowClassName = ({ row }) => {
+  if (contextQuery.value.commandId && row.command_id === contextQuery.value.commandId) {
+    return 'context-match-row'
+  }
+  if (contextQuery.value.policyRef && row.policy_ref === contextQuery.value.policyRef) {
+    return 'context-match-row'
+  }
+  return ''
+}
+
+const alertRowClassName = ({ row }) => {
+  if (!contextQuery.value.alertId) return ''
+  return row.id === contextQuery.value.alertId ? 'context-match-row' : ''
+}
+
+const openPolicyCenter = () => {
+  router.push({
+    name: 'Policies',
+    query: {
+      nodeId: nodeId.value,
+      ...(contextQuery.value.policyRef ? { policyRef: contextQuery.value.policyRef } : {}),
+      ...(contextQuery.value.policyDomain ? { kind: contextQuery.value.policyDomain } : {})
+    }
+  })
+}
+
 onMounted(() => {
   loadNode()
+})
+
+watch(() => route.fullPath, async () => {
+  await loadNode()
+  await scrollToFocusSection()
+})
+
+watch(node, async (value) => {
+  if (value) {
+    await scrollToFocusSection()
+  }
 })
 </script>
 
@@ -258,6 +375,26 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.context-card .context-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.context-description {
+  margin-top: 6px;
+  color: var(--aria-text-muted, #94A3B8);
+  font-size: 13px;
+}
+
+.context-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .back-row {
@@ -294,6 +431,10 @@ onMounted(() => {
 .meta-item {
   font-size: 13px;
   color: var(--aria-text-muted, #94A3B8);
+}
+
+:deep(.context-match-row > td) {
+  background: rgba(59, 130, 246, 0.10) !important;
 }
 
 /* State Card */

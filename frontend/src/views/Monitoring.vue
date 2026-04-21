@@ -4,7 +4,15 @@
     <!-- Stats Cards -->
     <el-row :gutter="16" class="stats-row">
       <el-col :xs="12" :sm="8" :lg="4" v-for="card in statCards" :key="card.key">
-        <div class="stat-card light-card" :class="`stat-card-${card.color}`">
+        <div
+          class="stat-card light-card"
+          :class="[`stat-card-${card.color}`, { 'is-clickable': isStatCardClickable(card.key) }]"
+          :role="isStatCardClickable(card.key) ? 'button' : undefined"
+          :tabindex="isStatCardClickable(card.key) ? 0 : undefined"
+          @click="handleStatCardClick(card.key)"
+          @keydown.enter.prevent="handleStatCardClick(card.key)"
+          @keydown.space.prevent="handleStatCardClick(card.key)"
+        >
           <div class="stat-icon-wrap">
             <el-icon :size="22"><component :is="card.icon" /></el-icon>
           </div>
@@ -55,8 +63,70 @@
       </div>
     </el-card>
 
+    <el-card ref="alertsSectionRef" class="alerts-card light-card" shadow="never" v-loading="alertsLoading">
+      <template #header>
+        <div class="card-header">
+          <div class="header-left">
+            <el-icon class="header-icon"><Bell /></el-icon>
+            <span class="header-title">Active Alerts</span>
+            <el-tag size="small" type="danger" v-if="alerts.length > 0">{{ alerts.length }} open</el-tag>
+          </div>
+        </div>
+      </template>
+
+      <el-empty v-if="alerts.length === 0 && !alertsLoading" description="No active alerts" />
+
+      <el-table
+        v-else
+        :data="alerts"
+        size="small"
+        style="width: 100%"
+      >
+        <el-table-column prop="severity" label="Severity" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" :type="severityTagType(row.severity)">
+              {{ row.severity || 'info' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="alert_type" label="Type" width="160" />
+        <el-table-column prop="title" label="Title" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="message" label="Message" min-width="220" show-overflow-tooltip />
+        <el-table-column label="Context" min-width="220">
+          <template #default="{ row }">
+            <div class="context-tags">
+              <el-tag v-if="row.context?.policy_ref" size="small" effect="plain">{{ row.context.policy_ref }}</el-tag>
+              <el-tag v-if="row.context?.command_id" size="small" effect="plain">{{ shortId(row.context.command_id) }}</el-tag>
+              <span v-if="!row.context?.policy_ref && !row.context?.command_id" class="muted-text">-</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="Actions" width="260">
+          <template #default="{ row }">
+            <div class="table-actions">
+              <el-button v-if="row.node_id" size="small" @click="goToNodeFromAlert(row)">
+                View Node
+              </el-button>
+              <el-button v-if="row.context?.policy_ref" size="small" @click="goToPolicyFromContext(row.node_id, row.context)">
+                View Policy
+              </el-button>
+              <el-button
+                size="small"
+                type="warning"
+                plain
+                :loading="resolvingId === row.id"
+                @click="handleResolve(row.id)"
+              >
+                Resolve
+              </el-button>
+            </div>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
     <!-- Event Feed Timeline -->
-    <el-card class="events-card light-card" shadow="never" v-loading="eventsLoading">
+    <el-card ref="eventsSectionRef" class="events-card light-card" shadow="never" v-loading="eventsLoading">
       <template #header>
         <div class="card-header">
           <div class="header-left">
@@ -99,14 +169,46 @@
               <span class="event-time">{{ formatTime(event.created_at) }}</span>
             </div>
             <div class="event-title">{{ event.title }}</div>
+            <div v-if="event.detail && Object.keys(event.detail).length > 0" class="event-context-row">
+              <el-tag v-if="event.detail.policy_ref" size="small" effect="plain">
+                Policy: {{ event.detail.policy_ref }}
+              </el-tag>
+              <el-tag v-if="event.detail.command_id" size="small" effect="plain">
+                Command: {{ shortId(event.detail.command_id) }}
+              </el-tag>
+              <el-tag v-if="event.detail.policy_domain" size="small" effect="plain">
+                Domain: {{ event.detail.policy_domain }}
+              </el-tag>
+            </div>
             <div class="event-actions-row">
               <span
                 v-if="event.node_id"
                 class="event-node-link"
-                @click="goToNodeDetail(event.node_id)"
+                @click="goToNodeFromEvent(event)"
               >
                 Node: {{ event.node_id.substring(0, 8) }}…
               </span>
+              <el-button
+                v-if="event.node_id"
+                size="small"
+                @click="goToNodeFromEvent(event)"
+              >
+                View Node
+              </el-button>
+              <el-button
+                v-if="event.detail?.policy_ref"
+                size="small"
+                @click="goToPolicyFromContext(event.node_id, event.detail)"
+              >
+                View Policy
+              </el-button>
+              <el-button
+                v-if="event.detail?.command_id && event.node_id"
+                size="small"
+                @click="goToNodeFromEvent(event, 'commands')"
+              >
+                View Command
+              </el-button>
               <el-button
                 v-if="event.source === 'alert' && event.severity"
                 size="small"
@@ -137,7 +239,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Refresh,
@@ -158,8 +260,11 @@ const router = useRouter()
 // --- State ---
 const statsLoading = ref(false)
 const eventsLoading = ref(false)
+const alertsLoading = ref(false)
 const refreshing = ref(false)
 const resolvingId = ref(null)
+const alertsSectionRef = ref(null)
+const eventsSectionRef = ref(null)
 
 const stats = ref({
   total_nodes: 0,
@@ -174,6 +279,7 @@ const stats = ref({
 })
 
 const events = ref([])
+const alerts = ref([])
 const eventsTotal = ref(0)
 const eventsPage = ref(1)
 const eventsLimit = 50
@@ -234,6 +340,8 @@ const statCards = computed(() => [
   }
 ])
 
+const isStatCardClickable = (key) => ['nodes', 'failed', 'alerts'].includes(key)
+
 // --- Methods ---
 const loadStats = async () => {
   try {
@@ -273,10 +381,31 @@ const loadEvents = async () => {
   }
 }
 
+const loadAlerts = async () => {
+  try {
+    alertsLoading.value = true
+    const data = await useMonitorApi.getAlerts({ status: 'active', limit: 10 })
+    alerts.value = data?.items || []
+  } catch (e) {
+    console.error('Failed to load alerts:', e)
+    alerts.value = []
+  } finally {
+    alertsLoading.value = false
+  }
+}
+
 const refreshAll = async () => {
   refreshing.value = true
-  await Promise.all([loadStats(), loadEvents()])
+  await Promise.all([loadStats(), loadEvents(), loadAlerts()])
   refreshing.value = false
+}
+
+const scrollToSection = async (sectionRef) => {
+  await nextTick()
+  const target = sectionRef?.value?.$el || sectionRef?.value
+  if (typeof target?.scrollIntoView === 'function') {
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 }
 
 const onPageChange = () => {
@@ -288,7 +417,7 @@ const handleResolve = async (alertId) => {
     resolvingId.value = alertId
     await useMonitorApi.resolveAlert(alertId)
     ElMessage.success('Alert resolved')
-    await Promise.all([loadStats(), loadEvents()])
+    await Promise.all([loadStats(), loadEvents(), loadAlerts()])
   } catch (e) {
     ElMessage.error('Failed to resolve alert')
   } finally {
@@ -298,6 +427,102 @@ const handleResolve = async (alertId) => {
 
 const goToNodeDetail = (nodeId) => {
   router.push({ name: 'NodeMonitorDetail', params: { nodeId } })
+}
+
+const handleStatCardClick = async (key) => {
+  if (!isStatCardClickable(key)) {
+    return
+  }
+
+  switch (key) {
+    case 'nodes':
+      router.push({ name: 'Nodes' })
+      break
+    case 'failed':
+      filterEventType.value = 'command_failed'
+      eventsPage.value = 1
+      await loadEvents()
+      await scrollToSection(eventsSectionRef)
+      break
+    case 'alerts':
+      await loadAlerts()
+      await scrollToSection(alertsSectionRef)
+      break
+    default:
+      break
+  }
+}
+
+const buildNodeQuery = (context = {}, focus = '') => {
+  const query = {}
+  if (focus) {
+    query.focus = focus
+  }
+  if (context.alertId) {
+    query.alertId = context.alertId
+  }
+  if (context.eventId) {
+    query.eventId = context.eventId
+  }
+  if (context.eventType) {
+    query.eventType = context.eventType
+  }
+  if (context.command_id) {
+    query.commandId = context.command_id
+  }
+  if (context.policy_ref) {
+    query.policyRef = context.policy_ref
+  }
+  if (context.policy_domain) {
+    query.policyDomain = context.policy_domain
+  }
+  return query
+}
+
+const goToNodeFromAlert = (alert) => {
+  if (!alert?.node_id) return
+  router.push({
+    name: 'NodeMonitorDetail',
+    params: { nodeId: alert.node_id },
+    query: buildNodeQuery({
+      alertId: alert.id,
+      eventType: alert.alert_type,
+      command_id: alert.context?.command_id,
+      policy_ref: alert.context?.policy_ref,
+      policy_domain: alert.context?.policy_domain
+    }, alert.context?.command_id ? 'commands' : (alert.context?.policy_ref ? 'policies' : 'alerts'))
+  })
+}
+
+const goToNodeFromEvent = (event, explicitFocus = '') => {
+  if (!event?.node_id) return
+  router.push({
+    name: 'NodeMonitorDetail',
+    params: { nodeId: event.node_id },
+    query: buildNodeQuery({
+      eventId: event.id,
+      eventType: event.event_type,
+      command_id: event.detail?.command_id,
+      policy_ref: event.detail?.policy_ref,
+      policy_domain: event.detail?.policy_domain
+    }, explicitFocus || (event.detail?.command_id ? 'commands' : (event.detail?.policy_ref ? 'policies' : 'alerts')))
+  })
+}
+
+const goToPolicyFromContext = (nodeId, context = {}) => {
+  router.push({
+    name: 'Policies',
+    query: {
+      ...(nodeId ? { nodeId } : {}),
+      ...(context.policy_ref ? { policyRef: context.policy_ref } : {}),
+      ...(context.policy_domain ? { kind: context.policy_domain } : {})
+    }
+  })
+}
+
+const shortId = (value) => {
+  if (!value) return ''
+  return value.length > 8 ? `${value.slice(0, 8)}...` : value
 }
 
 // --- Formatters ---
@@ -343,6 +568,7 @@ const severityDotClass = (event) => {
 onMounted(() => {
   loadStats()
   loadEvents()
+  loadAlerts()
 })
 </script>
 
@@ -369,6 +595,15 @@ onMounted(() => {
 .stat-card:hover {
   transform: translateY(-2px);
   box-shadow: var(--aria-shadow, 0 2px 8px rgba(0,0,0,0.08));
+}
+
+.stat-card.is-clickable {
+  cursor: pointer;
+}
+
+.stat-card.is-clickable:focus-visible {
+  outline: 2px solid var(--aria-primary, #3B82F6);
+  outline-offset: 2px;
 }
 
 .stat-icon-wrap {
@@ -424,6 +659,10 @@ onMounted(() => {
 /* Events Card */
 .events-card {
   min-height: 300px;
+}
+
+.alerts-card :deep(.el-card__body) {
+  padding-top: 8px;
 }
 
 .card-header {
@@ -522,10 +761,18 @@ onMounted(() => {
   line-height: 1.5;
 }
 
+.event-context-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .event-actions-row {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .event-node-link {
@@ -547,6 +794,19 @@ onMounted(() => {
 
 .empty-state {
   padding: 40px 0;
+}
+
+.table-actions,
+.context-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.muted-text {
+  color: var(--aria-text-muted, #94A3B8);
+  font-size: 12px;
 }
 
 /* Responsive */

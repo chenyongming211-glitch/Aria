@@ -429,6 +429,8 @@ const refreshData = async () => {
 
 const syncFiltersFromRoute = () => {
   filters.value.nodeId = typeof route.query.nodeId === 'string' ? route.query.nodeId : ''
+  filters.value.keyword = typeof route.query.policyRef === 'string' ? route.query.policyRef : ''
+  filters.value.kind = typeof route.query.kind === 'string' ? route.query.kind : ''
 }
 
 const goToKind = (kind) => {
@@ -465,7 +467,7 @@ onMounted(() => {
   fetchPolicies()
 })
 
-watch(() => route.query.nodeId, () => {
+watch(() => route.fullPath, () => {
   syncFiltersFromRoute()
 })
 </script>
