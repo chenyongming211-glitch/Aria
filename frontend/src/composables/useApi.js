@@ -155,8 +155,17 @@ api.interceptors.request.use(
     // Add tenant header
     const currentTenant = localStorage.getItem('aria-current-tenant')
     if (currentTenant) {
-      const tenant = JSON.parse(currentTenant)
-      config.headers['X-Tenant-ID'] = tenant.id
+      try {
+        const tenant = JSON.parse(currentTenant)
+        if (tenant?.id) {
+          config.headers['X-Tenant-ID'] = tenant.id
+        } else {
+          localStorage.removeItem('aria-current-tenant')
+        }
+      } catch (error) {
+        console.warn('Invalid aria-current-tenant in localStorage, clearing it:', error)
+        localStorage.removeItem('aria-current-tenant')
+      }
     }
 
     // 更新最后活动时间
