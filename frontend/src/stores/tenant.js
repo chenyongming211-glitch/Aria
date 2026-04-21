@@ -22,14 +22,25 @@ export default defineStore('tenant', () => {
         try {
           const parsed = JSON.parse(saved)
           const matched = tenants.value.find((tenant) => tenant.id === parsed?.id)
-          currentTenant.value = matched || (tenants.value[0] || null)
+          const nextTenant = matched || (tenants.value[0] || null)
+          currentTenant.value = nextTenant
+          if (nextTenant) {
+            localStorage.setItem('aria-current-tenant', JSON.stringify(nextTenant))
+          } else {
+            localStorage.removeItem('aria-current-tenant')
+          }
         } catch (error) {
           console.warn('Failed to parse aria-current-tenant:', error)
           currentTenant.value = tenants.value[0] || null
-          localStorage.removeItem('aria-current-tenant')
+          if (currentTenant.value) {
+            localStorage.setItem('aria-current-tenant', JSON.stringify(currentTenant.value))
+          } else {
+            localStorage.removeItem('aria-current-tenant')
+          }
         }
       } else if (tenants.value.length > 0) {
         currentTenant.value = tenants.value[0]
+        localStorage.setItem('aria-current-tenant', JSON.stringify(currentTenant.value))
       }
     } catch (error) {
       console.error('Failed to load tenants:', error)
