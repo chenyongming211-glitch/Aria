@@ -19,15 +19,26 @@ export default defineStore('tenant', () => {
       // Restore from localStorage
       const saved = localStorage.getItem('aria-current-tenant')
       if (saved) {
-        currentTenant.value = JSON.parse(saved)
+        try {
+          const parsed = JSON.parse(saved)
+          const matched = tenants.value.find((tenant) => tenant.id === parsed?.id)
+          currentTenant.value = matched || (tenants.value[0] || null)
+        } catch (error) {
+          console.warn('Failed to parse aria-current-tenant:', error)
+          currentTenant.value = tenants.value[0] || null
+          localStorage.removeItem('aria-current-tenant')
+        }
       } else if (tenants.value.length > 0) {
         currentTenant.value = tenants.value[0]
       }
     } catch (error) {
       console.error('Failed to load tenants:', error)
-      tenants.value = []
-      currentTenant.value = null
-      localStorage.removeItem('aria-current-tenant')
+      const status = error?.response?.status
+      if (status === 401) {
+        tenants.value = []
+        currentTenant.value = null
+        localStorage.removeItem('aria-current-tenant')
+      }
     } finally {
       loading.value = false
     }
