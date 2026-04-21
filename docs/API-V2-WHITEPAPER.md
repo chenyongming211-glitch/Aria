@@ -1,14 +1,20 @@
 # Aria API v2 完整接口白皮书
 
-> **v0.1.0 实施进度摘要**
-> - [x] **Auth Domain**: JWT 登录与刷新逻辑已就绪。
-> - [x] **Topology Domain**: 节点管理 (Nodes) 与 Mesh 路由发现 (Learned Routes) 已完成。
-> - [x] **Monitoring Domain**: 状态收敛 (Convergence) 计算与实时流量 (bps) 查询已闭环。
-> - [x] **AIOps Domain**: 专家诊断工具已集成。
-> - [ ] **Security/QoS Domain**: 接口定义已完成，正在推进 eBPF Map 的动态下发对接。
+> **文档状态说明（2026-04-21）**
+> - 北向业务 API 已完成 `v2-only` 收敛。
+> - 南向 Agent 入口当前是固定 HTTP 路径 + gRPC `ControllerService` 的双层模型。
+> - 本文档既记录当前已经落地的接口基线，也保留目标态契约；并非每个端点都已达到同样的产品化成熟度。
+>
+> **当前实现进度摘要**
+> - [x] **Auth Domain**: JWT 登录、刷新与会话管理已就绪。
+> - [x] **Topology Domain**: 节点管理、路由管理与 learned routes 展示已落地。
+> - [x] **Security/QoS Domain**: Northbound CRUD、desired state、policy delivery 与状态回显已接通。
+> - [x] **Monitoring Domain**: 状态收敛、节点详情、事件/告警、流量查询已接入。
+> - [x] **AIOps Domain**: `chat/confirm` 最小闭环已接通。
+> - [ ] **Platform Settings Domain**: `settings/backups` 仍有 placeholder，尚未达到完整产品化。
 
 本文档用于定义 Aria `API v2` 的统一接口边界。
-它不是对当前 `v1` 与旧接口混用状态的描述，而是作为后续重构与实现的目标规范。
+它以当前 `v2-only` 基线为出发点，同时保留目标态约束；阅读时应区分“已经落地的接口契约”和“仍在继续产品化的能力”。
 
 ## 0. 多租户强隔离原则
 
@@ -113,6 +119,7 @@ SD-WAN 核心物理与逻辑网络资产管理。
 |---|---|---|
 | `GET` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/security/acls` | 租户隔离 |
 | `POST` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/security/acls` | 租户管理员 |
+| `PUT` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/security/acls/{rule_id}` | 租户管理员 |
 | `DELETE` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/security/acls/{rule_id}` | 租户管理员 |
 
 ### 5.2 黑名单管理（匹配 eBPF `BLOCK_*_MAP`）
@@ -135,6 +142,7 @@ SD-WAN 核心物理与逻辑网络资产管理。
 | 方法 | URL | 匹配 eBPF MAP |
 |---|---|---|
 | `GET/POST` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/service` | `SERVICE_QOS_MAP` |
+| `PUT` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/service/{rule_id}` | `SERVICE_QOS_MAP` |
 | `DELETE` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/service/{rule_id}` | - |
 
 ### 6.2 节点对限速（中优先级，源 CIDR + 目标 CIDR）
@@ -142,6 +150,7 @@ SD-WAN 核心物理与逻辑网络资产管理。
 | 方法 | URL | 匹配 eBPF MAP |
 |---|---|---|
 | `GET/POST` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/peers` | `PAIR_ID_QOS_MAP` |
+| `PUT` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/peers/{rule_id}` | `PAIR_ID_QOS_MAP` |
 | `DELETE` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/peers/{rule_id}` | - |
 
 ### 6.3 单节点限速（最低优先级，单个 CIDR）
@@ -149,6 +158,7 @@ SD-WAN 核心物理与逻辑网络资产管理。
 | 方法 | URL | 匹配 eBPF MAP |
 |---|---|---|
 | `GET/POST` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/ip` | `SRC_ID_QOS_MAP` |
+| `PUT` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/ip/{rule_id}` | `SRC_ID_QOS_MAP` |
 | `DELETE` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/ip/{rule_id}` | - |
 
 注：QoS 所有接口均需租户隔离，增删操作需 `admin` 权限。
@@ -180,14 +190,21 @@ SD-WAN 核心物理与逻辑网络资产管理。
 
 提供租户作用域的监控视图与节点远程操作入口。
 
-### 8.1 Monitoring
+### 9.1 Monitoring
 
 | 方法 | URL | 权限说明 |
 |---|---|---|
 | `GET` | `/api/v2/tenants/{tenant_id}/monitoring/stats` | 租户隔离（Admin/Member） |
+| `GET` | `/api/v2/tenants/{tenant_id}/monitoring/events` | 租户隔离（Admin/Member） |
+| `GET` | `/api/v2/tenants/{tenant_id}/monitoring/alerts` | 租户隔离（Admin/Member） |
+| `POST` | `/api/v2/tenants/{tenant_id}/monitoring/alerts/{alert_id}/resolve` | 租户管理员（命令权限） |
+| `GET` | `/api/v2/tenants/{tenant_id}/monitoring/traffic` | 租户隔离（Admin/Member） |
+| `GET` | `/api/v2/tenants/{tenant_id}/monitoring/health` | 租户隔离（Admin/Member） |
+| `GET` | `/api/v2/tenants/{tenant_id}/monitoring/topology` | 租户隔离（Admin/Member） |
 | `GET` | `/api/v2/tenants/{tenant_id}/monitoring/nodes/{node_id}` | 租户隔离（Admin/Member） |
+| `GET` | `/api/v2/tenants/{tenant_id}/monitoring/nodes/{node_id}/metrics` | 租户隔离（Admin/Member） |
 
-### 8.2 Agent Operations
+### 9.2 Agent Operations
 
 | 方法 | URL | 权限说明 |
 |---|---|---|
@@ -195,20 +212,21 @@ SD-WAN 核心物理与逻辑网络资产管理。
 | `GET` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/agent/status` | 租户隔离（Admin/Member） |
 | `POST` | `/api/v2/tenants/{tenant_id}/agents/command` | 租户管理员 |
 
-## 10. API 总览统计
+## 10. API 总览（按领域）
 
-| 域 (Domain) | 端点数量 | 核心职责 |
-|---|---:|---|
-| 认证域 | 4 | 登录、注销、令牌刷新、强制改密 |
-| 租户管理域 | 5 | 客户入驻、配额调整、全局运维 |
-| IAM 域 | 8 | 租户成员 CRUD、API Token 签发与吊销 |
-| 拓扑域 | 8 | Agent 节点纳管、静态/策略路由下发 |
-| 安全控制域 | 12 | eBPF 四层安全防火墙、出入向黑白名单 |
-| QoS 域 | 9 | eBPF 三层级精细化流量整形 |
-| Policy Center | 1 | 租户统一策略读模型与交付状态视图 |
-| AI 域 | 2 | 智能网络运维与 Agent 会话交互 |
-| 运维域 | 5 | 监控视图、节点状态与远程命令 |
-| 总计 | 54 | 覆盖现代 SD-WAN Controller 核心能力 |
+> 说明：下表用于展示当前 `v2` 的领域边界与职责，不以固定端点数量作为约束；具体端点以各章节清单为准。
+
+| 域 (Domain) | 核心职责 |
+|---|---|
+| 认证域 | 登录、注销、令牌刷新、强制改密 |
+| 租户管理域 | 租户生命周期与配额调整 |
+| IAM 域 | 租户成员管理、Enrollment Token、角色权限 |
+| 拓扑域 | 节点纳管、路由管理与连通性 |
+| 安全控制域 | ACL 与黑名单策略管理 |
+| QoS 域 | 分层流量整形与限速策略 |
+| Policy Center | 租户统一策略读模型与交付状态视图 |
+| AI 域 | 智能运维对话与确认执行 |
+| 运维域 | 监控视图、告警处理、节点状态与远程命令 |
 
 ## 11. 统一响应格式
 
@@ -234,12 +252,10 @@ SD-WAN 核心物理与逻辑网络资产管理。
 
 ## 12. 实施说明
 
-当前仓库中已落地的是 `v1` 与部分旧接口混用状态。`v2` 白皮书作为目标规范，后续将采用以下方式逐步推进：
+当前仓库中的北向业务 API 已经收敛到 `/api/v2/...`，因此这里的后续工作重点不再是“迁移到 v2”，而是“把不同成熟度的 v2 端点继续做实”：
 
-- 先搭建 `/api/v2` 命名空间与最小可用骨架
-- 优先实现 `auth`、`tenants`、`users`、`tokens`、`nodes`
-- 逐步补齐 `Policy Center` 这种统一读模型，让前端按工作流组织而不是按旧页面碎片化取数
-- 复用现有 `v1` 能力时保持统一响应格式
-- 已被 `v2` 替代的 `v1` 北向管理接口应逐步下线并删除，不再作为长期兼容层保留
-- 前端逐步从 `v1`/旧接口迁移到 `v2`
-- 所有节点相关实现都必须先满足“单节点单租户强归属”约束
+- 保持北向新增接口一律进入 `/api/v2/...`
+- 继续补齐 `Policy Center`、`Monitoring` 与 `Agent Operations` 之间的工作流闭环
+- 保持统一响应格式，不引入新的历史兼容路径
+- 将仍为 placeholder 的 `settings/backups` 做真或临时下线
+- 所有节点相关实现继续以“单节点单租户强归属”为前提
