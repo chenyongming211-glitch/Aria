@@ -348,7 +348,19 @@ const handleLogin = async () => {
 
       const tenants = await userStore.loadTenants()
       if (tenants && tenants.length > 0) {
-        localStorage.setItem('aria-current-tenant', JSON.stringify(tenants[0]))
+        let loginTenantId = ''
+        try {
+          const currentUser = JSON.parse(localStorage.getItem('aria_user') || '{}')
+          loginTenantId = currentUser?.tenant_id || ''
+        } catch (error) {
+          console.warn('Failed to parse current user from localStorage:', error)
+        }
+
+        const selectedTenant = loginTenantId
+          ? tenants.find((tenant) => tenant.id === loginTenantId)
+          : null
+
+        localStorage.setItem('aria-current-tenant', JSON.stringify(selectedTenant || tenants[0]))
       } else {
         localStorage.removeItem('aria-current-tenant')
       }
