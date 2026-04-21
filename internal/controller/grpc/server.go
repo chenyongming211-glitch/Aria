@@ -174,7 +174,10 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 	}
 
 	// 刷新运行期凭据
-	runtimeToken, runtimeTokenExpiresAt, _ := auth.GenerateRuntimeToken(node.ID.String(), node.TenantID.String())
+	runtimeToken, runtimeTokenExpiresAt, err := generateRuntimeTokenForNode(node)
+	if err != nil {
+		return nil, fmt.Errorf("failed to refresh runtime token: %w", err)
+	}
 
 	return &agentpb.SyncResponse{
 		Peers:                 peers,
@@ -186,7 +189,7 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 		BlacklistRules:        blacklistRules,
 		DesiredStateVersion:   desiredVersion,
 		RuntimeToken:          runtimeToken,
-		RuntimeTokenExpiresAt: runtimeTokenExpiresAt.Unix(),
+		RuntimeTokenExpiresAt: runtimeTokenExpiresAt,
 	}, nil
 }
 
@@ -307,6 +310,17 @@ func parseUUIDOrZero(s string) uuid.UUID {
 		return uuid.Nil
 	}
 	return id
+}
+
+func generateRuntimeTokenForNode(node *controllerstorage.Node) (string, int64, error) {
+	if node == nil {
+		return "", 0, fmt.Errorf("node is required")
+	}
+	token, expiresAt, err := auth.GenerateRuntimeToken(node.ID.String(), node.TenantID.String())
+	if err != nil {
+		return "", 0, err
+	}
+	return token, expiresAt.Unix(), nil
 }
 
 func (s *ControllerServer) reportRuntimeSyncState(node *controllerstorage.Node, req *agentpb.SyncRequest) error {
