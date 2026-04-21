@@ -34,8 +34,6 @@
       <el-select v-model="filters.action" placeholder="动作" clearable @change="loadRules">
         <el-option label="允许" value="allow" />
         <el-option label="拒绝" value="deny" />
-        <el-option label="通过" value="pass" />
-        <el-option label="丢弃" value="drop" />
       </el-select>
       
       <el-select v-model="filters.enabled" placeholder="状态" clearable @change="loadRules">
@@ -53,11 +51,11 @@
       <el-table-column prop="node_name" label="节点" width="160" />
       <el-table-column prop="priority" label="优先级" width="80" sortable />
       <el-table-column prop="name" label="名称" width="150" />
-      <el-table-column prop="src_net" label="源网络" width="150" />
-      <el-table-column prop="dst_net" label="目标网络" width="150" />
-      <el-table-column label="端口范围" width="120">
+      <el-table-column prop="src_cidr" label="源网络" width="150" />
+      <el-table-column prop="dst_cidr" label="目标网络" width="150" />
+      <el-table-column label="目标端口" width="100">
         <template #default="{ row }">
-          {{ row.min_port || 0 }} - {{ row.max_port || 65535 }}
+          {{ row.dst_port || 0 }}
         </template>
       </el-table-column>
       <el-table-column prop="protocol" label="协议" width="80">
@@ -139,12 +137,12 @@
           <el-input v-model="form.name" placeholder="请输入规则名称" />
         </el-form-item>
         
-        <el-form-item label="源网络" prop="src_net">
-          <el-input v-model="form.src_net" placeholder="例如: 192.168.1.0/24" />
+        <el-form-item label="源网络" prop="src_cidr">
+          <el-input v-model="form.src_cidr" placeholder="例如: 192.168.1.0/24" />
         </el-form-item>
-        
-        <el-form-item label="目标网络" prop="dst_net">
-          <el-input v-model="form.dst_net" placeholder="例如: 10.0.0.0/24" />
+
+        <el-form-item label="目标网络" prop="dst_cidr">
+          <el-input v-model="form.dst_cidr" placeholder="例如: 10.0.0.0/24" />
         </el-form-item>
         
         <el-form-item label="协议" prop="protocol">
@@ -157,13 +155,8 @@
         
         <el-row :gutter="20">
           <el-col :span="12">
-            <el-form-item label="最小端口">
-              <el-input-number v-model="form.min_port" :min="0" :max="65535" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="最大端口">
-              <el-input-number v-model="form.max_port" :min="0" :max="65535" style="width: 100%" />
+            <el-form-item label="目标端口" prop="dst_port">
+              <el-input-number v-model="form.dst_port" :min="0" :max="65535" style="width: 100%" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -172,8 +165,6 @@
           <el-select v-model="form.action">
             <el-option label="允许 (allow)" value="allow" />
             <el-option label="拒绝 (deny)" value="deny" />
-            <el-option label="通过 (pass)" value="pass" />
-            <el-option label="丢弃 (drop)" value="drop" />
           </el-select>
         </el-form-item>
         
@@ -241,11 +232,10 @@ const form = reactive({
   node_name: '',
   id: null,
   name: '',
-  src_net: '',
-  dst_net: '',
+  src_cidr: '',
+  dst_cidr: '',
   protocol: 6,
-  min_port: null,
-  max_port: null,
+  dst_port: 0,
   action: 'allow',
   enabled: true,
   priority: 100,
@@ -260,13 +250,16 @@ const formRules = {
     { required: true, message: '请输入规则名称', trigger: 'blur' },
     { min: 1, max: 50, message: '长度在 1 到 50 个字符', trigger: 'blur' }
   ],
-  src_net: [
+  src_cidr: [
     { required: true, message: '请输入源网络', trigger: 'blur' },
     { pattern: /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/, message: '请输入有效的 CIDR 格式', trigger: 'blur' }
   ],
-  dst_net: [
+  dst_cidr: [
     { required: true, message: '请输入目标网络', trigger: 'blur' },
     { pattern: /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/, message: '请输入有效的 CIDR 格式', trigger: 'blur' }
+  ],
+  dst_port: [
+    { required: true, message: '请输入目标端口', trigger: 'blur' }
   ],
   protocol: [
     { required: true, message: '请选择协议', trigger: 'change' }
@@ -335,7 +328,13 @@ const handleCreate = () => {
 }
 
 const handleEdit = (row) => {
-  Object.assign(form, row, { node_id: row.node_id })
+  Object.assign(form, {
+    ...row,
+    node_id: row.node_id,
+    src_cidr: row.src_cidr || row.src_net || '',
+    dst_cidr: row.dst_cidr || row.dst_net || '',
+    dst_port: row.dst_port ?? row.max_port ?? 0
+  })
   dialogVisible.value = true
 }
 
@@ -376,11 +375,9 @@ const handleSubmit = async () => {
     
     const data = { ...form }
     
-    if (data.min_port !== null && data.max_port !== null) {
-      if (data.min_port > data.max_port) {
-        ElMessage.error('最小端口不能大于最大端口')
-        return
-      }
+    if (data.dst_port < 0 || data.dst_port > 65535) {
+      ElMessage.error('目标端口必须在 0 到 65535 之间')
+      return
     }
     
     if (form.id) {
@@ -406,8 +403,8 @@ const resetForm = () => {
   Object.assign(form, {
     node_id: tenantNodes.value[0]?.id || '',
     node_name: '',
-    id: null, name: '', src_net: '', dst_net: '',
-    protocol: 6, min_port: null, max_port: null,
+    id: null, name: '', src_cidr: '', dst_cidr: '',
+    protocol: 6, dst_port: 0,
     action: 'allow', enabled: true, priority: 100, description: ''
   })
   if (formRef.value) formRef.value.resetFields()
@@ -419,12 +416,12 @@ const getProtocolName = (protocol) => {
 }
 
 const getActionName = (action) => {
-  const map = { allow: '允许', deny: '拒绝', pass: '通过', drop: '丢弃' }
+  const map = { allow: '允许', deny: '拒绝' }
   return map[action] || action
 }
 
 const getActionType = (action) => {
-  const map = { allow: 'success', deny: 'danger', pass: 'info', drop: 'warning' }
+  const map = { allow: 'success', deny: 'danger' }
   return map[action] || ''
 }
 

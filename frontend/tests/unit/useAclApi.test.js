@@ -29,8 +29,8 @@ describe('useAclApi', () => {
   describe('getACLRules', () => {
     it('应该返回 ACL 规则列表', async () => {
       const mockRules = [
-        { id: 1, name: 'allow-web', action: 'allow', node_id: 'node-1' },
-        { id: 2, name: 'deny-ssh', action: 'deny', node_id: 'node-1' }
+        { id: 1, name: 'allow-web', action: 'allow', src_cidr: '10.0.0.0/24', dst_cidr: '0.0.0.0/0', dst_port: 443 },
+        { id: 2, name: 'deny-ssh', action: 'deny', src_cidr: '10.0.1.0/24', dst_cidr: '0.0.0.0/0', dst_port: 22 }
       ]
       
       api.get.mockResolvedValue({
@@ -41,8 +41,8 @@ describe('useAclApi', () => {
       
       expect(api.get).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/security/acls')
       expect(rules).toHaveLength(2)
-      expect(rules[0]).toMatchObject(mockRules[0])
-      expect(rules[1]).toMatchObject(mockRules[1])
+      expect(rules[0]).toMatchObject({ ...mockRules[0], node_id: 'node-1', src_net: '10.0.0.0/24', dst_net: '0.0.0.0/0', min_port: 443, max_port: 443 })
+      expect(rules[1]).toMatchObject({ ...mockRules[1], node_id: 'node-1', src_net: '10.0.1.0/24', dst_net: '0.0.0.0/0', min_port: 22, max_port: 22 })
     })
 
     it('应该支持过滤参数', async () => {
@@ -69,8 +69,9 @@ describe('useAclApi', () => {
       const newRule = {
         node_id: 'node-1',
         name: 'test-rule',
-        src_net: '192.168.1.0/24',
-        dst_net: '10.0.0.0/24',
+        src_cidr: '192.168.1.0/24',
+        dst_cidr: '10.0.0.0/24',
+        dst_port: 443,
         protocol: 6,
         action: 'allow',
         enabled: true,
@@ -87,11 +88,10 @@ describe('useAclApi', () => {
       
       expect(api.post).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/security/acls', {
         name: 'test-rule',
-        src_net: '192.168.1.0/24',
-        dst_net: '10.0.0.0/24',
+        src_cidr: '192.168.1.0/24',
+        dst_cidr: '10.0.0.0/24',
         protocol: 6,
-        min_port: 0,
-        max_port: 65535,
+        dst_port: 443,
         action: 'allow',
         enabled: true,
         priority: 100,
@@ -117,11 +117,10 @@ describe('useAclApi', () => {
       
       expect(api.put).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/security/acls/1', {
         name: 'updated-rule',
-        src_net: undefined,
-        dst_net: undefined,
+        src_cidr: '',
+        dst_cidr: '',
         protocol: 0,
-        min_port: 0,
-        max_port: 65535,
+        dst_port: 0,
         action: 'deny',
         enabled: true,
         priority: 100,

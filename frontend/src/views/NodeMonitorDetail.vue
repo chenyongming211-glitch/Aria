@@ -148,6 +148,31 @@
           </el-table-column>
         </el-table>
       </el-card>
+
+      <el-card class="table-card light-card" shadow="never">
+        <template #header>
+          <span class="header-title">Active Alerts</span>
+        </template>
+        <el-table
+          :data="node.active_alerts || []"
+          stripe
+          style="width: 100%"
+          max-height="320"
+          empty-text="No active alerts"
+        >
+          <el-table-column prop="severity" label="Severity" width="120">
+            <template #default="{ row }">
+              <el-tag :type="alertSeverityType(row.severity)" size="small">{{ row.severity || 'info' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="alert_type" label="Type" width="160" />
+          <el-table-column prop="title" label="Title" min-width="180" />
+          <el-table-column prop="message" label="Message" min-width="220" show-overflow-tooltip />
+          <el-table-column prop="created_at" label="Created" width="180">
+            <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+          </el-table-column>
+        </el-table>
+      </el-card>
     </template>
 
     <!-- Error state -->
@@ -208,6 +233,18 @@ const cmdStatusType = (status) => {
     case 'failed': return 'danger'
     case 'pending': case 'queued': return 'warning'
     default: return 'info'
+  }
+}
+
+const alertSeverityType = (severity) => {
+  switch (severity) {
+    case 'critical':
+    case 'error':
+      return 'danger'
+    case 'warning':
+      return 'warning'
+    default:
+      return 'info'
   }
 }
 

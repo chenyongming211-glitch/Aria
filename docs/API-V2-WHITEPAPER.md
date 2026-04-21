@@ -11,7 +11,7 @@
 > - [x] **Security/QoS Domain**: Northbound CRUD、desired state、policy delivery 与状态回显已接通。
 > - [x] **Monitoring Domain**: 状态收敛、节点详情、事件/告警、流量查询已接入。
 > - [x] **AIOps Domain**: `chat/confirm` 最小闭环已接通。
-> - [ ] **Platform Settings Domain**: `settings/backups` 仍有 placeholder，尚未达到完整产品化。
+> - [~] **Platform Settings Domain**: `settings/backups` 已完成最小可用的 create/list/download/delete；`restore/upload` 与其他系统设置项仍未开放。
 
 本文档用于定义 Aria `API v2` 的统一接口边界。
 它以当前 `v2-only` 基线为出发点，同时保留目标态约束；阅读时应区分“已经落地的接口契约”和“仍在继续产品化的能力”。
@@ -257,5 +257,5 @@ SD-WAN 核心物理与逻辑网络资产管理。
 - 保持北向新增接口一律进入 `/api/v2/...`
 - 继续补齐 `Policy Center`、`Monitoring` 与 `Agent Operations` 之间的工作流闭环
 - 保持统一响应格式，不引入新的历史兼容路径
-- 将仍为 placeholder 的 `settings/backups` 做真或临时下线
+- 继续补齐 `settings/backups` 的恢复链路；未开放的设置项保持隐藏或只读
 - 所有节点相关实现继续以“单节点单租户强归属”为前提

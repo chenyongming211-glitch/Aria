@@ -3,6 +3,23 @@ import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 
 const aclRuleNodeMap = new Map()
 
+function normalizeRuleRecord(rule, nodeId) {
+  const dstPort = Number(rule.dst_port ?? rule.max_port ?? 0)
+  return {
+    ...rule,
+    node_id: nodeId,
+    name: rule.name || '',
+    action: rule.action || 'allow',
+    src_cidr: rule.src_cidr || rule.src_net || '',
+    dst_cidr: rule.dst_cidr || rule.dst_net || '',
+    dst_port: dstPort,
+    src_net: rule.src_cidr || rule.src_net || '',
+    dst_net: rule.dst_cidr || rule.dst_net || '',
+    min_port: dstPort > 0 ? dstPort : 0,
+    max_port: dstPort > 0 ? dstPort : 65535
+  }
+}
+
 function applyFilters(rules, filters = {}) {
   return rules.filter((rule) => {
     if (filters.name && !String(rule.name || '').toLowerCase().includes(String(filters.name).toLowerCase())) {
@@ -25,13 +42,15 @@ function applyFilters(rules, filters = {}) {
 }
 
 function normalizeRulePayload(rule) {
+  const srcCIDR = rule.src_cidr || rule.src_net || ''
+  const dstCIDR = rule.dst_cidr || rule.dst_net || ''
+  const dstPort = Number(rule.dst_port ?? rule.max_port ?? 0)
   const payload = {
     name: rule.name,
-    src_net: rule.src_net,
-    dst_net: rule.dst_net,
+    src_cidr: srcCIDR,
+    dst_cidr: dstCIDR,
     protocol: Number(rule.protocol || 0),
-    min_port: Number(rule.min_port || 0),
-    max_port: Number(rule.max_port || 65535),
+    dst_port: dstPort,
     action: rule.action,
     enabled: rule.enabled !== false,
     priority: Number(rule.priority || 100),
@@ -81,8 +100,7 @@ export const useAclApi = {
       // 归一化处理，补充节点信息
       const normalizedRules = rules.map(rule => {
         const normalized = {
-          ...rule,
-          node_id: nodeId,
+          ...normalizeRuleRecord(rule, nodeId),
           ...normalizeDeliveryFields(rule)
         }
         // 缓存映射用于后续更新删除

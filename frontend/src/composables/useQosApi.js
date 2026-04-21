@@ -1,6 +1,14 @@
 import api from './useApi'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 
+function normalizeBandwidthMbps(rule) {
+  const value = Number(rule.bandwidth_mbps ?? rule.bandwidth ?? 0)
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error('bandwidth_mbps must be greater than 0')
+  }
+  return value
+}
+
 /**
  * QoS 规则管理 API (v2)
  * 分类定义:
@@ -51,7 +59,7 @@ export const useQosApi = {
         src_port: Number(rule.src_port || 0),
         dst_port: Number(rule.dst_port || 0),
         protocol: Number(rule.protocol || 0),
-        bandwidth_mbps: Number(rule.bandwidth_mbps || rule.bandwidth || 0),
+        bandwidth_mbps: normalizeBandwidthMbps(rule),
         description: rule.description || '',
         enabled: rule.enabled !== false
       }
@@ -92,7 +100,7 @@ export const useQosApi = {
         src_port: Number(rule.src_port || 0),
         dst_port: Number(rule.dst_port || 0),
         protocol: Number(rule.protocol || 0),
-        bandwidth_mbps: Number(rule.bandwidth_mbps || rule.bandwidth || 0),
+        bandwidth_mbps: normalizeBandwidthMbps(rule),
         description: rule.description || '',
         enabled: rule.enabled !== false
       }

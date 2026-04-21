@@ -177,6 +177,9 @@
               <el-icon><View /></el-icon>
               详情
             </el-button>
+            <el-button size="small" @click="openNodeDetail(row)">
+              节点详情
+            </el-button>
             <el-button size="small" type="primary" @click="goToKind(row.kind)">
               前往专页
             </el-button>
@@ -224,19 +227,25 @@
             <div v-if="item.last_error" class="delivery-error">{{ item.last_error }}</div>
           </div>
         </div>
+
+        <div class="drawer-actions">
+          <el-button @click="openNodeDetail(selectedPolicy)">打开节点监控</el-button>
+          <el-button type="primary" @click="goToKind(selectedPolicy.kind)">前往专页</el-button>
+        </div>
       </template>
     </el-drawer>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Connection, Histogram, Lock, Refresh, View } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { usePolicyApi } from '@/composables/usePolicyApi'
 
 const router = useRouter()
+const route = useRoute()
 
 const loading = ref(false)
 const policies = ref([])
@@ -418,6 +427,10 @@ const refreshData = async () => {
   await fetchPolicies()
 }
 
+const syncFiltersFromRoute = () => {
+  filters.value.nodeId = typeof route.query.nodeId === 'string' ? route.query.nodeId : ''
+}
+
 const goToKind = (kind) => {
   switch (kind) {
     case 'acl':
@@ -439,8 +452,21 @@ const showDetails = (policy) => {
   detailVisible.value = true
 }
 
+const openNodeDetail = (policy) => {
+  if (!policy?.nodeId) {
+    ElMessage.warning('该策略没有目标节点')
+    return
+  }
+  router.push({ name: 'NodeMonitorDetail', params: { nodeId: policy.nodeId } })
+}
+
 onMounted(() => {
+  syncFiltersFromRoute()
   fetchPolicies()
+})
+
+watch(() => route.query.nodeId, () => {
+  syncFiltersFromRoute()
 })
 </script>
 
@@ -560,5 +586,11 @@ onMounted(() => {
 
 .empty-history {
   color: #909399;
+}
+
+.drawer-actions {
+  margin-top: 20px;
+  display: flex;
+  gap: 12px;
 }
 </style>

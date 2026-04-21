@@ -77,6 +77,7 @@ func (r *Router) listTenantNodeACLs(w http.ResponseWriter, tenantID, nodeID uuid
 
 func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node) {
 	var body struct {
+		Name        string `json:"name"`
 		Action      string `json:"action"`
 		SrcCIDR     string `json:"src_cidr"`
 		DstCIDR     string `json:"dst_cidr"`
@@ -117,6 +118,7 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 	rule := &controllerstorage.ACLRuleRecord{
 		TenantID:    tenantID,
 		NodeID:      node.ID,
+		Name:        body.Name,
 		Action:      body.Action,
 		SrcCIDR:     src,
 		DstCIDR:     dst,
@@ -136,6 +138,7 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 	r.writePolicyMutationSuccess(w, node, "acl", "create", map[string]interface{}{
 		"id":          created.ID.String(),
 		"node_id":     node.ID.String(),
+		"name":        created.Name,
 		"action":      created.Action,
 		"src_cidr":    created.SrcCIDR,
 		"dst_cidr":    created.DstCIDR,
@@ -161,6 +164,7 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 	}
 
 	var body struct {
+		Name        string `json:"name"`
 		Action      string `json:"action"`
 		SrcCIDR     string `json:"src_cidr"`
 		DstCIDR     string `json:"dst_cidr"`
@@ -200,6 +204,7 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 	rule := &controllerstorage.ACLRuleRecord{
 		TenantID:    tenantID,
 		NodeID:      node.ID,
+		Name:        body.Name,
 		Action:      body.Action,
 		SrcCIDR:     src,
 		DstCIDR:     dst,
@@ -222,6 +227,7 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 	r.writePolicyMutationSuccess(w, node, "acl", "update", map[string]interface{}{
 		"id":          ruleID.String(),
 		"node_id":     node.ID.String(),
+		"name":        updated.Name,
 		"action":      updated.Action,
 		"src_cidr":    updated.SrcCIDR,
 		"dst_cidr":    updated.DstCIDR,
@@ -461,6 +467,10 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
 		return
 	}
+	if body.BandwidthMbps <= 0 {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "bandwidth_mbps must be greater than 0", nil)
+		return
+	}
 
 	rule := &controllerstorage.QoSRuleRecord{
 		TenantID:      tenantID,
@@ -523,6 +533,10 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
+		return
+	}
+	if body.BandwidthMbps <= 0 {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "bandwidth_mbps must be greater than 0", nil)
 		return
 	}
 

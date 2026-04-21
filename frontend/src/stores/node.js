@@ -4,6 +4,7 @@ import { ref } from 'vue'
 import api from '@/composables/useApi'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 import { useAgentProxyApi } from '@/composables/useAgentProxyApi'
+import { useMonitorApi } from '@/composables/useMonitorApi'
 
 export default defineStore('node', () => {
   const nodes = ref([])
@@ -85,8 +86,9 @@ export default defineStore('node', () => {
 
   async function loadNodeDetail(id) {
     const tenantId = requireCurrentTenantId()
-    const [detailResponse, statusResponse, commandsResponse] = await Promise.all([
+    const [detailResponse, monitorDetail, statusResponse, commandsResponse] = await Promise.all([
       api.get(API_ENDPOINTS.TENANT.NODE_DETAIL(tenantId, id)),
+      useMonitorApi.getNodeDetail(id),
       useAgentProxyApi.getAgentStatus(id),
       useAgentProxyApi.getAgentCommands(id, 10)
     ])
@@ -97,12 +99,12 @@ export default defineStore('node', () => {
 
     const node = {
       id: detail.id || id,
-      hostname: detail.hostname || 'unknown',
+      hostname: detail.hostname || monitorDetail?.hostname || 'unknown',
       ip: detail.assigned_ip || detail.private_ip || detail.public_ip || 'N/A',
       publicIp: detail.public_ip || 'N/A',
       vpnIp: detail.assigned_ip || 'N/A',
       region: detail.region || 'unknown',
-      status: status.availability_status || detail.availability_status || detail.status || 'offline',
+      status: status.availability_status || monitorDetail?.availability_status || detail.availability_status || detail.status || 'offline',
       rawStatus: detail.status || 'offline',
       version: detail.kernel_version || '0.2.26',
       mode: detail.runtime_mode || 'kernel',
@@ -111,20 +113,26 @@ export default defineStore('node', () => {
       routes: detail.advertised_routes || [],
       pendingCmds: status.pending_cmds || detail.pending_cmds || 0,
       configurationStatus: status.configuration_status || detail.configuration_status || 'idle',
-      lastSyncAt: status.last_sync_at ? formatTimestamp(status.last_sync_at) : (detail.last_sync_at ? formatTimestamp(detail.last_sync_at) : 'N/A'),
-      desiredStateVersion: status.desired_state_version || detail.desired_state_version || '',
+      lastSyncAt: status.last_sync_at
+        ? formatTimestamp(status.last_sync_at)
+        : (monitorDetail?.last_sync_at
+            ? formatTimestamp(monitorDetail.last_sync_at)
+            : (detail.last_sync_at ? formatTimestamp(detail.last_sync_at) : 'N/A')),
+      desiredStateVersion: status.desired_state_version || monitorDetail?.desired_state_version || detail.desired_state_version || '',
       desiredStateUpdatedAt: formatDateTime(status.desired_state_updated_at || detail.desired_state_updated_at),
-      appliedStateVersion: status.applied_state_version || detail.applied_state_version || '',
+      appliedStateVersion: status.applied_state_version || monitorDetail?.applied_state_version || detail.applied_state_version || '',
       appliedStateUpdatedAt: formatDateTime(status.applied_state_updated_at || detail.applied_state_updated_at),
-      observedState: status.observed_state || detail.observed_state || status.configuration_status || detail.configuration_status || 'idle',
-      observedMessage: status.observed_message || detail.observed_message || status.last_sync_error || detail.last_sync_error || '',
+      observedState: status.observed_state || monitorDetail?.observed_state || detail.observed_state || status.configuration_status || detail.configuration_status || 'idle',
+      observedMessage: status.observed_message || monitorDetail?.observed_message || detail.observed_message || status.last_sync_error || monitorDetail?.last_sync_error || detail.last_sync_error || '',
       observedAt: formatDateTime(status.observed_at || detail.observed_at),
-      stateConvergence: status.convergence_status || detail.convergence_status || status.state_convergence || detail.state_convergence || 'idle',
-      learnedRoutes: detail.learned_routes || [],
+      stateConvergence: status.convergence_status || monitorDetail?.state_convergence || detail.convergence_status || status.state_convergence || detail.state_convergence || 'idle',
+      learnedRoutes: Array.isArray(monitorDetail?.learned_routes) ? monitorDetail.learned_routes : [],
       lastCommand: status.last_command || detail.last_command || null,
       lastCommandStatus: status.last_command_status || detail.last_command_status || '',
       lastCommandError: status.last_command_error || detail.last_command_error || '',
       recentCommands: Array.isArray(commands) ? commands : [],
+      recentPolicyDeliveries: Array.isArray(monitorDetail?.recent_policy_deliveries) ? monitorDetail.recent_policy_deliveries : [],
+      activeAlerts: Array.isArray(monitorDetail?.active_alerts) ? monitorDetail.active_alerts : [],
       bandwidth: { upload: 0, download: 0 },
       latency: 0
     }

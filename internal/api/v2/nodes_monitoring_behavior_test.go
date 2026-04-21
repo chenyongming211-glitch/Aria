@@ -666,6 +666,34 @@ func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
 			"action", "command_id", "command_status", "last_error", "metadata",
 			"created_at", "updated_at", "completed_at",
 		}))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM alerts WHERE tenant_id = $1 AND status = $2 AND node_id = $3")).
+		WithArgs(tenantID, "active", nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, alert_type, severity, title, COALESCE(message, ''),
+		       context, status, created_at, resolved_at
+		FROM alerts
+		WHERE tenant_id = $1 AND status = $2 AND node_id = $3
+		ORDER BY created_at DESC
+		LIMIT $4 OFFSET $5
+	`)).
+		WithArgs(tenantID, "active", nodeID, 10, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "alert_type", "severity", "title",
+			"message", "context", "status", "created_at", "resolved_at",
+		}).AddRow(
+			uuid.New(),
+			tenantID,
+			nodeID.String(),
+			"sync_failed",
+			"warning",
+			"Sync failed",
+			"last sync reported an error",
+			[]byte(`{"phase":"apply"}`),
+			"active",
+			now,
+			nil,
+		))
 	expectTenantNodesQuery(mock, tenantID).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
@@ -698,6 +726,9 @@ func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
 	}
 	if _, ok := data["recent_policy_deliveries"]; !ok {
 		t.Fatalf("expected recent_policy_deliveries field")
+	}
+	if alerts, ok := data["active_alerts"].([]interface{}); !ok || len(alerts) != 1 {
+		t.Fatalf("expected active_alerts field with 1 item, got %#v", data["active_alerts"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
@@ -2133,4 +2164,3 @@ func TestMonitoringAPI_StatsReturnsInternalErrorWhenNodeCountFails(t *testing.T)
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
-

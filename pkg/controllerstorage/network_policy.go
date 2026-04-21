@@ -40,6 +40,7 @@ type ACLRuleRecord struct {
 	ID          uuid.UUID `json:"id"`
 	TenantID    uuid.UUID `json:"tenant_id"`
 	NodeID      uuid.UUID `json:"node_id"`
+	Name        string    `json:"name"`
 	Action      string    `json:"action"` // "allow", "deny"
 	SrcCIDR     string    `json:"src_cidr"`
 	DstCIDR     string    `json:"dst_cidr"`
@@ -48,8 +49,8 @@ type ACLRuleRecord struct {
 	Priority    int       `json:"priority"`
 	Enabled     bool      `json:"enabled"`
 	Description string    `json:"description"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type BlacklistRuleRecord struct {
@@ -196,7 +197,7 @@ func (s *Storage) UpdateTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, ca
 
 func (s *Storage) ListTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRuleRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT id, tenant_id, node_id, action, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+		`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		        COALESCE(dst_port, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
 		        created_at, updated_at
 		   FROM acl_rules
@@ -213,7 +214,7 @@ func (s *Storage) ListTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRule
 	for rows.Next() {
 		rule := &ACLRuleRecord{}
 		err := rows.Scan(
-			&rule.ID, &rule.TenantID, &rule.NodeID, &rule.Action, &rule.SrcCIDR, &rule.DstCIDR,
+			&rule.ID, &rule.TenantID, &rule.NodeID, &rule.Name, &rule.Action, &rule.SrcCIDR, &rule.DstCIDR,
 			&rule.DstPort, &rule.Protocol, &rule.Priority, &rule.Enabled, &rule.Description,
 			&rule.CreatedAt, &rule.UpdatedAt,
 		)
@@ -228,17 +229,17 @@ func (s *Storage) ListTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRule
 func (s *Storage) CreateTenantNodeACLRule(rule *ACLRuleRecord) (*ACLRuleRecord, error) {
 	created := &ACLRuleRecord{}
 	err := s.db.QueryRow(
-		`INSERT INTO acl_rules (tenant_id, node_id, action, src_cidr, dst_cidr, dst_port, protocol, priority, enabled, description)
-		 VALUES ($1, $2, $3, NULLIF($4, '')::cidr, NULLIF($5, '')::cidr, $6, $7, $8, $9, $10)
-		 RETURNING id, tenant_id, node_id, action, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+		`INSERT INTO acl_rules (tenant_id, node_id, name, action, src_cidr, dst_cidr, dst_port, protocol, priority, enabled, description)
+		 VALUES ($1, $2, $3, $4, NULLIF($5, '')::cidr, NULLIF($6, '')::cidr, $7, $8, $9, $10, $11)
+		 RETURNING id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		           COALESCE(dst_port, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
 		           created_at, updated_at`,
-		rule.TenantID, rule.NodeID, rule.Action,
+		rule.TenantID, rule.NodeID, strings.TrimSpace(rule.Name), rule.Action,
 		strings.TrimSpace(rule.SrcCIDR), strings.TrimSpace(rule.DstCIDR),
 		nullableInt(rule.DstPort), nullableInt(rule.Protocol), rule.Priority,
 		rule.Enabled, strings.TrimSpace(rule.Description),
 	).Scan(
-		&created.ID, &created.TenantID, &created.NodeID, &created.Action, &created.SrcCIDR, &created.DstCIDR,
+		&created.ID, &created.TenantID, &created.NodeID, &created.Name, &created.Action, &created.SrcCIDR, &created.DstCIDR,
 		&created.DstPort, &created.Protocol, &created.Priority, &created.Enabled, &created.Description,
 		&created.CreatedAt, &created.UpdatedAt,
 	)
@@ -273,12 +274,12 @@ func (s *Storage) DeleteTenantNodeACLRuleByID(tenantID, nodeID uuid.UUID, ruleID
 func (s *Storage) UpdateTenantNodeACLRule(tenantID, nodeID, ruleID uuid.UUID, rule *ACLRuleRecord) (*ACLRuleRecord, error) {
 	result, err := s.db.Exec(
 		`UPDATE acl_rules SET
-			action = $4, src_cidr = NULLIF($5, ''), dst_cidr = NULLIF($6, ''),
-			dst_port = $7, protocol = $8, priority = $9, description = $10,
-			enabled = $11, updated_at = NOW()
+			name = $4, action = $5, src_cidr = NULLIF($6, ''), dst_cidr = NULLIF($7, ''),
+			dst_port = $8, protocol = $9, priority = $10, description = $11,
+			enabled = $12, updated_at = NOW()
 		 WHERE id = $1 AND tenant_id = $2 AND node_id = $3`,
 		ruleID, tenantID, nodeID,
-		rule.Action, rule.SrcCIDR, rule.DstCIDR,
+		strings.TrimSpace(rule.Name), rule.Action, rule.SrcCIDR, rule.DstCIDR,
 		rule.DstPort, rule.Protocol, rule.Priority,
 		rule.Description, rule.Enabled,
 	)
@@ -298,6 +299,7 @@ func (s *Storage) UpdateTenantNodeACLRule(tenantID, nodeID, ruleID uuid.UUID, ru
 	rule.ID = ruleID
 	rule.TenantID = tenantID
 	rule.NodeID = nodeID
+	rule.Name = strings.TrimSpace(rule.Name)
 	rule.UpdatedAt = time.Now()
 	return rule, nil
 }

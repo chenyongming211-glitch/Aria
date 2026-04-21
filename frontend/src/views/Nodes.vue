@@ -330,6 +330,12 @@
               Recent Commands
             </h4>
             <div class="detail-toolbar">
+              <el-button size="small" @click="openMonitoringDetail">
+                Monitoring Detail
+              </el-button>
+              <el-button size="small" @click="openPolicyCenter">
+                Policy Center
+              </el-button>
               <el-button size="small" type="primary" :loading="commandLoading" @click="runQuickCommand('sync')">
                 Force Sync
               </el-button>
@@ -357,6 +363,73 @@
                 {{ formatCommandTime(row.created_at) }}
               </template>
             </el-table-column>
+          </el-table>
+        </div>
+
+        <div class="detail-section">
+          <div class="section-header">
+            <h4 class="section-title">
+              <el-icon><Warning /></el-icon>
+              Active Alerts
+            </h4>
+            <el-button size="small" @click="openMonitoringDetail">
+              Open Monitoring
+            </el-button>
+          </div>
+          <el-table
+            :data="selectedNode.activeAlerts || []"
+            size="small"
+            empty-text="No active alerts"
+          >
+            <el-table-column prop="severity" label="Severity" width="120">
+              <template #default="{ row }">
+                <el-tag size="small" :type="getAlertSeverityTagType(row.severity)">
+                  {{ row.severity || 'info' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="alert_type" label="Type" width="150" />
+            <el-table-column prop="title" label="Title" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="message" label="Message" min-width="220" show-overflow-tooltip />
+            <el-table-column label="Created" width="180">
+              <template #default="{ row }">
+                {{ formatCommandTime(row.created_at) }}
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+
+        <div class="detail-section">
+          <div class="section-header">
+            <h4 class="section-title">
+              <el-icon><Document /></el-icon>
+              Recent Policy Deliveries
+            </h4>
+            <el-button size="small" @click="openPolicyCenter">
+              Open Policy Center
+            </el-button>
+          </div>
+          <el-table
+            :data="selectedNode.recentPolicyDeliveries || []"
+            size="small"
+            empty-text="No recent policy deliveries"
+          >
+            <el-table-column prop="policy_domain" label="Domain" width="120" />
+            <el-table-column prop="policy_name" label="Policy" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="policy_ref" label="Ref" width="150" show-overflow-tooltip />
+            <el-table-column prop="command_status" label="Status" width="120">
+              <template #default="{ row }">
+                <el-tag size="small" :type="getDeliveryStatusTagType(row.command_status)">
+                  {{ row.command_status || 'unknown' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="Updated" width="180">
+              <template #default="{ row }">
+                {{ formatCommandTime(row.updated_at || row.completed_at || row.created_at) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="last_error" label="Error" min-width="220" show-overflow-tooltip />
           </el-table>
         </div>
       </div>
@@ -416,6 +489,7 @@
 
 <script setup>
 import { ref, computed, onMounted, reactive, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   Search,
   Refresh,
@@ -432,7 +506,9 @@ import {
   Upload,
   Download,
   Timer,
-  Position
+  Position,
+  Warning,
+  Document
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import useNodeStore from '../stores/node'
@@ -443,6 +519,7 @@ import { usePermission } from '../composables/usePermission'
 // 使用节点 store
 const nodeStore = useNodeStore()
 const { hasPermission } = usePermission()
+const router = useRouter()
 
 // 节点数据从 store 获取
 const nodes = computed(() => nodeStore.nodes)
@@ -597,6 +674,18 @@ const closeDetailDialog = () => {
   selectedNode.value = null
 }
 
+const openMonitoringDetail = () => {
+  if (!selectedNode.value?.id) return
+  detailDialogVisible.value = false
+  router.push({ name: 'NodeMonitorDetail', params: { nodeId: selectedNode.value.id } })
+}
+
+const openPolicyCenter = () => {
+  if (!selectedNode.value?.id) return
+  detailDialogVisible.value = false
+  router.push({ name: 'Policies', query: { nodeId: selectedNode.value.id } })
+}
+
 const handleSizeChange = (size) => {
   pageSize.value = size
   currentPage.value = 1
@@ -647,6 +736,38 @@ const getConvergenceTagType = (state) => {
     case 'pending': return 'warning'
     case 'diverged': return 'danger'
     default: return 'info'
+  }
+}
+
+const getAlertSeverityTagType = (severity) => {
+  switch (severity) {
+    case 'critical':
+    case 'error':
+      return 'danger'
+    case 'warning':
+      return 'warning'
+    case 'info':
+      return 'info'
+    default:
+      return 'info'
+  }
+}
+
+const getDeliveryStatusTagType = (status) => {
+  switch (status) {
+    case 'completed':
+    case 'applied':
+      return 'success'
+    case 'pending':
+    case 'queued':
+    case 'acknowledged':
+    case 'in_progress':
+      return 'warning'
+    case 'failed':
+    case 'error':
+      return 'danger'
+    default:
+      return 'info'
   }
 }
 

@@ -136,6 +136,17 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 	}
 	data["recent_policy_deliveries"] = pdItems
 
+	alerts, _, err := r.store.ListAlerts(tenantID, controllerstorage.AlertFilter{
+		Status: "active",
+		NodeID: &node.ID,
+		Limit:  10,
+	})
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to list active alerts: "+err.Error(), nil)
+		return
+	}
+	data["active_alerts"] = alerts
+
 	// 计算已学习的路由 (Learned Routes)
 	// 在 Mesh 网络中，本节点会学习到同租户其他所有节点宣告的路由
 	tenantNodes, err := r.store.GetNodesByTenant(tenantID)

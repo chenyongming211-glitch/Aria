@@ -72,6 +72,15 @@ vi.mock('@/composables/useTokenApi', () => ({
   }
 }))
 
+vi.mock('@/composables/useSettingsApi', () => ({
+  useSettingsApi: {
+    listBackups: vi.fn(async () => []),
+    createBackup: vi.fn(async () => ({})),
+    deleteBackup: vi.fn(async () => ({})),
+    downloadBackupUrl: vi.fn((id) => `/v2/settings/backups/${id}/download`)
+  }
+}))
+
 vi.mock('@/stores', () => ({
   useAppStore: () => ({
     lang: 'zh',
@@ -126,6 +135,7 @@ const elementStubs = {
   'el-checkbox-group': { template: '<div><slot /></div>' },
   'el-checkbox': { template: '<div><slot /></div>' },
   'el-upload': { template: '<div><slot /></div>' },
+  'el-alert': { template: '<div><slot /></div>' },
   'el-empty': { template: '<div></div>' },
   'el-descriptions': { template: '<div><slot /></div>' },
   'el-descriptions-item': { template: '<div><slot /></div>' },
@@ -244,4 +254,3 @@ describe('page-level RBAC button visibility', () => {
     expect(denied.text()).not.toContain('Save Changes')
   })
 })
-
