@@ -2,6 +2,7 @@ package v2
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -126,6 +127,39 @@ func TestAuthorizeTenantPermission_EnforcementModes(t *testing.T) {
 		}
 	})
 
+	t.Run("audit mode denies when permission lookup fails", func(t *testing.T) {
+		t.Setenv("RBAC_ENFORCEMENT", "audit")
+
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("sqlmock.New failed: %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT permissions FROM roles WHERE tenant_id = $1 AND name = $2`)).
+			WithArgs(tenantID, "viewer").
+			WillReturnError(errors.New("lookup failed"))
+
+		router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+		req := newAuthzRequest("viewer", tenantID)
+		rr := httptest.NewRecorder()
+
+		ok := router.authorizeTenantPermission(rr, req, tenantID, middleware.PermTokensWrite)
+		if ok {
+			t.Fatalf("expected audit mode to deny on permission lookup failure")
+		}
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("expected status %d, got %d", http.StatusForbidden, rr.Code)
+		}
+		if got := rr.Header().Get("X-RBAC-Audit-Denied"); got != "" {
+			t.Fatalf("expected no X-RBAC-Audit-Denied header on lookup failure, got %q", got)
+		}
+
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatalf("unmet sql expectations: %v", err)
+		}
+	})
+
 	t.Run("enforce mode allows granted permissions", func(t *testing.T) {
 		t.Setenv("RBAC_ENFORCEMENT", "enforce")
 
@@ -153,4 +187,3 @@ func TestAuthorizeTenantPermission_EnforcementModes(t *testing.T) {
 		}
 	})
 }
-

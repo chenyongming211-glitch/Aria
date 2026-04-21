@@ -572,7 +572,7 @@ func (r *Router) updateTenantNode(w http.ResponseWriter, req *http.Request, tena
 	if routes == nil {
 		routes = node.AdvertisedRoutes
 	}
-	
+
 	role := body.Role
 	if role == "" {
 		role = node.Role
@@ -589,7 +589,7 @@ func (r *Router) updateTenantNode(w http.ResponseWriter, req *http.Request, tena
 		advertised_routes = $8,
 		updated_at = NOW()
 		WHERE id = $9 AND tenant_id = $10`
-	
+
 	if _, err := r.store.DB().Exec(query,
 		body.Hostname,
 		body.Endpoint,
@@ -786,7 +786,7 @@ func (r *Router) replaceTenantNodeRoute(w http.ResponseWriter, req *http.Request
 		"node_id":  node.ID.String(),
 		"previous": routeID,
 	}, "Route updated successfully", map[string]interface{}{
-		"node_id":  node.ID.String(),
+		"node_id":   node.ID.String(),
 		"new_route": newRoute,
 		"old_route": routeID,
 	})
@@ -1035,6 +1035,10 @@ func (r *Router) authorizeTenantPermission(w http.ResponseWriter, req *http.Requ
 	if hasPermission {
 		return true
 	}
+	if err != nil {
+		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Role permission lookup failed", nil)
+		return false
+	}
 
 	if mode == "audit" {
 		w.Header().Set("X-RBAC-Audit-Denied", "true")
@@ -1050,10 +1054,6 @@ func (r *Router) authorizeTenantPermission(w http.ResponseWriter, req *http.Requ
 		return true
 	}
 
-	if err != nil {
-		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Role permission lookup failed", nil)
-		return false
-	}
 	apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Insufficient permissions", nil)
 	return false
 }
@@ -1136,7 +1136,7 @@ func attachPolicyDeliveriesToItems(
 		item["delivery_history"] = serializedHistory
 		item["last_delivery"] = serializedHistory[0]
 		item["policy_status"] = mapCommandStatusToPolicyStatus(history[0].CommandStatus)
-		
+
 		pendingCount := 0
 		for _, h := range history {
 			pendingCount += pendingCountForCommandStatus(h.CommandStatus)
@@ -1304,18 +1304,18 @@ func (r *Router) buildTenantNodeACLPolicies(tenantID uuid.UUID, node *controller
 	items := make([]map[string]interface{}, 0, len(rules))
 	for _, rule := range rules {
 		items = append(items, map[string]interface{}{
-			"id":          rule.ID.String(),
-			"node_id":     node.ID.String(),
-			"node_name":   firstNonEmpty(node.Hostname, node.PublicKey),
-			"kind":        "acl",
-			"name":        rule.Description,
-			"src_net":     rule.SrcCIDR,
-			"dst_net":     rule.DstCIDR,
-			"action":      rule.Action,
-			"enabled":     rule.Enabled,
-			"priority":    rule.Priority,
-			"created_at":  rule.CreatedAt,
-			"updated_at":  rule.UpdatedAt,
+			"id":         rule.ID.String(),
+			"node_id":    node.ID.String(),
+			"node_name":  firstNonEmpty(node.Hostname, node.PublicKey),
+			"kind":       "acl",
+			"name":       rule.Description,
+			"src_net":    rule.SrcCIDR,
+			"dst_net":    rule.DstCIDR,
+			"action":     rule.Action,
+			"enabled":    rule.Enabled,
+			"priority":   rule.Priority,
+			"created_at": rule.CreatedAt,
+			"updated_at": rule.UpdatedAt,
 		})
 	}
 
