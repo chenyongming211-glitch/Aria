@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"strings"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -704,6 +704,34 @@ func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
 		WithArgs(tenantID, nodeID).
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
+		       not_before, not_after, status, issued_at, revoked_at,
+		       COALESCE(revoke_reason, ''), renewed_from, updated_at
+		FROM node_certificates
+		WHERE node_id = $1
+	`)).
+		WithArgs(nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "serial_number", "cert_pem", "ca_pem",
+			"not_before", "not_after", "status", "issued_at", "revoked_at",
+			"revoke_reason", "renewed_from", "updated_at",
+		}).AddRow(
+			uuid.New(),
+			tenantID,
+			nodeID,
+			"serial-1",
+			"cert-pem",
+			"ca-pem",
+			now.Add(-24*time.Hour),
+			now.Add(24*time.Hour),
+			controllerstorage.CertStatusIssued,
+			now.Add(-24*time.Hour),
+			nil,
+			"",
+			nil,
+			now,
+		))
+	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT id, node_public_key, command, params, status, COALESCE(message, ''), priority, timeout_seconds,
 		       created_at, updated_at, sent_at, acknowledged_at, completed_at, result
 		FROM agent_commands
@@ -788,6 +816,13 @@ func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
 	}
 	if _, ok := data["recent_commands"]; !ok {
 		t.Fatalf("expected recent_commands field")
+	}
+	certificate, ok := data["certificate"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected certificate field, got %#v", data["certificate"])
+	}
+	if certificate["status"] != controllerstorage.CertStatusIssued {
+		t.Fatalf("expected certificate status %q, got %#v", controllerstorage.CertStatusIssued, certificate["status"])
 	}
 	if _, ok := data["recent_policy_deliveries"]; !ok {
 		t.Fatalf("expected recent_policy_deliveries field")

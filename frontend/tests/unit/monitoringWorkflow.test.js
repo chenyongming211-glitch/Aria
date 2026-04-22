@@ -74,6 +74,12 @@ const {
       state_convergence: 'diverged',
       desired_state_version: 'desired-1',
       applied_state_version: 'applied-1',
+      certificate: {
+        status: 'issued',
+        serial_number: 'serial-1',
+        issued_at: '2026-04-21T10:00:00Z',
+        not_after: '2026-04-24T10:00:00Z'
+      },
       recent_commands: [
         { id: 'cmd-1', command: 'sync', status: 'failed', message: 'sync failed', created_at: '2026-04-21T10:00:00Z' }
       ],
@@ -333,6 +339,7 @@ describe('node monitor detail context handling', () => {
     expect(wrapper.vm.contextDescription).toContain('Event: policy_failed')
     expect(wrapper.vm.contextDescription).toContain('Policy: acl-1')
     expect(wrapper.vm.contextDescription).toContain('Command: cmd-1')
+    expect(wrapper.vm.certificateStatusLabel).toBe('issued')
     expect(wrapper.vm.commandRowClassName({ row: { id: 'cmd-1' } })).toBe('context-match-row')
     expect(wrapper.vm.policyRowClassName({ row: { policy_ref: 'acl-1', command_id: 'other' } })).toBe('context-match-row')
     expect(wrapper.vm.alertRowClassName({ row: { id: 'alert-1' } })).toBe('context-match-row')

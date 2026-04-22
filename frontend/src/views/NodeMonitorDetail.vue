@@ -108,6 +108,51 @@
         </div>
       </el-card>
 
+      <el-card class="state-card light-card" shadow="never">
+        <template #header>
+          <div class="card-header">
+            <span class="header-title">Certificate Status</span>
+            <el-tag :type="certificateBadgeType" effect="dark" size="large">
+              {{ certificateStatusLabel }}
+            </el-tag>
+          </div>
+        </template>
+
+        <el-row :gutter="20">
+          <el-col :xs="24" :sm="8">
+            <div class="state-block">
+              <div class="state-label">Expires At</div>
+              <div class="state-value">
+                {{ node.certificate?.not_after ? formatTime(node.certificate.not_after) : '—' }}
+              </div>
+            </div>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <div class="state-block">
+              <div class="state-label">Issued At</div>
+              <div class="state-value">
+                {{ node.certificate?.issued_at ? formatTime(node.certificate.issued_at) : '—' }}
+              </div>
+            </div>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <div class="state-block">
+              <div class="state-label">Serial Number</div>
+              <div class="state-value">
+                {{ node.certificate?.serial_number || '—' }}
+              </div>
+            </div>
+          </el-col>
+        </el-row>
+
+        <div v-if="node.certificate?.revoke_reason" class="state-message">
+          Revoke reason: {{ node.certificate.revoke_reason }}
+        </div>
+        <div v-if="node.certificate?.renewed_from" class="state-message">
+          Renewed from: {{ node.certificate.renewed_from }}
+        </div>
+      </el-card>
+
       <!-- Recent Commands -->
       <el-card ref="commandsSectionRef" class="table-card light-card" shadow="never">
         <template #header>
@@ -266,6 +311,20 @@ const convergenceBadgeType = computed(() => {
     case 'pending': return 'warning'
     case 'diverged': return 'danger'
     default: return 'info'
+  }
+})
+
+const certificateStatusLabel = computed(() => node.value?.certificate?.status || 'missing')
+
+const certificateBadgeType = computed(() => {
+  switch (node.value?.certificate?.status) {
+    case 'issued': return 'success'
+    case 'expiring': return 'warning'
+    case 'expired':
+    case 'revoked':
+      return 'danger'
+    default:
+      return 'info'
   }
 })
 

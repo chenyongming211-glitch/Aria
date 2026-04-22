@@ -39,6 +39,8 @@ pub struct BootstrapConfig {
     pub hostname: Option<String>,
     #[serde(default = "default_sync_interval", with = "serde_duration")]
     pub sync_interval: Duration,
+    #[serde(default = "default_certificate_renew_before", with = "serde_duration")]
+    pub certificate_renew_before: Duration,
     #[serde(default = "default_multi_tunnel")]
     pub multi_tunnel: bool,
 }
@@ -115,6 +117,8 @@ pub struct AgentConfig {
     pub hostname: Option<String>,
     #[serde(default = "default_sync_interval", with = "serde_duration")]
     pub sync_interval: Duration,
+    #[serde(default = "default_certificate_renew_before", with = "serde_duration")]
+    pub certificate_renew_before: Duration,
     #[serde(default = "default_multi_tunnel")]
     pub multi_tunnel: bool,
     #[serde(default)]
@@ -145,6 +149,10 @@ fn default_mtu() -> u32 {
 
 fn default_sync_interval() -> Duration {
     Duration::from_secs(5)
+}
+
+fn default_certificate_renew_before() -> Duration {
+    Duration::from_secs(72 * 60 * 60)
 }
 
 fn default_multi_tunnel() -> bool {
@@ -189,6 +197,7 @@ impl Default for BootstrapConfig {
             advertised_routes: None,
             hostname: None,
             sync_interval: default_sync_interval(),
+            certificate_renew_before: default_certificate_renew_before(),
             multi_tunnel: default_multi_tunnel(),
         }
     }
@@ -241,6 +250,7 @@ impl AgentConfig {
             advertised_routes: bootstrap.advertised_routes,
             hostname: bootstrap.hostname,
             sync_interval: bootstrap.sync_interval,
+            certificate_renew_before: bootstrap.certificate_renew_before,
             multi_tunnel: bootstrap.multi_tunnel,
             current_credential: state.current_credential,
             last_desired_version: state.last_desired_version,
@@ -268,6 +278,7 @@ impl AgentConfig {
             advertised_routes: self.advertised_routes.clone(),
             hostname: self.hostname.clone(),
             sync_interval: self.sync_interval,
+            certificate_renew_before: self.certificate_renew_before,
             multi_tunnel: self.multi_tunnel,
         }
     }
@@ -444,4 +455,27 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{default_certificate_renew_before, AgentConfig, BootstrapConfig};
+    use std::time::Duration;
+
+    #[test]
+    fn default_agent_config_sets_certificate_renew_window() {
+        let config = AgentConfig::default();
+        assert_eq!(config.certificate_renew_before, default_certificate_renew_before());
+    }
+
+    #[test]
+    fn from_parts_preserves_certificate_renew_window() {
+        let bootstrap = BootstrapConfig {
+            certificate_renew_before: Duration::from_secs(6 * 60 * 60),
+            ..BootstrapConfig::default()
+        };
+        let config = AgentConfig::from_parts(bootstrap.clone(), Default::default());
+        assert_eq!(config.certificate_renew_before, Duration::from_secs(6 * 60 * 60));
+        assert_eq!(config.to_bootstrap().certificate_renew_before, bootstrap.certificate_renew_before);
+    }
 }

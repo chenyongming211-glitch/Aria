@@ -607,6 +607,7 @@ fn run_init(
         advertised_routes: parse_advertised_routes(advertise_routes),
         hostname: Some(hostname),
         sync_interval: Duration::from_secs(5),
+        certificate_renew_before: Duration::from_secs(72 * 60 * 60),
         multi_tunnel: true,
     };
     let state = config::AgentState {

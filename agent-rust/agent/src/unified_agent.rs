@@ -33,7 +33,6 @@ use crate::config::{AgentConfig, ConfigManager};
 use crate::certificate_client;
 
 const BPF_FS_PATH: &str = "/sys/fs/bpf/aria";
-const CERTIFICATE_RENEW_BEFORE: Duration = Duration::from_secs(72 * 60 * 60);
 const CERTIFICATE_RENEW_CHECK_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2150,7 +2149,10 @@ impl UnifiedAgent {
             return Ok(());
         }
 
-        if !certificate_client::should_renew_certificate(&self.config.client_cert, CERTIFICATE_RENEW_BEFORE)? {
+        if !certificate_client::should_renew_certificate(
+            &self.config.client_cert,
+            self.config.certificate_renew_before,
+        )? {
             return Ok(());
         }
 
@@ -2208,6 +2210,15 @@ impl UnifiedAgent {
             tracing::info!("Sync interval changed: {:?} -> {:?}", 
                 self.config.sync_interval, new_config.sync_interval);
             self.config.sync_interval = new_config.sync_interval;
+        }
+
+        if new_config.certificate_renew_before != self.config.certificate_renew_before {
+            tracing::info!(
+                "Certificate renew window changed: {:?} -> {:?}",
+                self.config.certificate_renew_before,
+                new_config.certificate_renew_before
+            );
+            self.config.certificate_renew_before = new_config.certificate_renew_before;
         }
 
         if new_config.controller_api_url != self.config.controller_api_url {

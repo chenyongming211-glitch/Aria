@@ -32,6 +32,9 @@ advertised_routes:
 # 同步间隔（秒）
 sync_interval: 5
 
+# 证书续签提前窗口（秒；默认 259200 = 72 小时）
+certificate_renew_before: 259200
+
 # 运行时状态会由 Agent 自动写入独立的 state 文件：
 # 默认路径: /var/lib/aria/agent-state.yaml
 # 包含 device_id / WireGuard 密钥 / assigned_ip / address 等字段
