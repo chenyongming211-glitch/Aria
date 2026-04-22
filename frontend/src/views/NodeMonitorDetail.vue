@@ -154,6 +154,35 @@
         <div v-if="node.certificate?.renewed_from" class="state-message">
           Renewed from: {{ node.certificate.renewed_from }}
         </div>
+        <el-row :gutter="20" class="certificate-activity-row">
+          <el-col :xs="24" :sm="8">
+            <div class="state-block">
+              <div class="state-label">Last Renewed At</div>
+              <div class="state-value">
+                {{ certificateActivity?.last_renewed_at ? formatTime(certificateActivity.last_renewed_at) : '—' }}
+              </div>
+            </div>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <div class="state-block">
+              <div class="state-label">Last Renew Failed At</div>
+              <div class="state-value">
+                {{ certificateActivity?.last_renew_failed_at ? formatTime(certificateActivity.last_renew_failed_at) : '—' }}
+              </div>
+            </div>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <div class="state-block">
+              <div class="state-label">Last Renew Failure</div>
+              <div class="state-value state-wrap">
+                {{ certificateActivity?.last_renew_failure || '—' }}
+              </div>
+            </div>
+          </el-col>
+        </el-row>
+        <div v-if="certificateActivity?.last_renewed_serial_number" class="state-message">
+          Last renewed serial: {{ certificateActivity.last_renewed_serial_number }}
+        </div>
       </el-card>
 
       <!-- Recent Commands -->
@@ -319,6 +348,7 @@ const convergenceBadgeType = computed(() => {
 })
 
 const certificateStatusLabel = computed(() => node.value?.certificate?.status || 'missing')
+const certificateActivity = computed(() => node.value?.certificate_activity || null)
 
 const certificateBadgeType = computed(() => {
   switch (node.value?.certificate?.status) {
@@ -546,6 +576,15 @@ watch(node, async (value) => {
   font-size: 12px;
   color: var(--aria-text-muted, #94A3B8);
   margin-top: 4px;
+}
+
+.certificate-activity-row {
+  margin-top: 8px;
+}
+
+.state-wrap {
+  white-space: normal;
+  word-break: break-word;
 }
 
 .sync-error {

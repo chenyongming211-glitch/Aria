@@ -137,6 +137,13 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 		data["certificate"] = nil
 	}
 
+	certificateActivity, err := r.buildNodeCertificateActivity(tenantID, node.ID)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to get certificate activity: "+err.Error(), nil)
+		return
+	}
+	data["certificate_activity"] = certificateActivity
+
 	// Recent agent commands (up to 20)
 	commands, err := r.store.ListRecentAgentCommands(node.PublicKey, 20)
 	if err != nil {
@@ -195,6 +202,65 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 	}
 
 	apibase.WriteSuccess(w, data, "Node monitoring detail retrieved")
+}
+
+func (r *Router) buildNodeCertificateActivity(tenantID, nodeID uuid.UUID) (map[string]interface{}, error) {
+	lastRenewed, _, err := r.store.ListAuditEvents(tenantID, controllerstorage.AuditEventFilter{
+		NodeID:    &nodeID,
+		EventType: "certificate_renewed",
+		Limit:     1,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	lastRenewFailed, _, err := r.store.ListAuditEvents(tenantID, controllerstorage.AuditEventFilter{
+		NodeID:    &nodeID,
+		EventType: "certificate_renew_failed",
+		Limit:     1,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	activity := map[string]interface{}{}
+	if len(lastRenewed) > 0 && lastRenewed[0] != nil {
+		activity["last_renewed_at"] = lastRenewed[0].CreatedAt
+		if serialNumber := eventDetailString(lastRenewed[0].Detail, "serial_number"); serialNumber != "" {
+			activity["last_renewed_serial_number"] = serialNumber
+		}
+		if renewedFrom := eventDetailString(lastRenewed[0].Detail, "renewed_from"); renewedFrom != "" {
+			activity["last_renewed_from"] = renewedFrom
+		}
+		if notAfter := eventDetailString(lastRenewed[0].Detail, "not_after"); notAfter != "" {
+			activity["last_renewed_not_after"] = notAfter
+		}
+	}
+	if len(lastRenewFailed) > 0 && lastRenewFailed[0] != nil {
+		activity["last_renew_failed_at"] = lastRenewFailed[0].CreatedAt
+		if reason := eventDetailString(lastRenewFailed[0].Detail, "error", "message"); reason != "" {
+			activity["last_renew_failure"] = reason
+		}
+	}
+
+	if len(activity) == 0 {
+		return nil, nil
+	}
+	return activity, nil
+}
+
+func eventDetailString(detail map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		value, ok := detail[key]
+		if !ok || value == nil {
+			continue
+		}
+		text := strings.TrimSpace(fmt.Sprint(value))
+		if text != "" && text != "<nil>" {
+			return text
+		}
+	}
+	return ""
 }
 
 // handleMonitoringEvents returns a unified event feed of alerts and audit events.

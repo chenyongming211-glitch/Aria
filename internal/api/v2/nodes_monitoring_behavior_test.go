@@ -731,6 +731,52 @@ func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
 			nil,
 			now,
 		))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM audit_events WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3")).
+		WithArgs(tenantID, nodeID, "certificate_renewed").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, event_type, actor, summary, detail, created_at
+		FROM audit_events
+		WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3
+		ORDER BY created_at DESC
+		LIMIT $4 OFFSET $5
+	`)).
+		WithArgs(tenantID, nodeID, "certificate_renewed", 1, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at",
+		}).AddRow(
+			uuid.New(),
+			tenantID,
+			nodeID.String(),
+			"certificate_renewed",
+			"system",
+			"certificate renewed",
+			[]byte(`{"serial_number":"serial-2","renewed_from":"serial-1","not_after":"2026-04-25T10:00:00Z"}`),
+			now.Add(-2*time.Hour),
+		))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM audit_events WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3")).
+		WithArgs(tenantID, nodeID, "certificate_renew_failed").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, event_type, actor, summary, detail, created_at
+		FROM audit_events
+		WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3
+		ORDER BY created_at DESC
+		LIMIT $4 OFFSET $5
+	`)).
+		WithArgs(tenantID, nodeID, "certificate_renew_failed", 1, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at",
+		}).AddRow(
+			uuid.New(),
+			tenantID,
+			nodeID.String(),
+			"certificate_renew_failed",
+			"system",
+			"certificate renew failed",
+			[]byte(`{"error":"runtime token expired"}`),
+			now.Add(-time.Hour),
+		))
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT id, node_public_key, command, params, status, COALESCE(message, ''), priority, timeout_seconds,
 		       created_at, updated_at, sent_at, acknowledged_at, completed_at, result
@@ -823,6 +869,16 @@ func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
 	}
 	if certificate["status"] != controllerstorage.CertStatusIssued {
 		t.Fatalf("expected certificate status %q, got %#v", controllerstorage.CertStatusIssued, certificate["status"])
+	}
+	certificateActivity, ok := data["certificate_activity"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected certificate_activity field, got %#v", data["certificate_activity"])
+	}
+	if certificateActivity["last_renew_failure"] != "runtime token expired" {
+		t.Fatalf("expected last_renew_failure to be populated, got %#v", certificateActivity["last_renew_failure"])
+	}
+	if certificateActivity["last_renewed_serial_number"] != "serial-2" {
+		t.Fatalf("expected last_renewed_serial_number to be populated, got %#v", certificateActivity["last_renewed_serial_number"])
 	}
 	if _, ok := data["recent_policy_deliveries"]; !ok {
 		t.Fatalf("expected recent_policy_deliveries field")

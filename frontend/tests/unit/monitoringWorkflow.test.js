@@ -80,6 +80,12 @@ const {
         issued_at: '2026-04-21T10:00:00Z',
         not_after: '2026-04-24T10:00:00Z'
       },
+      certificate_activity: {
+        last_renewed_at: '2026-04-21T08:00:00Z',
+        last_renewed_serial_number: 'serial-1',
+        last_renew_failed_at: '2026-04-21T09:00:00Z',
+        last_renew_failure: 'runtime token expired'
+      },
       recent_commands: [
         { id: 'cmd-1', command: 'sync', status: 'failed', message: 'sync failed', created_at: '2026-04-21T10:00:00Z' }
       ],
@@ -365,6 +371,9 @@ describe('node monitor detail context handling', () => {
     expect(wrapper.vm.contextDescription).toContain('Policy: acl-1')
     expect(wrapper.vm.contextDescription).toContain('Command: cmd-1')
     expect(wrapper.vm.certificateStatusLabel).toBe('issued')
+    expect(wrapper.vm.certificateActivity.last_renew_failure).toBe('runtime token expired')
+    expect(wrapper.text()).toContain('Last Renew Failed At')
+    expect(wrapper.text()).toContain('runtime token expired')
     expect(wrapper.vm.scrollToFocusSection).toBeTypeOf('function')
     expect(wrapper.vm.commandRowClassName({ row: { id: 'cmd-1' } })).toBe('context-match-row')
     expect(wrapper.vm.policyRowClassName({ row: { policy_ref: 'acl-1', command_id: 'other' } })).toBe('context-match-row')
