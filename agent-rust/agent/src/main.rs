@@ -24,6 +24,7 @@ mod config;
 mod metrics;
 mod unified_agent;
 mod grpc_client;
+mod certificate_client;
 mod wireguard;
 mod routing;
 mod system_optimization;
@@ -70,6 +71,8 @@ enum Commands {
         client_cert: Option<String>,
         #[arg(long)]
         client_key: Option<String>,
+        #[arg(long)]
+        controller_api_url: Option<String>,
         #[arg(long)]
         tls_server_name: Option<String>,
         #[arg(long)]
@@ -291,6 +294,7 @@ fn main() -> Result<()> {
             ca_cert,
             client_cert,
             client_key,
+            controller_api_url,
             tls_server_name,
             config,
             advertise_routes,
@@ -304,6 +308,7 @@ fn main() -> Result<()> {
                 ca_cert.as_deref(),
                 client_cert.as_deref(),
                 client_key.as_deref(),
+                controller_api_url.as_deref(),
                 tls_server_name.as_deref(),
                 config.as_deref(),
                 advertise_routes.as_deref(),
@@ -568,6 +573,7 @@ fn run_init(
     ca_cert: Option<&str>,
     client_cert: Option<&str>,
     client_key: Option<&str>,
+    controller_api_url: Option<&str>,
     tls_server_name: Option<&str>,
     config_path: Option<&str>,
     advertise_routes: Option<&str>,
@@ -587,6 +593,7 @@ fn run_init(
 
     let bootstrap = config::BootstrapConfig {
         controller_url: server.to_string(),
+        controller_api_url: controller_api_url.unwrap_or_default().to_string(),
         ca_cert: ca_cert.unwrap_or_default().to_string(),
         client_cert: client_cert.unwrap_or_default().to_string(),
         client_key: client_key.unwrap_or_default().to_string(),

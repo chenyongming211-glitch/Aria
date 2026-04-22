@@ -523,20 +523,22 @@ func (r *Router) buildTenantNodeResponse(node *controllerstorage.Node) map[strin
 }
 
 func (r *Router) deleteTenantNode(w http.ResponseWriter, tenantID uuid.UUID, nodeID string) {
-	nodeUUID, err := uuid.Parse(nodeID)
+	node, err := r.getTenantNodeRecord(nodeID, tenantID)
 	if err != nil {
-		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid node ID", nil)
+		r.writeNodeLookupError(w, err)
 		return
 	}
 
-	var publicKey string
-	err = r.store.DB().QueryRow(`SELECT public_key FROM nodes WHERE id = $1 AND tenant_id = $2`, nodeUUID, tenantID).Scan(&publicKey)
-	if err != nil {
-		apibase.WriteError(w, http.StatusNotFound, apibase.CodeNodeNotFound, "Node not found", nil)
-		return
-	}
-
-	if err := r.store.MarkNodeDeleted(publicKey); err != nil {
+	if _, err := r.store.ApplyNodeLifecycleTransition(node.PublicKey, controllerstorage.NodeLifecycleTransition{
+		TargetStatus:   "deleted",
+		RevokeReason:   "node deleted via API",
+		AuditEventType: "node_deleted",
+		AuditActor:     "user",
+		AuditSummary:   "Node deleted via API",
+		AuditDetail: map[string]interface{}{
+			"node_id": node.ID.String(),
+		},
+	}); err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeUpdateNodeFailed, "Failed to delete node: "+err.Error(), nil)
 		return
 	}

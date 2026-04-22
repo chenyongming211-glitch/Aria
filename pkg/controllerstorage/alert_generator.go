@@ -3,6 +3,7 @@ package controllerstorage
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -155,5 +156,73 @@ func (s *Storage) GeneratePolicyFailedAlert(tenantID, nodeID uuid.UUID, domain, 
 		log.Printf("[alert_generator] failed to create audit event for policy_failed alert on node %s: %v", nodeID, err)
 	}
 
+	return nil
+}
+
+func (s *Storage) GenerateCertificateExpiringAlert(tenantID, nodeID uuid.UUID, hostname string, notAfter time.Time) error {
+	existing, err := s.GetActiveAlertByNodeAndType(tenantID, nodeID, "certificate_expiring")
+	if err != nil {
+		return fmt.Errorf("failed to check existing certificate_expiring alert: %w", err)
+	}
+	if existing != nil {
+		return nil
+	}
+
+	alert := &Alert{
+		TenantID:  tenantID,
+		NodeID:    &nodeID,
+		AlertType: "certificate_expiring",
+		Severity:  "warning",
+		Title:     "节点证书即将到期",
+		Message:   fmt.Sprintf("节点 %s 的客户端证书将在 %s 过期", hostname, notAfter.UTC().Format(time.RFC3339)),
+		Context: map[string]interface{}{
+			"hostname": hostname,
+			"not_after": notAfter.UTC().Format(time.RFC3339),
+		},
+	}
+	if _, err := s.CreateAlert(alert); err != nil {
+		return fmt.Errorf("failed to create certificate_expiring alert: %w", err)
+	}
+	return nil
+}
+
+func (s *Storage) ResolveCertificateExpiringAlert(tenantID, nodeID uuid.UUID) error {
+	existing, err := s.GetActiveAlertByNodeAndType(tenantID, nodeID, "certificate_expiring")
+	if err != nil {
+		return fmt.Errorf("failed to find active certificate_expiring alert: %w", err)
+	}
+	if existing == nil {
+		return nil
+	}
+	if _, err := s.ResolveAlert(existing.ID); err != nil {
+		return fmt.Errorf("failed to resolve certificate_expiring alert %s: %w", existing.ID, err)
+	}
+	return nil
+}
+
+func (s *Storage) GenerateCertificateExpiredAlert(tenantID, nodeID uuid.UUID, hostname string, notAfter time.Time) error {
+	existing, err := s.GetActiveAlertByNodeAndType(tenantID, nodeID, "certificate_expired")
+	if err != nil {
+		return fmt.Errorf("failed to check existing certificate_expired alert: %w", err)
+	}
+	if existing != nil {
+		return nil
+	}
+
+	alert := &Alert{
+		TenantID:  tenantID,
+		NodeID:    &nodeID,
+		AlertType: "certificate_expired",
+		Severity:  "critical",
+		Title:     "节点证书已过期",
+		Message:   fmt.Sprintf("节点 %s 的客户端证书已于 %s 过期", hostname, notAfter.UTC().Format(time.RFC3339)),
+		Context: map[string]interface{}{
+			"hostname": hostname,
+			"not_after": notAfter.UTC().Format(time.RFC3339),
+		},
+	}
+	if _, err := s.CreateAlert(alert); err != nil {
+		return fmt.Errorf("failed to create certificate_expired alert: %w", err)
+	}
 	return nil
 }

@@ -3,6 +3,9 @@
 # Controller 地址
 controller_url: "https://controller.example.com:50051"
 
+# Controller HTTP API 地址（可选；不填时从 controller_url 推导为 :8080）
+controller_api_url: "https://controller.example.com:8080"
+
 # 首次接入凭据（仅首次注册使用）
 enrollment_token: "aria-enroll-token"
 

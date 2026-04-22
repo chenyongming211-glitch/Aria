@@ -34,3 +34,17 @@ func TestNodeRegistrationForbidden(t *testing.T) {
 		t.Fatal("deleted node should be re-enrollable with a fresh token, not permanently forbidden")
 	}
 }
+
+func TestNodeCertificateRequestForbidden(t *testing.T) {
+	if nodeCertificateRequestForbidden(nil) {
+		t.Fatal("nil node should not be forbidden")
+	}
+	for _, status := range []string{"deleted", "suspended", "banned", " DELETED "} {
+		if !nodeCertificateRequestForbidden(&controllerstorage.Node{Status: status}) {
+			t.Fatalf("status %q should be forbidden for certificate requests", status)
+		}
+	}
+	if nodeCertificateRequestForbidden(&controllerstorage.Node{Status: "offline"}) {
+		t.Fatal("offline node should not be forbidden for certificate requests")
+	}
+}

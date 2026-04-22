@@ -89,8 +89,13 @@ func runAdminBan(cmd *cobra.Command, args []string) error {
 		hostname = matchedNode.Hostname
 	}
 
-	// Delete the node
-	if err := store.DeleteNode(publicKey); err != nil {
+	if _, err := store.ApplyNodeLifecycleTransition(publicKey, controllerstorage.NodeLifecycleTransition{
+		TargetStatus:   "banned",
+		RevokeReason:   "node banned by admin",
+		AuditEventType: "node_banned",
+		AuditActor:     "admin",
+		AuditSummary:   "Node banned by admin",
+	}); err != nil {
 		return fmt.Errorf("failed to ban device: %w", err)
 	}
 

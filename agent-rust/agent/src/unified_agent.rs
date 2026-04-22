@@ -30,8 +30,11 @@ use crate::qos::QoSManager;
 use crate::identity::IdentityManager;
 use crate::metrics;
 use crate::config::{AgentConfig, ConfigManager};
+use crate::certificate_client;
 
 const BPF_FS_PATH: &str = "/sys/fs/bpf/aria";
+const CERTIFICATE_RENEW_BEFORE: Duration = Duration::from_secs(72 * 60 * 60);
+const CERTIFICATE_RENEW_CHECK_INTERVAL: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UnixRequest {
@@ -439,6 +442,7 @@ impl UnifiedAgent {
         
         let mut sync_interval = tokio::time::interval(self.config.sync_interval);
         let mut metrics_timer = tokio::time::interval(Duration::from_secs(30));
+        let mut certificate_renew_timer = tokio::time::interval(CERTIFICATE_RENEW_CHECK_INTERVAL);
         let mut sighup = signal(SignalKind::hangup())?;
         
         loop {
@@ -473,6 +477,12 @@ impl UnifiedAgent {
 
                     if let Err(e) = self.collect_and_report_metrics().await {
                         tracing::error!("Metrics collection failed: {:?}", e);
+                    }
+                }
+
+                _ = certificate_renew_timer.tick() => {
+                    if let Err(e) = self.maybe_renew_certificate().await {
+                        tracing::warn!("Certificate renewal check failed: {:?}", e);
                     }
                 }
                 
@@ -2127,6 +2137,65 @@ impl UnifiedAgent {
         tracing::info!("✅ gRPC client reconnected successfully");
         Ok(())
     }
+
+    async fn maybe_renew_certificate(&mut self) -> Result<()> {
+        if self.config.current_credential.as_deref().map(str::trim).unwrap_or("").is_empty() {
+            return Ok(());
+        }
+        if self.config.client_cert.trim().is_empty()
+            || self.config.client_key.trim().is_empty()
+            || self.config.ca_cert.trim().is_empty()
+        {
+            tracing::debug!("Skipping certificate renewal check because certificate paths are incomplete");
+            return Ok(());
+        }
+
+        if !certificate_client::should_renew_certificate(&self.config.client_cert, CERTIFICATE_RENEW_BEFORE)? {
+            return Ok(());
+        }
+
+        let controller_api_url = certificate_client::resolve_controller_api_url(
+            &self.config.controller_url,
+            Some(&self.config.controller_api_url),
+        )?;
+        let common_name = self
+            .config
+            .node_id
+            .clone()
+            .or_else(|| self.config.hostname.clone())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "aria-agent".to_string());
+        let runtime_token = self
+            .config
+            .current_credential
+            .clone()
+            .context("runtime credential missing for certificate renewal")?;
+
+        tracing::info!(
+            "Client certificate is nearing expiry, requesting renewal from {}",
+            controller_api_url
+        );
+        let renewed = certificate_client::renew_certificate(
+            &controller_api_url,
+            &runtime_token,
+            &self.config.ca_cert,
+            &common_name,
+        )
+        .await?;
+
+        certificate_client::write_renewed_certificate_files(
+            &self.config.ca_cert,
+            &self.config.client_cert,
+            &self.config.client_key,
+            &renewed,
+        )?;
+        self.reconnect_grpc().await?;
+        tracing::info!(
+            "Client certificate renewed successfully; new expiry at {:?}",
+            renewed.not_after
+        );
+        Ok(())
+    }
     
     async fn reload_config(&mut self) -> Result<()> {
         tracing::info!("Reloading configuration...");
@@ -2139,6 +2208,15 @@ impl UnifiedAgent {
             tracing::info!("Sync interval changed: {:?} -> {:?}", 
                 self.config.sync_interval, new_config.sync_interval);
             self.config.sync_interval = new_config.sync_interval;
+        }
+
+        if new_config.controller_api_url != self.config.controller_api_url {
+            tracing::info!(
+                "Controller API URL changed: {} -> {}",
+                self.config.controller_api_url,
+                new_config.controller_api_url
+            );
+            self.config.controller_api_url = new_config.controller_api_url.clone();
         }
         
         // 2. 检测 Controller URL 变更（需要重连）

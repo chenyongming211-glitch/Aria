@@ -12,6 +12,8 @@ pub struct BootstrapConfig {
     #[serde(default)]
     pub controller_url: String,
     #[serde(default)]
+    pub controller_api_url: String,
+    #[serde(default)]
     pub ca_cert: String,
     #[serde(default)]
     pub client_cert: String,
@@ -73,6 +75,8 @@ pub struct AgentState {
 pub struct AgentConfig {
     #[serde(default)]
     pub controller_url: String,
+    #[serde(default)]
+    pub controller_api_url: String,
     #[serde(default)]
     pub ca_cert: String,
     #[serde(default)]
@@ -171,6 +175,7 @@ impl Default for BootstrapConfig {
     fn default() -> Self {
         Self {
             controller_url: String::new(),
+            controller_api_url: String::new(),
             ca_cert: String::new(),
             client_cert: String::new(),
             client_key: String::new(),
@@ -216,6 +221,7 @@ impl AgentConfig {
     pub fn from_parts(bootstrap: BootstrapConfig, state: AgentState) -> Self {
         Self {
             controller_url: bootstrap.controller_url,
+            controller_api_url: bootstrap.controller_api_url,
             ca_cert: bootstrap.ca_cert,
             client_cert: bootstrap.client_cert,
             client_key: bootstrap.client_key,
@@ -248,6 +254,7 @@ impl AgentConfig {
     pub fn to_bootstrap(&self) -> BootstrapConfig {
         BootstrapConfig {
             controller_url: self.controller_url.clone(),
+            controller_api_url: self.controller_api_url.clone(),
             ca_cert: self.ca_cert.clone(),
             client_cert: self.client_cert.clone(),
             client_key: self.client_key.clone(),

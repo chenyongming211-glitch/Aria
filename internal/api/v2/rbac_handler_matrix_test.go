@@ -178,6 +178,50 @@ func expectNodeLookup(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, routes s
 		))
 }
 
+func expectNodeLifecycleTransitionByPublicKey(
+	mock sqlmock.Sqlmock,
+	publicKey string,
+	tenantID, nodeID uuid.UUID,
+	fromStatus, targetStatus, revokeReason, eventType, actor, summary string,
+) {
+	now := time.Now()
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE public_key = $1 FOR UPDATE`)).
+		WithArgs(publicKey).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+			"created_at", "updated_at",
+		}).AddRow(
+			nodeID, publicKey, "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-1", "10.0.0.10", 10,
+			time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, fromStatus, int64(0), "{}", "", now, now,
+		))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE nodes
+		SET status = $2, updated_at = NOW()
+		WHERE public_key = $1
+	`)).
+		WithArgs(publicKey, targetStatus).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+			UPDATE node_certificates
+			SET status = $2,
+			    revoked_at = NOW(),
+			    revoke_reason = $3,
+			    updated_at = NOW()
+			WHERE node_id = $1
+		`)).
+		WithArgs(nodeID, controllerstorage.CertStatusRevoked, revokeReason).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+			INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`)).
+		WithArgs(tenantID, nodeID, eventType, actor, summary, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+}
+
 func expectACLListSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 	now := time.Now()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),

@@ -52,6 +52,9 @@ func (s *Storage) UpsertNodeCertificate(cert *NodeCertificate) error {
 			not_before = EXCLUDED.not_before,
 			not_after = EXCLUDED.not_after,
 			status = EXCLUDED.status,
+			issued_at = NOW(),
+			revoked_at = NULL,
+			revoke_reason = '',
 			renewed_from = EXCLUDED.renewed_from,
 			updated_at = NOW()
 	`

@@ -566,6 +566,7 @@ func (c *Controller) StartCleanupRoutine() {
 		defer ticker.Stop()
 		for range ticker.C {
 			c.cleanupStaleNodes()
+			c.reconcileCertificateLifecycle()
 			c.tokenStore.CleanupExpired()
 		}
 	}()
@@ -636,6 +637,69 @@ func (c *Controller) cleanupStaleNodes() {
 		}
 		if _, err := c.store.CreateAuditEvent(auditEvent); err != nil {
 			c.logger.Error("Failed to create node_online audit event for node %s: %v", node.Hostname, err)
+		}
+	}
+}
+
+func (c *Controller) reconcileCertificateLifecycle() {
+	if c.certService == nil {
+		return
+	}
+
+	expired, err := c.store.MarkExpiredNodeCertificates(time.Now())
+	if err != nil {
+		c.logger.Error("Failed to mark expired node certificates: %v", err)
+	} else {
+		for _, cert := range expired {
+			node, nodeErr := c.store.GetNodeByID(cert.NodeID)
+			if nodeErr != nil {
+				c.logger.Error("Failed to load node %s for expired certificate handling: %v", cert.NodeID, nodeErr)
+				continue
+			}
+			hostname := cert.NodeID.String()
+			if node != nil && node.Hostname != "" {
+				hostname = node.Hostname
+			}
+			if node != nil {
+				if err := c.store.ResolveCertificateExpiringAlert(node.TenantID, node.ID); err != nil {
+					c.logger.Warn("Failed to resolve certificate_expiring alert for node %s: %v", hostname, err)
+				}
+				if err := c.store.GenerateCertificateExpiredAlert(node.TenantID, node.ID, hostname, cert.NotAfter); err != nil {
+					c.logger.Warn("Failed to generate certificate_expired alert for node %s: %v", hostname, err)
+				}
+				nodeID := node.ID
+				if _, err := c.store.CreateAuditEvent(&controllerstorage.AuditEvent{
+					TenantID:  node.TenantID,
+					NodeID:    &nodeID,
+					EventType: "certificate_expired",
+					Actor:     "system",
+					Summary:   fmt.Sprintf("节点 %s 证书已过期", hostname),
+					Detail: map[string]interface{}{
+						"serial_number": cert.SerialNumber,
+						"not_after":     cert.NotAfter.UTC().Format(time.RFC3339),
+					},
+				}); err != nil {
+					c.logger.Warn("Failed to create certificate_expired audit event for node %s: %v", hostname, err)
+				}
+			}
+		}
+	}
+
+	deadline := time.Now().Add(c.certService.RenewBefore())
+	candidates, err := c.store.ListCertificatesExpiringBefore(deadline)
+	if err != nil {
+		c.logger.Error("Failed to list expiring node certificates: %v", err)
+		return
+	}
+	for _, candidate := range candidates {
+		tenantID, parseTenantErr := uuid.Parse(candidate.TenantID)
+		nodeID, parseNodeErr := uuid.Parse(candidate.NodeID)
+		if parseTenantErr != nil || parseNodeErr != nil {
+			c.logger.Warn("Skipping certificate renewal candidate with invalid ids tenant=%q node=%q", candidate.TenantID, candidate.NodeID)
+			continue
+		}
+		if err := c.store.GenerateCertificateExpiringAlert(tenantID, nodeID, candidate.Hostname, candidate.NotAfter); err != nil {
+			c.logger.Warn("Failed to generate certificate_expiring alert for node %s: %v", candidate.Hostname, err)
 		}
 	}
 }
@@ -1050,16 +1114,20 @@ func (c *Controller) HandleUnregister(w http.ResponseWriter, r *http.Request) {
 		assignedIP = node.AssignedIP
 	}
 
-	// Mark node as deleted (soft delete) instead of hard delete
-	if err := c.store.MarkNodeDeleted(req.PublicKey); err != nil {
+	// Mark node as deleted (soft delete) instead of hard delete.
+	if _, err := c.store.ApplyNodeLifecycleTransition(req.PublicKey, controllerstorage.NodeLifecycleTransition{
+		TargetStatus:   "deleted",
+		RevokeReason:   "node unregistered",
+		AuditEventType: "node_unregistered",
+		AuditActor:     "agent",
+		AuditSummary:   "Node unregistered",
+		AuditDetail: map[string]interface{}{
+			"assigned_ip": assignedIP,
+		},
+	}); err != nil {
 		c.logger.Error("Failed to mark node as deleted %s: %v", req.PublicKey[:8], err)
 		http.Error(w, "Failed to delete node", http.StatusInternalServerError)
 		return
-	}
-	if node != nil {
-		if err := c.store.RevokeNodeCertificate(node.ID, "node unregistered"); err != nil {
-			c.logger.Warn("Failed to revoke certificate for node %s: %v", req.PublicKey[:8], err)
-		}
 	}
 
 	c.logger.Info("Node marked as deleted: %s (hostname=%s, IP=%s)", req.PublicKey[:8], hostname, assignedIP)
@@ -1131,6 +1199,10 @@ func (c *Controller) handleIssueOrRenewCertificate(w http.ResponseWriter, r *htt
 			http.Error(w, "No existing certificate to renew", http.StatusNotFound)
 			return
 		}
+		if !strings.EqualFold(strings.TrimSpace(existing.Status), controllerstorage.CertStatusIssued) {
+			http.Error(w, "Current certificate is not eligible for renewal", http.StatusConflict)
+			return
+		}
 		renewedFrom = &existing.ID
 	}
 
@@ -1177,6 +1249,9 @@ func (c *Controller) resolveCertificateRequestNode(r *http.Request, req *certifi
 		if claims.TenantID != "" && node.TenantID.String() != claims.TenantID {
 			return nil, fmt.Errorf("tenant mismatch")
 		}
+		if nodeCertificateRequestForbidden(node) {
+			return nil, fmt.Errorf("node access denied: current status is '%s'", strings.ToLower(strings.TrimSpace(node.Status)))
+		}
 		return node, nil
 	}
 
@@ -1194,6 +1269,9 @@ func (c *Controller) resolveCertificateRequestNode(r *http.Request, req *certifi
 		}
 		if node.TenantID != tenantID {
 			return nil, fmt.Errorf("node tenant mismatch")
+		}
+		if nodeCertificateRequestForbidden(node) {
+			return nil, fmt.Errorf("node access denied: current status is '%s'", strings.ToLower(strings.TrimSpace(node.Status)))
 		}
 		return node, nil
 	}
@@ -1247,6 +1325,11 @@ func (c *Controller) issueNodeCertificate(node *controllerstorage.Node, csrPEM s
 	}
 	if err := c.store.UpsertNodeCertificate(certMeta); err != nil {
 		return nil, err
+	}
+	if renewedFrom != nil {
+		if err := c.store.ResolveCertificateExpiringAlert(node.TenantID, node.ID); err != nil {
+			c.logger.Warn("Failed to resolve certificate_expiring alert for node %s after renewal: %v", node.Hostname, err)
+		}
 	}
 	return c.store.GetNodeCertificate(node.ID)
 }
@@ -1983,6 +2066,18 @@ func nodeRegistrationForbidden(node *controllerstorage.Node) bool {
 	}
 	switch strings.ToLower(strings.TrimSpace(node.Status)) {
 	case "suspended", "banned":
+		return true
+	default:
+		return false
+	}
+}
+
+func nodeCertificateRequestForbidden(node *controllerstorage.Node) bool {
+	if node == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(node.Status)) {
+	case "deleted", "suspended", "banned":
 		return true
 	default:
 		return false

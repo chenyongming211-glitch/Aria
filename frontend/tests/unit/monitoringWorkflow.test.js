@@ -42,6 +42,17 @@ const {
     getAlerts: vi.fn(async () => ({
       items: [
         {
+          id: 'alert-cert-1',
+          node_id: 'node-1',
+          alert_type: 'certificate_expiring',
+          severity: 'warning',
+          title: 'Certificate expiring',
+          message: 'node certificate expires soon',
+          context: {
+            not_after: '2026-04-24T10:00:00Z'
+          }
+        },
+        {
           id: 'alert-1',
           node_id: 'node-1',
           alert_type: 'policy_failed',
@@ -280,6 +291,23 @@ describe('monitoring workflow routing', () => {
     await wrapper.vm.handleStatCardClick('nodes')
 
     expect(routerPush).toHaveBeenCalledWith({ name: 'Nodes' })
+  })
+
+  it('turns certificate alerts stat card into certificate-focused monitoring shortcuts', async () => {
+    const wrapper = mountWithStubs(Monitoring)
+    await flushPromises()
+
+    await wrapper.vm.handleStatCardClick('certificates')
+
+    expect(wrapper.vm.filterEventType).toBe('certificate_expired')
+    expect(wrapper.vm.alertsFilterMode).toBe('certificate')
+    expect(wrapper.vm.filteredAlerts).toHaveLength(1)
+    expect(wrapper.vm.filteredAlerts[0].alert_type).toBe('certificate_expiring')
+    expect(monitorApiMock.getEvents).toHaveBeenLastCalledWith({
+      limit: 50,
+      offset: 0,
+      event_type: 'certificate_expired'
+    })
   })
 })
 

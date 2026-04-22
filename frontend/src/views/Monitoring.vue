@@ -36,6 +36,8 @@
             <el-option label="All Types" value="" />
             <el-option label="Node Offline" value="node_offline" />
             <el-option label="Node Online" value="node_online" />
+            <el-option label="Certificate Expiring" value="certificate_expiring" />
+            <el-option label="Certificate Expired" value="certificate_expired" />
             <el-option label="Sync Failed" value="sync_failed" />
             <el-option label="Policy Failed" value="policy_failed" />
             <el-option label="Command Completed" value="command_completed" />
@@ -69,16 +71,23 @@
           <div class="header-left">
             <el-icon class="header-icon"><Bell /></el-icon>
             <span class="header-title">Active Alerts</span>
-            <el-tag size="small" type="danger" v-if="alerts.length > 0">{{ alerts.length }} open</el-tag>
+            <el-tag size="small" type="danger" v-if="filteredAlerts.length > 0">{{ filteredAlerts.length }} open</el-tag>
+            <el-tag size="small" type="warning" v-if="alertsFilterMode === 'certificate'">Certificate focus</el-tag>
+          </div>
+          <div class="header-actions">
+            <el-button size="small" text @click="setAlertsFilterMode('all')">All Alerts</el-button>
+            <el-button size="small" text type="warning" @click="setAlertsFilterMode('certificate')">
+              Cert Alerts
+            </el-button>
           </div>
         </div>
       </template>
 
-      <el-empty v-if="alerts.length === 0 && !alertsLoading" description="No active alerts" />
+      <el-empty v-if="filteredAlerts.length === 0 && !alertsLoading" description="No active alerts" />
 
       <el-table
         v-else
-        :data="alerts"
+        :data="filteredAlerts"
         size="small"
         style="width: 100%"
       >
@@ -97,7 +106,15 @@
             <div class="context-tags">
               <el-tag v-if="row.context?.policy_ref" size="small" effect="plain">{{ row.context.policy_ref }}</el-tag>
               <el-tag v-if="row.context?.command_id" size="small" effect="plain">{{ shortId(row.context.command_id) }}</el-tag>
-              <span v-if="!row.context?.policy_ref && !row.context?.command_id" class="muted-text">-</span>
+              <el-tag v-if="row.context?.not_after" size="small" type="warning" effect="plain">
+                Exp: {{ formatTime(row.context.not_after) }}
+              </el-tag>
+              <span
+                v-if="!row.context?.policy_ref && !row.context?.command_id && !row.context?.not_after"
+                class="muted-text"
+              >
+                -
+              </span>
             </div>
           </template>
         </el-table-column>
@@ -178,6 +195,9 @@
               </el-tag>
               <el-tag v-if="event.detail.policy_domain" size="small" effect="plain">
                 Domain: {{ event.detail.policy_domain }}
+              </el-tag>
+              <el-tag v-if="event.detail.not_after" size="small" type="warning" effect="plain">
+                Exp: {{ formatTime(event.detail.not_after) }}
               </el-tag>
             </div>
             <div class="event-actions-row">
@@ -283,9 +303,11 @@ const alerts = ref([])
 const eventsTotal = ref(0)
 const eventsPage = ref(1)
 const eventsLimit = 50
+const alertsFilterMode = ref('all')
 
 const filterEventType = ref('')
 const filterSeverity = ref('')
+const certificateAlertTypes = ['certificate_expiring', 'certificate_expired']
 
 // --- Computed ---
 const statCards = computed(() => [
@@ -337,10 +359,28 @@ const statCards = computed(() => [
     value: stats.value.active_alerts_count,
     icon: Bell,
     color: stats.value.active_alerts_count > 0 ? 'red' : 'green'
+  },
+  {
+    key: 'certificates',
+    label: 'Cert Alerts',
+    value: certificateAlertsCount.value,
+    icon: Bell,
+    color: certificateAlertsCount.value > 0 ? 'orange' : 'green'
   }
 ])
 
-const isStatCardClickable = (key) => ['nodes', 'failed', 'alerts'].includes(key)
+const filteredAlerts = computed(() => {
+  if (alertsFilterMode.value === 'certificate') {
+    return alerts.value.filter((alert) => isCertificateAlert(alert?.alert_type))
+  }
+  return alerts.value
+})
+
+const certificateAlertsCount = computed(() => (
+  alerts.value.filter((alert) => isCertificateAlert(alert?.alert_type)).length
+))
+
+const isStatCardClickable = (key) => ['nodes', 'failed', 'alerts', 'certificates'].includes(key)
 
 // --- Methods ---
 const loadStats = async () => {
@@ -384,7 +424,7 @@ const loadEvents = async () => {
 const loadAlerts = async () => {
   try {
     alertsLoading.value = true
-    const data = await useMonitorApi.getAlerts({ status: 'active', limit: 10 })
+    const data = await useMonitorApi.getAlerts({ status: 'active', limit: 100 })
     alerts.value = data?.items || []
   } catch (e) {
     console.error('Failed to load alerts:', e)
@@ -425,6 +465,14 @@ const handleResolve = async (alertId) => {
   }
 }
 
+const isCertificateAlert = (alertType = '') => certificateAlertTypes.includes(alertType)
+
+const setAlertsFilterMode = async (mode) => {
+  alertsFilterMode.value = mode
+  await loadAlerts()
+  await scrollToSection(alertsSectionRef)
+}
+
 const goToNodeDetail = (nodeId) => {
   router.push({ name: 'NodeMonitorDetail', params: { nodeId } })
 }
@@ -445,8 +493,13 @@ const handleStatCardClick = async (key) => {
       await scrollToSection(eventsSectionRef)
       break
     case 'alerts':
-      await loadAlerts()
-      await scrollToSection(alertsSectionRef)
+      await setAlertsFilterMode('all')
+      break
+    case 'certificates':
+      filterEventType.value = 'certificate_expired'
+      eventsPage.value = 1
+      await loadEvents()
+      await setAlertsFilterMode('certificate')
       break
     default:
       break

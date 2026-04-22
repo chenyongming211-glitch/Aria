@@ -299,16 +299,89 @@ func TestNodesAPI_DeleteReturnsInternalErrorWhenMarkDeletedFails(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	expectNodeLookup(mock, tenantID, nodeID, "{}")
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT public_key FROM nodes WHERE id = $1 AND tenant_id = $2`)).
-		WithArgs(nodeID, tenantID).
-		WillReturnRows(sqlmock.NewRows([]string{"public_key"}).AddRow("pub-key-1"))
+	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE public_key = $1 FOR UPDATE`)).
+		WithArgs("pub-key-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+			"created_at", "updated_at",
+		}).AddRow(
+			nodeID, "pub-key-1", "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-1", "10.0.0.10", 10,
+			time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "online", int64(0), "{}", "", time.Now(), time.Now(),
+		))
 	mock.ExpectExec(regexp.QuoteMeta(`
 		UPDATE nodes
-		SET status = 'deleted', updated_at = NOW()
+		SET status = $2, updated_at = NOW()
 		WHERE public_key = $1
 	`)).
-		WithArgs("pub-key-1").
+		WithArgs("pub-key-1", "deleted").
 		WillReturnError(errors.New("mark deleted failed"))
+	mock.ExpectRollback()
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(
+		http.MethodDelete,
+		"/api/v2/tenants/"+tenantID.String()+"/nodes/"+nodeID.String(),
+		nil,
+	), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rr.Code)
+	}
+	if resp.Code != apibase.CodeUpdateNodeFailed {
+		t.Fatalf("expected code %s, got %s", apibase.CodeUpdateNodeFailed, resp.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestNodesAPI_DeleteReturnsInternalErrorWhenCertificateRevokeFails(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE public_key = $1 FOR UPDATE`)).
+		WithArgs("pub-key-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+			"created_at", "updated_at",
+		}).AddRow(
+			nodeID, "pub-key-1", "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-1", "10.0.0.10", 10,
+			time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "online", int64(0), "{}", "", time.Now(), time.Now(),
+		))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE nodes
+		SET status = $2, updated_at = NOW()
+		WHERE public_key = $1
+	`)).
+		WithArgs("pub-key-1", "deleted").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+			UPDATE node_certificates
+			SET status = $2,
+			    revoked_at = NOW(),
+			    revoke_reason = $3,
+			    updated_at = NOW()
+			WHERE node_id = $1
+	`)).
+		WithArgs(nodeID, controllerstorage.CertStatusRevoked, "node deleted via API").
+		WillReturnError(errors.New("revoke failed"))
+	mock.ExpectRollback()
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSuperAdmin(httptest.NewRequest(
@@ -398,16 +471,8 @@ func TestNodesAPI_DeleteSuccessReturnsDeletedStatus(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	expectNodeLookup(mock, tenantID, nodeID, "{}")
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT public_key FROM nodes WHERE id = $1 AND tenant_id = $2`)).
-		WithArgs(nodeID, tenantID).
-		WillReturnRows(sqlmock.NewRows([]string{"public_key"}).AddRow("pub-key-1"))
-	mock.ExpectExec(regexp.QuoteMeta(`
-		UPDATE nodes
-		SET status = 'deleted', updated_at = NOW()
-		WHERE public_key = $1
-	`)).
-		WithArgs("pub-key-1").
-		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	expectNodeLifecycleTransitionByPublicKey(mock, "pub-key-1", tenantID, nodeID, "online", "deleted", "node deleted via API", "node_deleted", "user", "Node deleted via API")
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSuperAdmin(httptest.NewRequest(
