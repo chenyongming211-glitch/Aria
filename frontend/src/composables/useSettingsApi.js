@@ -28,5 +28,10 @@ export const useSettingsApi = {
     return response.data?.data || response.data
   },
 
+  restoreBackup: async (backupId) => {
+    const response = await api.post(API_ENDPOINTS.SETTINGS.BACKUP_RESTORE(backupId))
+    return response.data?.data || response.data
+  },
+
   downloadBackupUrl: (backupId) => API_ENDPOINTS.SETTINGS.BACKUP_DOWNLOAD(backupId)
 }

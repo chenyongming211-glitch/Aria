@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -137,6 +138,101 @@ func TestSettingsBackupUploadStoresValidatedFile(t *testing.T) {
 	}
 	if !strings.Contains(listRR.Body.String(), uploadedID) {
 		t.Fatalf("expected listed backups to contain %q, got %s", uploadedID, listRR.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestSettingsBackupRestoreAppliesManifest(t *testing.T) {
+	t.Setenv("ARIA_BACKUP_DIR", t.TempDir())
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	backupDir, err := backupDir()
+	if err != nil {
+		t.Fatalf("backupDir failed: %v", err)
+	}
+	backupID := "restore-fixture"
+	backupPath := backupDir + "/" + backupID + ".json"
+	manifest := `{
+	  "version":"v0.1.0",
+	  "created_at":"2026-04-22T15:00:00Z",
+	  "created_by":"alice",
+	  "tables":{
+	    "tenants":[{"id":"11111111-1111-1111-1111-111111111111","name":"Tenant A","code":"tenant-a","status":"active","resource_quota":{},"created_at":"2026-04-22T15:00:00Z","updated_at":"2026-04-22T15:00:00Z"}],
+	    "users":[{"id":"22222222-2222-2222-2222-222222222222","username":"alice","password_hash":"hash","tenant_id":"11111111-1111-1111-1111-111111111111","role":"admin","email":"alice@example.com","must_change_password":false,"created_at":"2026-04-22T15:00:00Z","last_login":"2026-04-22T15:00:00Z"}],
+	    "roles":[],
+	    "tokens":[],
+	    "nodes":[],
+	    "acl_rules":[],
+	    "qos_rules":[],
+	    "blacklist_rules":[]
+	  }
+	}`
+	if err := os.WriteFile(backupPath, []byte(manifest), 0o600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	mock.ExpectBegin()
+	for _, table := range backupRestoreCleanupTables {
+		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM " + table)).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+	}
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO tenants (id, name, code, status, resource_quota, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)")).
+		WithArgs(
+			"11111111-1111-1111-1111-111111111111",
+			"Tenant A",
+			"tenant-a",
+			"active",
+			"{}",
+			"2026-04-22T15:00:00Z",
+			"2026-04-22T15:00:00Z",
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO users (id, username, password_hash, tenant_id, role, email, must_change_password, created_at, last_login) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)")).
+		WithArgs(
+			"22222222-2222-2222-2222-222222222222",
+			"alice",
+			"hash",
+			"11111111-1111-1111-1111-111111111111",
+			"admin",
+			"alice@example.com",
+			false,
+			"2026-04-22T15:00:00Z",
+			"2026-04-22T15:00:00Z",
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSettingsContext(httptest.NewRequest(http.MethodPost, "/api/v2/settings/backups/"+backupID+"/restore", nil), "admin", "bob")
+	rr := httptest.NewRecorder()
+
+	router.HandleSettings(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected restore status %d, got %d, body=%s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	if data["backup_id"] != backupID {
+		t.Fatalf("expected backup_id=%q, got %#v", backupID, data["backup_id"])
+	}
+	restoredTables, ok := data["restored_tables"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected restored_tables field, got %#v", data["restored_tables"])
+	}
+	if restoredTables["tenants"] != float64(1) {
+		t.Fatalf("expected tenants restore count 1, got %#v", restoredTables["tenants"])
+	}
+	if restoredTables["users"] != float64(1) {
+		t.Fatalf("expected users restore count 1, got %#v", restoredTables["users"])
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

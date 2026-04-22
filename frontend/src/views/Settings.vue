@@ -80,6 +80,21 @@
                   {{ currentLang === 'zh' ? '下载' : 'Download' }}
                 </el-button>
                 <el-popconfirm
+                  :title="currentLang === 'zh' ? '恢复会覆盖当前配置，确定继续吗？' : 'Restore will replace the current configuration. Continue?'"
+                  @confirm="restoreBackup(row.id)"
+                >
+                  <template #reference>
+                    <el-button
+                      size="small"
+                      type="warning"
+                      :disabled="!canWriteSettings || restoringIds.has(row.id)"
+                      :loading="restoringIds.has(row.id)"
+                    >
+                      {{ currentLang === 'zh' ? '恢复' : 'Restore' }}
+                    </el-button>
+                  </template>
+                </el-popconfirm>
+                <el-popconfirm
                   :title="currentLang === 'zh' ? '确定删除这个备份吗？' : 'Delete this backup?'"
                   @confirm="deleteBackup(row.id)"
                 >
@@ -123,6 +138,7 @@ const creating = ref(false)
 const uploading = ref(false)
 const backupHistory = ref([])
 const deletingIds = ref(new Set())
+const restoringIds = ref(new Set())
 const uploadInputRef = ref(null)
 
 const loadBackups = async () => {
@@ -195,6 +211,23 @@ const deleteBackup = async (backupId) => {
     const reset = new Set(deletingIds.value)
     reset.delete(backupId)
     deletingIds.value = reset
+  }
+}
+
+const restoreBackup = async (backupId) => {
+  const next = new Set(restoringIds.value)
+  next.add(backupId)
+  restoringIds.value = next
+  try {
+    await useSettingsApi.restoreBackup(backupId)
+    ElMessage.success(currentLang.value === 'zh' ? '备份恢复完成' : 'Backup restored successfully')
+    await loadBackups()
+  } catch (error) {
+    ElMessage.error(error.message || (currentLang.value === 'zh' ? '恢复备份失败' : 'Failed to restore backup'))
+  } finally {
+    const reset = new Set(restoringIds.value)
+    reset.delete(backupId)
+    restoringIds.value = reset
   }
 }
 

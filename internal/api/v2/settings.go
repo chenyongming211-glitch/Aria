@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +16,8 @@ import (
 	"aria/internal/api/apibase"
 	"aria/internal/api/middleware"
 	"aria/pkg/controllerstorage"
+
+	"github.com/lib/pq"
 )
 
 const backupTimestampLayout = "2006-01-02 15:04:05"
@@ -53,6 +56,43 @@ type backupFile struct {
 	record backupRecord
 	path   string
 	modAt  time.Time
+}
+
+type backupTableSpec struct {
+	Name    string
+	Columns []string
+}
+
+var backupRestoreTables = []backupTableSpec{
+	{Name: "tenants", Columns: []string{"id", "name", "code", "status", "resource_quota", "created_at", "updated_at"}},
+	{Name: "roles", Columns: []string{"id", "tenant_id", "name", "description", "is_system", "permissions", "created_at", "updated_at"}},
+	{Name: "users", Columns: []string{"id", "username", "password_hash", "tenant_id", "role", "email", "must_change_password", "created_at", "last_login"}},
+	{Name: "tokens", Columns: []string{"id", "token", "tag", "tenant_id", "max_uses", "used_count", "expires_at", "created_at", "created_by", "status", "last_used_at", "last_used_by"}},
+	{Name: "nodes", Columns: []string{"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset", "last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token", "created_at", "updated_at"}},
+	{Name: "acl_rules", Columns: []string{"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "priority", "enabled", "description", "created_at", "updated_at"}},
+	{Name: "qos_rules", Columns: []string{"id", "tenant_id", "node_id", "category", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "enabled", "description", "created_at", "updated_at"}},
+	{Name: "blacklist_rules", Columns: []string{"id", "tenant_id", "node_id", "scope", "cidr", "port", "enabled", "description", "created_at", "updated_at"}},
+}
+
+var backupRestoreCleanupTables = []string{
+	"policy_deliveries",
+	"agent_commands",
+	"alerts",
+	"audit_events",
+	"blacklist_rules",
+	"qos_rules",
+	"acl_rules",
+	"node_control_states",
+	"node_certificates",
+	"device_configs",
+	"tunnel_links",
+	"ip_allocations",
+	"ip_pools",
+	"users",
+	"roles",
+	"tokens",
+	"nodes",
+	"tenants",
 }
 
 // HandleSettings handles /api/v2/settings/* routes.
@@ -116,7 +156,11 @@ func (r *Router) handleBackups(w http.ResponseWriter, req *http.Request, path st
 				return
 			}
 		case "restore":
-			apibase.WriteError(w, http.StatusNotImplemented, apibase.CodeEndpointNotFound, "Backup restore is not enabled yet", nil)
+			if req.Method == http.MethodPost {
+				r.restoreBackup(w, req, backupID)
+				return
+			}
+			apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
 			return
 		}
 		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Unknown backup endpoint", nil)
@@ -339,6 +383,40 @@ func (r *Router) deleteBackup(w http.ResponseWriter, req *http.Request, backupID
 	apibase.WriteSuccess(w, map[string]string{"id": backupID, "status": "deleted"}, "Backup deleted successfully")
 }
 
+func (r *Router) restoreBackup(w http.ResponseWriter, req *http.Request, backupID string) {
+	backup, err := r.findBackupFile(backupID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Backup not found", nil)
+			return
+		}
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load backup: "+err.Error(), nil)
+		return
+	}
+
+	manifest, err := readBackupManifestHeader(backup.path)
+	if err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Failed to decode backup manifest: "+err.Error(), nil)
+		return
+	}
+	if err := validateBackupManifest(manifest, true); err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Backup restore validation failed: "+err.Error(), nil)
+		return
+	}
+
+	restoredTables, err := r.restoreBackupManifest(manifest)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to restore backup: "+err.Error(), nil)
+		return
+	}
+
+	apibase.WriteSuccess(w, map[string]interface{}{
+		"backup_id":       backupID,
+		"restored_tables": restoredTables,
+		"restored_at":     time.Now().UTC().Format(time.RFC3339),
+	}, "Backup restored successfully")
+}
+
 func (r *Router) buildBackupManifest(createdBy string) (*backupManifest, error) {
 	tables := make(map[string][]interface{}, len(backupExportTables))
 	for _, table := range backupExportTables {
@@ -508,6 +586,37 @@ func readBackupManifestHeader(path string) (*backupManifest, error) {
 	return &manifest, nil
 }
 
+func (r *Router) restoreBackupManifest(manifest *backupManifest) (map[string]int, error) {
+	tx, err := r.store.DB().Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	for _, table := range backupRestoreCleanupTables {
+		if _, err := tx.Exec("DELETE FROM " + table); err != nil {
+			return nil, fmt.Errorf("cleanup %s failed: %w", table, err)
+		}
+	}
+
+	restoredTables := make(map[string]int, len(backupRestoreTables))
+	for _, spec := range backupRestoreTables {
+		rows := manifest.Tables[spec.Name]
+		count, err := restoreBackupTable(tx, spec, rows)
+		if err != nil {
+			return nil, err
+		}
+		restoredTables[spec.Name] = count
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return restoredTables, nil
+}
+
 func validateBackupManifest(manifest *backupManifest, requireRestoreFields bool) error {
 	if manifest == nil {
 		return fmt.Errorf("manifest is required")
@@ -571,4 +680,109 @@ func uploadedBackupID(filename string) string {
 		id = "uploaded-backup"
 	}
 	return id
+}
+
+func restoreBackupTable(tx *sql.Tx, spec backupTableSpec, rows []interface{}) (int, error) {
+	if len(rows) == 0 {
+		return 0, nil
+	}
+
+	placeholders := make([]string, len(spec.Columns))
+	for i := range spec.Columns {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+	}
+	query := fmt.Sprintf(
+		"INSERT INTO %s (%s) VALUES (%s)",
+		spec.Name,
+		strings.Join(spec.Columns, ", "),
+		strings.Join(placeholders, ", "),
+	)
+
+	for _, rawRow := range rows {
+		item, ok := rawRow.(map[string]interface{})
+		if !ok {
+			return 0, fmt.Errorf("%s rows must be objects", spec.Name)
+		}
+
+		args := make([]interface{}, len(spec.Columns))
+		for i, column := range spec.Columns {
+			value, _ := item[column]
+			normalized, err := normalizeRestoreValue(column, value)
+			if err != nil {
+				return 0, fmt.Errorf("%s.%s: %w", spec.Name, column, err)
+			}
+			args[i] = normalized
+		}
+
+		if _, err := tx.Exec(query, args...); err != nil {
+			return 0, fmt.Errorf("restore %s failed: %w", spec.Name, err)
+		}
+	}
+
+	return len(rows), nil
+}
+
+func normalizeRestoreValue(column string, value interface{}) (interface{}, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	switch column {
+	case "resource_quota":
+		return normalizeRestoreJSON(value)
+	case "permissions", "advertised_routes":
+		return normalizeRestoreTextArray(value)
+	}
+
+	switch typed := value.(type) {
+	case float64:
+		if math.Trunc(typed) == typed {
+			return int64(typed), nil
+		}
+		return typed, nil
+	case map[string]interface{}, []interface{}:
+		return normalizeRestoreJSON(typed)
+	default:
+		return typed, nil
+	}
+}
+
+func normalizeRestoreJSON(value interface{}) (interface{}, error) {
+	switch typed := value.(type) {
+	case string:
+		return typed, nil
+	case []byte:
+		return string(typed), nil
+	default:
+		payload, err := json.Marshal(typed)
+		if err != nil {
+			return nil, err
+		}
+		return string(payload), nil
+	}
+}
+
+func normalizeRestoreTextArray(value interface{}) (interface{}, error) {
+	switch typed := value.(type) {
+	case nil:
+		return nil, nil
+	case string:
+		var parsed pq.StringArray
+		if err := parsed.Scan(typed); err == nil {
+			return parsed, nil
+		}
+		return pq.Array([]string{typed}), nil
+	case []byte:
+		return normalizeRestoreTextArray(string(typed))
+	case []string:
+		return pq.Array(typed), nil
+	case []interface{}:
+		items := make([]string, 0, len(typed))
+		for _, entry := range typed {
+			items = append(items, strings.TrimSpace(fmt.Sprint(entry)))
+		}
+		return pq.Array(items), nil
+	default:
+		return nil, fmt.Errorf("unsupported array value %T", value)
+	}
 }
