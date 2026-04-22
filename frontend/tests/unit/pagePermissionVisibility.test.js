@@ -82,6 +82,7 @@ vi.mock('@/composables/useSettingsApi', () => ({
   useSettingsApi: {
     listBackups: vi.fn(async () => []),
     createBackup: vi.fn(async () => ({})),
+    uploadBackup: vi.fn(async () => ({})),
     deleteBackup: vi.fn(async () => ({})),
     downloadBackupUrl: vi.fn((id) => `/v2/settings/backups/${id}/download`)
   }

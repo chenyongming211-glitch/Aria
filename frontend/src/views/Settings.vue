@@ -41,9 +41,21 @@
                 ? '创建当前控制面配置快照，包含租户、用户、角色、节点及策略数据。'
                 : 'Create a snapshot of the current control-plane configuration, including tenants, users, roles, nodes, and policy data.' }}
             </p>
-            <el-button type="primary" :disabled="!canWriteSettings || creating" :loading="creating" @click="createBackup">
-              {{ currentLang === 'zh' ? '立即创建备份' : 'Create Backup' }}
-            </el-button>
+            <div class="backup-action-buttons">
+              <input
+                ref="uploadInputRef"
+                class="backup-upload-input"
+                type="file"
+                accept=".json,application/json"
+                @change="handleUploadBackup"
+              />
+              <el-button :disabled="!canWriteSettings || uploading" :loading="uploading" @click="triggerUploadBackup">
+                {{ currentLang === 'zh' ? '上传备份' : 'Upload Backup' }}
+              </el-button>
+              <el-button type="primary" :disabled="!canWriteSettings || creating" :loading="creating" @click="createBackup">
+                {{ currentLang === 'zh' ? '立即创建备份' : 'Create Backup' }}
+              </el-button>
+            </div>
           </div>
         </el-card>
 
@@ -108,8 +120,10 @@ const canWriteSettings = computed(() => hasPermission('settings:write'))
 
 const loading = ref(false)
 const creating = ref(false)
+const uploading = ref(false)
 const backupHistory = ref([])
 const deletingIds = ref(new Set())
+const uploadInputRef = ref(null)
 
 const loadBackups = async () => {
   loading.value = true
@@ -132,6 +146,31 @@ const createBackup = async () => {
     ElMessage.error(error.message || (currentLang.value === 'zh' ? '创建备份失败' : 'Failed to create backup'))
   } finally {
     creating.value = false
+  }
+}
+
+const triggerUploadBackup = () => {
+  uploadInputRef.value?.click()
+}
+
+const handleUploadBackup = async (event) => {
+  const file = event?.target?.files?.[0]
+  if (!file) {
+    return
+  }
+
+  uploading.value = true
+  try {
+    const uploaded = await useSettingsApi.uploadBackup(file)
+    backupHistory.value = [uploaded, ...backupHistory.value.filter(item => item.id !== uploaded.id)]
+    ElMessage.success(currentLang.value === 'zh' ? '备份上传成功' : 'Backup uploaded successfully')
+  } catch (error) {
+    ElMessage.error(error.message || (currentLang.value === 'zh' ? '上传备份失败' : 'Failed to upload backup'))
+  } finally {
+    uploading.value = false
+    if (event?.target) {
+      event.target.value = ''
+    }
   }
 }
 
@@ -197,6 +236,16 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   gap: 16px;
+}
+
+.backup-action-buttons {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.backup-upload-input {
+  display: none;
 }
 
 .backup-description {

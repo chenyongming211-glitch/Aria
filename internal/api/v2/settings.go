@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,13 +18,14 @@ import (
 )
 
 const backupTimestampLayout = "2006-01-02 15:04:05"
+const maxBackupUploadBytes = 10 << 20
 
 var backupExportTables = []struct {
 	Name  string
 	Query string
 }{
 	{Name: "tenants", Query: `SELECT id, name, code, status, resource_quota, created_at, updated_at FROM tenants ORDER BY created_at ASC`},
-	{Name: "users", Query: `SELECT id, username, tenant_id, role, email, COALESCE(must_change_password, false) AS must_change_password, created_at, last_login FROM users ORDER BY created_at ASC`},
+	{Name: "users", Query: `SELECT id, username, password_hash, tenant_id, role, email, COALESCE(must_change_password, false) AS must_change_password, created_at, last_login FROM users ORDER BY created_at ASC`},
 	{Name: "roles", Query: `SELECT id, tenant_id, name, description, is_system, permissions, created_at, updated_at FROM roles ORDER BY created_at ASC`},
 	{Name: "tokens", Query: `SELECT id, token, tag, tenant_id, max_uses, used_count, expires_at, created_at, created_by, status, last_used_at, last_used_by FROM tokens ORDER BY created_at ASC`},
 	{Name: "nodes", Query: `SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, runtime_mode, kernel_version, has_aesni, status, offline_since, advertised_routes, enrolled_with_token, created_at, updated_at FROM nodes ORDER BY created_at ASC`},
@@ -89,7 +91,11 @@ func (r *Router) handleBackups(w http.ResponseWriter, req *http.Request, path st
 			apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
 		}
 	case rest == "/upload":
-		apibase.WriteError(w, http.StatusNotImplemented, apibase.CodeEndpointNotFound, "Backup upload is not enabled yet", nil)
+		if req.Method == http.MethodPost {
+			r.uploadBackup(w, req)
+			return
+		}
+		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
 	default:
 		parts := strings.Split(strings.Trim(rest, "/"), "/")
 		backupID := parts[0]
@@ -188,6 +194,90 @@ func (r *Router) createBackup(w http.ResponseWriter, req *http.Request) {
 	}
 
 	apibase.WriteSuccess(w, record, "Backup created successfully")
+}
+
+func (r *Router) uploadBackup(w http.ResponseWriter, req *http.Request) {
+	if err := req.ParseMultipartForm(maxBackupUploadBytes); err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Failed to parse backup upload", nil)
+		return
+	}
+
+	file, header, err := req.FormFile("file")
+	if err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Backup file is required", nil)
+		return
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(io.LimitReader(file, maxBackupUploadBytes+1))
+	if err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Failed to read uploaded backup", nil)
+		return
+	}
+	if int64(len(content)) > maxBackupUploadBytes {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Uploaded backup is too large", nil)
+		return
+	}
+
+	var manifest backupManifest
+	if err := json.Unmarshal(content, &manifest); err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Uploaded file is not a valid backup manifest", nil)
+		return
+	}
+	if err := validateBackupManifest(&manifest, true); err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Uploaded backup is invalid: "+err.Error(), nil)
+		return
+	}
+
+	dir, err := backupDir()
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to prepare backup directory: "+err.Error(), nil)
+		return
+	}
+
+	id := uploadedBackupID(header.Filename)
+	filename := id + ".json"
+	fullPath := filepath.Join(dir, filename)
+	if _, err := os.Stat(fullPath); err == nil {
+		id = fmt.Sprintf("%s-%s", id, time.Now().UTC().Format("20060102-150405"))
+		filename = id + ".json"
+		fullPath = filepath.Join(dir, filename)
+	}
+
+	normalized, err := json.MarshalIndent(&manifest, "", "  ")
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to encode uploaded backup", nil)
+		return
+	}
+	if err := os.WriteFile(fullPath, normalized, 0o600); err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to store uploaded backup", nil)
+		return
+	}
+
+	backup, err := r.findBackupFile(id)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load uploaded backup metadata", nil)
+		return
+	}
+
+	username, _ := middleware.GetUsername(req.Context())
+	if strings.TrimSpace(username) == "" {
+		username = "system"
+	}
+	if tenantID, ok := middleware.GetTenantID(req.Context()); ok {
+		r.store.CreateAuditEvent(&controllerstorage.AuditEvent{
+			TenantID:  tenantID,
+			EventType: "settings_backup_uploaded",
+			Actor:     username,
+			Summary:   "Configuration backup uploaded",
+			Detail: map[string]interface{}{
+				"backup_id": id,
+				"filename":  filename,
+			},
+		})
+	}
+
+	apibase.WriteSuccess(w, backup.record, "Backup uploaded successfully")
 }
 
 func (r *Router) downloadBackup(w http.ResponseWriter, backupID string) {
@@ -416,4 +506,69 @@ func readBackupManifestHeader(path string) (*backupManifest, error) {
 		return nil, err
 	}
 	return &manifest, nil
+}
+
+func validateBackupManifest(manifest *backupManifest, requireRestoreFields bool) error {
+	if manifest == nil {
+		return fmt.Errorf("manifest is required")
+	}
+	if strings.TrimSpace(manifest.Version) == "" {
+		return fmt.Errorf("version is required")
+	}
+	if len(manifest.Tables) == 0 {
+		return fmt.Errorf("tables are required")
+	}
+
+	requiredTables := []string{"tenants", "users", "roles", "tokens", "nodes", "acl_rules", "qos_rules", "blacklist_rules"}
+	for _, table := range requiredTables {
+		if _, ok := manifest.Tables[table]; !ok {
+			return fmt.Errorf("missing table %q", table)
+		}
+	}
+
+	if requireRestoreFields {
+		users, ok := manifest.Tables["users"]
+		if !ok {
+			return fmt.Errorf("missing table %q", "users")
+		}
+		for _, row := range users {
+			item, ok := row.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("users rows must be objects")
+			}
+			if strings.TrimSpace(eventDetailString(item, "password_hash")) == "" {
+				return fmt.Errorf("users backup rows must include password_hash")
+			}
+		}
+	}
+
+	return nil
+}
+
+func uploadedBackupID(filename string) string {
+	base := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
+	base = strings.ToLower(strings.TrimSpace(base))
+	if base == "" {
+		base = "uploaded-backup"
+	}
+
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range base {
+		isAlphaNum := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if isAlphaNum {
+			builder.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			builder.WriteRune('-')
+			lastDash = true
+		}
+	}
+	id := strings.Trim(builder.String(), "-")
+	if id == "" {
+		id = "uploaded-backup"
+	}
+	return id
 }

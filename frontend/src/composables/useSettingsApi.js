@@ -12,6 +12,17 @@ export const useSettingsApi = {
     return response.data?.data || response.data
   },
 
+  uploadBackup: async (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await api.post(API_ENDPOINTS.SETTINGS.BACKUP_UPLOAD, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+    return response.data?.data || response.data
+  },
+
   deleteBackup: async (backupId) => {
     const response = await api.delete(API_ENDPOINTS.SETTINGS.BACKUP_DETAIL(backupId))
     return response.data?.data || response.data

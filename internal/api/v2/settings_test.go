@@ -1,8 +1,10 @@
 package v2
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -68,6 +70,73 @@ func TestSettingsBackupsLifecycle(t *testing.T) {
 	router.HandleSettings(deleteRR, deleteReq)
 	if deleteRR.Code != http.StatusOK {
 		t.Fatalf("expected delete status %d, got %d", http.StatusOK, deleteRR.Code)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestSettingsBackupUploadStoresValidatedFile(t *testing.T) {
+	t.Setenv("ARIA_BACKUP_DIR", t.TempDir())
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	fileWriter, err := writer.CreateFormFile("file", "uploaded-backup.json")
+	if err != nil {
+		t.Fatalf("CreateFormFile failed: %v", err)
+	}
+	if _, err := fileWriter.Write([]byte(`{
+	  "version":"v0.1.0",
+	  "created_at":"2026-04-22T15:00:00Z",
+	  "created_by":"alice",
+	  "tables":{
+	    "tenants":[{"id":"11111111-1111-1111-1111-111111111111","name":"Tenant A","code":"tenant-a","status":"active","resource_quota":{},"created_at":"2026-04-22T15:00:00Z","updated_at":"2026-04-22T15:00:00Z"}],
+	    "users":[{"id":"22222222-2222-2222-2222-222222222222","username":"alice","password_hash":"hash","tenant_id":"11111111-1111-1111-1111-111111111111","role":"admin","email":"alice@example.com","must_change_password":false,"created_at":"2026-04-22T15:00:00Z","last_login":"2026-04-22T15:00:00Z"}],
+	    "roles":[],
+	    "tokens":[],
+	    "nodes":[],
+	    "acl_rules":[],
+	    "qos_rules":[],
+	    "blacklist_rules":[]
+	  }
+	}`)); err != nil {
+		t.Fatalf("failed to write upload payload: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer.Close failed: %v", err)
+	}
+
+	req := withSettingsContext(httptest.NewRequest(http.MethodPost, "/api/v2/settings/backups/upload", body), "admin", "bob")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rr := httptest.NewRecorder()
+
+	router.HandleSettings(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected upload status %d, got %d, body=%s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	uploadedID := decodeBackupID(t, rr.Body.Bytes())
+	if uploadedID != "uploaded-backup" {
+		t.Fatalf("expected uploaded backup id %q, got %q", "uploaded-backup", uploadedID)
+	}
+
+	listReq := withSettingsContext(httptest.NewRequest(http.MethodGet, "/api/v2/settings/backups", nil), "admin", "")
+	listRR := httptest.NewRecorder()
+	router.HandleSettings(listRR, listReq)
+	if listRR.Code != http.StatusOK {
+		t.Fatalf("expected list status %d, got %d", http.StatusOK, listRR.Code)
+	}
+	if !strings.Contains(listRR.Body.String(), uploadedID) {
+		t.Fatalf("expected listed backups to contain %q, got %s", uploadedID, listRR.Body.String())
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
