@@ -1330,6 +1330,21 @@ func (c *Controller) issueNodeCertificate(node *controllerstorage.Node, csrPEM s
 		if err := c.store.ResolveCertificateExpiringAlert(node.TenantID, node.ID); err != nil {
 			c.logger.Warn("Failed to resolve certificate_expiring alert for node %s after renewal: %v", node.Hostname, err)
 		}
+		nodeID := node.ID
+		if _, err := c.store.CreateAuditEvent(&controllerstorage.AuditEvent{
+			TenantID:  node.TenantID,
+			NodeID:    &nodeID,
+			EventType: "certificate_renewed",
+			Actor:     "system",
+			Summary:   fmt.Sprintf("节点 %s 证书已续签", node.Hostname),
+			Detail: map[string]interface{}{
+				"serial_number": certMeta.SerialNumber,
+				"not_after":     certMeta.NotAfter.UTC().Format(time.RFC3339),
+				"renewed_from":  renewedFrom.String(),
+			},
+		}); err != nil {
+			c.logger.Warn("Failed to create certificate_renewed audit event for node %s: %v", node.Hostname, err)
+		}
 	}
 	return c.store.GetNodeCertificate(node.ID)
 }

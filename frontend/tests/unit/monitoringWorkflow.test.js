@@ -315,6 +315,31 @@ describe('monitoring workflow routing', () => {
       event_type: 'certificate_expired'
     })
   })
+
+  it('routes certificate renewal events to node detail with certificate focus', async () => {
+    const wrapper = mountWithStubs(Monitoring)
+    await flushPromises()
+
+    wrapper.vm.goToNodeFromEvent({
+      id: 'event-cert-1',
+      node_id: 'node-1',
+      event_type: 'certificate_renewed',
+      detail: {
+        renewed_from: 'cert-old-1',
+        not_after: '2026-04-24T10:00:00Z'
+      }
+    })
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-1' },
+      query: {
+        focus: 'certificate',
+        eventId: 'event-cert-1',
+        eventType: 'certificate_renewed'
+      }
+    })
+  })
 })
 
 describe('node monitor detail context handling', () => {
@@ -322,14 +347,14 @@ describe('node monitor detail context handling', () => {
     routerPush.mockReset()
     routeState.params = { nodeId: 'node-1' }
     routeState.query = {
-      focus: 'commands',
+      focus: 'certificate',
       commandId: 'cmd-1',
       policyRef: 'acl-1',
       policyDomain: 'acl',
       alertId: 'alert-1',
       eventType: 'policy_failed'
     }
-    routeState.fullPath = '/monitoring/nodes/node-1?focus=commands&commandId=cmd-1&policyRef=acl-1'
+    routeState.fullPath = '/monitoring/nodes/node-1?focus=certificate&commandId=cmd-1&policyRef=acl-1'
   })
 
   it('derives context summary and highlights the targeted command row', async () => {
@@ -340,6 +365,7 @@ describe('node monitor detail context handling', () => {
     expect(wrapper.vm.contextDescription).toContain('Policy: acl-1')
     expect(wrapper.vm.contextDescription).toContain('Command: cmd-1')
     expect(wrapper.vm.certificateStatusLabel).toBe('issued')
+    expect(wrapper.vm.scrollToFocusSection).toBeTypeOf('function')
     expect(wrapper.vm.commandRowClassName({ row: { id: 'cmd-1' } })).toBe('context-match-row')
     expect(wrapper.vm.policyRowClassName({ row: { policy_ref: 'acl-1', command_id: 'other' } })).toBe('context-match-row')
     expect(wrapper.vm.alertRowClassName({ row: { id: 'alert-1' } })).toBe('context-match-row')

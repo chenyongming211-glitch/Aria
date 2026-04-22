@@ -862,6 +862,7 @@ func TestHandleRenewCertificate_SuccessPersistsRenewedFrom(t *testing.T) {
 	expectNodeCertificateUpsert(mock, tenantID, nodeID, existingCertID).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	expectNoActiveAlertByNodeAndType(mock, tenantID, nodeID, "certificate_expiring")
+	expectAuditEventCreate(mock, tenantID, nodeID, "certificate_renewed", "system", "节点 node-1 证书已续签")
 	expectNodeCertificateGetByNodeID(mock, nodeID).
 		WillReturnRows(newNodeCertificateRows().AddRow(
 			uuid.New(), tenantID, nodeID, "new-serial", "new-cert", "new-ca", now, now.Add(48*time.Hour),
@@ -1074,6 +1075,27 @@ func expectNoActiveAlertByNodeAndType(mock sqlmock.Sqlmock, tenantID, nodeID uui
 	`)).
 		WithArgs(tenantID, nodeID, alertType).
 		WillReturnError(sql.ErrNoRows)
+}
+
+func expectAuditEventCreate(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, eventType, actor, summary string) {
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, tenant_id, node_id, event_type, actor, summary, detail, created_at
+	`)).
+		WithArgs(tenantID, nodeID, eventType, actor, summary, sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at",
+		}).AddRow(
+			uuid.New(),
+			tenantID,
+			nodeID,
+			eventType,
+			actor,
+			summary,
+			[]byte(`{}`),
+			time.Now(),
+		))
 }
 
 func expectSaveNodeSuccess(mock sqlmock.Sqlmock, publicKey string, tenantID, persistedNodeID uuid.UUID) {

@@ -19,6 +19,9 @@
             <el-button v-if="contextQuery.policyRef" size="small" @click="openPolicyCenter">
               Open Policy
             </el-button>
+            <el-button v-if="contextQuery.focus === 'certificate'" size="small" @click="scrollToFocusSection">
+              Focus Certificate
+            </el-button>
             <el-button v-if="contextQuery.focus === 'commands'" size="small" @click="scrollToFocusSection">
               Focus Commands
             </el-button>
@@ -53,7 +56,7 @@
       </el-card>
 
       <!-- Three-State Panel -->
-      <el-card class="state-card light-card" shadow="never">
+      <el-card ref="certificateSectionRef" class="state-card light-card" shadow="never">
         <template #header>
           <div class="card-header">
             <span class="header-title">State Convergence</span>
@@ -266,6 +269,7 @@ const router = useRouter()
 
 const loading = ref(false)
 const node = ref(null)
+const certificateSectionRef = ref(null)
 const commandsSectionRef = ref(null)
 const policiesSectionRef = ref(null)
 const alertsSectionRef = ref(null)
@@ -345,6 +349,8 @@ const scrollToFocusSection = async () => {
   const focus = contextQuery.value.focus
   const targetRef = focus === 'commands'
     ? commandsSectionRef.value
+    : focus === 'certificate'
+      ? certificateSectionRef.value
     : focus === 'policies'
       ? policiesSectionRef.value
       : focus === 'alerts'

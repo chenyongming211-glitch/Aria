@@ -38,6 +38,7 @@
             <el-option label="Node Online" value="node_online" />
             <el-option label="Certificate Expiring" value="certificate_expiring" />
             <el-option label="Certificate Expired" value="certificate_expired" />
+            <el-option label="Certificate Renewed" value="certificate_renewed" />
             <el-option label="Sync Failed" value="sync_failed" />
             <el-option label="Policy Failed" value="policy_failed" />
             <el-option label="Command Completed" value="command_completed" />
@@ -198,6 +199,9 @@
               </el-tag>
               <el-tag v-if="event.detail.not_after" size="small" type="warning" effect="plain">
                 Exp: {{ formatTime(event.detail.not_after) }}
+              </el-tag>
+              <el-tag v-if="event.detail.renewed_from" size="small" type="success" effect="plain">
+                Renewed
               </el-tag>
             </div>
             <div class="event-actions-row">
@@ -532,6 +536,13 @@ const buildNodeQuery = (context = {}, focus = '') => {
   return query
 }
 
+const defaultNodeFocus = (context = {}, eventType = '') => {
+  if (context.command_id) return 'commands'
+  if (context.policy_ref) return 'policies'
+  if (String(eventType).startsWith('certificate_')) return 'certificate'
+  return 'alerts'
+}
+
 const goToNodeFromAlert = (alert) => {
   if (!alert?.node_id) return
   router.push({
@@ -543,7 +554,7 @@ const goToNodeFromAlert = (alert) => {
       command_id: alert.context?.command_id,
       policy_ref: alert.context?.policy_ref,
       policy_domain: alert.context?.policy_domain
-    }, alert.context?.command_id ? 'commands' : (alert.context?.policy_ref ? 'policies' : 'alerts'))
+    }, defaultNodeFocus(alert.context, alert.alert_type))
   })
 }
 
@@ -558,7 +569,7 @@ const goToNodeFromEvent = (event, explicitFocus = '') => {
       command_id: event.detail?.command_id,
       policy_ref: event.detail?.policy_ref,
       policy_domain: event.detail?.policy_domain
-    }, explicitFocus || (event.detail?.command_id ? 'commands' : (event.detail?.policy_ref ? 'policies' : 'alerts')))
+    }, explicitFocus || defaultNodeFocus(event.detail, event.event_type))
   })
 }
 
@@ -594,6 +605,7 @@ const eventTypeTagType = (type) => {
   if (!type) return 'info'
   if (type.includes('failed')) return 'danger'
   if (type.includes('offline')) return 'danger'
+  if (type.includes('renewed')) return 'success'
   if (type.includes('completed') || type.includes('delivered') || type.includes('online')) return 'success'
   if (type.includes('alert')) return 'warning'
   return 'info'
