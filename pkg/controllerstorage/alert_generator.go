@@ -176,7 +176,7 @@ func (s *Storage) GenerateCertificateExpiringAlert(tenantID, nodeID uuid.UUID, h
 		Title:     "节点证书即将到期",
 		Message:   fmt.Sprintf("节点 %s 的客户端证书将在 %s 过期", hostname, notAfter.UTC().Format(time.RFC3339)),
 		Context: map[string]interface{}{
-			"hostname": hostname,
+			"hostname":  hostname,
 			"not_after": notAfter.UTC().Format(time.RFC3339),
 		},
 	}
@@ -217,12 +217,53 @@ func (s *Storage) GenerateCertificateExpiredAlert(tenantID, nodeID uuid.UUID, ho
 		Title:     "节点证书已过期",
 		Message:   fmt.Sprintf("节点 %s 的客户端证书已于 %s 过期", hostname, notAfter.UTC().Format(time.RFC3339)),
 		Context: map[string]interface{}{
-			"hostname": hostname,
+			"hostname":  hostname,
 			"not_after": notAfter.UTC().Format(time.RFC3339),
 		},
 	}
 	if _, err := s.CreateAlert(alert); err != nil {
 		return fmt.Errorf("failed to create certificate_expired alert: %w", err)
+	}
+	return nil
+}
+
+func (s *Storage) GenerateCertificateRenewFailedAlert(tenantID, nodeID uuid.UUID, hostname, message string) error {
+	existing, err := s.GetActiveAlertByNodeAndType(tenantID, nodeID, "certificate_renew_failed")
+	if err != nil {
+		return fmt.Errorf("failed to check existing certificate_renew_failed alert: %w", err)
+	}
+	if existing != nil {
+		return nil
+	}
+
+	alert := &Alert{
+		TenantID:  tenantID,
+		NodeID:    &nodeID,
+		AlertType: "certificate_renew_failed",
+		Severity:  "warning",
+		Title:     "节点证书续签失败",
+		Message:   fmt.Sprintf("节点 %s 的客户端证书续签失败: %s", hostname, message),
+		Context: map[string]interface{}{
+			"hostname": hostname,
+			"error":    message,
+		},
+	}
+	if _, err := s.CreateAlert(alert); err != nil {
+		return fmt.Errorf("failed to create certificate_renew_failed alert: %w", err)
+	}
+	return nil
+}
+
+func (s *Storage) ResolveCertificateRenewFailedAlert(tenantID, nodeID uuid.UUID) error {
+	existing, err := s.GetActiveAlertByNodeAndType(tenantID, nodeID, "certificate_renew_failed")
+	if err != nil {
+		return fmt.Errorf("failed to find active certificate_renew_failed alert: %w", err)
+	}
+	if existing == nil {
+		return nil
+	}
+	if _, err := s.ResolveAlert(existing.ID); err != nil {
+		return fmt.Errorf("failed to resolve certificate_renew_failed alert %s: %w", existing.ID, err)
 	}
 	return nil
 }

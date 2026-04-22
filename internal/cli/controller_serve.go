@@ -1192,14 +1192,17 @@ func (c *Controller) handleIssueOrRenewCertificate(w http.ResponseWriter, r *htt
 	if isRenew {
 		existing, err := c.store.GetNodeCertificate(node.ID)
 		if err != nil {
+			c.recordCertificateRenewFailure(node, "failed to load current certificate")
 			http.Error(w, "Failed to load current certificate", http.StatusInternalServerError)
 			return
 		}
 		if existing == nil {
+			c.recordCertificateRenewFailure(node, "no existing certificate to renew")
 			http.Error(w, "No existing certificate to renew", http.StatusNotFound)
 			return
 		}
 		if !strings.EqualFold(strings.TrimSpace(existing.Status), controllerstorage.CertStatusIssued) {
+			c.recordCertificateRenewFailure(node, "current certificate is not eligible for renewal")
 			http.Error(w, "Current certificate is not eligible for renewal", http.StatusConflict)
 			return
 		}
@@ -1208,6 +1211,9 @@ func (c *Controller) handleIssueOrRenewCertificate(w http.ResponseWriter, r *htt
 
 	cert, err := c.issueNodeCertificate(node, req.CSRPEM, renewedFrom)
 	if err != nil {
+		if isRenew {
+			c.recordCertificateRenewFailure(node, err.Error())
+		}
 		http.Error(w, "Failed to issue certificate: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -1223,6 +1229,32 @@ func (c *Controller) handleIssueOrRenewCertificate(w http.ResponseWriter, r *htt
 		"not_after":     cert.NotAfter.Unix(),
 		"renew_before":  int64(c.certService.RenewBefore().Seconds()),
 	})
+}
+
+func (c *Controller) recordCertificateRenewFailure(node *controllerstorage.Node, message string) {
+	if c == nil || c.store == nil || node == nil {
+		return
+	}
+	hostname := node.Hostname
+	if strings.TrimSpace(hostname) == "" {
+		hostname = node.ID.String()
+	}
+	if err := c.store.GenerateCertificateRenewFailedAlert(node.TenantID, node.ID, hostname, message); err != nil && c.logger != nil {
+		c.logger.Warn("Failed to generate certificate_renew_failed alert for node %s: %v", hostname, err)
+	}
+	nodeID := node.ID
+	if _, err := c.store.CreateAuditEvent(&controllerstorage.AuditEvent{
+		TenantID:  node.TenantID,
+		NodeID:    &nodeID,
+		EventType: "certificate_renew_failed",
+		Actor:     "system",
+		Summary:   fmt.Sprintf("节点 %s 证书续签失败", hostname),
+		Detail: map[string]interface{}{
+			"error": message,
+		},
+	}); err != nil && c.logger != nil {
+		c.logger.Warn("Failed to create certificate_renew_failed audit event for node %s: %v", hostname, err)
+	}
 }
 
 func (c *Controller) resolveCertificateRequestNode(r *http.Request, req *certificateIssueRequest) (*controllerstorage.Node, error) {
@@ -1329,6 +1361,9 @@ func (c *Controller) issueNodeCertificate(node *controllerstorage.Node, csrPEM s
 	if renewedFrom != nil {
 		if err := c.store.ResolveCertificateExpiringAlert(node.TenantID, node.ID); err != nil {
 			c.logger.Warn("Failed to resolve certificate_expiring alert for node %s after renewal: %v", node.Hostname, err)
+		}
+		if err := c.store.ResolveCertificateRenewFailedAlert(node.TenantID, node.ID); err != nil {
+			c.logger.Warn("Failed to resolve certificate_renew_failed alert for node %s after renewal: %v", node.Hostname, err)
 		}
 		nodeID := node.ID
 		if _, err := c.store.CreateAuditEvent(&controllerstorage.AuditEvent{

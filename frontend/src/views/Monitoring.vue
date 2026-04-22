@@ -38,6 +38,7 @@
             <el-option label="Node Online" value="node_online" />
             <el-option label="Certificate Expiring" value="certificate_expiring" />
             <el-option label="Certificate Expired" value="certificate_expired" />
+            <el-option label="Certificate Renew Failed" value="certificate_renew_failed" />
             <el-option label="Certificate Renewed" value="certificate_renewed" />
             <el-option label="Sync Failed" value="sync_failed" />
             <el-option label="Policy Failed" value="policy_failed" />
@@ -311,7 +312,7 @@ const alertsFilterMode = ref('all')
 
 const filterEventType = ref('')
 const filterSeverity = ref('')
-const certificateAlertTypes = ['certificate_expiring', 'certificate_expired']
+const certificateAlertTypes = ['certificate_expiring', 'certificate_expired', 'certificate_renew_failed']
 
 // --- Computed ---
 const statCards = computed(() => [
