@@ -141,6 +141,19 @@ const deletingIds = ref(new Set())
 const restoringIds = ref(new Set())
 const uploadInputRef = ref(null)
 
+const formatRestoreSummary = (result) => {
+  const restoredTables = result?.restored_tables
+  if (!restoredTables || typeof restoredTables !== 'object') {
+    return ''
+  }
+
+  const entries = Object.entries(restoredTables)
+    .filter(([, count]) => Number(count) > 0)
+    .map(([table, count]) => `${table}: ${count}`)
+
+  return entries.join(', ')
+}
+
 const loadBackups = async () => {
   loading.value = true
   try {
@@ -219,8 +232,13 @@ const restoreBackup = async (backupId) => {
   next.add(backupId)
   restoringIds.value = next
   try {
-    await useSettingsApi.restoreBackup(backupId)
-    ElMessage.success(currentLang.value === 'zh' ? '备份恢复完成' : 'Backup restored successfully')
+    const restored = await useSettingsApi.restoreBackup(backupId)
+    const summary = formatRestoreSummary(restored)
+    ElMessage.success(
+      currentLang.value === 'zh'
+        ? `备份恢复完成${summary ? `：${summary}` : ''}`
+        : `Backup restored successfully${summary ? `: ${summary}` : ''}`
+    )
     await loadBackups()
   } catch (error) {
     ElMessage.error(error.message || (currentLang.value === 'zh' ? '恢复备份失败' : 'Failed to restore backup'))

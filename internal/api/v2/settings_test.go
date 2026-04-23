@@ -208,6 +208,18 @@ func TestSettingsBackupRestoreAppliesManifest(t *testing.T) {
 			"2026-04-22T15:00:00Z",
 		).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+			INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
+			VALUES ($1, NULL, $2, $3, $4, $5)
+		`)).
+		WithArgs(
+			"11111111-1111-1111-1111-111111111111",
+			"settings_backup_restored",
+			"bob",
+			"Configuration backup restored",
+			sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}

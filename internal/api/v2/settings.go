@@ -17,6 +17,7 @@ import (
 	"aria/internal/api/middleware"
 	"aria/pkg/controllerstorage"
 
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
 
@@ -404,7 +405,12 @@ func (r *Router) restoreBackup(w http.ResponseWriter, req *http.Request, backupI
 		return
 	}
 
-	restoredTables, err := r.restoreBackupManifest(manifest)
+	username, _ := middleware.GetUsername(req.Context())
+	if strings.TrimSpace(username) == "" {
+		username = "system"
+	}
+
+	restoredTables, err := r.restoreBackupManifest(manifest, backupID, username)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to restore backup: "+err.Error(), nil)
 		return
@@ -586,7 +592,7 @@ func readBackupManifestHeader(path string) (*backupManifest, error) {
 	return &manifest, nil
 }
 
-func (r *Router) restoreBackupManifest(manifest *backupManifest) (map[string]int, error) {
+func (r *Router) restoreBackupManifest(manifest *backupManifest, backupID, actor string) (map[string]int, error) {
 	tx, err := r.store.DB().Begin()
 	if err != nil {
 		return nil, err
@@ -609,6 +615,10 @@ func (r *Router) restoreBackupManifest(manifest *backupManifest) (map[string]int
 			return nil, err
 		}
 		restoredTables[spec.Name] = count
+	}
+
+	if err := recordBackupRestoreAuditEvents(tx, manifest, backupID, actor, restoredTables); err != nil {
+		return nil, err
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -722,6 +732,31 @@ func restoreBackupTable(tx *sql.Tx, spec backupTableSpec, rows []interface{}) (i
 	return len(rows), nil
 }
 
+func recordBackupRestoreAuditEvents(tx *sql.Tx, manifest *backupManifest, backupID, actor string, restoredTables map[string]int) error {
+	tenantIDs := collectManifestTenantIDs(manifest)
+	if len(tenantIDs) == 0 {
+		return nil
+	}
+
+	detailJSON, err := json.Marshal(map[string]interface{}{
+		"backup_id":       backupID,
+		"restored_tables": restoredTables,
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, tenantID := range tenantIDs {
+		if _, err := tx.Exec(`
+			INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
+			VALUES ($1, NULL, $2, $3, $4, $5)
+		`, tenantID, "settings_backup_restored", actor, "Configuration backup restored", detailJSON); err != nil {
+			return fmt.Errorf("create restore audit event failed: %w", err)
+		}
+	}
+	return nil
+}
+
 func normalizeRestoreValue(column string, value interface{}) (interface{}, error) {
 	if value == nil {
 		return nil, nil
@@ -785,4 +820,37 @@ func normalizeRestoreTextArray(value interface{}) (interface{}, error) {
 	default:
 		return nil, fmt.Errorf("unsupported array value %T", value)
 	}
+}
+
+func collectManifestTenantIDs(manifest *backupManifest) []string {
+	if manifest == nil {
+		return nil
+	}
+
+	rows, ok := manifest.Tables["tenants"]
+	if !ok || len(rows) == 0 {
+		return nil
+	}
+
+	tenantIDs := make([]string, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	for _, rawRow := range rows {
+		item, ok := rawRow.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		id := strings.TrimSpace(fmt.Sprint(item["id"]))
+		if id == "" {
+			continue
+		}
+		if _, err := uuid.Parse(id); err != nil {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		tenantIDs = append(tenantIDs, id)
+	}
+	return tenantIDs
 }
