@@ -104,8 +104,8 @@ func (r *Router) HandleSettings(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if role != "super_admin" && role != "admin" {
-		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Admin access required", nil)
+	if role != "super_admin" {
+		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Access denied: super_admin only", nil)
 		return
 	}
 

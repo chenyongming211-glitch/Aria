@@ -49,7 +49,9 @@ export default defineStore('user', () => {
         localStorage.setItem('aria_user', JSON.stringify(user.value))
 
         // 加载用户权限
-        if (userData?.tenant_id) {
+        if (userData?.role === 'super_admin') {
+          loadPermissions(null, userData.role)
+        } else if (userData?.tenant_id) {
           loadPermissions(userData.tenant_id, userData.role)
         }
 
@@ -150,6 +152,7 @@ export default defineStore('user', () => {
     if (role === 'super_admin') {
       // super_admin 拥有所有权限
       permissions.value = ['*']
+      localStorage.setItem('aria_permissions', JSON.stringify(permissions.value))
       return
     }
     try {

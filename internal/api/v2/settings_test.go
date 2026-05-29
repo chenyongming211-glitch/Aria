@@ -34,7 +34,7 @@ func TestSettingsBackupsLifecycle(t *testing.T) {
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 
-	createReq := withSettingsContext(httptest.NewRequest(http.MethodPost, "/api/v2/settings/backups", nil), "admin", "alice")
+	createReq := withSettingsContext(httptest.NewRequest(http.MethodPost, "/api/v2/settings/backups", nil), "super_admin", "alice")
 	createRR := httptest.NewRecorder()
 	router.HandleSettings(createRR, createReq)
 	if createRR.Code != http.StatusOK {
@@ -46,7 +46,7 @@ func TestSettingsBackupsLifecycle(t *testing.T) {
 		t.Fatalf("unexpected backup id %q", createdID)
 	}
 
-	listReq := withSettingsContext(httptest.NewRequest(http.MethodGet, "/api/v2/settings/backups", nil), "admin", "")
+	listReq := withSettingsContext(httptest.NewRequest(http.MethodGet, "/api/v2/settings/backups", nil), "super_admin", "")
 	listRR := httptest.NewRecorder()
 	router.HandleSettings(listRR, listReq)
 	if listRR.Code != http.StatusOK {
@@ -56,7 +56,7 @@ func TestSettingsBackupsLifecycle(t *testing.T) {
 		t.Fatalf("expected listed backups to contain %q, got %s", createdID, listRR.Body.String())
 	}
 
-	downloadReq := withSettingsContext(httptest.NewRequest(http.MethodGet, "/api/v2/settings/backups/"+createdID+"/download", nil), "admin", "")
+	downloadReq := withSettingsContext(httptest.NewRequest(http.MethodGet, "/api/v2/settings/backups/"+createdID+"/download", nil), "super_admin", "")
 	downloadRR := httptest.NewRecorder()
 	router.HandleSettings(downloadRR, downloadReq)
 	if downloadRR.Code != http.StatusOK {
@@ -66,7 +66,7 @@ func TestSettingsBackupsLifecycle(t *testing.T) {
 		t.Fatalf("expected attachment header to contain backup id, got %q", contentDisposition)
 	}
 
-	deleteReq := withSettingsContext(httptest.NewRequest(http.MethodDelete, "/api/v2/settings/backups/"+createdID, nil), "admin", "alice")
+	deleteReq := withSettingsContext(httptest.NewRequest(http.MethodDelete, "/api/v2/settings/backups/"+createdID, nil), "super_admin", "alice")
 	deleteRR := httptest.NewRecorder()
 	router.HandleSettings(deleteRR, deleteReq)
 	if deleteRR.Code != http.StatusOK {
@@ -75,6 +75,34 @@ func TestSettingsBackupsLifecycle(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestSettingsBackupsRequireSuperAdmin(t *testing.T) {
+	cases := []struct {
+		name string
+		role string
+	}{
+		{name: "tenant admin denied", role: "admin"},
+		{name: "viewer denied", role: "viewer"},
+		{name: "missing role denied", role: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			router := &Router{}
+			req := httptest.NewRequest(http.MethodGet, "/api/v2/settings/backups", nil)
+			if tc.role != "" {
+				req = withSettingsContext(req, tc.role, "alice")
+			}
+			rr := httptest.NewRecorder()
+
+			router.HandleSettings(rr, req)
+
+			if rr.Code != http.StatusForbidden {
+				t.Fatalf("expected status %d, got %d", http.StatusForbidden, rr.Code)
+			}
+		})
 	}
 }
 
@@ -116,7 +144,7 @@ func TestSettingsBackupUploadStoresValidatedFile(t *testing.T) {
 		t.Fatalf("writer.Close failed: %v", err)
 	}
 
-	req := withSettingsContext(httptest.NewRequest(http.MethodPost, "/api/v2/settings/backups/upload", body), "admin", "bob")
+	req := withSettingsContext(httptest.NewRequest(http.MethodPost, "/api/v2/settings/backups/upload", body), "super_admin", "bob")
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rr := httptest.NewRecorder()
 
@@ -130,7 +158,7 @@ func TestSettingsBackupUploadStoresValidatedFile(t *testing.T) {
 		t.Fatalf("expected uploaded backup id %q, got %q", "uploaded-backup", uploadedID)
 	}
 
-	listReq := withSettingsContext(httptest.NewRequest(http.MethodGet, "/api/v2/settings/backups", nil), "admin", "")
+	listReq := withSettingsContext(httptest.NewRequest(http.MethodGet, "/api/v2/settings/backups", nil), "super_admin", "")
 	listRR := httptest.NewRecorder()
 	router.HandleSettings(listRR, listReq)
 	if listRR.Code != http.StatusOK {
@@ -223,7 +251,7 @@ func TestSettingsBackupRestoreAppliesManifest(t *testing.T) {
 	mock.ExpectCommit()
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
-	req := withSettingsContext(httptest.NewRequest(http.MethodPost, "/api/v2/settings/backups/"+backupID+"/restore", nil), "admin", "bob")
+	req := withSettingsContext(httptest.NewRequest(http.MethodPost, "/api/v2/settings/backups/"+backupID+"/restore", nil), "super_admin", "bob")
 	rr := httptest.NewRecorder()
 
 	router.HandleSettings(rr, req)

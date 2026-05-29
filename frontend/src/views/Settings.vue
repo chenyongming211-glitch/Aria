@@ -76,7 +76,12 @@
             <el-table-column prop="created_by" :label="currentLang === 'zh' ? '创建人' : 'Created By'" width="120" />
             <el-table-column :label="currentLang === 'zh' ? '操作' : 'Actions'" width="180">
               <template #default="{ row }">
-                <el-button size="small" @click="downloadBackup(row)">
+                <el-button
+                  size="small"
+                  :disabled="!canWriteSettings || downloadingIds.has(row.id)"
+                  :loading="downloadingIds.has(row.id)"
+                  @click="downloadBackup(row)"
+                >
                   {{ currentLang === 'zh' ? '下载' : 'Download' }}
                 </el-button>
                 <el-popconfirm
@@ -123,20 +128,20 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useAppStore } from '@/stores'
-import { usePermission } from '@/composables/usePermission'
+import { useAppStore, useUserStore } from '@/stores'
 import { useSettingsApi } from '@/composables/useSettingsApi'
 
 const appStore = useAppStore()
-const { hasPermission } = usePermission()
+const userStore = useUserStore()
 
 const currentLang = computed(() => appStore.lang)
-const canWriteSettings = computed(() => hasPermission('settings:write'))
+const canWriteSettings = computed(() => userStore.user?.role === 'super_admin')
 
 const loading = ref(false)
 const creating = ref(false)
 const uploading = ref(false)
 const backupHistory = ref([])
+const downloadingIds = ref(new Set())
 const deletingIds = ref(new Set())
 const restoringIds = ref(new Set())
 const uploadInputRef = ref(null)
@@ -203,10 +208,18 @@ const handleUploadBackup = async (event) => {
   }
 }
 
-const downloadBackup = (backup) => {
-  const url = useSettingsApi.downloadBackupUrl(backup.id)
-  if (typeof window !== 'undefined') {
-    window.location.assign(url)
+const downloadBackup = async (backup) => {
+  const next = new Set(downloadingIds.value)
+  next.add(backup.id)
+  downloadingIds.value = next
+  try {
+    await useSettingsApi.downloadBackup(backup)
+  } catch (error) {
+    ElMessage.error(error.message || (currentLang.value === 'zh' ? '下载备份失败' : 'Failed to download backup'))
+  } finally {
+    const reset = new Set(downloadingIds.value)
+    reset.delete(backup.id)
+    downloadingIds.value = reset
   }
 }
 

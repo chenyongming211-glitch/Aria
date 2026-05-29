@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS roles (
 | `settings:read` | 查看设置 | | | ✅ |
 | `settings:write` | 修改设置 | | | ✅ |
 
+说明：`/api/v2/settings/backups/*` 是全局控制面备份/恢复能力，不再按租户 RBAC 的 `settings:*` 授权，当前仅允许 `super_admin` 访问。`settings:*` 保留给租户级设置/租户配置类接口使用。
+
 ## 5. 内置角色
 
 | 角色 | 权限范围 | is_system |

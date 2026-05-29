@@ -11,7 +11,7 @@
 > - [x] **Security/QoS Domain**: Northbound CRUD、desired state、policy delivery 与状态回显已接通。
 > - [x] **Monitoring Domain**: 状态收敛、节点详情、事件/告警、流量查询已接入。
 > - [x] **AIOps Domain**: `chat/confirm` 最小闭环已接通。
-> - [~] **Platform Settings Domain**: `settings/backups` 已完成最小可用的 create/list/download/delete；`restore/upload` 与其他系统设置项仍未开放。
+> - [x] **Platform Settings Domain**: `settings/backups` 已完成最小可用的 create/list/download/delete/upload/restore；其他系统设置项仍保持隐藏，避免展示 placeholder。
 
 本文档用于定义 Aria `API v2` 的统一接口边界。
 它以当前 `v2-only` 基线为出发点，同时保留目标态约束；阅读时应区分“已经落地的接口契约”和“仍在继续产品化的能力”。

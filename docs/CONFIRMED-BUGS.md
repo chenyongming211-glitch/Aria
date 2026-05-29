@@ -1,36 +1,16 @@
 # 代码 Bug 追踪
 
-**最后复核**: 2026-04-21  
-**复核方式**: 重新阅读当前代码并核对原始问题描述  
+**最后复核**: 2026-05-29
+**复核方式**: 重新阅读当前代码并核对原始问题描述
 **说明**: 本文档记录“当前状态”，不再把历史 OPEN 条目和后续 FIXED 结论混写在一起。
 
 ---
 
 ## 当前仍未闭合的 Bug
 
-### BUG-13: 前后端 ACL 字段名不匹配
+暂无已确认仍开放的代码级 bug。
 
-- **状态**: 🔴 OPEN
-- **前端**: `frontend/src/composables/useAclApi.js`
-- **后端**: `internal/api/v2/security.go`
-- **问题**:
-  - 前端仍发送 `src_net`、`dst_net`、`min_port`、`max_port`
-  - v2 后端接收的是 `src_cidr`、`dst_cidr`、`dst_port`
-- **影响**:
-  - 通过当前 ACL 前端创建/更新规则时，字段会发生丢失或错位
-  - 这不是文档问题，而是仍然存在的真实代码风险
-
-### BUG-19: QoS 通用 API 仍允许 `bandwidth_mbps=0`
-
-- **状态**: 🟡 OPEN（UI 已部分缓解）
-- **前端**: `frontend/src/composables/useQosApi.js`
-- **Agent**: `agent-rust/agent/src/qos.rs`
-- **问题**:
-  - 通用 QoS API 仍使用 `Number(rule.bandwidth_mbps || rule.bandwidth || 0)`
-  - Rust Agent 的令牌桶计算逻辑会按传入值直接生成限速参数
-- **当前情况**:
-  - `frontend/src/views/BandwidthControl.vue` 的表单层已经把最小值限制为 `1`
-  - 但 API 组合层仍然接受 `0`，所以这个问题只是被 UI 缓解，不算彻底修复
+当前剩余工作主要是产品闭环和风险边界，不再把已经修复的历史问题继续列为 OPEN。新的风险项应先进入 `KNOWN-ISSUES-STATUS.md`，确认可复现代码缺陷后再进入本文档。
 
 ---
 
@@ -47,6 +27,13 @@
 - **状态**: ✅ FIXED
 - **文件**: `pkg/controllerstorage/postgres.go`, `pkg/controllerstorage/network_policy.go`
 - **说明**: 当前 `acl_rules.id` 为 UUID，存储层记录结构和 CRUD 参数也已统一为 `uuid.UUID`
+
+### BUG-13: 前后端 ACL 字段名不匹配
+
+- **状态**: ✅ FIXED
+- **前端**: `frontend/src/composables/useAclApi.js`
+- **后端**: `internal/api/v2/security.go`
+- **说明**: 前端创建/更新已标准化发送 `src_cidr`、`dst_cidr`、`dst_port`；后端仍兼容旧字段，避免历史调用方中断。
 
 ### BUG-14: AI `maxTokens` 未初始化
 
@@ -77,6 +64,13 @@
 - **状态**: ✅ FIXED
 - **文件**: `pkg/controllerstorage/alert_generator.go`
 - **说明**: 现在已先检查活跃告警，再决定是否创建新告警
+
+### BUG-19: QoS 通用 API 仍允许 `bandwidth_mbps=0`
+
+- **状态**: ✅ FIXED
+- **前端**: `frontend/src/composables/useQosApi.js`
+- **后端**: `internal/api/v2/security.go`
+- **说明**: 前端 API 组合层和后端创建/更新接口均拒绝 `bandwidth_mbps <= 0`。
 
 ### BUG-20: Rust Agent 硬编码 `eth0` 物理接口
 

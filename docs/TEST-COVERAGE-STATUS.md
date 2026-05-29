@@ -1,6 +1,6 @@
 # 测试覆盖状态（v0.1.0）
 
-**更新时间**: 2026-04-20
+**更新时间**: 2026-05-29
 
 ## 1. 当前状态
 
@@ -8,6 +8,7 @@
 - ✅ 前端权限控制已覆盖 composable、路由守卫、页面可见性测试
 - ✅ `nodes + monitoring` 已补齐 API 行为级测试（成功/参数错误/边界/错误码）
 - ✅ 自动证书签发（`issue/renew`）已补齐核心 API 行为测试（鉴权/参数/续签链路/错误契约）
+- ✅ Settings / Backup 已覆盖 `super_admin` 权限边界、备份生命周期、上传、下载与恢复行为
 - ✅ 前端单测已接入 CI（`npm run test:run`）
 
 ## 2. 已覆盖重点
@@ -29,12 +30,17 @@
   - `renew` 成功/失败：无历史证书 `404`、历史证书查询失败 `500`、节点不存在 `401`
   - 续签链路：断言 `renewed_from` 证书链路写入（续签 lineage 保持）
   - 协议守卫：`405 Method Not Allowed`、`503 Service Unavailable`、`400 csr_pem required`
+- Settings / Backup 行为测试（`internal/api/v2/settings_test.go`）：
+  - `super_admin` 专用访问边界
+  - `create/list/download/delete/upload/restore` 的基础行为契约
+  - restore 事务内清理、恢复表数据并写入审计事件
 
 ### 前端（Vue）
 
 - `usePermission` 权限判断（包含 wildcard）
 - 路由权限元信息与 guard 跳转
 - 关键页面按钮和菜单可见性/禁用态
+- Settings 下载通过鉴权 API 客户端获取 blob，避免裸浏览器跳转绕过请求拦截器
 
 ## 3. CI 状态
 

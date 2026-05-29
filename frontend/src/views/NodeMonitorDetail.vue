@@ -55,8 +55,27 @@
         </div>
       </el-card>
 
+      <el-card class="summary-card light-card" shadow="never">
+        <template #header>
+          <span class="header-title">Operations Summary</span>
+        </template>
+        <div class="summary-grid">
+          <button
+            v-for="item in workbenchSummary"
+            :key="item.key"
+            class="summary-item"
+            type="button"
+            @click="scrollToSection(item.focus)"
+          >
+            <span class="summary-label">{{ item.label }}</span>
+            <span class="summary-value">{{ item.value }}</span>
+            <el-tag :type="item.type" size="small">{{ item.status }}</el-tag>
+          </button>
+        </div>
+      </el-card>
+
       <!-- Three-State Panel -->
-      <el-card ref="certificateSectionRef" class="state-card light-card" shadow="never">
+      <el-card class="state-card light-card" shadow="never">
         <template #header>
           <div class="card-header">
             <span class="header-title">State Convergence</span>
@@ -111,7 +130,7 @@
         </div>
       </el-card>
 
-      <el-card class="state-card light-card" shadow="never">
+      <el-card ref="certificateSectionRef" class="state-card light-card" shadow="never">
         <template #header>
           <div class="card-header">
             <span class="header-title">Certificate Status</span>
@@ -349,6 +368,9 @@ const convergenceBadgeType = computed(() => {
 
 const certificateStatusLabel = computed(() => node.value?.certificate?.status || 'missing')
 const certificateActivity = computed(() => node.value?.certificate_activity || null)
+const recentCommands = computed(() => node.value?.recent_commands || [])
+const recentPolicyDeliveries = computed(() => node.value?.recent_policy_deliveries || [])
+const activeAlerts = computed(() => node.value?.active_alerts || [])
 
 const certificateBadgeType = computed(() => {
   switch (node.value?.certificate?.status) {
@@ -360,6 +382,53 @@ const certificateBadgeType = computed(() => {
     default:
       return 'info'
   }
+})
+
+const statusCount = (items, statuses, field = 'status') => (
+  items.filter((item) => statuses.includes(item?.[field])).length
+)
+
+const workbenchSummary = computed(() => {
+  const failedCommands = statusCount(recentCommands.value, ['failed'])
+  const pendingCommands = statusCount(recentCommands.value, ['pending', 'queued', 'running', 'acknowledged'])
+  const failedDeliveries = statusCount(recentPolicyDeliveries.value, ['failed'], 'command_status')
+  const pendingDeliveries = statusCount(recentPolicyDeliveries.value, ['pending', 'queued', 'running', 'acknowledged'], 'command_status')
+  const certificateStatus = certificateStatusLabel.value
+
+  return [
+    {
+      key: 'commands',
+      label: 'Commands',
+      value: recentCommands.value.length,
+      status: failedCommands > 0 ? `${failedCommands} failed` : `${pendingCommands} pending`,
+      type: failedCommands > 0 ? 'danger' : pendingCommands > 0 ? 'warning' : 'success',
+      focus: 'commands'
+    },
+    {
+      key: 'policies',
+      label: 'Policy Deliveries',
+      value: recentPolicyDeliveries.value.length,
+      status: failedDeliveries > 0 ? `${failedDeliveries} failed` : `${pendingDeliveries} pending`,
+      type: failedDeliveries > 0 ? 'danger' : pendingDeliveries > 0 ? 'warning' : 'success',
+      focus: 'policies'
+    },
+    {
+      key: 'alerts',
+      label: 'Active Alerts',
+      value: activeAlerts.value.length,
+      status: activeAlerts.value.length > 0 ? 'active' : 'clear',
+      type: activeAlerts.value.length > 0 ? 'danger' : 'success',
+      focus: 'alerts'
+    },
+    {
+      key: 'certificate',
+      label: 'Certificate',
+      value: certificateStatus,
+      status: certificateActivity.value?.last_renew_failure ? 'renew failed' : certificateStatus,
+      type: certificateBadgeType.value,
+      focus: 'certificate'
+    }
+  ]
 })
 
 const loadNode = async () => {
@@ -374,23 +443,24 @@ const loadNode = async () => {
   }
 }
 
-const scrollToFocusSection = async () => {
+const sectionRefForFocus = (focus) => {
+  if (focus === 'commands') return commandsSectionRef.value
+  if (focus === 'certificate') return certificateSectionRef.value
+  if (focus === 'policies') return policiesSectionRef.value
+  if (focus === 'alerts') return alertsSectionRef.value
+  return null
+}
+
+const scrollToSection = async (focus) => {
   await nextTick()
-  const focus = contextQuery.value.focus
-  const targetRef = focus === 'commands'
-    ? commandsSectionRef.value
-    : focus === 'certificate'
-      ? certificateSectionRef.value
-    : focus === 'policies'
-      ? policiesSectionRef.value
-      : focus === 'alerts'
-        ? alertsSectionRef.value
-        : null
+  const targetRef = sectionRefForFocus(focus)
   const target = targetRef?.$el || targetRef
   if (typeof target?.scrollIntoView === 'function') {
     target.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 }
+
+const scrollToFocusSection = () => scrollToSection(contextQuery.value.focus)
 
 const formatTime = (iso) => {
   if (!iso) return ''
@@ -528,6 +598,45 @@ watch(node, async (value) => {
   color: var(--aria-text-muted, #94A3B8);
 }
 
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.summary-item {
+  min-height: 96px;
+  padding: 14px;
+  border: 1px solid var(--aria-border-color, #E2E8F0);
+  border-radius: 8px;
+  background: var(--aria-content-bg-tertiary, #F8FAFC);
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  text-align: left;
+}
+
+.summary-item:hover {
+  border-color: var(--el-color-primary);
+}
+
+.summary-label {
+  font-size: 12px;
+  color: var(--aria-text-muted, #94A3B8);
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.summary-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--aria-text-primary, #1E293B);
+  word-break: break-word;
+}
+
 :deep(.context-match-row > td) {
   background: rgba(59, 130, 246, 0.10) !important;
 }
@@ -558,7 +667,7 @@ watch(node, async (value) => {
   color: var(--aria-text-muted, #94A3B8);
   margin-bottom: 6px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
 }
 
 .state-value {
@@ -606,8 +715,18 @@ watch(node, async (value) => {
 }
 
 @media (max-width: 768px) {
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .node-hostname {
     font-size: 18px;
+  }
+}
+
+@media (max-width: 520px) {
+  .summary-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
