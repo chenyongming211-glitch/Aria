@@ -45,6 +45,7 @@ describe('router RBAC metadata', () => {
   it('blocks navigation without required permission', async () => {
     localStorage.setItem('aria_token', 'dummy-token')
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_user', JSON.stringify({ role: 'admin' }))
     localStorage.setItem('aria_permissions', JSON.stringify(['nodes:read']))
 
     await router.push('/dashboard')
