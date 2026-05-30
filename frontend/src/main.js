@@ -15,6 +15,7 @@ import '@fontsource-variable/plus-jakarta-sans'
 import App from './App.vue'
 import router from './router'
 import useAppStore from './stores/app'
+import useUserStore from './stores/user'
 
 const app = createApp(App)
 const pinia = createPinia()
@@ -25,6 +26,8 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 }
 
 app.use(pinia)
+const userStore = useUserStore()
+userStore.loadSession()
 app.use(router)
 app.use(ElementPlus)
 
