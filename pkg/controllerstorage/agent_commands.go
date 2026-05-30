@@ -149,16 +149,16 @@ func (s *Storage) UpdateAgentCommandStatus(commandID, status, message string, re
 
 	query := `
 		UPDATE agent_commands
-		SET status = $2,
+		SET status = $2::varchar,
 		    message = $3,
 		    result = $4,
 		    updated_at = NOW(),
 		    acknowledged_at = CASE
-		        WHEN $2 = 'acknowledged' AND acknowledged_at IS NULL THEN NOW()
+		        WHEN $2::varchar = 'acknowledged' AND acknowledged_at IS NULL THEN NOW()
 		        ELSE acknowledged_at
 		    END,
 		    completed_at = CASE
-		        WHEN $2 IN ('completed', 'failed') THEN NOW()
+		        WHEN $2::varchar IN ('completed', 'failed') THEN NOW()
 		        ELSE completed_at
 		    END
 		WHERE id = $1
@@ -176,15 +176,15 @@ func (s *Storage) UpdateAgentCommandStatus(commandID, status, message string, re
 
 	if _, err := tx.Exec(`
 		UPDATE policy_deliveries
-		SET command_status = $2,
+		SET command_status = $2::varchar,
 		    last_error = CASE
-		        WHEN $2 = 'failed' THEN $3
-		        WHEN $2 = 'completed' THEN ''
+		        WHEN $2::varchar = 'failed' THEN $3
+		        WHEN $2::varchar = 'completed' THEN ''
 		        ELSE last_error
 		    END,
 		    updated_at = NOW(),
 		    completed_at = CASE
-		        WHEN $2 IN ('completed', 'failed') THEN NOW()
+		        WHEN $2::varchar IN ('completed', 'failed') THEN NOW()
 		        ELSE completed_at
 		    END
 		WHERE command_id = $1
