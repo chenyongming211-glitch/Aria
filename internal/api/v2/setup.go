@@ -151,9 +151,16 @@ func (r *Router) handleTenantRoles(w http.ResponseWriter, req *http.Request, ten
 	parts := splitPath(req.URL.Path)
 	// /api/v2/tenants/{tid}/roles
 	// /api/v2/tenants/{tid}/roles/{rid}
-	if len(parts) >= 7 && parts[6] == "roles" {
-		if len(parts) >= 8 && parts[7] != "" {
-			r.handleRoleDetail(w, req, tenantID, parts[7])
+	roleIndex := -1
+	for i, part := range parts {
+		if part == "roles" {
+			roleIndex = i
+			break
+		}
+	}
+	if roleIndex >= 0 {
+		if len(parts) > roleIndex+1 && parts[roleIndex+1] != "" {
+			r.handleRoleDetail(w, req, tenantID, parts[roleIndex+1])
 			return
 		}
 		r.handleRoles(w, req, tenantID, parts)
@@ -212,9 +219,9 @@ func (r *Router) handleTenantUsers(w http.ResponseWriter, req *http.Request, ten
 	}
 
 	parts := splitPath(req.URL.Path)
-	if len(parts) == 7 && req.Method == http.MethodDelete {
+	if len(parts) == 6 && req.Method == http.MethodDelete {
 		currentUserID, ok := middleware.GetUserID(req.Context())
-		if ok && currentUserID == parts[6] {
+		if ok && currentUserID == parts[5] {
 			apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "You cannot delete your own account", nil)
 			return
 		}

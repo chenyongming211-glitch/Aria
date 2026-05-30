@@ -1,6 +1,7 @@
 package controllerstorage
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -20,9 +21,9 @@ type Role struct {
 }
 
 var (
-	SystemRoleAdmin = "admin"
+	SystemRoleAdmin    = "admin"
 	SystemRoleOperator = "operator"
-	SystemRoleViewer = "viewer"
+	SystemRoleViewer   = "viewer"
 
 	AdminPermissions = []string{
 		"nodes:read", "nodes:write",
@@ -64,7 +65,11 @@ var (
 	}
 )
 
-func (s *Storage) CreateSystemRoles(tenantID uuid.UUID) error {
+type roleExec interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+}
+
+func (s *Storage) createSystemRoles(exec roleExec, tenantID uuid.UUID) error {
 	systemRoles := []struct {
 		name        string
 		desc        string
@@ -76,7 +81,7 @@ func (s *Storage) CreateSystemRoles(tenantID uuid.UUID) error {
 	}
 
 	for _, sr := range systemRoles {
-		_, err := s.db.Exec(`
+		_, err := exec.Exec(`
 			INSERT INTO roles (tenant_id, name, description, is_system, permissions)
 			VALUES ($1, $2, $3, true, $4)
 			ON CONFLICT (tenant_id, name) DO NOTHING
@@ -86,6 +91,14 @@ func (s *Storage) CreateSystemRoles(tenantID uuid.UUID) error {
 		}
 	}
 	return nil
+}
+
+func (s *Storage) CreateSystemRoles(tenantID uuid.UUID) error {
+	return s.createSystemRoles(s.db, tenantID)
+}
+
+func (s *Storage) EnsureTenantRolesTx(tx *sql.Tx, tenantID uuid.UUID) error {
+	return s.createSystemRoles(tx, tenantID)
 }
 
 func (s *Storage) GetRoleByName(tenantID uuid.UUID, name string) (*Role, error) {

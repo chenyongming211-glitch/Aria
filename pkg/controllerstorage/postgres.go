@@ -162,11 +162,15 @@ func (s *Storage) Migrate() error {
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			name VARCHAR(100) NOT NULL,
 			code VARCHAR(50) UNIQUE,
+			email VARCHAR(100),
+			phone VARCHAR(32),
 			status VARCHAR(20) DEFAULT 'active',
 			resource_quota JSONB DEFAULT '{}',
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS email VARCHAR(100)`,
+		`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS phone VARCHAR(32)`,
 
 		`CREATE TABLE IF NOT EXISTS nodes (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -255,9 +259,11 @@ func (s *Storage) Migrate() error {
 			role VARCHAR(20) DEFAULT 'viewer',
 			email VARCHAR(100),
 			created_at TIMESTAMPTZ DEFAULT NOW(),
+			updated_at TIMESTAMPTZ DEFAULT NOW(),
 			last_login TIMESTAMPTZ
 		)`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
 		`ALTER TABLE users ALTER COLUMN tenant_id DROP NOT NULL`,
 
 		`CREATE TABLE IF NOT EXISTS acl_rules (
