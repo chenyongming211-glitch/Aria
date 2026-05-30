@@ -388,35 +388,44 @@ impl RoutingManager {
             .args(&["route", "show", "table", &VPN_TABLE.to_string()])
             .output()
             .context("Failed to list VPN routes")?;
-        
-        if !output.status.success() {
-            tracing::warn!("Failed to list VPN routes: {}", 
-                String::from_utf8_lossy(&output.stderr));
+
+        let routes_str = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        parse_route_table_routes(&routes_str, &stderr, output.status.success())
+    }
+}
+
+fn parse_route_table_routes(routes_str: &str, stderr: &str, success: bool) -> Result<HashSet<String>> {
+    if !success {
+        if stderr.contains("FIB table does not exist") {
+            tracing::debug!("Route table is empty or not yet initialized: {}", stderr.trim());
             return Ok(HashSet::new());
         }
-        
-        let routes_str = String::from_utf8_lossy(&output.stdout);
-        let mut routes = HashSet::new();
-        
-        for line in routes_str.lines() {
-            if line.is_empty() {
-                continue;
-            }
-            
-            // 提取目标网段（第一个字段）
-            if let Some(dest) = line.split_whitespace().next() {
-                // 只收集有效的 CIDR 格式路由
-                // 过滤掉 "default"、"local" 等特殊路由
-                if is_valid_cidr(dest) {
-                    routes.insert(dest.to_string());
-                } else {
-                    tracing::debug!("Skipping non-CIDR route: {}", dest);
-                }
+
+        tracing::warn!("Failed to list VPN routes: {}", stderr);
+        return Ok(HashSet::new());
+    }
+
+    let mut routes = HashSet::new();
+
+    for line in routes_str.lines() {
+        if line.is_empty() {
+            continue;
+        }
+
+        // 提取目标网段（第一个字段）
+        if let Some(dest) = line.split_whitespace().next() {
+            // 只收集有效的 CIDR 格式路由
+            // 过滤掉 "default"、"local" 等特殊路由
+            if is_valid_cidr(dest) {
+                routes.insert(dest.to_string());
+            } else {
+                tracing::debug!("Skipping non-CIDR route: {}", dest);
             }
         }
-        
-        Ok(routes)
     }
+
+    Ok(routes)
 }
 
 /// 检查是否是有效的 CIDR 格式
