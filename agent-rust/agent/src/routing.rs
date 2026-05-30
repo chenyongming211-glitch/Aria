@@ -461,4 +461,15 @@ mod tests {
         let manager = RoutingManager::new("test0");
         assert_eq!(manager.interface_name, "test0");
     }
+
+    #[test]
+    fn missing_fib_table_is_treated_as_empty_route_set() {
+        let routes = parse_route_table_routes(
+            "",
+            "Error: ipv4: FIB table does not exist.\nDump terminated\n",
+            false,
+        ).expect("missing FIB table should be treated as an empty table");
+
+        assert!(routes.is_empty());
+    }
 }
