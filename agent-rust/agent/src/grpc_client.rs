@@ -427,3 +427,30 @@ pub struct BlacklistRule {
     pub cidr: String,
     pub port: u32,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unary_requests_keep_a_bounded_rpc_timeout() {
+        let request = with_unary_rpc_timeout(tonic::Request::new(()));
+
+        assert_eq!(
+            request.metadata().get("grpc-timeout").unwrap(),
+            "30000000u"
+        );
+    }
+
+    #[test]
+    fn command_stream_request_does_not_set_rpc_timeout() {
+        let request = build_command_stream_request((), Some("runtime-token"))
+            .expect("command stream request should be built");
+
+        assert!(request.metadata().get("grpc-timeout").is_none());
+        assert_eq!(
+            request.metadata().get("authorization").unwrap(),
+            "Bearer runtime-token"
+        );
+    }
+}
