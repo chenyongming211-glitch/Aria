@@ -140,6 +140,7 @@ const elementStubs = {
   'el-icon': { template: '<i><slot /></i>' },
   'el-tag': { template: '<span><slot /></span>' },
   'el-tooltip': { template: '<div><slot /></div>' },
+  'el-alert': { template: '<div><slot />{{ title }}</div>', props: ['title'] },
   'el-empty': { template: '<div></div>' },
   'el-pagination': { template: '<div></div>' },
   'el-popconfirm': { template: '<div><slot name="reference" /></div>' },
@@ -150,7 +151,8 @@ const elementStubs = {
   'el-descriptions-item': { template: '<div><slot /></div>' },
   'el-table': { template: '<div><slot /></div>' },
   'el-table-column': {
-    template: '<div><slot :row="row" /></div>',
+    props: ['prop'],
+    template: '<div><slot :row="row" />{{ prop ? row[prop] : "" }}</div>',
     data() {
       return {
         row: {
