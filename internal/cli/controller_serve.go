@@ -731,7 +731,7 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	var requestedTenantID uuid.UUID
 
 	if nodeRegistrationForbidden(existingNode) {
-		c.logger.Warn("Registration rejected: node %s status is %s", req.PublicKey[:8], existingNode.Status)
+		c.logger.Warn("Registration rejected: node %s status is %s", previewString(req.PublicKey, 8), existingNode.Status)
 		http.Error(w, "Node registration is disabled", http.StatusForbidden)
 		return
 	}
@@ -778,12 +778,12 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		requestedTenantID = resolvedTenantID
 		if requiresFreshEnrollment && requestedTenantID != existingNode.TenantID {
 			c.logger.Warn("Registration rejected: deleted node %s attempted to switch tenant from %s to %s",
-				req.PublicKey[:8], existingNode.TenantID, requestedTenantID)
+				previewString(req.PublicKey, 8), existingNode.TenantID, requestedTenantID)
 			http.Error(w, "Node tenant ownership is immutable", http.StatusForbidden)
 			return
 		}
 	} else {
-		c.logger.Debug("Re-registration from existing node: %s", req.PublicKey[:8])
+		c.logger.Debug("Re-registration from existing node: %s", previewString(req.PublicKey, 8))
 		if req.Token != "" {
 			resolvedTenantID, err := c.store.GetTenantIDByToken(req.Token)
 			if err != nil {
@@ -794,7 +794,7 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 			requestedTenantID = resolvedTenantID
 			if requestedTenantID != existingNode.TenantID {
 				c.logger.Warn("Registration rejected: node %s attempted to switch tenant from %s to %s",
-					req.PublicKey[:8], existingNode.TenantID, requestedTenantID)
+					previewString(req.PublicKey, 8), existingNode.TenantID, requestedTenantID)
 				http.Error(w, "Node tenant ownership is immutable", http.StatusForbidden)
 				return
 			}
@@ -812,7 +812,7 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c.logger.Debug("Processing registration: hostname=%s, publicIP=%s, publicKey=%s...",
-		req.Hostname, req.PublicIP, req.PublicKey[:8])
+		req.Hostname, req.PublicIP, previewString(req.PublicKey, 8))
 
 	var assignedIP string
 	var ipOffset int
@@ -822,7 +822,7 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		assignedIP = existingNode.AssignedIP
 		ipOffset = existingNode.IPOffset
 		c.logger.Info("Node re-registered: %s (hostname=%s), reusing IP: %s",
-			req.PublicKey[:8], req.Hostname, assignedIP)
+			previewString(req.PublicKey, 8), req.Hostname, assignedIP)
 		// Preserve existing advertised routes if not provided in re-registration
 		if len(req.AdvertisedRoutes) == 0 && len(existingNode.AdvertisedRoutes) > 0 {
 			req.AdvertisedRoutes = existingNode.AdvertisedRoutes
@@ -858,7 +858,7 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 			}
 			assignedIP = newIP
 			c.logger.Info("New node registered: %s (hostname=%s), assigned IP: %s (offset=%d)",
-				req.PublicKey[:8], req.Hostname, assignedIP, ipOffset)
+				previewString(req.PublicKey, 8), req.Hostname, assignedIP, ipOffset)
 		}
 	}
 
@@ -907,10 +907,10 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 
 	if c.certService != nil && req.CSRPEM != "" {
 		if _, err := c.issueNodeCertificate(node, req.CSRPEM, nil); err != nil {
-			c.logger.Error("Certificate issuance during register failed for node %s: %v", req.PublicKey[:8], err)
+			c.logger.Error("Certificate issuance during register failed for node %s: %v", previewString(req.PublicKey, 8), err)
 			if !isReRegistration || requiresFreshEnrollment {
 				if markErr := c.store.MarkNodeDeleted(req.PublicKey); markErr != nil {
-					c.logger.Warn("Failed to roll back node %s after certificate issuance failure: %v", req.PublicKey[:8], markErr)
+					c.logger.Warn("Failed to roll back node %s after certificate issuance failure: %v", previewString(req.PublicKey, 8), markErr)
 				}
 			}
 			http.Error(w, "Failed to issue node certificate", http.StatusInternalServerError)
@@ -1125,12 +1125,12 @@ func (c *Controller) HandleUnregister(w http.ResponseWriter, r *http.Request) {
 			"assigned_ip": assignedIP,
 		},
 	}); err != nil {
-		c.logger.Error("Failed to mark node as deleted %s: %v", req.PublicKey[:8], err)
+		c.logger.Error("Failed to mark node as deleted %s: %v", previewString(req.PublicKey, 8), err)
 		http.Error(w, "Failed to delete node", http.StatusInternalServerError)
 		return
 	}
 
-	c.logger.Info("Node marked as deleted: %s (hostname=%s, IP=%s)", req.PublicKey[:8], hostname, assignedIP)
+	c.logger.Info("Node marked as deleted: %s (hostname=%s, IP=%s)", previewString(req.PublicKey, 8), hostname, assignedIP)
 
 	// 阶段3：发布 Redis Pub/Sub 通知所有 agent 删除该 peer
 	if c.heartbeat != nil {
@@ -1138,7 +1138,7 @@ func (c *Controller) HandleUnregister(w http.ResponseWriter, r *http.Request) {
 			c.logger.Error("Failed to publish node deletion event: %v", err)
 			// 不返回错误，因为节点已标记删除
 		} else {
-			c.logger.Debug("Published node deletion event for %s...", req.PublicKey[:8])
+			c.logger.Debug("Published node deletion event for %s...", previewString(req.PublicKey, 8))
 		}
 	}
 
@@ -1766,7 +1766,7 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 		if err != nil {
 			return "", fmt.Errorf("invalid token: %w", err)
 		}
-		c.logger.Debug("Token validated: %s (tag: %s)", tkn.Token[:12], tkn.Tag)
+		c.logger.Debug("Token validated: %s (tag: %s)", previewString(tkn.Token, 12), tkn.Tag)
 		requestedTenantID, err = c.store.GetTenantIDByToken(req.Token)
 		if err != nil {
 			return "", fmt.Errorf("failed to get tenant ID by token: %w", err)
@@ -1798,7 +1798,7 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 		assignedIP = existingNode.AssignedIP
 		ipOffset = existingNode.IPOffset
 		c.logger.Info("Node re-registered: %s (hostname=%s), reusing IP: %s",
-			req.PublicKey[:8], req.Hostname, assignedIP)
+			previewString(req.PublicKey, 8), req.Hostname, assignedIP)
 		if len(req.AdvertisedRoutes) == 0 && len(existingNode.AdvertisedRoutes) > 0 {
 			req.AdvertisedRoutes = existingNode.AdvertisedRoutes
 		}
@@ -1873,7 +1873,7 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 	}
 
 	c.logger.Info("Node registered successfully: %s (hostname=%s, IP=%s, region=%s)",
-		req.PublicKey[:8], req.Hostname, assignedIP, req.Region)
+		previewString(req.PublicKey, 8), req.Hostname, assignedIP, req.Region)
 
 	return assignedIP, nil
 }
@@ -1888,7 +1888,7 @@ func (c *Controller) processSync(publicKey string) (interface{}, string, interfa
 	// Update last seen
 	node.LastSeen = time.Now().Unix()
 	if err := c.store.SaveNode(node); err != nil {
-		c.logger.Warn("Failed to update last seen for %s: %v", publicKey[:8], err)
+		c.logger.Warn("Failed to update last seen for %s: %v", previewString(publicKey, 8), err)
 	}
 
 	tenantNodes, err := c.store.GetNodesByTenant(node.TenantID)
@@ -2097,13 +2097,23 @@ func ensureDefaultTenant(store *controllerstorage.Storage, logger *logging.Logge
 		return nil
 	}
 
-	_, err = store.GetOrCreateTenantByCode("default", "Aria Default")
+	tenantID, err := store.GetOrCreateTenantByCode("default", "Aria Default")
 	if err != nil {
 		return fmt.Errorf("failed to create default tenant: %w", err)
+	}
+	if err := store.EnsureTenantRoles(tenantID); err != nil {
+		return fmt.Errorf("failed to create default tenant roles: %w", err)
 	}
 
 	logger.Info("Default tenant created: Aria Default (code=default)")
 	return nil
+}
+
+func previewString(value string, maxLen int) string {
+	if maxLen <= 0 || len(value) <= maxLen {
+		return value
+	}
+	return value[:maxLen]
 }
 
 func nodeRequiresFreshEnrollment(node *controllerstorage.Node) bool {

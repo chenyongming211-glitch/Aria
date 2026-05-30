@@ -204,6 +204,20 @@ export default defineStore('node', () => {
     nodes.value = nodes.value.filter(node => node.id !== id)
   }
 
+  async function deleteNodeRemote(id) {
+    loading.value = true
+    try {
+      const tenantId = requireCurrentTenantId()
+      await api.delete(API_ENDPOINTS.TENANT.NODE_DETAIL(tenantId, id))
+      deleteNode(id)
+    } catch (error) {
+      console.error('[Node Store] Failed to delete node:', error)
+      throw error
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function updateNodeRemote(id, data) {
     loading.value = true
     try {
@@ -241,6 +255,7 @@ export default defineStore('node', () => {
     updateNode,
     updateNodeRemote,
     deleteNode,
+    deleteNodeRemote,
     setCurrentNode
   }
 })
