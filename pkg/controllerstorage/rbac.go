@@ -81,7 +81,7 @@ func (s *Storage) createSystemRoles(exec roleExec, tenantID uuid.UUID) error {
 	}
 
 	for _, sr := range systemRoles {
-		_, err := s.db.Exec(`
+		_, err := exec.Exec(`
 			INSERT INTO roles (tenant_id, name, description, is_system, permissions)
 			VALUES ($1, $2, $3, true, $4)
 			ON CONFLICT (tenant_id, name) DO NOTHING
