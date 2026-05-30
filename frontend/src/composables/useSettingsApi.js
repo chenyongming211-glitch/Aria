@@ -1,6 +1,45 @@
 import api from './useApi'
 import { API_ENDPOINTS } from '@/config/api'
 
+const contentDispositionFilename = (value) => {
+  if (!value) return ''
+
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(value)
+  if (encoded?.[1]) {
+    try {
+      return decodeURIComponent(encoded[1].replace(/^"|"$/g, ''))
+    } catch {
+      return encoded[1].replace(/^"|"$/g, '')
+    }
+  }
+
+  const plain = /filename="?([^";]+)"?/i.exec(value)
+  return plain?.[1]?.trim() || ''
+}
+
+const responseHeader = (headers, name) => {
+  if (!headers) return ''
+  if (typeof headers.get === 'function') {
+    return headers.get(name) || headers.get(name.toLowerCase()) || ''
+  }
+  return headers[name] || headers[name.toLowerCase()] || ''
+}
+
+const saveBlob = (blob, filename) => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return
+  }
+
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
 export const useSettingsApi = {
   listBackups: async () => {
     const response = await api.get(API_ENDPOINTS.SETTINGS.BACKUPS)
@@ -33,5 +72,20 @@ export const useSettingsApi = {
     return response.data?.data || response.data
   },
 
-  downloadBackupUrl: (backupId) => API_ENDPOINTS.SETTINGS.BACKUP_DOWNLOAD(backupId)
+  downloadBackup: async (backup) => {
+    const backupId = typeof backup === 'string' ? backup : backup?.id
+    if (!backupId) {
+      throw new Error('backup id is required')
+    }
+
+    const response = await api.get(API_ENDPOINTS.SETTINGS.BACKUP_DOWNLOAD(backupId), {
+      responseType: 'blob'
+    })
+    const filename = contentDispositionFilename(responseHeader(response.headers, 'content-disposition')) ||
+      (typeof backup === 'object' ? backup.filename : '') ||
+      `${backupId}.json`
+
+    saveBlob(response.data, filename)
+    return { id: backupId, filename }
+  }
 }

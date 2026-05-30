@@ -98,7 +98,7 @@ const routes = [
         path: 'platform/settings',
         name: 'Settings',
         component: () => import('@/views/Settings.vue'),
-        meta: { title: 'Settings', requiresAuth: true, section: 'platform', permission: 'settings:read' }
+        meta: { title: 'Settings', requiresAuth: true, section: 'platform', role: 'super_admin' }
       },
       {
         path: 'routing',
@@ -157,7 +157,23 @@ const readPermissions = () => {
   }
 }
 
+const readUser = () => {
+  try {
+    const raw = localStorage.getItem('aria_user')
+    return raw ? JSON.parse(raw) : null
+  } catch (error) {
+    console.warn('Failed to parse cached user:', error)
+    return null
+  }
+}
+
 const hasRoutePermission = (to) => {
+  const requiredRole = to.meta?.role
+  if (requiredRole) {
+    const user = readUser()
+    if (user?.role !== requiredRole) return false
+  }
+
   const required = to.meta?.permission
   if (!required) return true
 

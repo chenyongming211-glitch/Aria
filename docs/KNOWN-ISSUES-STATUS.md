@@ -1,6 +1,6 @@
 # 已知问题状态追踪
 
-**复核日期**: 2026-04-21  
+**复核日期**: 2026-05-29
 **复核方式**: 重新对照当前代码，而不是沿用历史修复结论
 
 ---
@@ -45,12 +45,12 @@
 
 ### 5. ACL / Policies / Bandwidth 概念重叠
 
-**状态**: ⚠️ 后端模型已收敛，前端与产品层仍有残余分裂
+**状态**: ⚠️ 代码字段已收敛，产品层仍有残余分裂
 
 - 后端已经统一到节点级策略域，并具备版本提升与下发记录
-- 但前端 ACL 仍存在旧字段名兼容残留，`useAclApi` 发送 `src_net/dst_net/min_port/max_port`，而 v2 后端接收 `src_cidr/dst_cidr/dst_port`
-- QoS 页面虽然在表单层限制了最小值，但通用 API 仍允许 `bandwidth_mbps` 回落到 `0`
-- 因此这项只能写成“基础收拢已完成，仍需继续产品化和防呆”
+- ACL 前端已标准化发送 `src_cidr/dst_cidr/dst_port`，后端保留旧字段兼容
+- QoS 前端 API 与后端创建/更新接口均已拒绝 `bandwidth_mbps <= 0`
+- 仍需继续收口的是前端心智模型：`Policy Center`、`ACL`、`Bandwidth` 仍分散在多个页面
 
 ---
 
@@ -58,11 +58,12 @@
 
 ### Settings / Backup 已完成最小收口，但未完全产品化
 
-**状态**: 🟡 部分完成
+**状态**: 🟢 最小真实能力已完成，仍需增强恢复安全性
 
-- 后端 `internal/api/v2/settings.go` 已支持真实的备份 `create/list/download/delete`
-- 前端 `frontend/src/views/Settings.vue` 已下线原来的假保存按钮，只保留真实可用的备份管理
-- 仍未完成的部分是 `restore/upload`，以及其他系统设置项尚未产品化
+- 后端 `internal/api/v2/settings.go` 已支持真实的备份 `create/list/download/delete/upload/restore`
+- 备份导出和恢复是全局控制面能力，当前已收口为 `super_admin` 专用
+- 前端下载改为通过鉴权 API 客户端拉取 blob，不再使用裸 `window.location.assign`
+- 仍未完成的是恢复前 dry-run、选择性恢复、二次确认强约束等恢复安全增强；其他系统设置项继续隐藏，不展示 placeholder
 
 ### 运维闭环仍未完全打通
 
@@ -80,4 +81,4 @@
 
 - `v2-only`、运行期鉴权、状态版本化这些底层结构项已经落地
 - `菜单/领域对齐` 与 `策略概念收拢` 只完成了基础层，不应继续表述为“完全闭环”
-- `Settings / Backup` 已不再是纯占位能力，但仍未达到完整可恢复、可配置的产品状态
+- `Settings / Backup` 已具备最小真实能力；后续重点是恢复安全增强，而不是补齐基础 upload/restore

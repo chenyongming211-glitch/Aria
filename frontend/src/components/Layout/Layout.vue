@@ -71,7 +71,7 @@
           <el-icon><ChatLineRound /></el-icon>
           <template #title>{{ t('nav.aiCopilot') }}</template>
         </el-menu-item>
-        <el-sub-menu v-if="canAnyAccess(['tokens:read', 'users:read', 'roles:read', 'settings:read'])" index="platform">
+        <el-sub-menu v-if="isSuperAdmin || canAnyAccess(['tokens:read', 'users:read', 'roles:read'])" index="platform">
           <template #title>
             <el-icon><Setting /></el-icon>
             <span>{{ t('nav.platform') }}</span>
@@ -88,7 +88,7 @@
             <el-icon><Lock /></el-icon>
             <template #title>{{ t('nav.roleManagement') }}</template>
           </el-menu-item>
-          <el-menu-item v-if="canAccess('settings:read')" index="/platform/settings">
+          <el-menu-item v-if="isSuperAdmin" index="/platform/settings">
             <el-icon><Setting /></el-icon>
             <template #title>{{ t('nav.settings') }}</template>
           </el-menu-item>
@@ -167,7 +167,7 @@
                     <el-icon><User /></el-icon>
                     <span>{{ t('header.profile') }}</span>
                   </el-dropdown-item>
-                  <el-dropdown-item v-if="canAccess('settings:read')" command="settings">
+                  <el-dropdown-item v-if="isSuperAdmin" command="settings">
                     <el-icon><Setting /></el-icon>
                     <span>{{ t('nav.settings') }}</span>
                   </el-dropdown-item>
@@ -233,6 +233,7 @@ const appVersion = computed(() => appStore.version)
 const sidebarWidth = computed(() => isCollapsed.value ? '72px' : '240px')
 const defaultOpeneds = computed(() => isCollapsed.value ? [] : ['connectivity', 'policy-center', 'platform'])
 const userPermissions = computed(() => userStore.permissions || [])
+const isSuperAdmin = computed(() => currentUser.value?.role === 'super_admin')
 
 const canAccess = (permission) => {
   if (!permission) return true

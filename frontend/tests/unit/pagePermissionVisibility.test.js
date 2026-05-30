@@ -3,7 +3,8 @@ import { mount, flushPromises } from '@vue/test-utils'
 
 const {
   permissionSet,
-  mockNodeStore
+  mockNodeStore,
+  mockUserStore
 } = vi.hoisted(() => ({
   permissionSet: new Set(),
   mockNodeStore: {
@@ -13,6 +14,10 @@ const {
     loadNodeDetail: vi.fn(async () => null),
     updateNodeRemote: vi.fn(async () => {}),
     deleteNode: vi.fn(() => {})
+  },
+  mockUserStore: {
+    user: { role: 'admin' },
+    permissions: []
   }
 }))
 
@@ -83,9 +88,9 @@ vi.mock('@/composables/useSettingsApi', () => ({
     listBackups: vi.fn(async () => []),
     createBackup: vi.fn(async () => ({})),
     uploadBackup: vi.fn(async () => ({})),
+    downloadBackup: vi.fn(async () => ({})),
     restoreBackup: vi.fn(async () => ({})),
-    deleteBackup: vi.fn(async () => ({})),
-    downloadBackupUrl: vi.fn((id) => `/v2/settings/backups/${id}/download`)
+    deleteBackup: vi.fn(async () => ({}))
   }
 }))
 
@@ -93,7 +98,8 @@ vi.mock('@/stores', () => ({
   useAppStore: () => ({
     lang: 'zh',
     setLang: vi.fn()
-  })
+  }),
+  useUserStore: () => mockUserStore
 }))
 
 vi.mock('@/i18n', () => ({
@@ -194,6 +200,8 @@ describe('page-level RBAC button visibility', () => {
   beforeEach(() => {
     permissionSet.clear()
     mockNodeStore.loadNodes.mockClear()
+    mockUserStore.user = { role: 'admin' }
+    mockUserStore.permissions = []
 
     const storage = new Map()
     globalThis.localStorage = {
@@ -234,14 +242,14 @@ describe('page-level RBAC button visibility', () => {
     expect(denied.text()).not.toContain('common.revoke')
   })
 
-  it('disables Settings write buttons when settings:write is missing', async () => {
-    permissionSet.add('settings:write')
+  it('disables Settings write buttons unless the user is super_admin', async () => {
+    mockUserStore.user = { role: 'super_admin' }
     const allowed = mountWithStubs(Settings)
     await flushPromises()
     const allowedButtons = allowed.findAll('button')
     expect(allowedButtons.some((b) => b.attributes('disabled') !== undefined)).toBe(false)
 
-    permissionSet.clear()
+    mockUserStore.user = { role: 'admin' }
     const denied = mountWithStubs(Settings)
     await flushPromises()
     const deniedButtons = denied.findAll('button')
