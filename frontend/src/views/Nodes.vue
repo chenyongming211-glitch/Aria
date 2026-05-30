@@ -208,6 +208,31 @@
       @closed="closeDetailDialog"
     >
       <div v-if="selectedNode" class="node-detail-content">
+        <div class="detail-section">
+          <div class="section-header">
+            <h4 class="section-title">
+              <el-icon><Operation /></el-icon>
+              Operations Summary
+            </h4>
+            <el-button size="small" @click="openMonitoringDetail('commands')">
+              Monitoring Context
+            </el-button>
+          </div>
+          <div class="workbench-summary-grid">
+            <button
+              v-for="item in workbenchSummary"
+              :key="item.key"
+              type="button"
+              class="workbench-summary-item"
+              @click="handleSummaryClick(item.focus)"
+            >
+              <span class="summary-label">{{ item.label }}</span>
+              <span class="summary-value">{{ item.value }}</span>
+              <el-tag size="small" :type="item.type">{{ item.status }}</el-tag>
+            </button>
+          </div>
+        </div>
+
         <!-- 基础信息 -->
         <div class="detail-section">
           <h4 class="section-title">
@@ -228,6 +253,88 @@
             </el-descriptions-item>
             <el-descriptions-item label="Uptime">{{ selectedNode.uptime }}</el-descriptions-item>
           </el-descriptions>
+        </div>
+
+        <div class="detail-section">
+          <h4 class="section-title">
+            <el-icon><Connection /></el-icon>
+            Control State
+          </h4>
+          <div class="control-state-grid">
+            <div class="control-state-item">
+              <div class="control-state-label">Desired Version</div>
+              <div class="control-state-value" :class="{ danger: isStateDiverged }">
+                {{ selectedNode.desiredStateVersion || 'N/A' }}
+              </div>
+              <div class="control-state-time">{{ selectedNode.desiredStateUpdatedAt || 'N/A' }}</div>
+            </div>
+            <div class="control-state-item">
+              <div class="control-state-label">Applied Version</div>
+              <div class="control-state-value" :class="{ danger: isStateDiverged }">
+                {{ selectedNode.appliedStateVersion || 'N/A' }}
+              </div>
+              <div class="control-state-time">{{ selectedNode.appliedStateUpdatedAt || 'N/A' }}</div>
+            </div>
+            <div class="control-state-item">
+              <div class="control-state-label">Observed State</div>
+              <div class="control-state-value">{{ selectedNode.observedState || 'idle' }}</div>
+              <div class="control-state-time">{{ selectedNode.observedAt || 'N/A' }}</div>
+            </div>
+            <div class="control-state-item">
+              <div class="control-state-label">Convergence</div>
+              <div class="control-state-value">
+                <el-tag size="small" :type="getConvergenceTagType(selectedNode.stateConvergence)">
+                  {{ formatConvergence(selectedNode.stateConvergence) }}
+                </el-tag>
+              </div>
+              <div class="control-state-time">Last sync: {{ selectedNode.lastSyncAt || 'N/A' }}</div>
+            </div>
+          </div>
+          <el-alert
+            v-if="selectedNode.observedMessage || selectedNode.lastCommandError"
+            class="state-alert"
+            :title="selectedNode.observedMessage || selectedNode.lastCommandError"
+            :type="selectedNode.stateConvergence === 'diverged' || selectedNode.lastCommandError ? 'error' : 'info'"
+            show-icon
+            :closable="false"
+          />
+        </div>
+
+        <div class="detail-section">
+          <div class="section-header">
+            <h4 class="section-title">
+              <el-icon><Key /></el-icon>
+              Certificate Status
+            </h4>
+            <el-button size="small" @click="openMonitoringDetail('certificate')">
+              Certificate Context
+            </el-button>
+          </div>
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="Status">
+              <el-tag size="small" :type="getCertificateStatusTagType(selectedNode.certificate?.status)">
+                {{ selectedNode.certificate?.status || 'missing' }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="Serial Number">
+              {{ selectedNode.certificate?.serial_number || 'N/A' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Issued At">
+              {{ formatCommandTime(selectedNode.certificate?.issued_at) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Expires At">
+              {{ formatCommandTime(selectedNode.certificate?.not_after) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Last Renewed">
+              {{ formatCommandTime(selectedNode.certificateActivity?.last_renewed_at) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Renew Failure">
+              {{ selectedNode.certificateActivity?.last_renew_failure || 'N/A' }}
+            </el-descriptions-item>
+          </el-descriptions>
+          <div v-if="selectedNode.certificateActivity?.last_renewed_serial_number" class="certificate-note">
+            Last renewed serial: {{ selectedNode.certificateActivity.last_renewed_serial_number }}
+          </div>
         </div>
 
         <!-- 实时监控指标 -->
@@ -330,10 +437,10 @@
               Recent Commands
             </h4>
             <div class="detail-toolbar">
-              <el-button size="small" @click="openMonitoringDetail">
+              <el-button size="small" @click="openMonitoringDetail('commands')">
                 Monitoring Detail
               </el-button>
-              <el-button size="small" @click="openPolicyCenter">
+              <el-button size="small" @click="openPolicyCenter()">
                 Policy Center
               </el-button>
               <el-button size="small" type="primary" :loading="commandLoading" @click="runQuickCommand('sync')">
@@ -349,10 +456,18 @@
             size="small"
             empty-text="No commands yet"
           >
+            <el-table-column label="ID" width="110">
+              <template #default="{ row }">
+                <el-tooltip v-if="row.id" :content="row.id" placement="top">
+                  <span class="mono-text">{{ shortCommandId(row.id) }}</span>
+                </el-tooltip>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="command" label="Command" min-width="120" />
             <el-table-column prop="status" label="Status" width="120">
               <template #default="{ row }">
-                <el-tag :type="row.status === 'completed' ? 'success' : 'warning'" size="small">
+                <el-tag :type="getCommandStatusTagType(row.status)" size="small">
                   {{ row.status }}
                 </el-tag>
               </template>
@@ -361,6 +476,11 @@
             <el-table-column label="Created" width="180">
               <template #default="{ row }">
                 {{ formatCommandTime(row.created_at) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="Completed" width="180">
+              <template #default="{ row }">
+                {{ formatCommandTime(row.completed_at || row.updated_at) }}
               </template>
             </el-table-column>
           </el-table>
@@ -372,7 +492,7 @@
               <el-icon><Warning /></el-icon>
               Active Alerts
             </h4>
-            <el-button size="small" @click="openMonitoringDetail">
+            <el-button size="small" @click="openMonitoringDetail('alerts')">
               Open Monitoring
             </el-button>
           </div>
@@ -405,7 +525,7 @@
               <el-icon><Document /></el-icon>
               Recent Policy Deliveries
             </h4>
-            <el-button size="small" @click="openPolicyCenter">
+            <el-button size="small" @click="openPolicyCenter()">
               Open Policy Center
             </el-button>
           </div>
@@ -415,8 +535,20 @@
             empty-text="No recent policy deliveries"
           >
             <el-table-column prop="policy_domain" label="Domain" width="120" />
-            <el-table-column prop="policy_name" label="Policy" min-width="180" show-overflow-tooltip />
+            <el-table-column label="Policy" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">
+                {{ row.policy_name || row.policy_ref || '-' }}
+              </template>
+            </el-table-column>
             <el-table-column prop="policy_ref" label="Ref" width="150" show-overflow-tooltip />
+            <el-table-column label="Command" width="120">
+              <template #default="{ row }">
+                <el-tooltip v-if="row.command_id" :content="row.command_id" placement="top">
+                  <span class="mono-text">{{ shortCommandId(row.command_id) }}</span>
+                </el-tooltip>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="command_status" label="Status" width="120">
               <template #default="{ row }">
                 <el-tag size="small" :type="getDeliveryStatusTagType(row.command_status)">
@@ -430,6 +562,13 @@
               </template>
             </el-table-column>
             <el-table-column prop="last_error" label="Error" min-width="220" show-overflow-tooltip />
+            <el-table-column label="Actions" width="120">
+              <template #default="{ row }">
+                <el-button size="small" link @click="openPolicyCenter(row)">
+                  Open
+                </el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </div>
       </div>
@@ -508,7 +647,10 @@ import {
   Timer,
   Position,
   Warning,
-  Document
+  Document,
+  Operation,
+  Connection,
+  Key
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import useNodeStore from '../stores/node'
@@ -551,6 +693,56 @@ const InputRef = ref(null)
 const onlineCount = computed(() => nodes.value.filter(n => n.status === 'online').length)
 const offlineCount = computed(() => nodes.value.filter(n => n.status === 'offline').length)
 const maintenanceCount = computed(() => nodes.value.filter(n => n.status === 'maintenance').length)
+const recentCommandCount = computed(() => selectedNode.value?.recentCommands?.length || 0)
+const recentDeliveryCount = computed(() => selectedNode.value?.recentPolicyDeliveries?.length || 0)
+const activeAlertCount = computed(() => selectedNode.value?.activeAlerts?.length || 0)
+const failedCommandCount = computed(() => (selectedNode.value?.recentCommands || []).filter(item => item.status === 'failed').length)
+const pendingCommandCount = computed(() => (selectedNode.value?.recentCommands || []).filter(item => isPendingCommandStatus(item.status)).length)
+const failedDeliveryCount = computed(() => (selectedNode.value?.recentPolicyDeliveries || []).filter(item => item.command_status === 'failed').length)
+const pendingDeliveryCount = computed(() => (selectedNode.value?.recentPolicyDeliveries || []).filter(item => isPendingCommandStatus(item.command_status)).length)
+const isStateDiverged = computed(() => {
+  if (!selectedNode.value) return false
+  const desired = selectedNode.value.desiredStateVersion
+  const applied = selectedNode.value.appliedStateVersion
+  return Boolean(desired && applied && desired !== applied)
+})
+const workbenchSummary = computed(() => {
+  const certStatus = selectedNode.value?.certificate?.status || 'missing'
+  return [
+    {
+      key: 'commands',
+      label: 'Commands',
+      value: recentCommandCount.value,
+      status: failedCommandCount.value > 0 ? `${failedCommandCount.value} failed` : `${pendingCommandCount.value} pending`,
+      type: failedCommandCount.value > 0 ? 'danger' : pendingCommandCount.value > 0 ? 'warning' : 'success',
+      focus: 'commands'
+    },
+    {
+      key: 'policies',
+      label: 'Policy Deliveries',
+      value: recentDeliveryCount.value,
+      status: failedDeliveryCount.value > 0 ? `${failedDeliveryCount.value} failed` : `${pendingDeliveryCount.value} pending`,
+      type: failedDeliveryCount.value > 0 ? 'danger' : pendingDeliveryCount.value > 0 ? 'warning' : 'success',
+      focus: 'policies'
+    },
+    {
+      key: 'alerts',
+      label: 'Active Alerts',
+      value: activeAlertCount.value,
+      status: activeAlertCount.value > 0 ? 'active' : 'clear',
+      type: activeAlertCount.value > 0 ? 'danger' : 'success',
+      focus: 'alerts'
+    },
+    {
+      key: 'certificate',
+      label: 'Certificate',
+      value: certStatus,
+      status: selectedNode.value?.certificateActivity?.last_renew_failure ? 'renew failed' : certStatus,
+      type: getCertificateStatusTagType(certStatus),
+      focus: 'certificate'
+    }
+  ]
+})
 
 const filteredNodes = computed(() => {
   if (!searchQuery.value) {
@@ -673,16 +865,36 @@ const closeDetailDialog = () => {
   selectedNode.value = null
 }
 
-const openMonitoringDetail = () => {
+const openMonitoringDetail = (focus = '') => {
   if (!selectedNode.value?.id) return
   detailDialogVisible.value = false
-  router.push({ name: 'NodeMonitorDetail', params: { nodeId: selectedNode.value.id } })
+  router.push({
+    name: 'NodeMonitorDetail',
+    params: { nodeId: selectedNode.value.id },
+    ...(focus ? { query: { focus } } : {})
+  })
 }
 
-const openPolicyCenter = () => {
+const openPolicyCenter = (delivery = null) => {
   if (!selectedNode.value?.id) return
   detailDialogVisible.value = false
-  router.push({ name: 'Policies', query: { nodeId: selectedNode.value.id } })
+  router.push({
+    name: 'Policies',
+    query: {
+      nodeId: selectedNode.value.id,
+      ...(delivery?.policy_ref ? { policyRef: delivery.policy_ref } : {}),
+      ...(delivery?.policy_domain ? { kind: delivery.policy_domain } : {}),
+      ...(delivery?.command_id ? { commandId: delivery.command_id } : {})
+    }
+  })
+}
+
+const handleSummaryClick = (focus) => {
+  if (focus === 'policies') {
+    openPolicyCenter()
+    return
+  }
+  openMonitoringDetail(focus)
 }
 
 const handleSizeChange = (size) => {
@@ -694,9 +906,33 @@ const handleCurrentChange = (page) => {
   currentPage.value = page
 }
 
-const reloadSelectedNode = async () => {
+const reloadSelectedNode = async (preserveCommand = null) => {
   if (!selectedNode.value?.id) return
   selectedNode.value = await nodeStore.loadNodeDetail(selectedNode.value.id)
+  if (preserveCommand) {
+    prependCommandIfMissing(preserveCommand)
+  }
+}
+
+const normalizeQueuedCommand = (command, response) => ({
+  id: response?.command_id || response?.id || '',
+  command: response?.command || command,
+  status: response?.status || 'pending',
+  message: response?.message || 'Command queued for delivery',
+  created_at: response?.created_at || new Date().toISOString(),
+  updated_at: response?.updated_at || response?.created_at || new Date().toISOString(),
+  timeout_seconds: response?.timeout_seconds,
+  priority: response?.priority
+})
+
+const prependCommandIfMissing = (command) => {
+  if (!selectedNode.value || !command?.id) return
+  const existing = Array.isArray(selectedNode.value.recentCommands) ? selectedNode.value.recentCommands : []
+  if (existing.some(item => item.id === command.id)) {
+    selectedNode.value.recentCommands = existing
+    return
+  }
+  selectedNode.value.recentCommands = [command, ...existing]
 }
 
 const runQuickCommand = async (command) => {
@@ -704,13 +940,15 @@ const runQuickCommand = async (command) => {
 
   commandLoading.value = true
   try {
-    await useAgentProxyApi.sendAgentCommand(selectedNode.value.id, {
+    const response = await useAgentProxyApi.sendAgentCommand(selectedNode.value.id, {
       command,
       params: {},
       timeout: 30
     })
+    const queuedCommand = normalizeQueuedCommand(command, response)
+    prependCommandIfMissing(queuedCommand)
     ElMessage.success(`${command} queued`)
-    await reloadSelectedNode()
+    await reloadSelectedNode(queuedCommand)
   } catch (error) {
     console.error(`Failed to queue ${command}:`, error)
     ElMessage.error(`Failed to queue ${command}`)
@@ -759,6 +997,7 @@ const getDeliveryStatusTagType = (status) => {
       return 'success'
     case 'pending':
     case 'queued':
+    case 'sent':
     case 'acknowledged':
     case 'in_progress':
       return 'warning'
@@ -770,9 +1009,32 @@ const getDeliveryStatusTagType = (status) => {
   }
 }
 
+const getCommandStatusTagType = (status) => getDeliveryStatusTagType(status)
+
+const getCertificateStatusTagType = (status) => {
+  switch (status) {
+    case 'issued':
+      return 'success'
+    case 'expiring':
+      return 'warning'
+    case 'expired':
+    case 'revoked':
+      return 'danger'
+    default:
+      return 'info'
+  }
+}
+
+const isPendingCommandStatus = (status) => ['pending', 'queued', 'sent', 'acknowledged', 'in_progress', 'running'].includes(status)
+
 const shortStateVersion = (value) => {
   if (!value) return 'N/A'
   return value.length > 12 ? `${value.slice(0, 12)}...` : value
+}
+
+const shortCommandId = (value) => {
+  if (!value) return '-'
+  return String(value).length > 10 ? `${String(value).slice(0, 10)}...` : String(value)
 }
 
 const formatCommandTime = (value) => {
@@ -849,6 +1111,20 @@ onMounted(() => {
 .node-detail-content { max-height: 600px; overflow-y: auto; }
 .detail-section { margin-bottom: 32px; }
 .section-title { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; color: var(--aria-text-primary); margin: 0 0 16px 0; }
+.workbench-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.workbench-summary-item { min-height: 92px; padding: 14px; border: 1px solid var(--aria-border-primary); border-radius: var(--aria-radius-md); background: var(--aria-bg-tertiary); color: inherit; cursor: pointer; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; text-align: left; transition: border-color var(--aria-transition-base), background var(--aria-transition-base); }
+.workbench-summary-item:hover { border-color: var(--aria-primary); background: var(--aria-bg-secondary); }
+.summary-label { font-size: 12px; color: var(--aria-text-secondary); text-transform: uppercase; letter-spacing: 0; }
+.summary-value { font-size: 20px; font-weight: 700; color: var(--aria-text-primary); word-break: break-word; }
+.control-state-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.control-state-item { min-height: 94px; padding: 14px; background: var(--aria-bg-tertiary); border: 1px solid var(--aria-border-primary); border-radius: var(--aria-radius-md); }
+.control-state-label { font-size: 12px; color: var(--aria-text-secondary); text-transform: uppercase; letter-spacing: 0; margin-bottom: 8px; }
+.control-state-value { font-size: 14px; font-weight: 700; color: var(--aria-text-primary); word-break: break-all; }
+.control-state-value.danger { color: #EF4444; }
+.control-state-time { margin-top: 8px; font-size: 12px; color: var(--aria-text-secondary); word-break: break-word; }
+.state-alert { margin-top: 12px; }
+.certificate-note { margin-top: 10px; color: var(--aria-text-secondary); font-size: 12px; }
+.mono-text { font-family: Menlo, Monaco, Consolas, "Courier New", monospace; font-size: 12px; }
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
 .stat-box { display: flex; align-items: center; gap: 16px; padding: 20px; background: var(--aria-bg-tertiary); border: 1px solid var(--aria-border-primary); border-radius: var(--aria-radius-lg); }
 .stat-icon-box { width: 48px; height: 48px; border-radius: var(--aria-radius-md); display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0; }
@@ -862,5 +1138,7 @@ onMounted(() => {
 .route-code { color: #cf9236; }
 
 @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-@media (max-width: 768px) { .stats-cards { grid-template-columns: repeat(2, 1fr); } .stats-grid { grid-template-columns: 1fr; } }
+@media (max-width: 960px) { .workbench-summary-grid, .control-state-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 768px) { .stats-cards { grid-template-columns: repeat(2, 1fr); } .stats-grid { grid-template-columns: 1fr; } .detail-toolbar { flex-wrap: wrap; } }
+@media (max-width: 520px) { .workbench-summary-grid, .control-state-grid { grid-template-columns: 1fr; } }
 </style>

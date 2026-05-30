@@ -86,16 +86,33 @@ export default defineStore('node', () => {
 
   async function loadNodeDetail(id) {
     const tenantId = requireCurrentTenantId()
-    const [detailResponse, monitorDetail, statusResponse, commandsResponse] = await Promise.all([
+    const [detailResult, monitorResult, statusResult, commandsResult] = await Promise.allSettled([
       api.get(API_ENDPOINTS.TENANT.NODE_DETAIL(tenantId, id)),
       useMonitorApi.getNodeDetail(id),
       useAgentProxyApi.getAgentStatus(id),
       useAgentProxyApi.getAgentCommands(id, 10)
     ])
 
+    if (detailResult.status === 'rejected' && monitorResult.status === 'rejected') {
+      throw detailResult.reason || monitorResult.reason
+    }
+
+    if (statusResult.status === 'rejected') {
+      console.warn('[Node Store] Failed to load node operation status:', statusResult.reason)
+    }
+    if (commandsResult.status === 'rejected') {
+      console.warn('[Node Store] Failed to load node command history:', commandsResult.reason)
+    }
+
+    const detailResponse = detailResult.status === 'fulfilled' ? detailResult.value : { data: {} }
+    const monitorDetail = monitorResult.status === 'fulfilled' ? (monitorResult.value || {}) : {}
+    const statusResponse = statusResult.status === 'fulfilled' ? (statusResult.value || {}) : {}
+    const commandsResponse = commandsResult.status === 'fulfilled' ? (commandsResult.value || {}) : {}
     const detail = detailResponse.data?.data || detailResponse.data || {}
     const status = statusResponse || {}
-    const commands = commandsResponse?.items || []
+    const commands = Array.isArray(commandsResponse?.items)
+      ? commandsResponse.items
+      : (Array.isArray(monitorDetail?.recent_commands) ? monitorDetail.recent_commands : [])
 
     const node = {
       id: detail.id || id,
@@ -133,6 +150,8 @@ export default defineStore('node', () => {
       recentCommands: Array.isArray(commands) ? commands : [],
       recentPolicyDeliveries: Array.isArray(monitorDetail?.recent_policy_deliveries) ? monitorDetail.recent_policy_deliveries : [],
       activeAlerts: Array.isArray(monitorDetail?.active_alerts) ? monitorDetail.active_alerts : [],
+      certificate: monitorDetail?.certificate || detail.certificate || null,
+      certificateActivity: monitorDetail?.certificate_activity || detail.certificate_activity || null,
       bandwidth: { upload: 0, download: 0 },
       latency: 0
     }
