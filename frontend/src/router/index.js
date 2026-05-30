@@ -177,6 +177,9 @@ const hasRoutePermission = (to) => {
   const required = to.meta?.permission
   if (!required) return true
 
+  const user = readUser()
+  if (user?.role === 'super_admin') return true
+
   const permissions = readPermissions()
   if (permissions.includes('*')) return true
 

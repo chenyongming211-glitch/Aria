@@ -133,6 +133,10 @@ export default defineStore('user', () => {
       if (cached) {
         permissions.value = JSON.parse(cached)
       }
+      if (user.value?.role === 'super_admin' && !permissions.value.includes('*')) {
+        permissions.value = ['*']
+        localStorage.setItem('aria_permissions', JSON.stringify(permissions.value))
+      }
     }
   }
 
