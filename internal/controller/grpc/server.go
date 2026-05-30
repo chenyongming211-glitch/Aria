@@ -13,6 +13,7 @@ import (
 	controllerstorage "aria/pkg/controllerstorage"
 	"aria/pkg/grpc/agentpb"
 	"github.com/google/uuid"
+	"google.golang.org/grpc/metadata"
 )
 
 // ControllerServer 实现 gRPC ControllerService
@@ -215,6 +216,9 @@ func (s *ControllerServer) CommandStream(stream agentpb.ControllerService_Comman
 				return err
 			}
 			nodePublicKey = node.PublicKey
+			if err := stream.SendHeader(metadata.MD{}); err != nil {
+				return fmt.Errorf("stream send header error: %w", err)
+			}
 			if err := s.sendNextPendingCommand(stream, nodePublicKey); err != nil {
 				return err
 			}
