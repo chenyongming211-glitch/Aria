@@ -593,8 +593,7 @@ func TestRBACHandlerMatrix_UsersRead(t *testing.T) {
 				store:     store,
 				tenantAPI: handlers.NewTenantAPI(store),
 			}
-			// Call handler directly with short path so TenantAPI treats GET as list-users branch.
-			req := withAuthContext(httptest.NewRequest(http.MethodGet, "/x/x/x/x", nil), tc.role, tenantID)
+			req := withAuthContext(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/users", nil), tc.role, tenantID)
 			rr := httptest.NewRecorder()
 			router.handleTenantUsers(rr, req, tenantID, tc.role)
 
@@ -831,7 +830,7 @@ func TestRBACHandlerMatrix_UsersWrite(t *testing.T) {
 			}
 			req := withAuthContext(httptest.NewRequest(
 				http.MethodPost,
-				"/x/x/x/x",
+				"/api/v2/tenants/"+tenantID.String()+"/users",
 				strings.NewReader(`{"username":"bob","password":"P@ssw0rd","email":"bob@example.com","role":"member"}`),
 			), tc.role, tenantID)
 			rr := httptest.NewRecorder()
