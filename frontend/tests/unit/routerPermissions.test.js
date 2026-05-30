@@ -67,6 +67,36 @@ describe('router RBAC metadata', () => {
     expect(router.currentRoute.value.path).toBe('/nodes')
   })
 
+  it('redirects token-only sessions to login before protected pages', async () => {
+    await router.replace('/login')
+    await router.isReady()
+
+    localStorage.setItem('aria_token', 'dummy-token')
+    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_permissions', JSON.stringify(['nodes:read']))
+
+    await router.push('/dashboard')
+
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(localStorage.getItem('aria_token')).toBeNull()
+    expect(localStorage.getItem('aria_permissions')).toBeNull()
+  })
+
+  it('redirects malformed cached users to login before protected pages', async () => {
+    await router.replace('/login')
+    await router.isReady()
+
+    localStorage.setItem('aria_token', 'dummy-token')
+    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_user', '{not-json')
+
+    await router.push('/dashboard')
+
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(localStorage.getItem('aria_token')).toBeNull()
+    expect(localStorage.getItem('aria_user')).toBeNull()
+  })
+
   it('blocks Settings navigation for non-super_admin users', async () => {
     localStorage.setItem('aria_token', 'dummy-token')
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
