@@ -18,6 +18,22 @@ use aria::controller_service_client::ControllerServiceClient;
 pub type GrpcCommandRequest = aria::CommandRequest;
 pub type GrpcCommandResponse = aria::CommandResponse;
 
+const UNARY_RPC_TIMEOUT: Duration = Duration::from_secs(30);
+
+pub fn unary_rpc_timeout() -> Option<Duration> {
+    Some(UNARY_RPC_TIMEOUT)
+}
+
+pub fn command_stream_rpc_timeout() -> Option<Duration> {
+    None
+}
+
+fn apply_unary_timeout<T>(request: &mut tonic::Request<T>) {
+    if let Some(timeout) = unary_rpc_timeout() {
+        request.set_timeout(timeout);
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RegisterResult {
     pub assigned_ip: String,
@@ -60,7 +76,6 @@ impl GrpcClient {
         let uses_tls = controller_url.starts_with("https://");
         let mut endpoint = Endpoint::from_shared(controller_url.clone())?
             .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(30))
             .tcp_keepalive(Some(Duration::from_secs(60)));
 
         if uses_tls {
@@ -158,7 +173,7 @@ impl GrpcClient {
         let kernel_version = get_kernel_version();
         let has_aesni = has_aesni_support();
         
-        let request = tonic::Request::new(aria::RegisterRequest {
+        let mut request = tonic::Request::new(aria::RegisterRequest {
             public_key,
             endpoint,
             private_ip: String::new(),
@@ -177,6 +192,7 @@ impl GrpcClient {
             has_aesni,
             machine_id,
         });
+        apply_unary_timeout(&mut request);
 
         let mut client = ControllerServiceClient::new(self.channel.clone());
         let response = client.register(request).await?;
@@ -228,6 +244,7 @@ impl GrpcClient {
             let metadata = request.metadata_mut();
             metadata.insert("authorization", format!("Bearer {}", token).parse().unwrap());
         }
+        apply_unary_timeout(&mut request);
 
         let mut client = ControllerServiceClient::new(self.channel.clone());
         let response = client.sync(request).await?;
@@ -318,6 +335,9 @@ impl GrpcClient {
         let mut client = ControllerServiceClient::new(self.channel.clone());
 
         let mut request = tonic::Request::new(request_stream);
+        if let Some(timeout) = command_stream_rpc_timeout() {
+            request.set_timeout(timeout);
+        }
         if let Some(token) = &runtime_token {
             let metadata = request.metadata_mut();
             metadata.insert("authorization", format!("Bearer {}", token).parse().unwrap());
