@@ -54,6 +54,19 @@ describe('router RBAC metadata', () => {
     expect(router.currentRoute.value.path).toBe('/dashboard')
   })
 
+  it('allows super_admin navigation when permission cache is empty', async () => {
+    localStorage.setItem('aria_token', 'dummy-token')
+    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_user', JSON.stringify({ role: 'super_admin' }))
+    localStorage.setItem('aria_permissions', JSON.stringify([]))
+
+    await router.push('/dashboard')
+    await router.isReady()
+    await router.push('/nodes')
+
+    expect(router.currentRoute.value.path).toBe('/nodes')
+  })
+
   it('blocks Settings navigation for non-super_admin users', async () => {
     localStorage.setItem('aria_token', 'dummy-token')
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
