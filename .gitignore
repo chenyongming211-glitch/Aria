@@ -22,6 +22,8 @@ coverage.html
 vendor/
 go.work
 go.work.sum
+.gocache/
+.gomodcache/
 
 # eBPF 构建产物
 internal/agent/firewall/ebpf/build/
@@ -74,6 +76,7 @@ docker-compose.override.yml
 temp-dist/
 
 # 前端 node_modules（不提交）
+frontend/node_modules/
 frontend-refactor/node_modules/
 
 # UI 构建产物
@@ -92,4 +95,3 @@ deployments/ansible/group_vars/vault.yml
 *.vault
 !.ansible/vault_pass.txt.example
 ~/.aria_vault_pass.txt
-

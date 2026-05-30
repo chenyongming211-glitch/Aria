@@ -661,8 +661,7 @@ const saveNodeChanges = async () => {
 
 const handleDeleteNode = async (id) => {
   try {
-    // 调用删除 API (如果有的话，此处暂模拟本地删除)
-    nodeStore.deleteNode(id)
+    await nodeStore.deleteNodeRemote(id)
     ElMessage.success('Node deleted')
   } catch (error) {
     ElMessage.error('Failed to delete node')

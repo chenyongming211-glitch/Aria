@@ -162,11 +162,15 @@ func (s *Storage) Migrate() error {
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			name VARCHAR(100) NOT NULL,
 			code VARCHAR(50) UNIQUE,
+			email VARCHAR(100),
+			phone VARCHAR(32),
 			status VARCHAR(20) DEFAULT 'active',
 			resource_quota JSONB DEFAULT '{}',
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS email VARCHAR(100)`,
+		`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS phone VARCHAR(32)`,
 
 		`CREATE TABLE IF NOT EXISTS nodes (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -255,9 +259,11 @@ func (s *Storage) Migrate() error {
 			role VARCHAR(20) DEFAULT 'viewer',
 			email VARCHAR(100),
 			created_at TIMESTAMPTZ DEFAULT NOW(),
+			updated_at TIMESTAMPTZ DEFAULT NOW(),
 			last_login TIMESTAMPTZ
 		)`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
 		`ALTER TABLE users ALTER COLUMN tenant_id DROP NOT NULL`,
 
 		`CREATE TABLE IF NOT EXISTS acl_rules (
@@ -326,6 +332,7 @@ func (s *Storage) Migrate() error {
 
 		// Add enrolled_with_token to track which token was used for registration
 		`ALTER TABLE nodes ADD COLUMN IF NOT EXISTS enrolled_with_token VARCHAR(64)`,
+		`ALTER TABLE nodes ADD COLUMN IF NOT EXISTS advertised_routes TEXT[] DEFAULT '{}'::text[]`,
 
 		// Add node references and action for policy management
 		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS node_id UUID REFERENCES nodes(id)`,
@@ -350,7 +357,6 @@ func (s *Storage) Migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_blacklist_rules_enabled ON blacklist_rules(enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)`,
 		`CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_node_control_states_unique_node ON node_control_states(node_id)`,
 
 		// AI Audit Log - 记录 AI 对话和工具调用
 		`CREATE TABLE IF NOT EXISTS ai_audit_logs (
@@ -417,6 +423,7 @@ func (s *Storage) Migrate() error {
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_node_control_states_unique_node ON node_control_states(node_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_commands_node_status ON agent_commands(node_public_key, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_commands_created_at ON agent_commands(created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_policy_deliveries_tenant_node_domain_ref ON policy_deliveries(tenant_id, node_id, policy_domain, policy_ref)`,

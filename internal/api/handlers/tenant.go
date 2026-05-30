@@ -54,12 +54,33 @@ func (t *TenantAPI) CreateTenant(w http.ResponseWriter, r *http.Request) {
 
 	tenantID := uuid.New()
 
+	tx, err := t.store.DB().Begin()
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeCreateTenantFailed, "Failed to start tenant transaction: "+err.Error(), nil)
+		return
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
 	query := `INSERT INTO tenants (id, name, code, email, phone, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`
-	_, err := t.store.DB().Exec(query, tenantID, req.Name, req.Code, req.Email, req.Phone)
+	_, err = tx.Exec(query, tenantID, req.Name, req.Code, req.Email, req.Phone)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeCreateTenantFailed, "Failed to create tenant: "+err.Error(), nil)
 		return
 	}
+	if err := t.store.EnsureTenantRolesTx(tx, tenantID); err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeCreateTenantFailed, "Failed to create tenant roles: "+err.Error(), nil)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeCreateTenantFailed, "Failed to commit tenant: "+err.Error(), nil)
+		return
+	}
+	committed = true
 
 	resp := TenantResponse{
 		ID:    tenantID.String(),
@@ -160,9 +181,13 @@ func (t *TenantAPI) HandleTenantUsers(w http.ResponseWriter, r *http.Request) {
 
 	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	// URL: api/v2/tenants/{tid}/users[/{uid}]
-	
-	if len(pathParts) >= 5 && pathParts[4] != "" {
-		userID := pathParts[4]
+	if len(pathParts) < 5 || pathParts[4] != "users" || len(pathParts) > 6 {
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Unknown users endpoint", nil)
+		return
+	}
+
+	if len(pathParts) == 6 && pathParts[5] != "" {
+		userID := pathParts[5]
 		switch r.Method {
 		case http.MethodPut:
 			t.UpdateUser(w, r, tenantID, userID)
