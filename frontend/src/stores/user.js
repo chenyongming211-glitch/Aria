@@ -26,6 +26,47 @@ const normalizeUser = (rawUser, fallbackUsername = '') => {
   }
 }
 
+const decodeJwtPayload = (token) => {
+  const payload = String(token || '').split('.')[1]
+  if (!payload) return null
+
+  try {
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+    const binary = atob(padded)
+    const bytes = Uint8Array.from(binary, char => char.charCodeAt(0))
+    return JSON.parse(new TextDecoder().decode(bytes))
+  } catch (error) {
+    console.warn('Failed to decode cached token claims:', error)
+    return null
+  }
+}
+
+const userFromTokenClaims = (token) => {
+  const claims = decodeJwtPayload(token)
+  if (!claims) return null
+
+  return normalizeUser({
+    id: claims.uid || claims.sub,
+    username: claims.unm,
+    role: claims.rol,
+    tenant_id: claims.tid || ''
+  })
+}
+
+const mergeTokenUserClaims = (cachedUser, token) => {
+  const tokenUser = userFromTokenClaims(token)
+  if (!tokenUser) return normalizeUser(cachedUser)
+
+  return normalizeUser({
+    ...cachedUser,
+    id: tokenUser.id || cachedUser?.id,
+    username: tokenUser.username || cachedUser?.username,
+    role: tokenUser.role || cachedUser?.role,
+    tenant_id: tokenUser.tenant_id ?? cachedUser?.tenant_id
+  })
+}
+
 export default defineStore('user', () => {
   const user = ref(null)
   const isAuthenticated = ref(false)
@@ -157,7 +198,7 @@ export default defineStore('user', () => {
     }
 
     try {
-      user.value = normalizeUser(JSON.parse(userData))
+      user.value = mergeTokenUserClaims(JSON.parse(userData), token)
     } catch (error) {
       console.warn('Invalid cached user session, clearing it:', error)
       logout()
