@@ -13,7 +13,9 @@ import (
 	controllerstorage "aria/pkg/controllerstorage"
 	"aria/pkg/grpc/agentpb"
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 // ControllerServer 实现 gRPC ControllerService
@@ -98,7 +100,7 @@ func (s *ControllerServer) Register(ctx context.Context, req *agentpb.RegisterRe
 // Sync 处理 Agent 定期同步请求
 // 复用 REST API 的 HandleSync 逻辑
 func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (*agentpb.SyncResponse, error) {
-	node, err := s.resolveRuntimeNode(req.NodeId, req.PublicKey)
+	node, err := s.resolveRuntimeNodeForRequest(ctx, req.NodeId, req.PublicKey)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +212,7 @@ func (s *ControllerServer) CommandStream(stream agentpb.ControllerService_Comman
 		return fmt.Errorf("command stream init payload is required")
 	}
 
-	node, err := s.resolveNodeFromCommandStream(resp)
+	node, err := s.resolveCommandStreamNodeForRequest(stream.Context(), resp)
 	if err != nil {
 		return err
 	}
@@ -261,7 +263,7 @@ func (s *ControllerServer) CommandStream(stream agentpb.ControllerService_Comman
 			}
 
 			if resp.CommandId != "" && s.store != nil {
-				if err := s.store.UpdateAgentCommandStatus(resp.CommandId, resp.Status, resp.Message, resp.Result); err != nil {
+				if err := s.store.UpdateAgentCommandStatusForNode(resp.CommandId, nodePublicKey, resp.Status, resp.Message, resp.Result); err != nil {
 					return fmt.Errorf("failed to update command status: %w", err)
 				}
 			}
@@ -317,7 +319,7 @@ func isTerminalCommandStatus(status string) bool {
 
 // ReportMetrics 处理 Agent 指标上报
 func (s *ControllerServer) ReportMetrics(ctx context.Context, req *agentpb.MetricsReportRequest) (*agentpb.MetricsReportResponse, error) {
-	node, err := s.resolveMetricsNode(req)
+	node, err := s.resolveMetricsNodeForRequest(ctx, req)
 	if err != nil {
 		fmt.Printf("[WARN] Dropping metrics from unknown/unauthorized node: %v\n", err)
 		return &agentpb.MetricsReportResponse{Success: false, Message: "Unauthorized node"}, nil
@@ -455,6 +457,49 @@ func (s *ControllerServer) resolveRuntimeNode(nodeID, publicKey string) (*contro
 	return resolvedNode, nil
 }
 
+func (s *ControllerServer) resolveRuntimeNodeForRequest(ctx context.Context, nodeID, publicKey string) (*controllerstorage.Node, error) {
+	node, err := s.resolveRuntimeNode(nodeID, publicKey)
+	if err != nil {
+		return nil, err
+	}
+	if err := bindRuntimeTokenToNode(ctx, node); err != nil {
+		return nil, err
+	}
+	return node, nil
+}
+
+func bindRuntimeTokenToNode(ctx context.Context, node *controllerstorage.Node) error {
+	if node == nil {
+		return status.Error(codes.Unauthenticated, "runtime node is required")
+	}
+
+	tokenNodeID, ok := GetRuntimeNodeID(ctx)
+	if !ok || strings.TrimSpace(tokenNodeID) == "" {
+		return status.Error(codes.Unauthenticated, "runtime token node missing")
+	}
+
+	parsedTokenNodeID, err := uuid.Parse(tokenNodeID)
+	if err != nil {
+		return status.Error(codes.Unauthenticated, "invalid runtime token node")
+	}
+	if parsedTokenNodeID != node.ID {
+		return status.Error(codes.PermissionDenied, "runtime token node mismatch")
+	}
+
+	tokenTenantID, ok := GetRuntimeTenantID(ctx)
+	if ok && strings.TrimSpace(tokenTenantID) != "" {
+		parsedTokenTenantID, err := uuid.Parse(tokenTenantID)
+		if err != nil {
+			return status.Error(codes.Unauthenticated, "invalid runtime token tenant")
+		}
+		if parsedTokenTenantID != node.TenantID {
+			return status.Error(codes.PermissionDenied, "runtime token tenant mismatch")
+		}
+	}
+
+	return nil
+}
+
 func (s *ControllerServer) resolveLegacyAgentIdentity(agentID string) (*controllerstorage.Node, error) {
 	if s.store == nil {
 		return nil, fmt.Errorf("controller storage is not configured")
@@ -468,6 +513,17 @@ func (s *ControllerServer) resolveLegacyAgentIdentity(agentID string) (*controll
 	}
 
 	return s.store.GetNode(agentID)
+}
+
+func (s *ControllerServer) resolveCommandStreamNodeForRequest(ctx context.Context, resp *agentpb.CommandResponse) (*controllerstorage.Node, error) {
+	node, err := s.resolveNodeFromCommandStream(resp)
+	if err != nil {
+		return nil, err
+	}
+	if err := bindRuntimeTokenToNode(ctx, node); err != nil {
+		return nil, err
+	}
+	return node, nil
 }
 
 func (s *ControllerServer) resolveNodeFromCommandStream(resp *agentpb.CommandResponse) (*controllerstorage.Node, error) {
@@ -519,6 +575,17 @@ func (s *ControllerServer) resolveMetricsNode(req *agentpb.MetricsReportRequest)
 	}
 
 	return nil, fmt.Errorf("node_id or public_key is required for metrics reporting")
+}
+
+func (s *ControllerServer) resolveMetricsNodeForRequest(ctx context.Context, req *agentpb.MetricsReportRequest) (*controllerstorage.Node, error) {
+	node, err := s.resolveMetricsNode(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := bindRuntimeTokenToNode(ctx, node); err != nil {
+		return nil, err
+	}
+	return node, nil
 }
 
 // 辅助函数：从 map 中安全获取字符串

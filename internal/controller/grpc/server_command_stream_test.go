@@ -46,6 +46,9 @@ func TestCommandStreamSendsHeaderAfterInitWithoutPendingCommand(t *testing.T) {
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectRollback()
 
+	ctx := context.WithValue(context.Background(), RuntimeNodeIDKey, nodeID.String())
+	ctx = context.WithValue(ctx, RuntimeTenantIDKey, tenantID.String())
+
 	stream := &fakeCommandStream{
 		recv: []*agentpb.CommandResponse{{
 			CommandId: "init",
@@ -56,6 +59,7 @@ func TestCommandStreamSendsHeaderAfterInitWithoutPendingCommand(t *testing.T) {
 			},
 			PublicKey: publicKey,
 		}},
+		ctx: ctx,
 	}
 
 	server := NewControllerServer(nil, nil, controllerstorage.NewStorageWithDB(db))

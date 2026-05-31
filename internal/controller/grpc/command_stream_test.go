@@ -71,6 +71,8 @@ func TestCommandStreamPollsForCommandsAfterIdleInit(t *testing.T) {
 	expectPendingAgentCommand(mock, publicKey, commandID, now)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx = context.WithValue(ctx, RuntimeNodeIDKey, nodeID.String())
+	ctx = context.WithValue(ctx, RuntimeTenantIDKey, tenantID.String())
 	defer cancel()
 	stream := &pollingCommandStream{
 		ctx:  ctx,

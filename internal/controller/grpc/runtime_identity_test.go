@@ -29,7 +29,6 @@ func TestResolveRuntimeNodeForRequestRejectsRuntimeTokenNodeMismatch(t *testing.
 	requestNodeID := uuid.New()
 	now := time.Now()
 
-	expectNodeByID(mock, tokenNodeID, "token-node-key", tenantID, now)
 	expectNodeByID(mock, requestNodeID, "request-node-key", tenantID, now)
 	expectNodeByPublicKey(mock, "request-node-key", requestNodeID, tenantID, now)
 
@@ -60,7 +59,6 @@ func TestResolveCommandStreamNodeForRequestRejectsRuntimeTokenNodeMismatch(t *te
 	initNodeID := uuid.New()
 	now := time.Now()
 
-	expectNodeByID(mock, tokenNodeID, "token-node-key", tenantID, now)
 	expectNodeByID(mock, initNodeID, "init-node-key", tenantID, now)
 	expectNodeByPublicKey(mock, "init-node-key", initNodeID, tenantID, now)
 
