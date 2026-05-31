@@ -131,6 +131,17 @@ func (s *Storage) GetNextPendingAgentCommand(nodePublicKey string) (*AgentComman
 }
 
 func (s *Storage) UpdateAgentCommandStatus(commandID, status, message string, result map[string]string) error {
+	return s.updateAgentCommandStatus(commandID, "", status, message, result)
+}
+
+func (s *Storage) UpdateAgentCommandStatusForNode(commandID, nodePublicKey, status, message string, result map[string]string) error {
+	if nodePublicKey == "" {
+		return errors.New("node public key is required")
+	}
+	return s.updateAgentCommandStatus(commandID, nodePublicKey, status, message, result)
+}
+
+func (s *Storage) updateAgentCommandStatus(commandID, nodePublicKey, status, message string, result map[string]string) error {
 	if commandID == "" {
 		return errors.New("command id is required")
 	}
@@ -163,6 +174,26 @@ func (s *Storage) UpdateAgentCommandStatus(commandID, status, message string, re
 		    END
 		WHERE id = $1
 	`
+	args := []interface{}{commandID, status, message, resultJSON}
+	if nodePublicKey != "" {
+		query = `
+			UPDATE agent_commands
+			SET status = $2::varchar,
+			    message = $3,
+			    result = $4,
+			    updated_at = NOW(),
+			    acknowledged_at = CASE
+			        WHEN $2::varchar = 'acknowledged' AND acknowledged_at IS NULL THEN NOW()
+			        ELSE acknowledged_at
+			    END,
+			    completed_at = CASE
+			        WHEN $2::varchar IN ('completed', 'failed') THEN NOW()
+			        ELSE completed_at
+			    END
+			WHERE id = $1 AND node_public_key = $5
+		`
+		args = append(args, nodePublicKey)
+	}
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -170,8 +201,18 @@ func (s *Storage) UpdateAgentCommandStatus(commandID, status, message string, re
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(query, commandID, status, message, resultJSON); err != nil {
+	commandResult, err := tx.Exec(query, args...)
+	if err != nil {
 		return err
+	}
+	if nodePublicKey != "" {
+		affected, err := commandResult.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected == 0 {
+			return fmt.Errorf("agent command %s does not belong to node %s", commandID, nodePublicKey)
+		}
 	}
 
 	if _, err := tx.Exec(`
