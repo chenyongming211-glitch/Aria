@@ -57,7 +57,7 @@ aria_controller_domain: aria.yun
 
 # -------------------- gRPC TLS 配置 --------------------
 # TLS模式: disabled (HTTP), server (单向TLS), mutual (双向mTLS)
-aria_grpc_tls_mode: mutual
+aria_grpc_tls_mode: server
 aria_grpc_server_cert: /etc/aria/certs/grpc-server.crt
 aria_grpc_server_key: /etc/aria/certs/grpc-server.key
 aria_grpc_ca_cert: /etc/aria/certs/ca.crt
@@ -72,6 +72,7 @@ aria_controller_deploy_dir: /root/aria-controller
 aria_controller_config_dir: "{{ aria_controller_deploy_dir }}/config"
 aria_controller_certs_dir: "{{ aria_controller_deploy_dir }}/certs"
 aria_controller_images_dir: "{{ aria_controller_deploy_dir }}/bin/images"
+aria_controller_image: ghcr.io/chenyongming211-glitch/aria-controller:0.2.35-test
 
 # Agent 部署目录
 aria_agent_deploy_dir: /root/aria-agent

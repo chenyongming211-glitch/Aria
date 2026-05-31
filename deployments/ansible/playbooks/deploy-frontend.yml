@@ -1,5 +1,7 @@
 ---
-# Frontend 部署 Playbook
+# Frontend deployment playbook.
+# The frontend must be built by GitHub Actions and downloaded as the
+# `frontend-dist` artifact before this playbook runs.
 
 - name: Deploy Aria Frontend
   hosts: controller
@@ -7,116 +9,48 @@
   become: yes
 
   vars:
-    # 前端全新部署配置
-    frontend_source_dir: /Users/chen/Aria/frontend
-    frontend_dist_dir: /Users/chen/Aria/temp-dist
-    frontend_remote_dir: /root/aria-controller/ui-dist
-    
-    # nginx 证书路径
-    nginx_cert_dir: /root/aria-controller/certs
-    
-    # 部署模式: full (全新部署) 或 update (仅更新前端文件)
-    deploy_mode: update
+    frontend_artifact_dir: /tmp/aria-frontend-dist
+    frontend_remote_dir: /root/aria-controller/frontend/dist
 
   tasks:
-    # ========== 全新部署模式 ==========
-    - name: Build frontend
-      ansible.builtin.shell: |
-        cd {{ frontend_source_dir }} && npm run build
-      delegate_to: localhost
-      become: no
-      when: deploy_mode == 'full'
-
-    - name: Ensure remote directories exist
+    - name: Ensure frontend parent directory exists
       ansible.builtin.file:
-        path: "{{ item }}"
+        path: /root/aria-controller/frontend
         state: directory
-        mode: '0755'
-      loop:
-        - "{{ frontend_remote_dir }}"
-        - "{{ nginx_cert_dir }}"
+        mode: "0755"
 
-    - name: Sync frontend to remote
+    - name: Upload prebuilt frontend artifact
       ansible.posix.synchronize:
-        src: "{{ frontend_dist_dir }}/"
-        dest: "{{ frontend_remote_dir }}/"
+        src: "{{ frontend_artifact_dir }}/"
+        dest: "{{ frontend_remote_dir }}.new/"
         delete: yes
         dirs: yes
       delegate_to: localhost
       become: no
-      when: deploy_mode == 'full'
 
-    - name: Ensure nginx config exists
-      ansible.builtin.file:
-        path: /root/aria-controller/nginx
-        state: directory
-        mode: '0755'
-      when: deploy_mode == 'full'
-
-    - name: Deploy nginx config template
-      ansible.builtin.template:
-        src: nginx.conf.j2
-        dest: /root/aria-controller/nginx/default.conf
-        mode: '0644'
-      when: deploy_mode == 'full'
-
-    - name: Deploy web docker-compose
-      ansible.builtin.copy:
-        content: |
-          version: '3.8'
-          services:
-            aria-web:
-              image: nginx:alpine
-              container_name: aria_web
-              restart: unless-stopped
-              ports:
-                - "80:80"
-                - "443:443"
-              volumes:
-                - ./ui-dist:/usr/share/nginx/html:ro
-                - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-                - ./certs:/etc/nginx/certs:ro
-              networks:
-                - aria_shared_net
-              healthcheck:
-                test: ["CMD", "curl", "-f", "http://localhost/"]
-                interval: 30s
-                timeout: 10s
-                retries: 3
-          networks:
-            aria_shared_net:
-              name: aria_shared_net
-              external: true
-        dest: /root/aria-controller/docker-compose.web.yml
-        mode: '0644'
-      when: deploy_mode == 'full'
-
-    - name: Start web container (full deploy)
+    - name: Swap frontend artifact into place
       ansible.builtin.shell: |
-        cd /root/aria-controller && docker compose -f docker-compose.web.yml up -d
-      when: deploy_mode == 'full'
+        set -e
+        cd /root/aria-controller/frontend
+        rm -rf dist.previous
+        if [ -d dist ]; then
+          mv dist dist.previous
+        fi
+        mv dist.new dist
+      args:
+        executable: /bin/bash
 
-    # ========== 更新模式（仅更新前端文件）==========
-    - name: Build frontend for update
-      ansible.builtin.shell: |
-        cd {{ frontend_source_dir }} && npm run build
-      delegate_to: localhost
-      become: no
-      when: deploy_mode == 'update'
+    - name: Restart frontend container
+      ansible.builtin.command: docker restart aria-frontend
 
-    - name: Sync frontend files (update mode)
-      ansible.posix.synchronize:
-        src: "{{ frontend_dist_dir }}/"
-        dest: "{{ frontend_remote_dir }}/"
-        delete: yes
-        dirs: yes
-      delegate_to: localhost
-      become: no
-      when: deploy_mode == 'update'
+    - name: Verify frontend health through API proxy
+      ansible.builtin.uri:
+        url: http://127.0.0.1:18080/api/version
+        method: GET
+        status_code: 200
+        return_content: true
+      register: frontend_version
 
-    - name: Restart web container (update mode)
-      ansible.builtin.shell: docker restart aria_web
-      when: deploy_mode == 'update'
-
-    - name: Verify web container
-      ansible.builtin.shell: docker ps | grep aria_web
+    - name: Show frontend API version
+      ansible.builtin.debug:
+        msg: "{{ frontend_version.content }}"

@@ -1,5 +1,6 @@
 ---
-# Controller 部署 Playbook
+# Controller deployment playbook.
+# Release images are built by GitHub Actions and pulled from GHCR on the host.
 
 - name: Deploy Aria Controller
   hosts: controller
@@ -7,56 +8,56 @@
   become: yes
 
   vars:
-    aria_grpc_tls_mode: server
     version: "0.2.35-test"
+    aria_controller_deploy_dir: /root/aria-controller
+    aria_controller_image: "ghcr.io/chenyongming211-glitch/aria-controller:{{ version }}"
+    aria_grpc_tls_mode: server
 
   tasks:
-    - name: Ensure remote directory exists
+    - name: Ensure Controller directories exist
       ansible.builtin.file:
-        path: /root/aria-controller/bin/images
+        path: "{{ item }}"
         state: directory
-        mode: '0755'
+        mode: "0755"
+      loop:
+        - "{{ aria_controller_deploy_dir }}"
+        - "{{ aria_controller_deploy_dir }}/config"
+        - "{{ aria_controller_deploy_dir }}/certs"
+        - "{{ aria_controller_deploy_dir }}/logs"
+        - "{{ aria_controller_deploy_dir }}/data/backups"
+        - "{{ aria_controller_deploy_dir }}/frontend/dist"
 
-    - name: Sync image to remote
-      ansible.posix.synchronize:
-        src: /Users/chen/Aria/bin/images/aria-controller-{{ version }}.tar
-        dest: /root/aria-controller/bin/images/aria-controller-latest.tar
-      delegate_to: localhost
-      become: no
+    - name: Render Controller environment
+      ansible.builtin.template:
+        src: ../roles/controller/templates/controller.env.j2
+        dest: "{{ aria_controller_deploy_dir }}/.env"
+        mode: "0600"
 
-    - name: Load Docker image
-      ansible.builtin.shell: docker load -i /root/aria-controller/bin/images/aria-controller-latest.tar
+    - name: Render Docker Compose
+      ansible.builtin.template:
+        src: ../roles/controller/templates/docker-compose.yml.j2
+        dest: "{{ aria_controller_deploy_dir }}/docker-compose.yml"
+        mode: "0600"
 
-    - name: Remove old container
-      ansible.builtin.shell: docker rm -f aria_controller || true
+    - name: Pull Controller image from GHCR
+      ansible.builtin.command:
+        cmd: "docker pull {{ aria_controller_image }}"
+      changed_when: "'Downloaded newer image' in pull_result.stdout or 'Pull complete' in pull_result.stdout"
+      register: pull_result
 
-    - name: Start Controller container
-      ansible.builtin.shell: |
-        docker run -d \
-            --name aria_controller \
-            --network aria_shared_net \
-            -p 50051:50051 \
-            -v /root/aria-controller/config/controller.yaml:/etc/aria/controller.yaml:ro \
-            -v /var/log/aria:/var/log/aria \
-            -v /root/aria-controller/certs:/etc/aria/certs:ro \
-            -e POSTGRES_HOST=aria-postgres \
-            -e POSTGRES_PORT=5432 \
-            -e POSTGRES_USER=aria \
-            -e POSTGRES_PASSWORD=aria-local-password \
-            -e POSTGRES_DATABASE=aria \
-            -e REDIS_ADDR=aria-redis:6379 \
-            -e ARIA_GRPC_SERVER_CERT=/etc/aria/certs/grpc-server.crt \
-            -e ARIA_GRPC_SERVER_KEY=/etc/aria/certs/grpc-server.key \
-            -e ARIA_GRPC_TLS_MODE={{ aria_grpc_tls_mode }} \
-            -e ARIA_GRPC_CA_CERT=/etc/aria/certs/ca.crt \
-            -e DEEPSEEK_API_KEY="sk-44fc7def9839422390f8d2018967081f" \
-            -e DEEPSEEK_BASE_URL="https://api.deepseek.com" \
-            -e DEEPSEEK_MODEL="deepseek-chat" \
-            -e DEEPSEEK_SYSTEM_PROMPT='You are Aria'\''s intelligent operations assistant.' \
-            -e FEISHU_APP_ID="cli_a9f4b69ae5b8dbb3" \
-            -e FEISHU_APP_SECRET="TSbiUWpalWbbIZ7t6Je3IfUgcqtWOBvF" \
-            -e FEISHU_ENCRYPT_KEY="" \
-            -e FEISHU_VERIFY_TOKEN="X12NiE0nKEQltttec2p7ynlNHrBkjDvx" \
-            --restart unless-stopped \
-            aria-controller:latest \
-            controller serve --config=/etc/aria/controller.yaml
+    - name: Apply Controller compose
+      ansible.builtin.command:
+        cmd: docker compose up -d aria-controller
+        chdir: "{{ aria_controller_deploy_dir }}"
+
+    - name: Verify Controller HTTP health
+      ansible.builtin.uri:
+        url: http://127.0.0.1:18080/api/version
+        method: GET
+        status_code: 200
+        return_content: true
+      register: controller_version
+
+    - name: Show deployed version
+      ansible.builtin.debug:
+        msg: "{{ controller_version.content }}"
