@@ -2394,3 +2394,33 @@ fn build_failed_command_response_with_result(
         public_key: String::new(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::apply_runtime_token_from_sync;
+    use crate::config::AgentConfig;
+    use crate::grpc_client::SyncResult;
+    use crate::runtime_credential::RuntimeCredentialStore;
+
+    #[tokio::test]
+    async fn runtime_token_is_recorded_before_local_apply_errors_are_returned() {
+        let mut config = AgentConfig::default();
+        let store = RuntimeCredentialStore::new(None);
+        let sync_result = SyncResult {
+            peers: Vec::new(),
+            assigned_ip: String::new(),
+            desired_state_version: String::new(),
+            acl_rules: Vec::new(),
+            qos_rules: Vec::new(),
+            blacklist_rules: Vec::new(),
+            runtime_token: Some("rt.new-token".to_string()),
+            runtime_token_expires_at: Some(1_700_000_000),
+        };
+
+        apply_runtime_token_from_sync(&mut config, &store, &sync_result).await;
+
+        assert_eq!(config.current_credential.as_deref(), Some("rt.new-token"));
+        assert_eq!(config.current_credential_expires_at, Some(1_700_000_000));
+        assert_eq!(store.snapshot().await.as_deref(), Some("rt.new-token"));
+    }
+}

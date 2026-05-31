@@ -1062,3 +1062,32 @@ async fn run_unified_agent(
 
 // Unix Socket 服务器已集成到 unified_agent.rs 中的 UnifiedAgent
 // 使用 UnifiedAgent::start_unix_socket_server() 启动
+
+#[cfg(test)]
+mod tests {
+    use super::needs_bootstrap_registration;
+    use crate::config::AgentState;
+
+    #[test]
+    fn bootstrap_needed_when_assigned_ip_exists_but_runtime_credential_missing() {
+        let state = AgentState {
+            assigned_ip: Some("100.64.0.2".to_string()),
+            current_credential: None,
+            ..Default::default()
+        };
+
+        assert!(needs_bootstrap_registration(&state, 1_700_000_000));
+    }
+
+    #[test]
+    fn bootstrap_needed_when_runtime_credential_is_expired() {
+        let state = AgentState {
+            assigned_ip: Some("100.64.0.2".to_string()),
+            current_credential: Some("rt.old".to_string()),
+            current_credential_expires_at: Some(1_699_999_000),
+            ..Default::default()
+        };
+
+        assert!(needs_bootstrap_registration(&state, 1_700_000_000));
+    }
+}
