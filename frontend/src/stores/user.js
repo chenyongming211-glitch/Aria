@@ -4,6 +4,28 @@ import { ref } from 'vue'
 import api from '@/composables/useApi'
 import { API_ENDPOINTS } from '@/config/api'
 
+const deriveInitials = (value) => {
+  const text = String(value || '').trim()
+  if (!text) return ''
+  const parts = text.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) {
+    return `${Array.from(parts[0])[0] || ''}${Array.from(parts[1])[0] || ''}`.toUpperCase()
+  }
+  return Array.from(text).slice(0, 2).join('').toUpperCase()
+}
+
+const normalizeUser = (rawUser, fallbackUsername = '') => {
+  const source = rawUser || {}
+  const username = source.username || source.name || fallbackUsername
+  const name = source.name || username
+  return {
+    ...source,
+    username,
+    name,
+    initials: source.initials || deriveInitials(name || username)
+  }
+}
+
 export default defineStore('user', () => {
   const user = ref(null)
   const isAuthenticated = ref(false)
@@ -35,12 +57,11 @@ export default defineStore('user', () => {
         localStorage.setItem('aria_last_activity', Date.now().toString())
 
         // 设置用户数据
-        user.value = userData || {
+        user.value = normalizeUser(userData || {
           id: 'user-1',
-          name: credentials.username,
-          initials: credentials.username.substring(0, 2).toUpperCase(),
+          username: credentials.username,
           role: 'admin'
-        }
+        }, credentials.username)
 
         isAuthenticated.value = true
         mustChangePassword.value = requirePasswordChange
@@ -112,6 +133,7 @@ export default defineStore('user', () => {
   const logout = () => {
     user.value = null
     isAuthenticated.value = false
+    mustChangePassword.value = false
     localStorage.removeItem('aria_token')
     localStorage.removeItem('aria_token_expire_time')
     localStorage.removeItem('aria_last_activity')
@@ -125,15 +147,49 @@ export default defineStore('user', () => {
     const token = localStorage.getItem('aria_token')
     const userData = localStorage.getItem('aria_user')
 
-    if (token && userData) {
-      user.value = JSON.parse(userData)
-      isAuthenticated.value = true
-      // 恢复缓存的权限
-      const cached = localStorage.getItem('aria_permissions')
-      if (cached) {
-        permissions.value = JSON.parse(cached)
-      }
+    if (!token && !userData) {
+      return false
     }
+
+    if (!token || !userData) {
+      logout()
+      return false
+    }
+
+    try {
+      user.value = normalizeUser(JSON.parse(userData))
+    } catch (error) {
+      console.warn('Invalid cached user session, clearing it:', error)
+      logout()
+      return false
+    }
+
+    isAuthenticated.value = true
+    localStorage.setItem('aria_user', JSON.stringify(user.value))
+
+    const cached = localStorage.getItem('aria_permissions')
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached)
+        permissions.value = Array.isArray(parsed) ? parsed : []
+        if (!Array.isArray(parsed)) {
+          localStorage.removeItem('aria_permissions')
+        }
+      } catch (error) {
+        console.warn('Invalid cached permissions, clearing them:', error)
+        permissions.value = []
+        localStorage.removeItem('aria_permissions')
+      }
+    } else {
+      permissions.value = []
+    }
+
+    if (user.value?.role === 'super_admin' && !permissions.value.includes('*')) {
+      permissions.value = ['*']
+      localStorage.setItem('aria_permissions', JSON.stringify(permissions.value))
+    }
+
+    return true
   }
 
   // 加载租户列表

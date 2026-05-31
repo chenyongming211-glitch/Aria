@@ -45,6 +45,7 @@ describe('router RBAC metadata', () => {
   it('blocks navigation without required permission', async () => {
     localStorage.setItem('aria_token', 'dummy-token')
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_user', JSON.stringify({ role: 'admin' }))
     localStorage.setItem('aria_permissions', JSON.stringify(['nodes:read']))
 
     await router.push('/dashboard')
@@ -52,6 +53,49 @@ describe('router RBAC metadata', () => {
     await router.push('/platform/tokens')
 
     expect(router.currentRoute.value.path).toBe('/dashboard')
+  })
+
+  it('redirects token-only sessions to login before protected pages', async () => {
+    await router.replace('/login')
+    await router.isReady()
+
+    localStorage.setItem('aria_token', 'dummy-token')
+    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_permissions', JSON.stringify(['nodes:read']))
+
+    await router.push('/dashboard')
+
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(localStorage.getItem('aria_token')).toBeNull()
+    expect(localStorage.getItem('aria_permissions')).toBeNull()
+  })
+
+  it('redirects malformed cached users to login before protected pages', async () => {
+    await router.replace('/login')
+    await router.isReady()
+
+    localStorage.setItem('aria_token', 'dummy-token')
+    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_user', '{not-json')
+
+    await router.push('/dashboard')
+
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(localStorage.getItem('aria_token')).toBeNull()
+    expect(localStorage.getItem('aria_user')).toBeNull()
+  })
+
+  it('allows super_admin navigation without a cached permissions list', async () => {
+    await router.replace('/login')
+    await router.isReady()
+
+    localStorage.setItem('aria_token', 'dummy-token')
+    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_user', JSON.stringify({ role: 'super_admin' }))
+
+    await router.push('/nodes')
+
+    expect(router.currentRoute.value.path).toBe('/nodes')
   })
 
   it('blocks Settings navigation for non-super_admin users', async () => {

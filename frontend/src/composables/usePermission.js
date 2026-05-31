@@ -5,7 +5,8 @@ export function usePermission() {
   const userStore = useUserStore()
   const getPermissions = () => userStore.permissions || []
 
-  const hasWildcard = () => getPermissions().includes('*')
+  const isSuperAdmin = () => userStore.user?.role === 'super_admin'
+  const hasWildcard = () => isSuperAdmin() || getPermissions().includes('*')
 
   const hasPermission = (permission) => {
     if (!permission) return true
