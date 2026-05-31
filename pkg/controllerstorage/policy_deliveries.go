@@ -106,15 +106,15 @@ func (s *Storage) CreatePolicyDelivery(delivery *PolicyDelivery) (*PolicyDeliver
 func (s *Storage) UpdatePolicyDeliveryStatusByCommand(commandID, status, message string) error {
 	_, err := s.db.Exec(`
 		UPDATE policy_deliveries
-		SET command_status = $2,
+		SET command_status = $2::varchar,
 		    last_error = CASE
-		        WHEN $2 = 'failed' THEN $3
-		        WHEN $2 = 'completed' THEN ''
+		        WHEN $2::varchar = 'failed' THEN $3
+		        WHEN $2::varchar = 'completed' THEN ''
 		        ELSE last_error
 		    END,
 		    updated_at = NOW(),
 		    completed_at = CASE
-		        WHEN $2 IN ('completed', 'failed') THEN NOW()
+		        WHEN $2::varchar IN ('completed', 'failed') THEN NOW()
 		        ELSE completed_at
 		    END
 		WHERE command_id = $1
