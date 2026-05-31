@@ -753,11 +753,31 @@ fn ensure_local_identity(
     Ok((bootstrap_changed, state_changed))
 }
 
+fn current_epoch_seconds() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+fn needs_bootstrap_registration(state: &config::AgentState, now: i64) -> bool {
+    if state.assigned_ip.as_deref().map(|value| value.trim().is_empty()).unwrap_or(true) {
+        return true;
+    }
+    if state.current_credential.as_deref().map(|value| value.trim().is_empty()).unwrap_or(true) {
+        return true;
+    }
+    match state.current_credential_expires_at {
+        Some(expires_at) => expires_at <= now + 60,
+        None => true,
+    }
+}
+
 async fn bootstrap_register(
     bootstrap: &config::BootstrapConfig,
     state: &mut config::AgentState,
 ) -> Result<bool> {
-    if state.assigned_ip.as_deref().map(|value| !value.trim().is_empty()).unwrap_or(false) {
+    if !needs_bootstrap_registration(state, current_epoch_seconds()) {
         return Ok(false);
     }
 
@@ -818,6 +838,7 @@ async fn bootstrap_register(
     if let Some(runtime_token) = registration.runtime_token {
         state.current_credential = Some(runtime_token);
     }
+    state.current_credential_expires_at = registration.runtime_token_expires_at;
     state.last_desired_version = None;
     state.last_applied_version = None;
     state.last_sync_status = Some("registered".to_string());
@@ -1031,8 +1052,8 @@ async fn run_unified_agent(
 
     let (bootstrap_changed, mut state_changed) = ensure_local_identity(&mut bootstrap, &mut state)?;
 
-    if state.assigned_ip.as_deref().map(|value| value.trim().is_empty()).unwrap_or(true) {
-        info!("No assigned IP found, starting bootstrap registration");
+    if needs_bootstrap_registration(&state, current_epoch_seconds()) {
+        info!("Runtime registration state missing or expired, starting bootstrap registration");
         if bootstrap_register(&bootstrap, &mut state).await? {
             state_changed = true;
         }

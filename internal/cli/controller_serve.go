@@ -245,13 +245,16 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 	logger.Info("Config: %s", serveConfigPath)
 	logger.Info("Log Level: %s", cfg.Logging.Level)
 
-	// Initialize JWT secret from config
-	if cfg.JWT.Secret != "" {
-		auth.SetSecret(cfg.JWT.Secret)
-		logger.Info("JWT secret loaded from config")
-	} else {
-		logger.Warn("No jwt.secret configured — using default (insecure!)")
+	// Initialize JWT secret from config or environment.
+	jwtSecret := strings.TrimSpace(cfg.JWT.Secret)
+	if jwtSecret == "" {
+		jwtSecret = strings.TrimSpace(os.Getenv("ARIA_JWT_SECRET"))
 	}
+	if jwtSecret == "" {
+		return fmt.Errorf("jwt secret is required, please set jwt.secret or ARIA_JWT_SECRET: %w", auth.ErrJWTSecretNotConfigured)
+	}
+	auth.SetSecret(jwtSecret)
+	logger.Info("JWT secret loaded")
 
 	if err := auth.LoadRuntimeSecretFromEnv(); err != nil {
 		return fmt.Errorf("runtime token secret is required, please set ARIA_RUNTIME_TOKEN_SECRET: %w", err)

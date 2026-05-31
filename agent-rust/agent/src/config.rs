@@ -62,6 +62,8 @@ pub struct AgentState {
     #[serde(default)]
     pub current_credential: Option<String>,
     #[serde(default)]
+    pub current_credential_expires_at: Option<i64>,
+    #[serde(default)]
     pub last_desired_version: Option<String>,
     #[serde(default)]
     pub last_applied_version: Option<String>,
@@ -123,6 +125,8 @@ pub struct AgentConfig {
     pub multi_tunnel: bool,
     #[serde(default)]
     pub current_credential: Option<String>,
+    #[serde(default)]
+    pub current_credential_expires_at: Option<i64>,
     #[serde(default)]
     pub last_desired_version: Option<String>,
     #[serde(default)]
@@ -218,6 +222,7 @@ impl AgentState {
             || self.assigned_ip.is_some()
             || self.address.is_some()
             || self.current_credential.is_some()
+            || self.current_credential_expires_at.is_some()
             || self.last_desired_version.is_some()
             || self.last_applied_version.is_some()
             || self.last_sync_status.is_some()
@@ -253,6 +258,7 @@ impl AgentConfig {
             certificate_renew_before: bootstrap.certificate_renew_before,
             multi_tunnel: bootstrap.multi_tunnel,
             current_credential: state.current_credential,
+            current_credential_expires_at: state.current_credential_expires_at,
             last_desired_version: state.last_desired_version,
             last_applied_version: state.last_applied_version,
             last_sync_status: state.last_sync_status,
@@ -292,6 +298,7 @@ impl AgentConfig {
             assigned_ip: self.assigned_ip.clone(),
             address: self.address.clone(),
             current_credential: self.current_credential.clone(),
+            current_credential_expires_at: self.current_credential_expires_at,
             last_desired_version: self.last_desired_version.clone(),
             last_applied_version: self.last_applied_version.clone(),
             last_sync_status: self.last_sync_status.clone(),
