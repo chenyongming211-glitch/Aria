@@ -11,6 +11,12 @@ vi.mock('@/composables/useApi', () => ({
 import api from '@/composables/useApi'
 import useUserStore from '@/stores/user'
 
+const makeJwt = (payload) => [
+  Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url'),
+  Buffer.from(JSON.stringify(payload)).toString('base64url'),
+  'signature'
+].join('.')
+
 describe('user session persistence', () => {
   let storage
 
@@ -92,6 +98,36 @@ describe('user session persistence', () => {
       name: 'sysadmin',
       initials: 'SY'
     })
+  })
+
+  it('repairs stale cached user roles from JWT claims during startup', () => {
+    localStorage.setItem('aria_token', makeJwt({
+      uid: 'user-1',
+      unm: 'sysadmin',
+      rol: 'super_admin',
+      tid: '',
+      exp: Math.floor(Date.now() / 1000) + 3600
+    }))
+    localStorage.setItem('aria_user', JSON.stringify({
+      id: 'user-1',
+      username: 'sysadmin',
+      role: 'admin'
+    }))
+    localStorage.setItem('aria_permissions', JSON.stringify([]))
+
+    const userStore = useUserStore()
+
+    expect(userStore.loadSession()).toBe(true)
+    expect(userStore.user).toMatchObject({
+      id: 'user-1',
+      username: 'sysadmin',
+      role: 'super_admin'
+    })
+    expect(userStore.permissions).toEqual(['*'])
+    expect(JSON.parse(localStorage.getItem('aria_user'))).toMatchObject({
+      role: 'super_admin'
+    })
+    expect(JSON.parse(localStorage.getItem('aria_permissions'))).toEqual(['*'])
   })
 
   it('normalizes logged-in backend users for header display', async () => {
