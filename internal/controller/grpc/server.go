@@ -25,6 +25,8 @@ type ControllerServer struct {
 	store           *controllerstorage.Storage
 }
 
+var commandStreamPollInterval = 2 * time.Second
+
 // NewControllerServer 创建新的 gRPC 服务端
 // 参数是 REST API 的 handler 函数，用于复用逻辑
 func NewControllerServer(
@@ -197,41 +199,79 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 // CommandStream 处理双向流命令
 // Agent 连接后，Controller 可以推送命令，Agent 返回执行结果
 func (s *ControllerServer) CommandStream(stream agentpb.ControllerService_CommandStreamServer) error {
-	var nodePublicKey string
+	resp, err := stream.Recv()
+	if err == io.EOF {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("stream recv error: %w", err)
+	}
+	if resp == nil || resp.CommandId != "init" {
+		return fmt.Errorf("command stream init payload is required")
+	}
+
+	node, err := s.resolveNodeFromCommandStream(resp)
+	if err != nil {
+		return err
+	}
+	nodePublicKey := node.PublicKey
+	if err := stream.SendHeader(metadata.MD{}); err != nil {
+		return fmt.Errorf("stream send header error: %w", err)
+	}
+	if err := s.sendNextPendingCommand(stream, nodePublicKey); err != nil {
+		return err
+	}
+
+	responses := make(chan *agentpb.CommandResponse, 1)
+	recvErrs := make(chan error, 1)
+	go func() {
+		for {
+			resp, err := stream.Recv()
+			if err != nil {
+				recvErrs <- err
+				return
+			}
+			select {
+			case responses <- resp:
+			case <-stream.Context().Done():
+				return
+			}
+		}
+	}()
+
+	ticker := time.NewTicker(commandStreamPollInterval)
+	defer ticker.Stop()
 
 	for {
-		// 接收来自 Agent 的响应
-		resp, err := stream.Recv()
-		if err == io.EOF {
+		select {
+		case <-stream.Context().Done():
 			return nil
-		}
-		if err != nil {
+		case err := <-recvErrs:
+			if err == io.EOF {
+				return nil
+			}
 			return fmt.Errorf("stream recv error: %w", err)
-		}
+		case resp := <-responses:
+			if resp == nil {
+				continue
+			}
 
-		// 第一次响应用于识别 Agent
-		if nodePublicKey == "" && resp.CommandId == "init" {
-			node, err := s.resolveNodeFromCommandStream(resp)
-			if err != nil {
-				return err
+			if resp.CommandId == "init" {
+				continue
 			}
-			nodePublicKey = node.PublicKey
-			if err := stream.SendHeader(metadata.MD{}); err != nil {
-				return fmt.Errorf("stream send header error: %w", err)
-			}
-			if err := s.sendNextPendingCommand(stream, nodePublicKey); err != nil {
-				return err
-			}
-			continue
-		}
 
-		if resp.CommandId != "" && s.store != nil {
-			if err := s.store.UpdateAgentCommandStatus(resp.CommandId, resp.Status, resp.Message, resp.Result); err != nil {
-				return fmt.Errorf("failed to update command status: %w", err)
+			if resp.CommandId != "" && s.store != nil {
+				if err := s.store.UpdateAgentCommandStatus(resp.CommandId, resp.Status, resp.Message, resp.Result); err != nil {
+					return fmt.Errorf("failed to update command status: %w", err)
+				}
 			}
-		}
 
-		if isTerminalCommandStatus(resp.Status) {
+			if isTerminalCommandStatus(resp.Status) {
+				if err := s.sendNextPendingCommand(stream, nodePublicKey); err != nil {
+					return err
+				}
+			}
+		case <-ticker.C:
 			if err := s.sendNextPendingCommand(stream, nodePublicKey); err != nil {
 				return err
 			}

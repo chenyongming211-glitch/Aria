@@ -27,6 +27,10 @@ path = "../tests/test_wireguard.rs"
 name = "test-routing"
 path = "../tests/test_routing.rs"
 
+[[bin]]
+name = "test-command-stream-timeout"
+path = "../tests/test_command_stream_timeout.rs"
+
 [dependencies]
 aya.workspace = true
 aya-log.workspace = true
