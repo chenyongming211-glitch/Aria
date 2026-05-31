@@ -7,6 +7,7 @@ pub mod routing;
 pub mod config;
 pub mod metrics;
 pub mod system_optimization;
+pub mod runtime_credential;
 
 pub use acl::{AclManager, AclError, PolicyKey, PolicyValue, ACTION_DROP, ACTION_PASS};
 pub use qos::{QoSManager, QoSError, BucketState, ServiceQoSKey, PairQoSKey};

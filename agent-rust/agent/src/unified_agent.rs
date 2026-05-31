@@ -31,6 +31,7 @@ use crate::identity::IdentityManager;
 use crate::metrics;
 use crate::config::{AgentConfig, ConfigManager};
 use crate::certificate_client;
+use crate::runtime_credential::RuntimeCredentialStore;
 
 const BPF_FS_PATH: &str = "/sys/fs/bpf/aria";
 const CERTIFICATE_RENEW_CHECK_INTERVAL: Duration = Duration::from_secs(30 * 60);
@@ -77,6 +78,7 @@ pub struct UnifiedAgent {
     
     cancel_token: CancellationToken,
     sync_now: Arc<Notify>,
+    runtime_credential: RuntimeCredentialStore,
     log_handle: Arc<StdMutex<Option<reload::Handle<EnvFilter, Registry>>>>,
     current_log_level: Arc<StdMutex<String>>,
 }
@@ -142,6 +144,7 @@ impl UnifiedAgent {
         let sync_now = Arc::new(Notify::new());
         let current_log_level = Arc::new(StdMutex::new("info".to_string()));
         let last_sync_peers = Arc::new(Mutex::new(Vec::new()));
+        let runtime_credential = RuntimeCredentialStore::new(config.current_credential.clone());
 
         Ok(Self {
             config,
@@ -156,6 +159,7 @@ impl UnifiedAgent {
             last_sync_peers,
             cancel_token,
             sync_now,
+            runtime_credential,
             log_handle,
             current_log_level,
         })
@@ -543,7 +547,7 @@ impl UnifiedAgent {
         let sync_now = self.sync_now.clone();
         let node_id = self.config.node_id.clone();
         let public_key = self.config.public_key.clone();
-        let current_credential = self.config.current_credential.clone();
+        let runtime_credential = self.runtime_credential.clone();
 
         tokio::spawn(async move {
             loop {
@@ -551,6 +555,7 @@ impl UnifiedAgent {
                     break;
                 }
 
+                let current_credential = runtime_credential.snapshot().await;
                 match grpc_client
                     .connect_command_stream(node_id.clone(), public_key.clone(), current_credential.clone())
                     .await
@@ -1564,7 +1569,8 @@ impl UnifiedAgent {
 
         // 更新运行期凭据
         if let Some(new_token) = sync_result.runtime_token {
-            self.config.current_credential = Some(new_token);
+            self.config.current_credential = Some(new_token.clone());
+            self.runtime_credential.update(Some(new_token)).await;
         }
 
         if let Err(e) = self.persist_runtime_state() {

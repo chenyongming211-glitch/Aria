@@ -28,6 +28,7 @@ mod certificate_client;
 mod wireguard;
 mod routing;
 mod system_optimization;
+mod runtime_credential;
 
 const SOCKET_PATH: &str = "/run/aria-agent.sock";
 const DEFAULT_CONFIG_PATH: &str = "/etc/aria/agent.yaml";
