@@ -447,3 +447,15 @@ pub struct BlacklistRule {
     pub cidr: String,
     pub port: u32,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::authorization_metadata_value;
+
+    #[test]
+    fn authorization_metadata_rejects_invalid_token_without_panic() {
+        let value = authorization_metadata_value("bad\nruntime-token");
+
+        assert!(value.is_err());
+    }
+}
