@@ -19,6 +19,9 @@ ports, volumes, and network.
 Public HTTPS is terminated by the host Nginx at `https://aria.yun`.
 The frontend container serves the GitHub Actions `frontend-dist` artifact.
 The Controller image is built and pushed by GitHub Actions `workflow_dispatch`.
+The frontend Nginx config must serve `index.html` with `Cache-Control: no-store`
+so browsers do not keep an old Vite entrypoint after a deploy. Hashed assets
+under `/assets/` can use long immutable caching.
 
 ## Release Flow
 

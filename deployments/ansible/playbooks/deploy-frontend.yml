@@ -19,6 +19,12 @@
         state: directory
         mode: "0755"
 
+    - name: Render frontend nginx cache policy
+      ansible.builtin.template:
+        src: ../roles/controller/templates/frontend-nginx.conf.j2
+        dest: /root/aria-controller/frontend/nginx.conf
+        mode: "0644"
+
     - name: Upload prebuilt frontend artifact
       ansible.posix.synchronize:
         src: "{{ frontend_artifact_dir }}/"
