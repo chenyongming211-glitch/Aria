@@ -35,9 +35,10 @@ function onTokenRefreshFailed() {
 // 检查 token 是否快过期（剩余 < 10 分钟）
 function isTokenExpiringSoon() {
   const tokenExpireTime = localStorage.getItem('aria_token_expire_time')
-  if (!tokenExpireTime) return true
+  if (!tokenExpireTime) return false
   
   const expireTime = parseInt(tokenExpireTime, 10)
+  if (Number.isNaN(expireTime)) return true
   const now = Date.now()
   const tenMinutes = 10 * 60 * 1000
   
@@ -109,7 +110,7 @@ api.interceptors.request.use(
     // 检查最大不活动时间
     if (!checkMaxIdleTime()) {
       redirectToLogin()
-      return config
+      return Promise.reject(new Error('Session expired'))
     }
     
     // 检查 token 是否快过期，如果是则先刷新
@@ -126,7 +127,7 @@ api.interceptors.request.use(
           // 刷新失败，通知所有等待的请求，然后跳转登录
           onTokenRefreshFailed()
           redirectToLogin()
-          return config
+          return Promise.reject(new Error('Token refresh failed'))
         }
       } else {
         // 正在刷新，等待刷新完成后更新 token
@@ -212,6 +213,7 @@ function redirectToLogin() {
   localStorage.removeItem('aria_user')
   localStorage.removeItem('aria_last_activity')
   localStorage.removeItem('aria-current-tenant')
+  localStorage.removeItem('aria_permissions')
   window.location.href = '/#/login'
 }
 

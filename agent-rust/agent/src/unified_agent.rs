@@ -1518,6 +1518,8 @@ impl UnifiedAgent {
                 self.config.current_credential.clone(),
             )
             .await?;
+
+        apply_runtime_token_from_sync(&mut self.config, &self.runtime_credential, &sync_result).await;
         
         tracing::debug!("Sync received: {} peers, {} ACL rules, {} blacklist rules, {} QoS rules", 
             sync_result.peers.len(), 
@@ -1566,12 +1568,6 @@ impl UnifiedAgent {
             self.config.last_applied_version = Some(desired_state_version);
         }
         self.set_sync_observation("applied", "sync applied successfully".to_string());
-
-        // 更新运行期凭据
-        if let Some(new_token) = sync_result.runtime_token {
-            self.config.current_credential = Some(new_token.clone());
-            self.runtime_credential.update(Some(new_token)).await;
-        }
 
         if let Err(e) = self.persist_runtime_state() {
             tracing::warn!("Failed to persist runtime state after sync: {:?}", e);
@@ -2359,6 +2355,20 @@ impl UnifiedAgent {
     }
 }
 
+async fn apply_runtime_token_from_sync(
+    config: &mut AgentConfig,
+    runtime_credential: &RuntimeCredentialStore,
+    sync_result: &crate::grpc_client::SyncResult,
+) {
+    if let Some(new_token) = sync_result.runtime_token.clone() {
+        config.current_credential = Some(new_token.clone());
+        runtime_credential.update(Some(new_token)).await;
+    }
+    if let Some(expires_at) = sync_result.runtime_token_expires_at {
+        config.current_credential_expires_at = Some(expires_at);
+    }
+}
+
 fn build_completed_command_response(
     command_id: String,
     message: String,
@@ -2392,5 +2402,35 @@ fn build_failed_command_response_with_result(
         completed_at: current_unix_timestamp(),
         node_id: String::new(),
         public_key: String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_runtime_token_from_sync;
+    use crate::config::AgentConfig;
+    use crate::grpc_client::SyncResult;
+    use crate::runtime_credential::RuntimeCredentialStore;
+
+    #[tokio::test]
+    async fn runtime_token_is_recorded_before_local_apply_errors_are_returned() {
+        let mut config = AgentConfig::default();
+        let store = RuntimeCredentialStore::new(None);
+        let sync_result = SyncResult {
+            peers: Vec::new(),
+            assigned_ip: String::new(),
+            desired_state_version: String::new(),
+            acl_rules: Vec::new(),
+            qos_rules: Vec::new(),
+            blacklist_rules: Vec::new(),
+            runtime_token: Some("rt.new-token".to_string()),
+            runtime_token_expires_at: Some(1_700_000_000),
+        };
+
+        apply_runtime_token_from_sync(&mut config, &store, &sync_result).await;
+
+        assert_eq!(config.current_credential.as_deref(), Some("rt.new-token"));
+        assert_eq!(config.current_credential_expires_at, Some(1_700_000_000));
+        assert_eq!(store.snapshot().await.as_deref(), Some("rt.new-token"));
     }
 }

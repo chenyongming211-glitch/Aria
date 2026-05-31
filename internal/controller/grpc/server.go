@@ -73,19 +73,19 @@ func (s *ControllerServer) Register(ctx context.Context, req *agentpb.RegisterRe
 	nodeID := registeredNodeID(s.store, req.PublicKey)
 
 	// 生成运行期凭据
-	var runtimeToken string
-	var runtimeTokenExpiresAt int64
-	if nodeID != "" {
-		node, nodeErr := s.store.GetNodeByID(parseUUIDOrZero(nodeID))
-		var tenantID string
-		if nodeErr == nil && node != nil {
-			tenantID = node.TenantID.String()
-		}
-		token, expiresAt, tokenErr := auth.GenerateRuntimeToken(nodeID, tenantID)
-		if tokenErr == nil {
-			runtimeToken = token
-			runtimeTokenExpiresAt = expiresAt.Unix()
-		}
+	if nodeID == "" {
+		return nil, fmt.Errorf("registration failed: registered node was not persisted")
+	}
+	node, nodeErr := s.store.GetNodeByID(parseUUIDOrZero(nodeID))
+	if nodeErr != nil {
+		return nil, fmt.Errorf("registration failed: failed to load registered node: %w", nodeErr)
+	}
+	if node == nil {
+		return nil, fmt.Errorf("registration failed: registered node was not found")
+	}
+	runtimeToken, runtimeTokenExpiresAt, err := generateRuntimeTokenForNode(node)
+	if err != nil {
+		return nil, fmt.Errorf("registration failed: failed to issue runtime token: %w", err)
 	}
 
 	return &agentpb.RegisterResponse{
@@ -162,15 +162,12 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 	// 查询 QoS 规则
 	qosRules, err := s.getQoSRules(ctx, node.PublicKey)
 	if err != nil {
-		// 记录错误但继续
-		fmt.Printf("[WARN] Failed to get QoS rules: %v\n", err)
-		qosRules = []*agentpb.QoSRule{} // 空列表
+		return nil, fmt.Errorf("failed to get QoS rules: %w", err)
 	}
 
 	blacklistRules, err := s.getBlacklistRules(ctx, node.PublicKey)
 	if err != nil {
-		fmt.Printf("[WARN] Failed to get blacklist rules: %v\n", err)
-		blacklistRules = []*agentpb.BlacklistRule{}
+		return nil, fmt.Errorf("failed to get blacklist rules: %w", err)
 	}
 
 	desiredVersion, err := s.ensureDesiredStateVersion(node)
@@ -652,7 +649,7 @@ func (s *ControllerServer) getQoSRules(ctx context.Context, publicKey string) ([
 		if err == sql.ErrNoRows {
 			return qosRules, nil
 		}
-		return qosRules, nil
+		return qosRules, err
 	}
 
 	for _, rule := range rules {
@@ -682,7 +679,7 @@ func (s *ControllerServer) getBlacklistRules(ctx context.Context, publicKey stri
 		if err == sql.ErrNoRows {
 			return blacklistRules, nil
 		}
-		return blacklistRules, nil
+		return blacklistRules, err
 	}
 
 	for _, rule := range rules {
