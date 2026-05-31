@@ -1,5 +1,6 @@
 // src/router/index.js
 import { createRouter, createWebHashHistory } from 'vue-router'
+import { permissionsForRole } from '@/stores/user'
 import Layout from '@/components/Layout/Layout.vue'
 
 const routes = [
@@ -194,7 +195,12 @@ const hasRoutePermission = (to) => {
   const user = readUser()
   if (user?.role === 'super_admin') return true
 
-  const permissions = readPermissions()
+  const cachedPermissions = readPermissions()
+  const fallbackPermissions = permissionsForRole(user?.role)
+  const permissions = cachedPermissions.length > 0 ? cachedPermissions : fallbackPermissions
+  if (cachedPermissions.length === 0 && fallbackPermissions.length > 0) {
+    localStorage.setItem('aria_permissions', JSON.stringify(fallbackPermissions))
+  }
   if (permissions.includes('*')) return true
 
   if (Array.isArray(required)) {
