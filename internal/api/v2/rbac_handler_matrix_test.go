@@ -315,6 +315,7 @@ func expectPolicyDispatchSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUI
 		"last_sync_at", "last_sync_error", "created_at", "updated_at",
 	}
 
+	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO node_control_states (`)).
 		WithArgs(tenantID, nodeID, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows(controlStateColumns).AddRow(
@@ -333,6 +334,7 @@ func expectPolicyDispatchSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUI
 			"id", "tenant_id", "node_id", "policy_domain", "policy_ref", "policy_name", "action", "command_id", "command_status",
 			"last_error", "metadata", "created_at", "updated_at", "completed_at",
 		}).AddRow(uuid.New(), tenantID, nodeID, "acl", "rule-ref", "rule-name", "create", "cmd-1", controllerstorage.AgentCommandStatusPending, "", []byte(`{}`), now, now, nil))
+	mock.ExpectCommit()
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*)
 		FROM agent_commands
