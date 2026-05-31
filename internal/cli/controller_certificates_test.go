@@ -689,6 +689,8 @@ func TestHandleRegister_CSRSuccessIncludesCertificateInSyncResponse(t *testing.T
 }
 
 func TestHandleUnregister_RevokesCertificateAndCreatesAuditEvent(t *testing.T) {
+	auth.SetRuntimeSecret("unregister-runtime-secret")
+
 	tenantID := uuid.New()
 	nodeID := uuid.New()
 	now := time.Now()
@@ -709,6 +711,11 @@ func TestHandleUnregister_RevokesCertificateAndCreatesAuditEvent(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/unregister", strings.NewReader(`{"public_key":"`+publicKey+`"}`))
+	runtimeToken, _, err := auth.GenerateRuntimeToken(nodeID.String(), tenantID.String())
+	if err != nil {
+		t.Fatalf("GenerateRuntimeToken failed: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+runtimeToken)
 	rr := httptest.NewRecorder()
 	controller.HandleUnregister(rr, req)
 

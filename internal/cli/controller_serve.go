@@ -1096,6 +1096,12 @@ func (c *Controller) HandleUnregister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	runtimeToken, ok := runtimeBearerTokenFromRequest(r)
+	if !ok {
+		http.Error(w, "Runtime token required", http.StatusUnauthorized)
+		return
+	}
+
 	var req struct {
 		PublicKey string `json:"public_key"`
 	}
@@ -1105,14 +1111,12 @@ func (c *Controller) HandleUnregister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get node info before deletion for logging
-	node, _ := c.store.GetNode(req.PublicKey)
-	hostname := "unknown"
-	assignedIP := "unknown"
-	if node != nil {
-		hostname = node.Hostname
-		assignedIP = node.AssignedIP
+	node, ok := c.authorizeRuntimeNodeByPublicKey(w, runtimeToken, req.PublicKey)
+	if !ok {
+		return
 	}
+	hostname := node.Hostname
+	assignedIP := node.AssignedIP
 
 	// Mark node as deleted (soft delete) instead of hard delete.
 	if _, err := c.store.ApplyNodeLifecycleTransition(req.PublicKey, controllerstorage.NodeLifecycleTransition{
@@ -1144,6 +1148,52 @@ func (c *Controller) HandleUnregister(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+func runtimeBearerTokenFromRequest(r *http.Request) (string, bool) {
+	authz := strings.TrimSpace(r.Header.Get("Authorization"))
+	if authz == "" {
+		return "", false
+	}
+	if strings.HasPrefix(strings.ToLower(authz), "bearer ") {
+		authz = strings.TrimSpace(authz[7:])
+	}
+	return authz, authz != ""
+}
+
+func (c *Controller) authorizeRuntimeNodeByPublicKey(w http.ResponseWriter, runtimeToken, publicKey string) (*controllerstorage.Node, bool) {
+	if strings.TrimSpace(publicKey) == "" {
+		http.Error(w, "Public key required", http.StatusBadRequest)
+		return nil, false
+	}
+
+	claims, err := auth.ValidateRuntimeToken(runtimeToken)
+	if err != nil {
+		http.Error(w, "Invalid runtime token", http.StatusUnauthorized)
+		return nil, false
+	}
+
+	node, err := c.store.GetNode(publicKey)
+	if err != nil || node == nil {
+		http.Error(w, "Node not found", http.StatusNotFound)
+		return nil, false
+	}
+
+	tokenNodeID, err := uuid.Parse(claims.NodeID)
+	if err != nil {
+		http.Error(w, "Invalid runtime token node id", http.StatusUnauthorized)
+		return nil, false
+	}
+	if tokenNodeID != node.ID {
+		http.Error(w, "Runtime token node mismatch", http.StatusForbidden)
+		return nil, false
+	}
+	if claims.TenantID != "" && claims.TenantID != node.TenantID.String() {
+		http.Error(w, "Runtime token tenant mismatch", http.StatusForbidden)
+		return nil, false
+	}
+
+	return node, true
 }
 
 type certificateIssueRequest struct {
@@ -1408,6 +1458,10 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if !c.authorizeJWTPermission(w, r, middleware.PermRoutesWrite) {
+		return
+	}
+
 	var req struct {
 		Hostname string `json:"hostname"`
 		CIDR     string `json:"cidr"`
@@ -1539,6 +1593,54 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 		"cidr":     req.CIDR,
 		"action":   req.Action,
 	})
+}
+
+func (c *Controller) authorizeJWTPermission(w http.ResponseWriter, r *http.Request, permission string) bool {
+	tokenString, ok := runtimeBearerTokenFromRequest(r)
+	if !ok {
+		http.Error(w, "Authorization header required", http.StatusUnauthorized)
+		return false
+	}
+
+	claims, err := auth.ValidateToken(tokenString)
+	if err != nil {
+		http.Error(w, "Invalid token", http.StatusUnauthorized)
+		return false
+	}
+	if claims.MustChangePassword {
+		http.Error(w, "You must change your password before proceeding", http.StatusForbidden)
+		return false
+	}
+	if claims.Role == middleware.RoleSuperAdmin {
+		return true
+	}
+	if claims.TenantID == "" {
+		http.Error(w, "Tenant context required", http.StatusForbidden)
+		return false
+	}
+	tenantID, err := uuid.Parse(claims.TenantID)
+	if err != nil {
+		http.Error(w, "Invalid tenant context", http.StatusForbidden)
+		return false
+	}
+
+	roleName := claims.Role
+	if roleName == "member" || roleName == "owner" {
+		roleName = controllerstorage.SystemRoleOperator
+	}
+	permissions, err := c.store.GetRolePermissions(tenantID, roleName)
+	if err != nil {
+		http.Error(w, "Role not found", http.StatusForbidden)
+		return false
+	}
+	for _, p := range permissions {
+		if p == permission {
+			return true
+		}
+	}
+
+	http.Error(w, "Insufficient permissions", http.StatusForbidden)
+	return false
 }
 
 // ========== Policy Management Handlers ==========
