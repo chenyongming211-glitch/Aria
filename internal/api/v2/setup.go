@@ -884,10 +884,6 @@ func (r *Router) queueNodePolicySync(
 	if name := strings.TrimSpace(policyName); name != "" {
 		desiredMetadata["policy_name"] = name
 	}
-	controlState, err := r.store.UpsertNodeDesiredState(node.TenantID, node.ID, desiredVersion, desiredMetadata)
-	if err != nil {
-		return nil, nil, err
-	}
 
 	params := map[string]interface{}{
 		"domain":                domain,
@@ -900,52 +896,49 @@ func (r *Router) queueNodePolicySync(
 		params[key] = value
 	}
 
-	cmd, err := r.store.QueueAgentCommand(node.PublicKey, "sync", params, 1, 60)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	dispatch := map[string]interface{}{
-		"command_id":            cmd.ID,
-		"status":                cmd.Status,
-		"desired_state_version": desiredVersion,
-	}
-	if controlState != nil {
-		dispatch["desired_state_updated_at"] = controlState.DesiredStateUpdatedAt
-	}
-
 	policyRef = strings.TrimSpace(policyRef)
-	if policyRef == "" {
-		return dispatch, nil, nil
-	}
 
 	deliveryMetadata := clonePolicyMetadata(metadata)
 	deliveryMetadata["domain"] = domain
 	deliveryMetadata["action"] = action
-	deliveryMetadata["command"] = cmd.Command
+	deliveryMetadata["command"] = "sync"
 	deliveryMetadata["desired_state_version"] = desiredVersion
 
-	delivery, err := r.store.CreatePolicyDelivery(&controllerstorage.PolicyDelivery{
-		TenantID:      node.TenantID,
-		NodeID:        node.ID,
-		PolicyDomain:  domain,
-		PolicyRef:     policyRef,
-		PolicyName:    strings.TrimSpace(policyName),
-		Action:        action,
-		CommandID:     cmd.ID,
-		CommandStatus: cmd.Status,
-		Metadata:      deliveryMetadata,
+	result, err := r.store.QueuePolicySync(controllerstorage.PolicySyncRequest{
+		TenantID:            node.TenantID,
+		NodeID:              node.ID,
+		NodePublicKey:       node.PublicKey,
+		Domain:              domain,
+		Action:              action,
+		PolicyRef:           policyRef,
+		PolicyName:          strings.TrimSpace(policyName),
+		DesiredStateVersion: desiredVersion,
+		DesiredMetadata:     desiredMetadata,
+		CommandParams:       params,
+		DeliveryMetadata:    deliveryMetadata,
+		Priority:            1,
+		TimeoutSeconds:      60,
 	})
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if delivery.PolicyName != "" {
-		dispatch["policy_name"] = delivery.PolicyName
+	dispatch := map[string]interface{}{
+		"command_id":            result.Command.ID,
+		"status":                result.Command.Status,
+		"desired_state_version": result.DesiredStateVersion,
 	}
-	dispatch["last_delivery"] = policyDeliveryToMap(delivery)
+	if result.ControlState != nil {
+		dispatch["desired_state_updated_at"] = result.ControlState.DesiredStateUpdatedAt
+	}
+	if result.Delivery != nil {
+		if result.Delivery.PolicyName != "" {
+			dispatch["policy_name"] = result.Delivery.PolicyName
+		}
+		dispatch["last_delivery"] = policyDeliveryToMap(result.Delivery)
+	}
 
-	return dispatch, delivery, nil
+	return dispatch, result.Delivery, nil
 }
 
 func (r *Router) writePolicyMutationSuccess(
@@ -959,14 +952,20 @@ func (r *Router) writePolicyMutationSuccess(
 ) {
 	policyRef, policyName := inferPolicyDeliveryIdentity(domain, data, metadata)
 	dispatch, delivery, err := r.queueNodePolicySync(node, domain, action, policyRef, policyName, metadata)
-	if err != nil {
-		apibase.WriteError(w, http.StatusInternalServerError, "COMMAND_DISPATCH_FAILED", "Policy updated but sync dispatch failed: "+err.Error(), nil)
-		return
-	}
 
 	if data == nil {
 		data = map[string]interface{}{}
 	}
+	if err != nil {
+		data["dispatch"] = map[string]interface{}{
+			"status": "failed",
+			"error":  err.Error(),
+		}
+		data["dispatch_error"] = err.Error()
+		apibase.WriteSuccess(w, data, message)
+		return
+	}
+
 	data["dispatch"] = dispatch
 	if delivery != nil {
 		data["last_delivery"] = policyDeliveryToMap(delivery)

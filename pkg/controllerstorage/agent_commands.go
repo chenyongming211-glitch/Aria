@@ -38,6 +38,10 @@ type AgentCommand struct {
 }
 
 func (s *Storage) QueueAgentCommand(nodePublicKey, command string, params map[string]interface{}, priority, timeoutSeconds int) (*AgentCommand, error) {
+	return queueAgentCommand(txQueryRowAdapter{s.db}, nodePublicKey, command, params, priority, timeoutSeconds)
+}
+
+func queueAgentCommand(q queryRower, nodePublicKey, command string, params map[string]interface{}, priority, timeoutSeconds int) (*AgentCommand, error) {
 	if nodePublicKey == "" {
 		return nil, errors.New("node public key is required")
 	}
@@ -72,7 +76,7 @@ func (s *Storage) QueueAgentCommand(nodePublicKey, command string, params map[st
 		RETURNING id, created_at, updated_at
 	`
 
-	if err := s.db.QueryRow(query,
+	if err := q.QueryRow(query,
 		nodePublicKey,
 		command,
 		paramsJSON,
