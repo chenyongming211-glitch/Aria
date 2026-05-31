@@ -157,6 +157,15 @@ const readPermissions = () => {
   }
 }
 
+const clearCachedSession = () => {
+  localStorage.removeItem('aria_token')
+  localStorage.removeItem('aria_token_expire_time')
+  localStorage.removeItem('aria_last_activity')
+  localStorage.removeItem('aria_user')
+  localStorage.removeItem('aria-current-tenant')
+  localStorage.removeItem('aria_permissions')
+}
+
 const readUser = () => {
   try {
     const raw = localStorage.getItem('aria_user')
@@ -165,6 +174,11 @@ const readUser = () => {
     console.warn('Failed to parse cached user:', error)
     return null
   }
+}
+
+const hasValidCachedUser = () => {
+  const user = readUser()
+  return Boolean(user?.role)
 }
 
 const hasRoutePermission = (to) => {
@@ -176,6 +190,9 @@ const hasRoutePermission = (to) => {
 
   const required = to.meta?.permission
   if (!required) return true
+
+  const user = readUser()
+  if (user?.role === 'super_admin') return true
 
   const permissions = readPermissions()
   if (permissions.includes('*')) return true
@@ -195,12 +212,24 @@ router.beforeEach((to, from, next) => {
   if (expireTime) {
     isExpired = Date.now() > parseInt(expireTime, 10)
   }
+
+  const hasInvalidCachedSession = token && !isExpired && !hasValidCachedUser()
+
+  if (hasInvalidCachedSession) {
+    console.warn('Invalid cached session, redirecting to login')
+    clearCachedSession()
+    if (to.path === '/login') {
+      next()
+    } else {
+      next('/login')
+    }
+    return
+  }
   
   if (to.meta.requiresAuth && (!token || isExpired)) {
     if (isExpired) {
       console.warn('Token expired, redirecting to login')
-      localStorage.removeItem('aria_token')
-      localStorage.removeItem('aria_token_expire_time')
+      clearCachedSession()
     }
     next('/login')
   } else if (to.path === '/login' && token && !isExpired) {

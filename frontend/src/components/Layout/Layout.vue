@@ -217,6 +217,7 @@ import {
   SwitchButton
 } from '@element-plus/icons-vue'
 import { useAppStore, useUserStore, useTenantStore } from '@/stores'
+import { usePermission } from '@/composables/usePermission'
 import { t } from '@/i18n'
 import TenantSelector from './TenantSelector.vue'
 
@@ -225,6 +226,7 @@ const router = useRouter()
 const appStore = useAppStore()
 const userStore = useUserStore()
 const tenantStore = useTenantStore()
+const { hasPermission, hasAnyPermission } = usePermission()
 
 const isCollapsed = computed(() => appStore.sidebarCollapsed)
 const currentUser = computed(() => userStore.user)
@@ -232,20 +234,10 @@ const currentLang = computed(() => appStore.lang)
 const appVersion = computed(() => appStore.version)
 const sidebarWidth = computed(() => isCollapsed.value ? '72px' : '240px')
 const defaultOpeneds = computed(() => isCollapsed.value ? [] : ['connectivity', 'policy-center', 'platform'])
-const userPermissions = computed(() => userStore.permissions || [])
 const isSuperAdmin = computed(() => currentUser.value?.role === 'super_admin')
 
-const canAccess = (permission) => {
-  if (!permission) return true
-  if (userPermissions.value.includes('*')) return true
-  return userPermissions.value.includes(permission)
-}
-
-const canAnyAccess = (permissions) => {
-  if (!Array.isArray(permissions) || permissions.length === 0) return true
-  if (userPermissions.value.includes('*')) return true
-  return permissions.some((permission) => userPermissions.value.includes(permission))
-}
+const canAccess = hasPermission
+const canAnyAccess = hasAnyPermission
 
 const getPageTitle = computed(() => {
   const routeMap = {
@@ -315,6 +307,7 @@ const openHelp = () => {
   flex-direction: column;
   position: relative;
   z-index: 20;
+  overflow: hidden;
 }
 
 /* Sidebar Header */
@@ -325,6 +318,7 @@ const openHelp = () => {
   height: 72px;
   border-bottom: 1px solid var(--aria-dark-border-primary);
   transition: all 0.3s ease;
+  flex-shrink: 0;
 }
 
 .logo-wrapper {
@@ -381,10 +375,27 @@ const openHelp = () => {
 /* Sidebar Menu */
 .sidebar-menu {
   flex: 1;
+  min-height: 0;
   border: none;
   background: transparent;
   padding: 16px 12px;
   overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+}
+
+.sidebar-menu::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-menu::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-menu::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
 }
 
 :deep(.sidebar-menu .el-menu-item) {
@@ -466,6 +477,7 @@ const openHelp = () => {
 .sidebar-footer {
   padding: 16px;
   border-top: 1px solid var(--aria-dark-border-primary);
+  flex-shrink: 0;
 }
 
 .status-indicator {
