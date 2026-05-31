@@ -90,6 +90,7 @@ type fakeCommandStream struct {
 	recv            []*agentpb.CommandResponse
 	sent            []*agentpb.CommandRequest
 	sendHeaderCalls int
+	ctx             context.Context
 }
 
 var _ agentpb.ControllerService_CommandStreamServer = (*fakeCommandStream)(nil)
@@ -120,6 +121,9 @@ func (s *fakeCommandStream) SendHeader(metadata.MD) error {
 func (s *fakeCommandStream) SetTrailer(metadata.MD) {}
 
 func (s *fakeCommandStream) Context() context.Context {
+	if s.ctx != nil {
+		return s.ctx
+	}
 	return context.Background()
 }
 
