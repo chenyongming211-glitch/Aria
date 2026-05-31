@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -10,20 +11,24 @@ import (
 )
 
 var (
-	ErrInvalidToken = errors.New("invalid token")
-	ErrExpiredToken = errors.New("token has expired")
+	ErrInvalidToken           = errors.New("invalid token")
+	ErrExpiredToken           = errors.New("token has expired")
+	ErrJWTSecretNotConfigured = errors.New("jwt secret is not configured")
 )
 
 var (
-	jwtSecret   = []byte("aria-jwt-secret-key-32-bytes-long!")
+	jwtSecret   []byte
 	jwtSecretMu sync.RWMutex
 )
 
 // getSecret 获取当前的 JWT 密钥（线程安全）
-func getSecret() []byte {
+func getSecret() ([]byte, error) {
 	jwtSecretMu.RLock()
 	defer jwtSecretMu.RUnlock()
-	return jwtSecret
+	if len(jwtSecret) == 0 {
+		return nil, ErrJWTSecretNotConfigured
+	}
+	return jwtSecret, nil
 }
 
 // Claims 定义JWT声明
@@ -63,8 +68,13 @@ func GenerateToken(userID, username, role, tenantID string, mustChangePassword .
 	// 创建令牌
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
+	secret, err := getSecret()
+	if err != nil {
+		return "", err
+	}
+
 	// 签名令牌
-	tokenString, err := token.SignedString(getSecret())
+	tokenString, err := token.SignedString(secret)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %w", err)
 	}
@@ -82,10 +92,13 @@ func ValidateToken(tokenString string) (*Claims, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return getSecret(), nil
+		return getSecret()
 	})
 
 	if err != nil {
+		if errors.Is(err, ErrJWTSecretNotConfigured) {
+			return nil, ErrJWTSecretNotConfigured
+		}
 		if errors.Is(err, jwt.ErrTokenExpired) {
 			return nil, ErrExpiredToken
 		}
@@ -114,7 +127,12 @@ func ExtractUserInfo(tokenString string) (*Claims, error) {
 
 // SetSecret 设置JWT密钥（应在初始化时调用）
 func SetSecret(secret string) {
+	trimmed := strings.TrimSpace(secret)
 	jwtSecretMu.Lock()
 	defer jwtSecretMu.Unlock()
-	jwtSecret = []byte(secret)
+	if trimmed == "" {
+		jwtSecret = nil
+		return
+	}
+	jwtSecret = []byte(trimmed)
 }
