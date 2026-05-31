@@ -1,242 +1,162 @@
-# Aria 部署文档
+# Aria Deployment
 
-## 当前架构
+## Current Production Shape
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     112.124.8.241 (Controller)             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐    │
-│  │ aria_web    │  │ aria_       │  │ aria_postgres  │    │
-│  │ (nginx)     │──│ controller  │──│ (16-alpine)    │    │
-│  │ :80/:443    │  │ :8080/:50051│  │ :5432          │    │
-│  └─────────────┘  └─────────────┘  └─────────────────┘    │
-│         │                │                  │              │
-│         └────────────────┼──────────────────┘              │
-│                    aria_shared_net (172.30.0.0/16)       │
-└─────────────────────────────────────────────────────────────┘
-         │
-         │ gRPC (:50051)
-         ▼
-┌─────────────────┐    ┌─────────────────┐
-│ 146.56.196.231  │    │ 118.195.135.16 │
-│ (Agent sh)      │◀──▶│ (Agent bj)     │
-│ WireGuard :51820│    │ WireGuard :51820│
-└─────────────────┘    └─────────────────┘
-```
+Controller host: `8.152.163.101`
 
-## 1. Controller 部署（使用 docker compose）
+Production runs Aria in isolated containers under `/root/aria-controller`.
+The server also hosts other products, so Aria must keep its own containers,
+ports, volumes, and network.
 
-### 1.1 目录结构
+| Service | Container | Image | Ports |
+| --- | --- | --- | --- |
+| Frontend | `aria-frontend` | `nginx:1.27-alpine` | `18080:80` |
+| Controller | `aria-controller` | `ghcr.io/chenyongming211-glitch/aria-controller:0.2.35-test` | `50051:50051` |
+| Postgres | `aria-postgres` | `postgres:16-alpine` | `127.0.0.1:15432:5432` |
+| Redis | `aria-redis` | `redis:7-alpine` | `127.0.0.1:16379:6379` |
+| VictoriaMetrics | `aria-victoriametrics` | `victoriametrics/victoria-metrics:latest` | `127.0.0.1:18428:8428` |
 
-```
-/root/aria-controller/
-├── docker-compose.yml    # 容器编排配置
-├── .env                  # 环境变量
-├── config/
-│   └── controller.yaml   # Controller配置
-├── certs/               # 证书目录
-│   ├── grpc-server.crt
-│   ├── grpc-server.key
-│   └── ca.crt
-└── bin/images/          # Docker镜像
-    └── aria-controller-latest.tar
-```
+Public HTTPS is terminated by the host Nginx at `https://aria.yun`.
+The frontend container serves the GitHub Actions `frontend-dist` artifact.
+The Controller image is built and pushed by GitHub Actions `workflow_dispatch`.
 
-### 1.2 docker-compose.yml
+## Release Flow
 
-```yaml
-# 模板位置: deployments/ansible/roles/controller/templates/docker-compose.yml.j2
+Do not build release binaries or Docker images locally. Use GitHub Actions.
 
-version: '3.8'
+1. Merge the release branch into `master`.
+2. Confirm the push-triggered `Build` workflow passes Go, Rust Agent, and Frontend jobs.
+3. Trigger `workflow_dispatch` for the `Build` workflow on `master`.
+4. Confirm `Docker Build & Push` succeeds and publishes:
+   - `ghcr.io/chenyongming211-glitch/aria-controller:latest`
+   - `ghcr.io/chenyongming211-glitch/aria-controller:<VERSION>`
+5. Download the `frontend-dist` workflow artifact from the same run.
+6. Deploy the Controller image and frontend artifact to `/root/aria-controller`.
 
-services:
-  aria-controller:
-    image: aria-controller:latest
-    container_name: aria_controller
-    restart: unless-stopped
-    ports:
-      - "50051:50051"
-    volumes:
-      - ./config/controller.yaml:/etc/aria/controller.yaml:ro
-      - ./certs:/etc/aria/certs:ro
-    env_file:
-      - .env
-    networks:
-      - aria_shared_net
-
-networks:
-  aria_shared_net:
-    external: true
-```
-
-### 1.3 .env 文件
+Useful commands:
 
 ```bash
-# 模板位置: deployments/ansible/roles/controller/templates/controller.env.j2
+gh workflow run Build --repo chenyongming211-glitch/Aria --ref master
+gh run download <run-id> --repo chenyongming211-glitch/Aria -n frontend-dist -D /tmp/aria-frontend-dist
+```
 
-# 数据库
-POSTGRES_HOST=aria-postgres
-POSTGRES_PORT=5432
-POSTGRES_USER=aria
-POSTGRES_PASSWORD=aria-local-password
-POSTGRES_DATABASE=aria
+## Server Layout
 
-# Redis
-REDIS_ADDR=aria-redis:6379
+```text
+/root/aria-controller/
+├── docker-compose.yml
+├── .env
+├── config/
+│   └── controller.yaml
+├── certs/
+│   ├── ca.crt
+│   ├── ca.key
+│   ├── grpc-server.crt
+│   └── grpc-server.key
+├── data/backups/
+├── frontend/
+│   ├── dist/
+│   └── nginx.conf
+└── logs/
+```
 
-# gRPC TLS
-ARIA_GRPC_TLS_MODE=disabled
+Controller volumes:
+
+```yaml
+- ./config/controller.yaml:/etc/aria/controller.yaml:ro
+- ./certs:/etc/aria/certs:ro
+- ./logs:/var/log/aria
+- ./data/backups:/opt/aria/data/backups
+```
+
+## gRPC TLS
+
+Production Agent configuration uses `https://aria.yun:50051`, the Controller CA,
+and `tls_server_name: aria.yun`. The Controller must therefore run in one-way TLS
+mode:
+
+```bash
+ARIA_GRPC_TLS_MODE=server
 ARIA_GRPC_SERVER_CERT=/etc/aria/certs/grpc-server.crt
 ARIA_GRPC_SERVER_KEY=/etc/aria/certs/grpc-server.key
 ARIA_GRPC_CA_CERT=/etc/aria/certs/ca.crt
-
-# DeepSeek AI
-DEEPSEEK_API_KEY=sk-xxx
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-chat
-
-# 飞书
-FEISHU_APP_ID=cli_xxx
-FEISHU_APP_SECRET=xxx
-FEISHU_VERIFY_TOKEN=xxx
 ```
 
-### 1.4 部署命令
+`disabled` is only for local or one-off plaintext testing. Do not use it on the
+production Controller while Agents are configured with `https://`.
+
+## Controller Deploy
+
+Before deployment:
 
 ```bash
-# 创建网络
-docker network create --subnet=172.30.0.0/16 aria_shared_net 2>/dev/null || true
-
-# 启动服务
+ssh root@8.152.163.101
 cd /root/aria-controller
-docker compose up -d
+docker exec aria-postgres pg_dump -U aria -d aria > backups/pre-controller-deploy-$(date +%Y%m%d-%H%M%S).sql
+tar -C /root -czf backups/pre-controller-deploy-config-$(date +%Y%m%d-%H%M%S).tar.gz aria-controller/config aria-controller/certs aria-controller/.env aria-controller/secrets
 ```
 
-### 1.5 TLS模式说明
-
-| 模式 | ARIA_GRPC_TLS_MODE | 说明 |
-|------|-------------------|------|
-| 禁用 | `disabled` | HTTP明文传输（测试用） |
-| 单向TLS | `server` | 只验证服务端证书（推荐） |
-| 双向mTLS | `mutual` | 双向证书验证 |
-
----
-
-## 2. Agent 部署
-
-### 2.1 配置文件 `/etc/aria/agent.yaml`
-
-```yaml
-controller_url: https://aria.yun:50051
-ca_cert: /etc/aria/certs/ca/ca.crt
-client_cert: /etc/aria/certs/agents/agent-sh.crt
-client_key: /etc/aria/certs/agents/agent-sh.key
-private_key: <WireGuard私钥>
-public_key: <WireGuard公钥>
-assigned_ip: "100.64.0.1"
-address: "100.64.0.1/32"
-interface_name: aria0
-listen_port: 51820
-mtu: 1360
-region: sh
-sync_interval: 5
-multi_tunnel: true
-```
-
-### 2.2 systemd 服务
-
-```ini
-[Unit]
-Description=Aria SD-WAN Agent
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/local/bin/aria up --interface=eth0 --config=/etc/aria/agent.yaml
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### 2.3 启动
+Pull and apply the Controller image:
 
 ```bash
-systemctl daemon-reload
-systemctl enable aria
-systemctl start aria
+cd /root/aria-controller
+docker pull ghcr.io/chenyongming211-glitch/aria-controller:0.2.35-test
+docker compose up -d aria-controller
+docker compose ps aria-controller
+docker logs --since 2m aria-controller
 ```
 
----
+Expected Controller log lines:
 
-## 3. 更新流程
+```text
+Controller ready
+gRPC one-way TLS enabled
+gRPC server listening on :50051 (TLS: server)
+```
 
-### 3.1 更新 Controller
+## Frontend Deploy
+
+Upload the downloaded Actions artifact and restart the frontend container:
 
 ```bash
-# 1. 本地构建
-cd /root/aria-project
-make build
-docker buildx build --platform linux/amd64 -t aria-controller:latest -f Dockerfile.controller . --load
-
-# 2. 保存镜像
-docker save aria-controller:latest -o bin/images/aria-controller-latest.tar
-
-# 3. 上传到服务器
-rsync -avz bin/images/aria-controller-latest.tar root@112.124.8.241:/root/aria-controller/bin/images/
-
-# 4. 服务器部署（使用 docker compose）
-ssh root@112.124.8.241 "cd /root/aria-controller && \
-    docker compose down && \
-    docker load -i bin/images/aria-controller-latest.tar && \
-    docker compose up -d"
+ssh root@8.152.163.101 'rm -rf /root/aria-controller/frontend/dist.new && mkdir -p /root/aria-controller/frontend/dist.new'
+rsync -az --delete /tmp/aria-frontend-dist/ root@8.152.163.101:/root/aria-controller/frontend/dist.new/
+ssh root@8.152.163.101 '
+  set -e
+  cd /root/aria-controller/frontend
+  rm -rf dist.previous
+  [ -d dist ] && mv dist dist.previous
+  mv dist.new dist
+  docker restart aria-frontend
+'
 ```
 
-### 3.2 使用 Ansible（推荐）
+## Smoke Checks
 
 ```bash
-cd deployments/ansible
-ansible-playbook -i inventory.yaml playbooks/deploy-controller.yml
+ssh root@8.152.163.101 'docker ps --format "{{.Names}}\t{{.Image}}\t{{.Status}}" | grep aria'
+ssh root@8.152.163.101 'curl -fsS http://127.0.0.1:18080/api/version'
+curl -fsS https://aria.yun/api/version
 ```
 
----
-
-## 4. 节点信息
-
-| 角色 | IP | Region | VPN IP |
-|------|-----|--------|--------|
-| Controller | 112.124.8.241 | - | - |
-| Agent | 146.56.196.231 | sh | 100.64.0.1 |
-| Agent | 118.195.135.16 | bj | 100.64.0.2 |
-
----
-
-## 5. 常用命令
+Agent gray verification:
 
 ```bash
-# Controller
-docker compose logs -f aria_controller
-docker compose restart aria_controller
-
-# Agent
-systemctl status aria-agent
-systemctl restart aria-agent
-aria-agent peers
+ssh ubuntu@82.156.48.111 'sudo journalctl -u aria-agent --since "5 min ago" --no-pager | tail -120'
 ```
---
 
-## 5. 常用命令
+Healthy Agent evidence should include:
 
-```bash
-# Controller
-docker compose logs -f aria_controller
-docker compose restart aria_controller
-
-# Agent
-systemctl status aria
-systemctl restart aria
-aria peers
+```text
+Controller command stream connected
+Immediate sync completed
+QoS sync completed
 ```
+
+## Notes
+
+- `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
+  the production compose shape.
+- `deployments/ansible/playbooks/deploy-frontend.yml` expects a prebuilt
+  `frontend-dist` artifact. It must not run `npm run build` locally for release
+  deploys.

@@ -445,6 +445,21 @@ func computeStateConvergence(cs *controllerstorage.NodeControlState) string {
 	return "pending"
 }
 
+func promQLRegexString(pattern string) string {
+	pattern = strings.ReplaceAll(pattern, `\`, `\\`)
+	pattern = strings.ReplaceAll(pattern, `"`, `\"`)
+	pattern = strings.ReplaceAll(pattern, "\n", `\n`)
+	return pattern
+}
+
+func promQLInstanceRegex(host string) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	return promQLRegexString(regexp.QuoteMeta(host) + ":.*")
+}
+
 // handleMonitoringTraffic returns tenant-level traffic time series data.
 // GET /api/v2/tenants/{tenant_id}/monitoring/traffic?range=24h
 func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
@@ -491,9 +506,18 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 	// 构建 instance 过滤列表
 	instances := make([]string, 0, len(nodes))
 	for _, n := range nodes {
-		if n.PublicIP != "" {
-			instances = append(instances, regexp.QuoteMeta(n.PublicIP)+":.*")
+		if instanceRegex := promQLInstanceRegex(n.PublicIP); instanceRegex != "" {
+			instances = append(instances, instanceRegex)
 		}
+	}
+	if len(instances) == 0 {
+		apibase.WriteSuccess(w, map[string]interface{}{
+			"timestamps":          []int64{},
+			"upload_bytes":        []float64{},
+			"download_bytes":      []float64{},
+			"peak_bandwidth_mbps": 0,
+		}, "Traffic data retrieved")
+		return
 	}
 	instanceFilter := strings.Join(instances, "|")
 
@@ -611,7 +635,7 @@ func (r *Router) handleMonitoringNodeMetrics(w http.ResponseWriter, req *http.Re
 		ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
 		defer cancel()
 
-		instanceFilter := regexp.QuoteMeta(node.PublicIP) + ":.*"
+		instanceFilter := promQLInstanceRegex(node.PublicIP)
 
 		// 查询上传速率
 		txQuery := fmt.Sprintf(`sum(rate(wireguard_peer_tx_bytes{instance=~"%s"}[5m]))`, instanceFilter)
