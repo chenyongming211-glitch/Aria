@@ -4,6 +4,57 @@ import { ref } from 'vue'
 import api from '@/composables/useApi'
 import { API_ENDPOINTS } from '@/config/api'
 
+export const SYSTEM_ROLE_PERMISSIONS = Object.freeze({
+  admin: Object.freeze([
+    'nodes:read', 'nodes:write',
+    'routes:read', 'routes:write',
+    'acls:read', 'acls:write',
+    'qos:read', 'qos:write',
+    'blacklist:read', 'blacklist:write',
+    'monitoring:read',
+    'commands:write',
+    'tokens:read', 'tokens:write',
+    'users:read', 'users:write',
+    'roles:read', 'roles:write',
+    'ai:use',
+    'policies:read',
+    'settings:read', 'settings:write'
+  ]),
+  operator: Object.freeze([
+    'nodes:read', 'nodes:write',
+    'routes:read', 'routes:write',
+    'acls:read', 'acls:write',
+    'qos:read', 'qos:write',
+    'blacklist:read', 'blacklist:write',
+    'monitoring:read',
+    'commands:write',
+    'ai:use',
+    'policies:read'
+  ]),
+  viewer: Object.freeze([
+    'nodes:read',
+    'routes:read',
+    'acls:read',
+    'qos:read',
+    'blacklist:read',
+    'monitoring:read',
+    'ai:use',
+    'policies:read'
+  ])
+})
+
+export const normalizeRoleName = (role) => {
+  const roleName = String(role || '').trim()
+  if (roleName === 'member' || roleName === 'owner') return 'operator'
+  return roleName
+}
+
+export const permissionsForRole = (role) => {
+  const roleName = normalizeRoleName(role)
+  if (roleName === 'super_admin') return ['*']
+  return SYSTEM_ROLE_PERMISSIONS[roleName] ? [...SYSTEM_ROLE_PERMISSIONS[roleName]] : []
+}
+
 const deriveInitials = (value) => {
   const text = String(value || '').trim()
   if (!text) return ''
@@ -73,6 +124,29 @@ export default defineStore('user', () => {
   const mustChangePassword = ref(false)
   const permissions = ref([])
 
+  const setPermissions = (nextPermissions) => {
+    const normalized = Array.from(new Set((nextPermissions || []).filter(Boolean)))
+    permissions.value = normalized
+    localStorage.setItem('aria_permissions', JSON.stringify(permissions.value))
+    return permissions.value
+  }
+
+  const readCachedPermissions = () => {
+    const cached = localStorage.getItem('aria_permissions')
+    if (!cached) return undefined
+
+    try {
+      const parsed = JSON.parse(cached)
+      if (Array.isArray(parsed)) return parsed
+      localStorage.removeItem('aria_permissions')
+      return null
+    } catch (error) {
+      console.warn('Invalid cached permissions, clearing them:', error)
+      localStorage.removeItem('aria_permissions')
+      return null
+    }
+  }
+
   const login = async (credentials) => {
     try {
       // 调用真实的登录 API
@@ -111,10 +185,15 @@ export default defineStore('user', () => {
         localStorage.setItem('aria_user', JSON.stringify(user.value))
 
         // 加载用户权限
-        if (userData?.role === 'super_admin') {
-          loadPermissions(null, userData.role)
-        } else if (userData?.tenant_id) {
-          loadPermissions(userData.tenant_id, userData.role)
+        if (user.value?.role === 'super_admin') {
+          await loadPermissions(null, user.value.role)
+        } else if (user.value?.tenant_id) {
+          await loadPermissions(user.value.tenant_id, user.value.role)
+        } else {
+          const defaults = permissionsForRole(user.value?.role)
+          if (defaults.length > 0) {
+            setPermissions(defaults)
+          }
         }
 
         // 存储租户 ID 到 localStorage（用于 API 请求）
@@ -208,26 +287,22 @@ export default defineStore('user', () => {
     isAuthenticated.value = true
     localStorage.setItem('aria_user', JSON.stringify(user.value))
 
-    const cached = localStorage.getItem('aria_permissions')
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached)
-        permissions.value = Array.isArray(parsed) ? parsed : []
-        if (!Array.isArray(parsed)) {
-          localStorage.removeItem('aria_permissions')
-        }
-      } catch (error) {
-        console.warn('Invalid cached permissions, clearing them:', error)
+    const cached = readCachedPermissions()
+    if (Array.isArray(cached)) {
+      permissions.value = cached
+    } else if (cached === undefined) {
+      const defaults = permissionsForRole(user.value?.role)
+      if (defaults.length > 0) {
+        setPermissions(defaults)
+      } else {
         permissions.value = []
-        localStorage.removeItem('aria_permissions')
       }
     } else {
       permissions.value = []
     }
 
     if (user.value?.role === 'super_admin' && !permissions.value.includes('*')) {
-      permissions.value = ['*']
-      localStorage.setItem('aria_permissions', JSON.stringify(permissions.value))
+      setPermissions(['*'])
     }
 
     return true
@@ -246,31 +321,47 @@ export default defineStore('user', () => {
 
   // 加载用户权限（从角色查询）
   const loadPermissions = async (tenantId, role) => {
-    if (role === 'super_admin') {
+    const roleName = normalizeRoleName(role)
+    if (roleName === 'super_admin') {
       // super_admin 拥有所有权限
-      permissions.value = ['*']
-      localStorage.setItem('aria_permissions', JSON.stringify(permissions.value))
-      return
+      return setPermissions(['*'])
     }
+
+    const defaultPermissions = permissionsForRole(roleName)
+    if (defaultPermissions.length > 0 && !defaultPermissions.includes('roles:read')) {
+      return setPermissions(defaultPermissions)
+    }
+
     try {
       const roleId = tenantId || JSON.parse(localStorage.getItem('aria-current-tenant'))?.id
-      if (!roleId) return
+      if (!roleId) {
+        if (defaultPermissions.length > 0) {
+          return setPermissions(defaultPermissions)
+        }
+        return permissions.value
+      }
       const response = await api.get(API_ENDPOINTS.TENANT.ROLES(roleId))
       const roles = response.data?.data || []
-      const roleName = role === 'member' || role === 'owner' ? 'operator' : role
       const matchedRole = roles.find(r => r.name === roleName)
       if (matchedRole) {
-        permissions.value = matchedRole.permissions || []
-        localStorage.setItem('aria_permissions', JSON.stringify(permissions.value))
+        return setPermissions(matchedRole.permissions || [])
+      }
+      if (defaultPermissions.length > 0) {
+        return setPermissions(defaultPermissions)
       }
     } catch (error) {
       console.error('Load permissions error:', error)
       // 尝试从缓存加载
-      const cached = localStorage.getItem('aria_permissions')
-      if (cached) {
-        permissions.value = JSON.parse(cached)
+      const cached = readCachedPermissions()
+      if (Array.isArray(cached)) {
+        permissions.value = cached
+        return permissions.value
+      }
+      if (defaultPermissions.length > 0) {
+        return setPermissions(defaultPermissions)
       }
     }
+    return permissions.value
   }
 
   // 刷新 token

@@ -98,6 +98,19 @@ describe('router RBAC metadata', () => {
     expect(router.currentRoute.value.path).toBe('/nodes')
   })
 
+  it('allows built-in operator navigation when cached permissions are missing', async () => {
+    await router.replace('/login')
+    await router.isReady()
+
+    localStorage.setItem('aria_token', 'dummy-token')
+    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_user', JSON.stringify({ role: 'operator' }))
+
+    await router.push('/nodes')
+
+    expect(router.currentRoute.value.path).toBe('/nodes')
+  })
+
   it('blocks Settings navigation for non-super_admin users', async () => {
     localStorage.setItem('aria_token', 'dummy-token')
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)

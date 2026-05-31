@@ -163,4 +163,93 @@ describe('user session persistence', () => {
       initials: 'SY'
     })
   })
+
+  it('loads built-in operator permissions without requiring roles:read', async () => {
+    const userStore = useUserStore()
+
+    await userStore.loadPermissions('tenant-1', 'operator')
+
+    expect(api.get).not.toHaveBeenCalled()
+    expect(userStore.permissions).toEqual(expect.arrayContaining([
+      'nodes:read',
+      'nodes:write',
+      'routes:read',
+      'acls:read',
+      'qos:read',
+      'monitoring:read',
+      'commands:write',
+      'policies:read'
+    ]))
+    expect(userStore.permissions).not.toContain('roles:read')
+    expect(JSON.parse(localStorage.getItem('aria_permissions'))).toEqual(userStore.permissions)
+  })
+
+  it('restores role permissions when cached permissions are missing', () => {
+    localStorage.setItem('aria_token', 'valid-token')
+    localStorage.setItem('aria_user', JSON.stringify({
+      id: 'user-1',
+      username: 'operator',
+      role: 'operator',
+      tenant_id: 'tenant-1'
+    }))
+
+    const userStore = useUserStore()
+
+    expect(userStore.loadSession()).toBe(true)
+    expect(userStore.permissions).toEqual(expect.arrayContaining([
+      'nodes:read',
+      'routes:read',
+      'acls:read',
+      'monitoring:read'
+    ]))
+    expect(JSON.parse(localStorage.getItem('aria_permissions'))).toEqual(userStore.permissions)
+  })
+
+  it('waits for permission loading before resolving login', async () => {
+    let resolveRoles
+    api.post.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          token: 'new-token',
+          expires_in: 7200,
+          require_password_change: false,
+          user: {
+            id: 'user-1',
+            username: 'admin',
+            role: 'admin',
+            tenant_id: 'tenant-1'
+          }
+        }
+      }
+    })
+    api.get.mockReturnValue(new Promise((resolve) => {
+      resolveRoles = resolve
+    }))
+
+    const userStore = useUserStore()
+    let settled = false
+    const loginPromise = userStore.login({ username: 'admin', password: 'secret' })
+      .then((result) => {
+        settled = true
+        return result
+      })
+
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    resolveRoles({
+      data: {
+        data: [
+          { name: 'admin', permissions: ['nodes:read', 'roles:read'] }
+        ]
+      }
+    })
+
+    const result = await loginPromise
+
+    expect(result.success).toBe(true)
+    expect(userStore.permissions).toEqual(['nodes:read', 'roles:read'])
+  })
 })
