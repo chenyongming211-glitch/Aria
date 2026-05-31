@@ -38,7 +38,6 @@ func TestHandleUnregisterRequiresRuntimeToken(t *testing.T) {
 
 func TestHandleUnregisterRejectsRuntimeTokenForDifferentNode(t *testing.T) {
 	auth.SetRuntimeSecret("southbound-runtime-secret")
-	t.Cleanup(func() { auth.SetRuntimeSecret("") })
 
 	tenantID := uuid.New()
 	tokenNodeID := uuid.New()

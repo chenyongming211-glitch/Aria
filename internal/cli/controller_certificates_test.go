@@ -690,7 +690,6 @@ func TestHandleRegister_CSRSuccessIncludesCertificateInSyncResponse(t *testing.T
 
 func TestHandleUnregister_RevokesCertificateAndCreatesAuditEvent(t *testing.T) {
 	auth.SetRuntimeSecret("unregister-runtime-secret")
-	t.Cleanup(func() { auth.SetRuntimeSecret("") })
 
 	tenantID := uuid.New()
 	nodeID := uuid.New()
