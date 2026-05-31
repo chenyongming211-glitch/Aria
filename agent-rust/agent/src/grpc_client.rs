@@ -5,6 +5,7 @@ use std::path::Path;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+use tonic::metadata::{Ascii, MetadataValue};
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use tonic::Streaming;
 
@@ -32,6 +33,12 @@ fn apply_unary_timeout<T>(request: &mut tonic::Request<T>) {
     if let Some(timeout) = unary_rpc_timeout() {
         request.set_timeout(timeout);
     }
+}
+
+fn authorization_metadata_value(token: &str) -> Result<MetadataValue<Ascii>> {
+    format!("Bearer {}", token.trim())
+        .parse()
+        .context("invalid runtime token metadata")
 }
 
 #[derive(Debug, Clone)]
@@ -242,7 +249,7 @@ impl GrpcClient {
 
         if let Some(token) = &runtime_token {
             let metadata = request.metadata_mut();
-            metadata.insert("authorization", format!("Bearer {}", token).parse().unwrap());
+            metadata.insert("authorization", authorization_metadata_value(token)?);
         }
         apply_unary_timeout(&mut request);
 
@@ -340,7 +347,7 @@ impl GrpcClient {
         }
         if let Some(token) = &runtime_token {
             let metadata = request.metadata_mut();
-            metadata.insert("authorization", format!("Bearer {}", token).parse().unwrap());
+            metadata.insert("authorization", authorization_metadata_value(token)?);
         }
 
         let response = client.command_stream(request).await?;
@@ -446,4 +453,16 @@ pub struct BlacklistRule {
     pub scope: String,
     pub cidr: String,
     pub port: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::authorization_metadata_value;
+
+    #[test]
+    fn authorization_metadata_rejects_invalid_token_without_panic() {
+        let value = authorization_metadata_value("bad\nruntime-token");
+
+        assert!(value.is_err());
+    }
 }
