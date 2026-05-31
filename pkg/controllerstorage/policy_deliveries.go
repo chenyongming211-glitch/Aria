@@ -26,6 +26,10 @@ type PolicyDelivery struct {
 }
 
 func (s *Storage) CreatePolicyDelivery(delivery *PolicyDelivery) (*PolicyDelivery, error) {
+	return createPolicyDelivery(txQueryRowAdapter{s.db}, delivery)
+}
+
+func createPolicyDelivery(q queryRower, delivery *PolicyDelivery) (*PolicyDelivery, error) {
 	if delivery.Metadata == nil {
 		delivery.Metadata = map[string]interface{}{}
 	}
@@ -41,7 +45,7 @@ func (s *Storage) CreatePolicyDelivery(delivery *PolicyDelivery) (*PolicyDeliver
 		completedAt sql.NullTime
 	)
 
-	err = s.db.QueryRow(`
+	err = q.QueryRow(`
 		INSERT INTO policy_deliveries (
 			tenant_id,
 			node_id,
