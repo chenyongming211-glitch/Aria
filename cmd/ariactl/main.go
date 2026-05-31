@@ -7,13 +7,15 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
 
 var (
 	controllerURL string
-	version = "0.2.26-test-7" // 默认开发版本，通过 ldflags 注入
+	authToken     string
+	version       = "0.2.26-test-7" // 默认开发版本，通过 ldflags 注入
 )
 
 var rootCmd = &cobra.Command{
@@ -75,6 +77,7 @@ Examples:
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&controllerURL, "controller", "http://localhost:8080", "Controller URL")
+	rootCmd.PersistentFlags().StringVar(&authToken, "token", os.Getenv("ARIACTL_TOKEN"), "Controller JWT token; defaults to ARIACTL_TOKEN")
 
 	rootCmd.AddCommand(networkCmd)
 	networkCmd.AddCommand(networkListCmd)
@@ -161,7 +164,7 @@ func runNetworkAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	body, _ := json.Marshal(reqBody)
-	resp, err := http.Post(controllerURL+"/api/v2/agents/network", "application/json", bytes.NewReader(body))
+	resp, err := postJSON(controllerURL+"/api/v2/agents/network", body)
 	if err != nil {
 		return fmt.Errorf("failed to connect to controller: %w", err)
 	}
@@ -191,7 +194,7 @@ func runNetworkRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	body, _ := json.Marshal(reqBody)
-	resp, err := http.Post(controllerURL+"/api/v2/agents/network", "application/json", bytes.NewReader(body))
+	resp, err := postJSON(controllerURL+"/api/v2/agents/network", body)
 	if err != nil {
 		return fmt.Errorf("failed to connect to controller: %w", err)
 	}
@@ -207,4 +210,16 @@ func runNetworkRemove(cmd *cobra.Command, args []string) error {
 	fmt.Println("Route will be removed from all peers automatically")
 
 	return nil
+}
+
+func postJSON(url string, body []byte) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if strings.TrimSpace(authToken) != "" {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(authToken))
+	}
+	return http.DefaultClient.Do(req)
 }
