@@ -149,7 +149,7 @@ func (s *Store) IncrementUsage(tokenStr, deviceID string) error {
 		    last_used_at = NOW(),
 		    last_used_by = $2,
 		    status = CASE
-		        WHEN used_count + 1 >= max_uses THEN 'exhausted'
+		        WHEN max_uses > 0 AND used_count + 1 >= max_uses THEN 'exhausted'
 		        ELSE status
 		    END
 		WHERE token = $1 AND status = 'active' AND (max_uses = 0 OR used_count < max_uses)
@@ -162,7 +162,7 @@ func (s *Store) IncrementUsage(tokenStr, deviceID string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	if affected == 0 {
 		// ✅ 严谨的二次查询与错误透传
 		t, err := s.GetByToken(tokenStr)
@@ -172,7 +172,7 @@ func (s *Store) IncrementUsage(tokenStr, deviceID string) error {
 		if t == nil {
 			return ErrTokenNotFound
 		}
-		
+
 		switch t.Status {
 		case StatusExpired:
 			return ErrTokenExpired

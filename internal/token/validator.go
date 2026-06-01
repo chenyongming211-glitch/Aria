@@ -44,7 +44,7 @@ func (v *Validator) Validate(tokenStr string) (*Token, error) {
 		return nil, ErrTokenExpired
 	}
 
-	if token.UsedCount >= token.MaxUses {
+	if token.MaxUses > 0 && token.UsedCount >= token.MaxUses {
 		// ✅ 记录状态同步时的潜在数据库错误
 		if err := v.store.UpdateStatus(token.ID.String(), StatusExhausted); err != nil {
 			log.Printf("⚠️ ERROR: failed to update token %s status to exhausted: %v", token.ID, err)

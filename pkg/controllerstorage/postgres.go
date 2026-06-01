@@ -355,8 +355,8 @@ func (s *Storage) Migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_qos_rules_enabled ON qos_rules(enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_blacklist_rules_tenant_node_scope ON blacklist_rules(tenant_id, node_id, scope)`,
 		`CREATE INDEX IF NOT EXISTS idx_blacklist_rules_enabled ON blacklist_rules(enabled)`,
-			`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_unique ON users(username)`,
-			`CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_unique ON users(username)`,
+		`CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id)`,
 
 		// AI Audit Log - 记录 AI 对话和工具调用
 		`CREATE TABLE IF NOT EXISTS ai_audit_logs (
@@ -615,7 +615,7 @@ func (s *Storage) SaveNode(node *Node) error {
 			ip_offset = $11,
 			last_seen = $12,
 			registered_at = $13,
-			role = $14,
+			role = COALESCE(NULLIF($14, ''), nodes.role),
 			runtime_mode = $15,
 			kernel_version = $16,
 			has_aesni = $17,
@@ -712,16 +712,24 @@ func (s *Storage) ReuseHostnameIP(hostname string, tenantID uuid.UUID) (assigned
 	defer tx.Rollback()
 
 	var pubKey string
+	var nodeID uuid.UUID
 	err = tx.QueryRow(
-		`SELECT public_key, assigned_ip, ip_offset FROM nodes WHERE hostname = $1 AND tenant_id = $2 AND status != 'deleted' FOR UPDATE LIMIT 1`,
+		`SELECT id, public_key, assigned_ip, ip_offset FROM nodes WHERE hostname = $1 AND tenant_id = $2 AND status != 'deleted' FOR UPDATE LIMIT 1`,
 		hostname, tenantID,
-	).Scan(&pubKey, &assignedIP, &ipOffset)
+	).Scan(&nodeID, &pubKey, &assignedIP, &ipOffset)
 	if err != nil {
 		return "", 0, err
 	}
 
 	_, err = tx.Exec(`UPDATE nodes SET status = 'deleted', updated_at = NOW() WHERE public_key = $1`, pubKey)
 	if err != nil {
+		return "", 0, err
+	}
+
+	if err := revokeNodeCertificatesTx(tx, nodeID, "hostname_reused"); err != nil {
+		return "", 0, err
+	}
+	if err := failIncompleteAgentCommandsForNodeTx(tx, pubKey, "node deleted for hostname reuse"); err != nil {
 		return "", 0, err
 	}
 
@@ -769,13 +777,33 @@ func (s *Storage) MarkStaleNodes(thresholdTimestamp int64) (int, error) {
 
 // MarkNodeDeleted 手动删除节点（标记为deleted状态）
 func (s *Storage) MarkNodeDeleted(publicKey string) error {
-	query := `
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var nodeID uuid.UUID
+	err = tx.QueryRow(`SELECT id FROM nodes WHERE public_key = $1 FOR UPDATE`, publicKey).Scan(&nodeID)
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`
 		UPDATE nodes
 		SET status = 'deleted', updated_at = NOW()
 		WHERE public_key = $1
-	`
-	_, err := s.db.Exec(query, publicKey)
-	return err
+	`, publicKey); err != nil {
+		return err
+	}
+	if err := revokeNodeCertificatesTx(tx, nodeID, "node_deleted"); err != nil {
+		return err
+	}
+	if err := failIncompleteAgentCommandsForNodeTx(tx, publicKey, "node deleted"); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // CleanupDeletedNodes 清理已标记为 deleted 超过指定时间的节点

@@ -864,6 +864,11 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		AdvertisedRoutes:  req.AdvertisedRoutes, // Site-to-Site VPN
 		EnrolledWithToken: req.Token,            // Track which token was used
 	}
+	if existingNode != nil && strings.TrimSpace(existingNode.Role) != "" {
+		node.Role = existingNode.Role
+	} else {
+		node.Role = "agent"
+	}
 
 	issueCertificateBeforeSave := isReRegistration && !requiresFreshEnrollment && c.certService != nil && req.CSRPEM != ""
 	if issueCertificateBeforeSave {
@@ -871,6 +876,14 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		if _, err := c.issueNodeCertificate(node, req.CSRPEM, nil); err != nil {
 			c.logger.Error("Certificate issuance during register failed for node %s: %v", previewString(req.PublicKey, 8), err)
 			http.Error(w, "Failed to issue node certificate", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if strings.TrimSpace(req.Token) != "" {
+		if err := c.tokenValidator.ConsumeToken(req.Token, req.PublicKey); err != nil {
+			c.logger.Warn("Failed to consume token: %v", err)
+			http.Error(w, "Failed to consume enrollment token", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -890,18 +903,6 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			http.Error(w, "Failed to issue node certificate", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	// ========== Consume Token ==========
-	if req.Token != "" && (!isReRegistration || requiresFreshEnrollment) {
-		if err := c.tokenValidator.ConsumeToken(req.Token, req.PublicKey); err != nil {
-			c.logger.Warn("Failed to consume token: %v", err)
-			if markErr := c.store.MarkNodeDeleted(req.PublicKey); markErr != nil {
-				c.logger.Warn("Failed to roll back node %s after token consume failure: %v", previewString(req.PublicKey, 8), markErr)
-			}
-			http.Error(w, "Failed to consume enrollment token", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -1911,8 +1912,6 @@ func (c *Controller) createSyncAdapter() func(string) (interface{}, string, inte
 func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) (string, error) {
 	// Token Validation
 	existingNode, _ := c.store.GetNode(req.PublicKey)
-	isReRegistration := (existingNode != nil)
-	requiresFreshEnrollment := nodeRequiresFreshEnrollment(existingNode)
 	authResult, authErr := c.authorizeRegistrationRequest(req, existingNode, strings.TrimSpace(req.RuntimeToken))
 	if authErr != nil {
 		return "", authErr
@@ -1988,28 +1987,29 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 		HasAESNI:         req.HasAESNI,
 		LastSeen:         time.Now().Unix(),
 		RegisteredAt:     req.RegisteredAt,
-		Role:             "agent",
 		TenantID:         tenantID,
+	}
+	if existingNode != nil && strings.TrimSpace(existingNode.Role) != "" {
+		node.Role = existingNode.Role
+	} else {
+		node.Role = "agent"
 	}
 
 	if existingNode != nil {
 		node.RegisteredAt = existingNode.RegisteredAt
 	}
 
-	if err := c.store.SaveNode(node); err != nil {
-		return "", fmt.Errorf("failed to save node: %w", err)
-	}
-
-	if req.Token != "" && (!isReRegistration || requiresFreshEnrollment) {
+	if strings.TrimSpace(req.Token) != "" {
 		if err := c.tokenValidator.ConsumeToken(req.Token, req.PublicKey); err != nil {
 			if c.logger != nil {
 				c.logger.Warn("Failed to consume token: %v", err)
 			}
-			if markErr := c.store.MarkNodeDeleted(req.PublicKey); markErr != nil && c.logger != nil {
-				c.logger.Warn("Failed to roll back node %s after token consume failure: %v", previewString(req.PublicKey, 8), markErr)
-			}
 			return "", fmt.Errorf("failed to consume enrollment token: %w", err)
 		}
+	}
+
+	if err := c.store.SaveNode(node); err != nil {
+		return "", fmt.Errorf("failed to save node: %w", err)
 	}
 
 	c.logger.Info("Node registered successfully: %s (hostname=%s, IP=%s, region=%s)",

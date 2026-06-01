@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type NodeLifecycleTransition struct {
@@ -47,14 +49,7 @@ func (s *Storage) ApplyNodeLifecycleTransition(publicKey string, transition Node
 	node.Status = targetStatus
 
 	if nodeStatusRequiresCertificateRevoke(targetStatus) {
-		if _, err := tx.Exec(`
-			UPDATE node_certificates
-			SET status = $2,
-			    revoked_at = NOW(),
-			    revoke_reason = $3,
-			    updated_at = NOW()
-			WHERE node_id = $1
-		`, node.ID, CertStatusRevoked, transition.RevokeReason); err != nil {
+		if err := revokeNodeCertificatesTx(tx, node.ID, transition.RevokeReason); err != nil {
 			return nil, err
 		}
 	}
@@ -94,6 +89,21 @@ func (s *Storage) ApplyNodeLifecycleTransition(publicKey string, transition Node
 
 func nodeStatusRequiresCertificateRevoke(status string) bool {
 	return nodeStatusStopsCommands(status)
+}
+
+func revokeNodeCertificatesTx(tx roleExec, nodeID uuid.UUID, reason string) error {
+	if reason == "" {
+		reason = "node_lifecycle"
+	}
+	_, err := tx.Exec(`
+		UPDATE node_certificates
+		SET status = $2,
+		    revoked_at = NOW(),
+		    revoke_reason = $3,
+		    updated_at = NOW()
+		WHERE node_id = $1
+	`, nodeID, CertStatusRevoked, reason)
+	return err
 }
 
 func nodeStatusStopsCommands(status string) bool {

@@ -13,8 +13,33 @@ import (
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
+
+func TestRuntimeContextGettersRejectWrongTypes(t *testing.T) {
+	ctx := context.WithValue(context.Background(), RuntimeNodeIDKey, 123)
+	ctx = context.WithValue(ctx, RuntimeTenantIDKey, 456)
+
+	if _, ok := GetRuntimeNodeID(ctx); ok {
+		t.Fatalf("expected GetRuntimeNodeID to reject wrong type")
+	}
+	if _, ok := GetRuntimeTenantID(ctx); ok {
+		t.Fatalf("expected GetRuntimeTenantID to reject wrong type")
+	}
+}
+
+func TestExtractBearerTokenAcceptsCaseInsensitiveScheme(t *testing.T) {
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "bearer rt_test"))
+
+	token, err := extractBearerToken(ctx)
+	if err != nil {
+		t.Fatalf("extractBearerToken returned error: %v", err)
+	}
+	if token != "rt_test" {
+		t.Fatalf("expected rt_test, got %q", token)
+	}
+}
 
 func TestResolveRuntimeNodeForRequestRejectsRuntimeTokenNodeMismatch(t *testing.T) {
 	db, mock, err := sqlmock.New()

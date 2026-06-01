@@ -352,6 +352,7 @@ func (s *ControllerServer) ReportMetrics(ctx context.Context, req *agentpb.Metri
 	node.LastSeen = time.Now().Unix()
 	if err := s.store.SaveNode(node); err != nil {
 		fmt.Printf("[ERROR] Failed to update node heartbeat: %v\n", err)
+		return &agentpb.MetricsReportResponse{Success: false, Message: "Failed to persist metrics"}, fmt.Errorf("failed to persist metrics: %w", err)
 	}
 
 	return &agentpb.MetricsReportResponse{
