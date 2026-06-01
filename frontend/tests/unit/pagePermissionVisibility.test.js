@@ -35,6 +35,18 @@ vi.mock('/src/composables/usePermission', () => ({
   })
 }))
 
+vi.mock('@/composables/usePermission.js', () => ({
+  usePermission: () => ({
+    hasPermission
+  })
+}))
+
+vi.mock('/src/composables/usePermission.js', () => ({
+  usePermission: () => ({
+    hasPermission
+  })
+}))
+
 vi.mock('/src/stores/node', () => ({
   default: () => mockNodeStore
 }))
@@ -129,6 +141,22 @@ vi.mock('@/composables/useSettingsApi', () => ({
 }))
 
 vi.mock('@/stores', () => ({
+  useAppStore: () => ({
+    lang: 'zh',
+    setLang: vi.fn()
+  }),
+  useUserStore: () => mockUserStore
+}))
+
+vi.mock('/src/stores', () => ({
+  useAppStore: () => ({
+    lang: 'zh',
+    setLang: vi.fn()
+  }),
+  useUserStore: () => mockUserStore
+}))
+
+vi.mock('/src/stores/index.js', () => ({
   useAppStore: () => ({
     lang: 'zh',
     setLang: vi.fn()
