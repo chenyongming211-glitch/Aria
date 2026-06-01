@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestWritePolicyMutationSuccessReturnsSuccessWhenDispatchFails(t *testing.T) {
+func TestWritePolicyMutationSuccessReturnsErrorWhenDispatchFails(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -45,24 +45,22 @@ func TestWritePolicyMutationSuccessReturnsSuccessWhenDispatchFails(t *testing.T)
 		"policy_ref": "acl-1",
 	})
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 when policy mutation already succeeded, got %d body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when policy dispatch fails, got %d body=%s", rr.Code, rr.Body.String())
 	}
 
 	var resp apibase.APIResponse
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	data, ok := resp.Data.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected map data, got %#v", resp.Data)
+	if resp.Success {
+		t.Fatalf("expected unsuccessful response: %#v", resp)
 	}
-	if data["dispatch_error"] == "" {
-		t.Fatalf("expected dispatch_error in response data: %#v", data)
+	if resp.Error == nil {
+		t.Fatalf("expected error payload: %#v", resp)
 	}
-	dispatch, ok := data["dispatch"].(map[string]interface{})
-	if !ok || dispatch["status"] != "failed" {
-		t.Fatalf("expected failed dispatch object, got %#v", data["dispatch"])
+	if resp.Error.Details["dispatch_error"] == "" {
+		t.Fatalf("expected dispatch_error in error details: %#v", resp.Error.Details)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

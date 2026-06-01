@@ -3,6 +3,7 @@ package cli
 import (
 	"database/sql/driver"
 	"regexp"
+	"strings"
 	"testing"
 
 	"aria/pkg/logging"
@@ -77,6 +78,39 @@ func TestEnsureSuperAdminDoesNotRewriteExistingPasswordWithoutEnvOverride(t *tes
 
 	if err := ensureSuperAdmin(db, logger); err != nil {
 		t.Fatalf("ensureSuperAdmin returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestEnsureSuperAdminRequiresConfiguredPasswordForFreshInstall(t *testing.T) {
+	t.Setenv("ARIA_SUPER_ADMIN", "sysadmin")
+	t.Setenv("ARIA_SUPER_ADMIN_PASSWORD", "")
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM users WHERE username = $1 AND role = 'super_admin'`)).
+		WithArgs("sysadmin").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM users WHERE role = 'super_admin'")).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	logger, err := logging.NewLogger(&logging.Config{LogDir: t.TempDir(), Component: "test"})
+	if err != nil {
+		t.Fatalf("NewLogger failed: %v", err)
+	}
+
+	err = ensureSuperAdmin(db, logger)
+	if err == nil {
+		t.Fatal("expected missing ARIA_SUPER_ADMIN_PASSWORD to fail fresh super admin creation")
+	}
+	if !strings.Contains(err.Error(), "ARIA_SUPER_ADMIN_PASSWORD") {
+		t.Fatalf("expected ARIA_SUPER_ADMIN_PASSWORD error, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

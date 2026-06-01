@@ -962,12 +962,9 @@ func (r *Router) writePolicyMutationSuccess(
 		data = map[string]interface{}{}
 	}
 	if err != nil {
-		data["dispatch"] = map[string]interface{}{
-			"status": "failed",
-			"error":  err.Error(),
-		}
-		data["dispatch_error"] = err.Error()
-		apibase.WriteSuccess(w, data, message)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, message+": policy dispatch failed", map[string]string{
+			"dispatch_error": err.Error(),
+		})
 		return
 	}
 

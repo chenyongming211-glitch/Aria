@@ -2256,19 +2256,16 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 	username := strings.TrimSpace(os.Getenv("ARIA_SUPER_ADMIN"))
 	rawPassword, passwordOverride := os.LookupEnv("ARIA_SUPER_ADMIN_PASSWORD")
 	password := strings.TrimSpace(rawPassword)
+	passwordConfigured := passwordOverride && password != ""
 
 	if username == "" {
 		username = "sysadmin"
-	}
-	if password == "" {
-		passwordOverride = false
-		password = "Sysadmin@123"
 	}
 
 	var existingUserID string
 	err := db.QueryRow(`SELECT id FROM users WHERE username = $1 AND role = 'super_admin'`, username).Scan(&existingUserID)
 	if err == nil {
-		if !passwordOverride {
+		if !passwordConfigured {
 			logger.Info("Super admin already exists")
 			return nil
 		}
@@ -2303,6 +2300,9 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 	if count > 0 {
 		logger.Info("Super admin already exists")
 		return nil
+	}
+	if !passwordConfigured {
+		return fmt.Errorf("ARIA_SUPER_ADMIN_PASSWORD is required when creating the initial super admin user")
 	}
 
 	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(password), 12)

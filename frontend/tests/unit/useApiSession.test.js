@@ -77,6 +77,16 @@ describe('useApi session request interceptor', () => {
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 2 * 60 * 60 * 1000}`)
   }
 
+  function deferred() {
+    let resolve
+    let reject
+    const promise = new Promise((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+
   function runActivity(event = 'mousedown') {
     const handler = activityHandlers.get(event)
     expect(handler, `missing activity handler for ${event}`).toBeTypeOf('function')
@@ -112,6 +122,35 @@ describe('useApi session request interceptor', () => {
 
     expect(axiosState.post).not.toHaveBeenCalled()
     expect(config.headers.Authorization).toBe('Bearer token-1')
+  })
+
+  it('keeps tenant header on requests waiting for token refresh', async () => {
+    seedActiveSession()
+    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60 * 1000}`)
+    localStorage.setItem('aria-current-tenant', JSON.stringify({ id: 'tenant-1', name: 'Tenant 1' }))
+    const refresh = deferred()
+    axiosState.post.mockReturnValue(refresh.promise)
+    await loadApiSession()
+
+    const leaderRequest = axiosState.requestHandler({ headers: {} })
+    expect(axiosState.post).toHaveBeenCalledTimes(1)
+    const queuedRequest = axiosState.requestHandler({ headers: {} })
+
+    refresh.resolve({
+      data: {
+        success: true,
+        data: {
+          token: 'token-2',
+          expires_in: 7200
+        }
+      }
+    })
+
+    const [leaderConfig, queuedConfig] = await Promise.all([leaderRequest, queuedRequest])
+    expect(leaderConfig.headers.Authorization).toBe('Bearer token-2')
+    expect(leaderConfig.headers['X-Tenant-ID']).toBe('tenant-1')
+    expect(queuedConfig.headers.Authorization).toBe('Bearer token-2')
+    expect(queuedConfig.headers['X-Tenant-ID']).toBe('tenant-1')
   })
 
   it('expires an idle session before recording a new user activity', async () => {
