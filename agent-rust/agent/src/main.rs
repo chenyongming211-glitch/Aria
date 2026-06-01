@@ -277,7 +277,7 @@ fn main() -> Result<()> {
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .expect("Failed to install rustls aws_lc provider");
-    
+
     let cli = Cli::parse();
 
     match cli.command {
@@ -422,7 +422,7 @@ fn send_qos_command(cmd: QosCommands) -> Result<()> {
     let mut resp_line = String::new();
     reader.read_line(&mut resp_line)?;
     let resp: Response = serde_json::from_str(&resp_line)?;
-    
+
     if resp.success {
         if let Some(msg) = resp.message {
             println!("{}", msg);
@@ -443,22 +443,49 @@ fn send_acl_command(cmd: AclCommands) -> Result<()> {
     let mut writer = BufWriter::new(&stream);
     let mut reader = BufReader::new(&stream);
 
-    let req = match cmd {
+    let req = acl_command_request(cmd);
+
+    let req_json = serde_json::to_string(&req)?;
+    writer.write_all(req_json.as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+
+    let mut resp_line = String::new();
+    reader.read_line(&mut resp_line)?;
+    let resp: Response = serde_json::from_str(&resp_line)?;
+
+    if resp.success {
+        if let Some(msg) = resp.message {
+            println!("{}", msg);
+        }
+        if let Some(data) = resp.data {
+            println!("{}", serde_json::to_string_pretty(&data)?);
+        }
+    } else {
+        eprintln!("Error: {}", resp.message.unwrap_or_else(|| "Unknown error".to_string()));
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+fn acl_command_request(cmd: AclCommands) -> Request {
+    match cmd {
         AclCommands::BlockSrcIp { ip } => Request {
             cmd: "acl_block_src_ip".to_string(),
-            args: serde_json::json!({"ip": ip}),
+            args: serde_json::json!({"src_ip": ip}),
         },
         AclCommands::UnblockSrcIp { ip } => Request {
             cmd: "acl_unblock_src_ip".to_string(),
-            args: serde_json::json!({"ip": ip}),
+            args: serde_json::json!({"src_ip": ip}),
         },
         AclCommands::BlockDstIp { ip } => Request {
             cmd: "acl_block_dst_ip".to_string(),
-            args: serde_json::json!({"ip": ip}),
+            args: serde_json::json!({"dst_ip": ip}),
         },
         AclCommands::UnblockDstIp { ip } => Request {
             cmd: "acl_unblock_dst_ip".to_string(),
-            args: serde_json::json!({"ip": ip}),
+            args: serde_json::json!({"dst_ip": ip}),
         },
         AclCommands::BlockPort { port } => Request {
             cmd: "acl_block_port".to_string(),
@@ -508,30 +535,7 @@ fn send_acl_command(cmd: AclCommands) -> Result<()> {
                 "protocol": protocol
             }),
         },
-    };
-
-    let req_json = serde_json::to_string(&req)?;
-    writer.write_all(req_json.as_bytes())?;
-    writer.write_all(b"\n")?;
-    writer.flush()?;
-
-    let mut resp_line = String::new();
-    reader.read_line(&mut resp_line)?;
-    let resp: Response = serde_json::from_str(&resp_line)?;
-    
-    if resp.success {
-        if let Some(msg) = resp.message {
-            println!("{}", msg);
-        }
-        if let Some(data) = resp.data {
-            println!("{}", serde_json::to_string_pretty(&data)?);
-        }
-    } else {
-        eprintln!("Error: {}", resp.message.unwrap_or_else(|| "Unknown error".to_string()));
-        std::process::exit(1);
     }
-
-    Ok(())
 }
 
 fn send_log_command(level: &str) -> Result<()> {
@@ -769,7 +773,7 @@ fn needs_bootstrap_registration(state: &config::AgentState, now: i64) -> bool {
     }
     match state.current_credential_expires_at {
         Some(expires_at) => expires_at <= now + 60,
-        None => true,
+        None => false,
     }
 }
 
@@ -1086,8 +1090,9 @@ async fn run_unified_agent(
 
 #[cfg(test)]
 mod tests {
-    use super::needs_bootstrap_registration;
+    use super::{acl_command_request, needs_bootstrap_registration, AclCommands};
     use crate::config::AgentState;
+    use serde_json::json;
 
     #[test]
     fn bootstrap_needed_when_assigned_ip_exists_but_runtime_credential_missing() {
@@ -1110,5 +1115,37 @@ mod tests {
         };
 
         assert!(needs_bootstrap_registration(&state, 1_700_000_000));
+    }
+
+    #[test]
+    fn bootstrap_not_needed_when_runtime_credential_has_no_expiry_metadata() {
+        let state = AgentState {
+            assigned_ip: Some("100.64.0.2".to_string()),
+            current_credential: Some("rt.unknown-expiry".to_string()),
+            current_credential_expires_at: None,
+            ..Default::default()
+        };
+
+        assert!(!needs_bootstrap_registration(&state, 1_700_000_000));
+    }
+
+    #[test]
+    fn acl_cli_block_src_ip_uses_handler_key() {
+        let req = acl_command_request(AclCommands::BlockSrcIp {
+            ip: "10.0.0.10".to_string(),
+        });
+
+        assert_eq!(req.cmd, "acl_block_src_ip");
+        assert_eq!(req.args, json!({"src_ip": "10.0.0.10"}));
+    }
+
+    #[test]
+    fn acl_cli_block_dst_ip_uses_handler_key() {
+        let req = acl_command_request(AclCommands::BlockDstIp {
+            ip: "10.0.0.20".to_string(),
+        });
+
+        assert_eq!(req.cmd, "acl_block_dst_ip");
+        assert_eq!(req.args, json!({"dst_ip": "10.0.0.20"}));
     }
 }
