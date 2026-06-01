@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import useActualUserStore from '@/stores/user'
 
 const {
   permissionSet,
@@ -252,8 +254,9 @@ const elementStubs = {
   }
 }
 
-const mountWithStubs = (component) =>
-  mount(component, {
+const mountWithStubs = (component) => {
+  syncPiniaUserStore()
+  return mount(component, {
     global: {
       stubs: elementStubs,
       directives: {
@@ -261,9 +264,17 @@ const mountWithStubs = (component) =>
       }
     }
   })
+}
+
+const syncPiniaUserStore = () => {
+  const userStore = useActualUserStore()
+  userStore.user = { ...mockUserStore.user }
+  userStore.permissions = Array.from(permissionSet)
+}
 
 describe('page-level RBAC button visibility', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     permissionSet.clear()
     mockNodeStore.loadNodes.mockClear()
     mockUserStore.user = { role: 'admin' }
