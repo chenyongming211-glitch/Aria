@@ -197,8 +197,8 @@ func (s *Storage) UpdateTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, ca
 
 func (s *Storage) ListTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRuleRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
-		        COALESCE(dst_port, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
+		`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+		        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
 		        created_at, updated_at
 		   FROM acl_rules
 		  WHERE tenant_id = $1 AND node_id = $2
@@ -228,16 +228,20 @@ func (s *Storage) ListTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRule
 
 func (s *Storage) CreateTenantNodeACLRule(rule *ACLRuleRecord) (*ACLRuleRecord, error) {
 	created := &ACLRuleRecord{}
+	srcNet := aclNetworkForSync(rule.SrcCIDR)
+	dstNet := aclNetworkForSync(rule.DstCIDR)
+	minPort, maxPort := aclPortRangeForSync(rule.DstPort)
+
 	err := s.db.QueryRow(
-		`INSERT INTO acl_rules (tenant_id, node_id, name, action, src_cidr, dst_cidr, dst_port, protocol, priority, enabled, description)
-		 VALUES ($1, $2, $3, $4, NULLIF($5, '')::cidr, NULLIF($6, '')::cidr, $7, $8, $9, $10, $11)
-		 RETURNING id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
-		           COALESCE(dst_port, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
+		`INSERT INTO acl_rules (tenant_id, node_id, name, action, src_cidr, dst_cidr, dst_port, protocol, priority, enabled, description, src_net, dst_net, min_port, max_port)
+		 VALUES ($1, $2, $3, $4, NULLIF($5, '')::cidr, NULLIF($6, '')::cidr, $7, $8, $9, $10, $11, $12::cidr, $13::cidr, $14, $15)
+		 RETURNING id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+		           COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
 		           created_at, updated_at`,
 		rule.TenantID, rule.NodeID, strings.TrimSpace(rule.Name), rule.Action,
 		strings.TrimSpace(rule.SrcCIDR), strings.TrimSpace(rule.DstCIDR),
-		nullableInt(rule.DstPort), nullableInt(rule.Protocol), rule.Priority,
-		rule.Enabled, strings.TrimSpace(rule.Description),
+		nullableInt(rule.DstPort), rule.Protocol, rule.Priority,
+		rule.Enabled, strings.TrimSpace(rule.Description), srcNet, dstNet, minPort, maxPort,
 	).Scan(
 		&created.ID, &created.TenantID, &created.NodeID, &created.Name, &created.Action, &created.SrcCIDR, &created.DstCIDR,
 		&created.DstPort, &created.Protocol, &created.Priority, &created.Enabled, &created.Description,
@@ -272,16 +276,20 @@ func (s *Storage) DeleteTenantNodeACLRuleByID(tenantID, nodeID uuid.UUID, ruleID
 }
 
 func (s *Storage) UpdateTenantNodeACLRule(tenantID, nodeID, ruleID uuid.UUID, rule *ACLRuleRecord) (*ACLRuleRecord, error) {
+	srcNet := aclNetworkForSync(rule.SrcCIDR)
+	dstNet := aclNetworkForSync(rule.DstCIDR)
+	minPort, maxPort := aclPortRangeForSync(rule.DstPort)
+
 	result, err := s.db.Exec(
 		`UPDATE acl_rules SET
-			name = $4, action = $5, src_cidr = NULLIF($6, ''), dst_cidr = NULLIF($7, ''),
+			name = $4, action = $5, src_cidr = NULLIF($6, '')::cidr, dst_cidr = NULLIF($7, '')::cidr,
 			dst_port = $8, protocol = $9, priority = $10, description = $11,
-			enabled = $12, updated_at = NOW()
+			enabled = $12, src_net = $13::cidr, dst_net = $14::cidr, min_port = $15, max_port = $16, updated_at = NOW()
 		 WHERE id = $1 AND tenant_id = $2 AND node_id = $3`,
 		ruleID, tenantID, nodeID,
 		strings.TrimSpace(rule.Name), rule.Action, rule.SrcCIDR, rule.DstCIDR,
 		rule.DstPort, rule.Protocol, rule.Priority,
-		rule.Description, rule.Enabled,
+		rule.Description, rule.Enabled, srcNet, dstNet, minPort, maxPort,
 	)
 	if err != nil {
 		return nil, err
@@ -356,6 +364,7 @@ func (s *Storage) CreateTenantNodeBlacklistRule(rule *BlacklistRuleRecord) (*Bla
 	if err != nil {
 		return nil, err
 	}
+	_ = s.bumpNodeDesiredVersion(rule.TenantID, rule.NodeID)
 	return created, nil
 }
 
@@ -374,6 +383,7 @@ func (s *Storage) DeleteTenantNodeBlacklistRuleByID(tenantID, nodeID uuid.UUID, 
 	if rowsAffected == 0 {
 		return sql.ErrNoRows
 	}
+	_ = s.bumpNodeDesiredVersion(tenantID, nodeID)
 	return nil
 }
 
@@ -392,6 +402,7 @@ func (s *Storage) DeleteTenantNodePortBlacklistRule(tenantID, nodeID uuid.UUID, 
 	if rowsAffected == 0 {
 		return sql.ErrNoRows
 	}
+	_ = s.bumpNodeDesiredVersion(tenantID, nodeID)
 	return nil
 }
 
@@ -526,6 +537,21 @@ func nullableInt(value int) interface{} {
 		return nil
 	}
 	return value
+}
+
+func aclNetworkForSync(cidr string) string {
+	trimmed := strings.TrimSpace(cidr)
+	if trimmed == "" {
+		return "0.0.0.0/0"
+	}
+	return trimmed
+}
+
+func aclPortRangeForSync(dstPort int) (int, int) {
+	if dstPort <= 0 {
+		return 0, 65535
+	}
+	return dstPort, dstPort
 }
 
 func (s *Storage) bumpNodeDesiredVersion(tenantID, nodeID uuid.UUID) error {

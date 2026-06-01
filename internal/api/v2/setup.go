@@ -1344,7 +1344,7 @@ func (r *Router) buildTenantNodeQoSPolicies(tenantID uuid.UUID, node *controller
 	for _, cat := range categories {
 		rules, err := r.store.ListTenantNodeQoSRules(tenantID, node.ID, cat)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("failed to load %s QoS rules: %w", cat, err)
 		}
 		for _, rule := range rules {
 			allPolicies = append(allPolicies, map[string]interface{}{

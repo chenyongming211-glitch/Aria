@@ -930,86 +930,25 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 		}
 	}
 
-	// 只获取同租户的节点
-	query := `SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1`
+	// 只获取同租户且可参与同步的节点。删除、暂停、封禁节点不能继续作为 peer 下发。
+	query := `SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND COALESCE(status, 'online') NOT IN ('deleted', 'suspended', 'banned')`
 	rows, err := c.store.DB().Query(query, nodeTenantID)
 	if err != nil {
 		c.logger.Error("Failed to get peers for tenant %s: %v", nodeTenantID, err)
-		peers := []*controllerstorage.Node{}
-		var peerInfos []NodeInfo
-		for _, peer := range peers {
-			if peer.PublicKey != req.PublicKey {
-				role := peer.Role
-				if role == "" {
-					role = "spoke"
-				}
-				peerInfos = append(peerInfos, NodeInfo{
-					PublicKey:     peer.PublicKey,
-					Endpoint:      fmt.Sprintf("%s:51820", peer.PublicIP),
-					PrivateIP:     peer.PrivateIP,
-					PublicIP:      peer.PublicIP,
-					Region:        peer.Region,
-					VPCID:         peer.VPCID,
-					Hostname:      peer.Hostname,
-					LastSeen:      peer.LastSeen,
-					AssignedIP:    peer.AssignedIP,
-					Role:          role,
-					RuntimeMode:   peer.RuntimeMode,
-					KernelVersion: peer.KernelVersion,
-				})
-			}
-		}
-
-		// Get enabled ACL rules for sync (filtered by region and tenant)
-		var aclRulesJSON []ACLRuleJSON
-		var aclRules []*controllerstorage.ACLRule
-		var err error
-
-		// Use tenant-scoped ACL rules if available, fallback to global if not
-		if c.tenantScopedStore != nil {
-			// Create a temporary context with the node's tenant ID
-			tempCtx := context.WithValue(context.Background(), middleware.TenantIDKey, nodeTenantID)
-			aclRules, err = c.getTenantEnabledACLRules(tempCtx)
-		} else {
-			// Fallback to global ACL rules
-			aclRules, err = c.store.GetEnabledACLRules()
-		}
-
-		if err != nil {
-			c.logger.Error("Failed to get ACL rules: %v", err)
-		} else {
-			// Filter rules by region
-			aclRulesJSON = c.getACLRulesForRegion(req.Region, aclRules)
-			// Safe truncation of public key
-			pk := req.PublicKey
-			if len(pk) > 16 {
-				pk = pk[:16]
-			}
-			c.logger.Info("Agent %s (Region: %s): sending %d ACL rules", pk, req.Region, len(aclRulesJSON))
-		}
-
-		response := SyncResponse{
-			Peers:              peerInfos,
-			AssignedIP:         assignedIP,
-			LastUpdate:         time.Now().Unix(),
-			ACLRules:           aclRulesJSON,
-			MetricsPushGateway: c.metricsPushGateway,
-		}
-		c.attachNodeCertificateToSyncResponse(req.PublicKey, &response)
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		http.Error(w, "Failed to load tenant peers", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
 	var peerInfos []NodeInfo
+	var tenantNodes []*controllerstorage.Node
 	for rows.Next() {
 		peer, err := c.store.ScanNodeRows(rows)
 		if err != nil {
 			c.logger.Error("Failed to scan peer: %v", err)
 			continue
 		}
+		tenantNodes = append(tenantNodes, peer)
 
 		// Skip the requesting node itself
 		if peer.PublicKey != req.PublicKey {
@@ -1041,7 +980,7 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 		c.logger.Error("Failed to get ACL rules for tenant %s: %v", nodeTenantID, err)
 	} else {
 		// Filter rules by region
-		aclRulesJSON = c.getACLRulesForRegion(req.Region, aclRules)
+		aclRulesJSON = c.getACLRulesForRegionInNodes(req.Region, aclRules, tenantNodes)
 		// Safe truncation of public key
 		pk := req.PublicKey
 		if len(pk) > 16 {
@@ -2101,7 +2040,12 @@ func (c *Controller) processSync(publicKey string) (interface{}, string, interfa
 	}
 
 	var peers []map[string]interface{}
+	syncNodes := make([]*controllerstorage.Node, 0, len(tenantNodes))
 	for _, n := range tenantNodes {
+		if !nodeEligibleForSync(n) {
+			continue
+		}
+		syncNodes = append(syncNodes, n)
 		if n.PublicKey == publicKey {
 			continue
 		}
@@ -2132,7 +2076,7 @@ func (c *Controller) processSync(publicKey string) (interface{}, string, interfa
 		}
 	}
 
-	regionACLs := c.getACLRulesForRegionInNodes(node.Region, enabledACLRules, tenantNodes)
+	regionACLs := c.getACLRulesForRegionInNodes(node.Region, enabledACLRules, syncNodes)
 	var aclRules []map[string]interface{}
 	for _, rule := range regionACLs {
 		aclRules = append(aclRules, map[string]interface{}{
@@ -2146,6 +2090,18 @@ func (c *Controller) processSync(publicKey string) (interface{}, string, interfa
 	}
 
 	return peers, node.AssignedIP, aclRules, node.TenantID, nil
+}
+
+func nodeEligibleForSync(node *controllerstorage.Node) bool {
+	if node == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(node.Status)) {
+	case "deleted", "suspended", "banned":
+		return false
+	default:
+		return true
+	}
 }
 
 // 辅助函数：从 map 中安全获取字符串
