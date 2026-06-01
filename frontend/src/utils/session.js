@@ -34,7 +34,7 @@ export function isIdleSessionExpired(now = Date.now()) {
   const lastActivity = readLastActivity()
   if (!lastActivity) return true
 
-  return now - lastActivity > SESSION_IDLE_TIMEOUT_MS
+  return now - lastActivity >= SESSION_IDLE_TIMEOUT_MS
 }
 
 export function recordUserActivity(now = Date.now()) {
@@ -45,7 +45,7 @@ export function recordUserActivity(now = Date.now()) {
 export function startIdleSessionMonitor(onExpired, intervalMs = SESSION_IDLE_CHECK_INTERVAL_MS) {
   if (typeof window === 'undefined') return null
 
-  const timer = setInterval(() => {
+  const timer = window.setInterval(() => {
     if (isIdleSessionExpired()) {
       onExpired()
     }
