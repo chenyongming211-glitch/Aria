@@ -2154,8 +2154,49 @@ func ipInRoutes(ipStr string, routes []string) (bool, string) {
 }
 
 func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
+	username := strings.TrimSpace(os.Getenv("ARIA_SUPER_ADMIN"))
+	rawPassword, passwordOverride := os.LookupEnv("ARIA_SUPER_ADMIN_PASSWORD")
+	password := strings.TrimSpace(rawPassword)
+
+	if username == "" {
+		username = "sysadmin"
+	}
+	if password == "" {
+		passwordOverride = false
+		password = "Sysadmin@123"
+	}
+
+	var existingUserID string
+	err := db.QueryRow(`SELECT id FROM users WHERE username = $1 AND role = 'super_admin'`, username).Scan(&existingUserID)
+	if err == nil {
+		if !passwordOverride {
+			logger.Info("Super admin already exists")
+			return nil
+		}
+
+		hashedPwd, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+		if err != nil {
+			return fmt.Errorf("failed to hash password: %w", err)
+		}
+
+		result, err := db.Exec(`UPDATE users SET password_hash = $1, must_change_password = TRUE WHERE id = $2`,
+			string(hashedPwd), existingUserID)
+		if err != nil {
+			return fmt.Errorf("failed to update super admin password: %w", err)
+		}
+		if rowsAffected, err := result.RowsAffected(); err == nil && rowsAffected == 0 {
+			return fmt.Errorf("failed to update super admin password: user %s was not updated", username)
+		}
+
+		logger.Info("Super admin password synchronized from ARIA_SUPER_ADMIN_PASSWORD: %s", username)
+		return nil
+	}
+	if err != sql.ErrNoRows {
+		return fmt.Errorf("failed to check super admin user: %w", err)
+	}
+
 	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'super_admin'").Scan(&count)
+	err = db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'super_admin'").Scan(&count)
 	if err != nil {
 		return fmt.Errorf("failed to check super admin: %w", err)
 	}
@@ -2163,16 +2204,6 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 	if count > 0 {
 		logger.Info("Super admin already exists")
 		return nil
-	}
-
-	username := os.Getenv("ARIA_SUPER_ADMIN")
-	password := os.Getenv("ARIA_SUPER_ADMIN_PASSWORD")
-
-	if username == "" {
-		username = "sysadmin"
-	}
-	if password == "" {
-		password = "Sysadmin@123"
 	}
 
 	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(password), 12)
