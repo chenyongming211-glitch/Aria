@@ -46,12 +46,13 @@ func SetupRoutes(mux *http.ServeMux, store *controllerstorage.Storage, vmClient 
 		vmClient:   vmClient,
 	}
 
+	withJWT := middleware.JWTAuthMiddleware
 	mux.HandleFunc("/api/v2/auth/login", router.authAPI.HandleLogin)
 	mux.HandleFunc("/api/v2/auth/refresh", router.authAPI.HandleRefresh)
 	mux.HandleFunc("/api/v2/auth/logout", router.authAPI.HandleLogout)
 	mux.HandleFunc("/api/v2/auth/force-change-password", router.authAPI.HandleForceChangePassword)
+	mux.HandleFunc("/api/v2/auth/permissions", withJWT(router.authAPI.HandlePermissions))
 
-	withJWT := middleware.JWTAuthMiddleware
 	mux.HandleFunc("/api/v2/tenants", withJWT(router.HandleTenants))
 	mux.HandleFunc("/api/v2/tenants/", withJWT(router.HandleTenantScoped))
 	mux.HandleFunc("/api/v2/settings/", withJWT(router.HandleSettings))

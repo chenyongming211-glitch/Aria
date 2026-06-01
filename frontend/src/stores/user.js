@@ -131,6 +131,14 @@ export default defineStore('user', () => {
     return permissions.value
   }
 
+  const persistCurrentTenant = (tenantId) => {
+    if (tenantId) {
+      localStorage.setItem('aria-current-tenant', JSON.stringify({ id: tenantId }))
+      return
+    }
+    localStorage.removeItem('aria-current-tenant')
+  }
+
   const readCachedPermissions = () => {
     const cached = localStorage.getItem('aria_permissions')
     if (!cached) return undefined
@@ -183,6 +191,7 @@ export default defineStore('user', () => {
 
         // 存储用户会话
         localStorage.setItem('aria_user', JSON.stringify(user.value))
+        persistCurrentTenant(user.value?.tenant_id)
 
         // 加载用户权限
         if (user.value?.role === 'super_admin') {
@@ -194,13 +203,6 @@ export default defineStore('user', () => {
           if (defaults.length > 0) {
             setPermissions(defaults)
           }
-        }
-
-        // 存储租户 ID 到 localStorage（用于 API 请求）
-        if (userData?.tenant_id) {
-          localStorage.setItem('aria-current-tenant', JSON.stringify({
-            id: userData.tenant_id
-          }))
         }
 
         return { success: true, token, requirePasswordChange }
@@ -286,6 +288,9 @@ export default defineStore('user', () => {
 
     isAuthenticated.value = true
     localStorage.setItem('aria_user', JSON.stringify(user.value))
+    if (user.value?.tenant_id) {
+      persistCurrentTenant(user.value.tenant_id)
+    }
 
     const cached = readCachedPermissions()
     if (Array.isArray(cached)) {
@@ -305,6 +310,12 @@ export default defineStore('user', () => {
       setPermissions(['*'])
     }
 
+    if (user.value?.role !== 'super_admin' && user.value?.tenant_id) {
+      loadCurrentPermissions().catch((error) => {
+        console.warn('Failed to refresh session permissions:', error)
+      })
+    }
+
     return true
   }
 
@@ -319,14 +330,16 @@ export default defineStore('user', () => {
     }
   }
 
-  // 加载用户权限（从角色查询）
-  const loadPermissions = async (tenantId, role) => {
-    const roleName = normalizeRoleName(role)
-    if (roleName === 'super_admin') {
-      // super_admin 拥有所有权限
-      return setPermissions(['*'])
+  const loadCurrentPermissions = async () => {
+    const response = await api.get(API_ENDPOINTS.AUTH.PERMISSIONS)
+    const data = response.data?.data || response.data || {}
+    if (Array.isArray(data.permissions)) {
+      return setPermissions(data.permissions)
     }
+    return permissions.value
+  }
 
+  const loadFallbackPermissions = async (tenantId, roleName) => {
     const defaultPermissions = permissionsForRole(roleName)
     if (defaultPermissions.length > 0 && !defaultPermissions.includes('roles:read')) {
       return setPermissions(defaultPermissions)
@@ -362,6 +375,21 @@ export default defineStore('user', () => {
       }
     }
     return permissions.value
+  }
+
+  // 加载用户权限：优先使用当前 JWT 上下文对应的后端权限，失败时回退到本地内置权限。
+  const loadPermissions = async (tenantId, role) => {
+    const roleName = normalizeRoleName(role)
+    if (roleName === 'super_admin') {
+      return setPermissions(['*'])
+    }
+
+    try {
+      return await loadCurrentPermissions()
+    } catch (error) {
+      console.error('Load permissions error:', error)
+      return loadFallbackPermissions(tenantId, roleName)
+    }
   }
 
   // 刷新 token

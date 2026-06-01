@@ -3,10 +3,12 @@ package handlers
 import (
 	"database/sql"
 	"net/http"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"aria/internal/api/apibase"
+	"aria/internal/api/middleware"
 	"aria/internal/auth"
 	"aria/pkg/controllerstorage"
 )
@@ -24,6 +26,20 @@ func NewAuthAPI(store *controllerstorage.Storage) *AuthAPI {
 type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+type PermissionsResponse struct {
+	Role        string   `json:"role"`
+	TenantID    string   `json:"tenant_id"`
+	Permissions []string `json:"permissions"`
+}
+
+func normalizeAuthRole(role string) string {
+	roleName := strings.TrimSpace(role)
+	if roleName == "member" || roleName == "owner" {
+		return controllerstorage.SystemRoleOperator
+	}
+	return roleName
 }
 
 func (a *AuthAPI) HandleLogin(w http.ResponseWriter, r *http.Request) {
@@ -139,6 +155,50 @@ func (a *AuthAPI) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	apibase.WriteSuccess(w, resp, "Logout successful")
+}
+
+func (a *AuthAPI) HandlePermissions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+		return
+	}
+
+	role, exists := middleware.GetUserRole(r.Context())
+	if !exists {
+		apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeUnauthorized, "Unauthorized", nil)
+		return
+	}
+
+	roleName := normalizeAuthRole(role)
+	if roleName == "super_admin" {
+		apibase.WriteSuccess(w, PermissionsResponse{
+			Role:        roleName,
+			TenantID:    "",
+			Permissions: []string{"*"},
+		}, "Permissions loaded successfully")
+		return
+	}
+
+	tenantID, exists := middleware.GetTenantID(r.Context())
+	if !exists {
+		apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeTenantContextNotFound, "Tenant context missing", nil)
+		return
+	}
+
+	permissions, err := a.store.GetRolePermissions(tenantID, roleName)
+	if err != nil {
+		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Role permission lookup failed", nil)
+		return
+	}
+	if permissions == nil {
+		permissions = []string{}
+	}
+
+	apibase.WriteSuccess(w, PermissionsResponse{
+		Role:        roleName,
+		TenantID:    tenantID.String(),
+		Permissions: permissions,
+	}, "Permissions loaded successfully")
 }
 
 type ChangePasswordRequest struct {
