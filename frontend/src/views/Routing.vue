@@ -15,7 +15,7 @@
               <el-icon><Refresh /></el-icon>
               刷新
             </el-button>
-            <el-button type="primary" @click="showAddRouteDialog">
+            <el-button v-if="hasPermission('routes:write')" type="primary" @click="showAddRouteDialog">
               <el-icon><Plus /></el-icon>
               添加路由
             </el-button>
@@ -54,7 +54,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="lastCommandError" label="失败原因" min-width="220" show-overflow-tooltip />
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column v-if="hasPermission('routes:write')" label="操作" width="180" fixed="right">
           <template #default="{ row }">
             <el-button size="small" type="primary" @click="showEditRouteDialog(row)">编辑</el-button>
             <el-button size="small" type="danger" @click="showDeleteRouteDialog(row)">删除</el-button>
@@ -102,7 +102,7 @@
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="closeRouteDialog">取消</el-button>
-          <el-button type="primary" @click="confirmRouteAction">
+          <el-button v-if="hasPermission('routes:write')" type="primary" @click="confirmRouteAction">
             {{ dialogMode === 'add' ? '添加' : '更新' }}
           </el-button>
         </span>
@@ -124,7 +124,7 @@
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="deleteDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="confirmDeleteRoute">确定</el-button>
+          <el-button v-if="hasPermission('routes:write')" type="primary" @click="confirmDeleteRoute">确定</el-button>
         </span>
       </template>
     </el-dialog>
@@ -137,6 +137,9 @@ import { Refresh, Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRouteApi } from '@/composables/useRouteApi'
 import { useTenantApi } from '@/composables/useTenantApi'
+import { usePermission } from '@/composables/usePermission'
+
+const { hasPermission } = usePermission()
 
 const loading = ref(false)
 const searchQuery = ref('')
@@ -223,6 +226,11 @@ const showDeleteRouteDialog = (route) => {
 }
 
 const confirmRouteAction = async () => {
+  if (!hasPermission('routes:write')) {
+    ElMessage.error('缺少路由管理权限')
+    return
+  }
+
   if (!currentRoute.value.nodeId || !currentRoute.value.cidr) {
     ElMessage.error('请填写完整的路由信息')
     return
@@ -257,6 +265,11 @@ const confirmRouteAction = async () => {
 }
 
 const confirmDeleteRoute = async () => {
+  if (!hasPermission('routes:write')) {
+    ElMessage.error('缺少路由管理权限')
+    return
+  }
+
   try {
     await useRouteApi.deleteRoute(currentDeleteRoute.value.nodeId, currentDeleteRoute.value.id)
     ElMessage.success('路由删除成功')

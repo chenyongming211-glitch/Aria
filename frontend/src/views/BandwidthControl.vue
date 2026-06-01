@@ -21,7 +21,12 @@
             </el-select>
           </div>
           <div class="header-actions">
-            <el-button type="primary" @click="showAddDialog" :disabled="!selectedNodeId">
+            <el-button
+              v-if="hasPermission('qos:write')"
+              type="primary"
+              @click="showAddDialog"
+              :disabled="!selectedNodeId"
+            >
               <el-icon><Plus /></el-icon>
               添加规则
             </el-button>
@@ -68,7 +73,7 @@
                   <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">{{ formatPolicyStatus(row.policyStatus) }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="120" fixed="right">
+              <el-table-column v-if="hasPermission('qos:write')" label="操作" width="120" fixed="right">
                 <template #default="{ row }">
                   <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
                 </template>
@@ -100,7 +105,7 @@
                   <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">{{ formatPolicyStatus(row.policyStatus) }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="120" fixed="right">
+              <el-table-column v-if="hasPermission('qos:write')" label="操作" width="120" fixed="right">
                 <template #default="{ row }">
                   <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
                 </template>
@@ -132,7 +137,7 @@
                   <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">{{ formatPolicyStatus(row.policyStatus) }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="120" fixed="right">
+              <el-table-column v-if="hasPermission('qos:write')" label="操作" width="120" fixed="right">
                 <template #default="{ row }">
                   <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
                 </template>
@@ -185,7 +190,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSave" :loading="submitting">保存并应用</el-button>
+        <el-button v-if="hasPermission('qos:write')" type="primary" @click="handleSave" :loading="submitting">保存并应用</el-button>
       </template>
     </el-dialog>
   </div>
@@ -197,6 +202,9 @@ import { Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useQosApi } from '@/composables/useQosApi'
 import { useTenantApi } from '@/composables/useTenantApi'
+import { usePermission } from '@/composables/usePermission'
+
+const { hasPermission } = usePermission()
 
 // 状态变量
 const loading = ref(false)
@@ -303,6 +311,10 @@ const resetForm = () => {
 }
 
 const handleSave = async () => {
+  if (!hasPermission('qos:write')) {
+    ElMessage.error('缺少 QoS 管理权限')
+    return
+  }
   if (!formRef.value) return
   
   try {
@@ -323,6 +335,11 @@ const handleSave = async () => {
 }
 
 const handleDelete = async (row) => {
+  if (!hasPermission('qos:write')) {
+    ElMessage.error('缺少 QoS 管理权限')
+    return
+  }
+
   try {
     await ElMessageBox.confirm('确定要删除此带宽限速规则吗？', '确认删除', {
       type: 'warning',
