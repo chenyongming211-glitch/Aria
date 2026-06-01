@@ -214,6 +214,7 @@ import * as echarts from 'echarts'
 import { useRouter } from 'vue-router'
 import { useMonitorApi } from '@/composables/useMonitorApi'
 import { useTenantApi } from '@/composables/useTenantApi'
+import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
 
 const router = useRouter()
 const trafficLoading = ref(false)
@@ -415,6 +416,18 @@ const formatEventTime = (ts) => {
   return Math.floor(diff / 86400) + ' days ago'
 }
 
+const normalizeAdvertisedRoutes = (routes) => {
+  if (Array.isArray(routes)) return routes
+  if (!routes || typeof routes !== 'string') return []
+  try {
+    const parsed = JSON.parse(routes)
+    return Array.isArray(parsed) ? parsed : []
+  } catch (error) {
+    console.warn('Invalid advertised_routes payload:', error)
+    return []
+  }
+}
+
 // 获取节点数据 + 统计卡片
 const fetchNodesData = async () => {
   try {
@@ -428,12 +441,7 @@ const fetchNodesData = async () => {
 
     let routeCount = 0
     cachedNodes.forEach(node => {
-      if (node.advertised_routes) {
-        const routes = Array.isArray(node.advertised_routes)
-          ? node.advertised_routes
-          : JSON.parse(node.advertised_routes || '[]')
-        routeCount += routes.length
-      }
+      routeCount += normalizeAdvertisedRoutes(node.advertised_routes).length
     })
     nodesData.value.routes = routeCount
 
@@ -627,6 +635,18 @@ const startHealthRefresh = () => {
   }, 60000)
 }
 
+const reloadTenantScopedData = async () => {
+  cachedNodes = []
+  activities.value = []
+  regions.value = []
+  await Promise.all([
+    fetchNodesData(),
+    fetchTrafficData(),
+    fetchHealthData(),
+    fetchActivities()
+  ])
+}
+
 onMounted(async () => {
   initTrafficChart()
   await Promise.all([
@@ -637,6 +657,8 @@ onMounted(async () => {
   ])
   startHealthRefresh()
 })
+
+useTenantChangeReload(reloadTenantScopedData)
 
 onBeforeUnmount(() => {
   if (healthTimer) {

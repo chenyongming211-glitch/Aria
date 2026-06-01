@@ -104,6 +104,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/composables/useApi'
 import { API_ENDPOINTS, getCurrentTenantId } from '@/config/api'
 import { usePermission } from '@/composables/usePermission'
+import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
 
 const { hasPermission } = usePermission()
 
@@ -171,7 +172,11 @@ const form = reactive({
 
 const loadRoles = async () => {
   const tenantId = getCurrentTenantId()
-  if (!tenantId) return
+  if (!tenantId) {
+    roles.value = []
+    ElMessage.warning('请先选择租户')
+    return
+  }
 
   loading.value = true
   try {
@@ -211,7 +216,10 @@ const getSelectedPermissions = () => {
 
 const handleSave = async () => {
   const tenantId = getCurrentTenantId()
-  if (!tenantId) return
+  if (!tenantId) {
+    ElMessage.warning('请先选择租户')
+    return
+  }
 
   const perms = getSelectedPermissions()
   if (perms.length === 0) {
@@ -251,7 +259,10 @@ const handleSave = async () => {
 
 const handleDelete = async (role) => {
   const tenantId = getCurrentTenantId()
-  if (!tenantId) return
+  if (!tenantId) {
+    ElMessage.warning('请先选择租户')
+    return
+  }
 
   try {
     await ElMessageBox.confirm(
@@ -270,6 +281,7 @@ const handleDelete = async (role) => {
 }
 
 onMounted(loadRoles)
+useTenantChangeReload(loadRoles)
 </script>
 
 <style scoped>

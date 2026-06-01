@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useAclApi } from '@/composables/useAclApi'
 
+const currentTenantId = vi.hoisted(() => ({ value: 'tenant-1' }))
+
 // Mock axios
 vi.mock('@/composables/useApi', () => ({
   default: {
@@ -15,7 +17,7 @@ vi.mock('@/config/api', async () => {
   const actual = await vi.importActual('@/config/api')
   return {
     ...actual,
-    requireCurrentTenantId: vi.fn(() => 'tenant-1')
+    requireCurrentTenantId: vi.fn(() => currentTenantId.value)
   }
 })
 
@@ -24,6 +26,7 @@ import api from '@/composables/useApi'
 describe('useAclApi', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    currentTenantId.value = 'tenant-1'
   })
 
   describe('getACLRules', () => {
@@ -127,6 +130,29 @@ describe('useAclApi', () => {
         description: ''
       })
       expect(result).toEqual(updatedRule)
+    })
+
+    it('不会跨租户复用同 ID 规则的节点映射', async () => {
+      api.get.mockResolvedValueOnce({
+        data: {
+          success: true,
+          data: [
+            { id: 1, name: 'tenant-1-rule', action: 'allow', src_cidr: '10.0.0.0/24', dst_cidr: '0.0.0.0/0' }
+          ]
+        }
+      })
+      api.put.mockResolvedValue({
+        data: { success: true, data: { id: 1, name: 'updated-rule' } }
+      })
+
+      await useAclApi.getACLRulesByNode('node-tenant-1')
+      currentTenantId.value = 'tenant-2'
+
+      await expect(useAclApi.updateACLRule(1, { name: 'updated-rule' })).rejects.toThrow('node_id is required')
+
+      await useAclApi.updateACLRule(1, { name: 'updated-rule', node_id: 'node-tenant-2' })
+
+      expect(api.put).toHaveBeenCalledWith('/v2/tenants/tenant-2/nodes/node-tenant-2/security/acls/1', expect.any(Object))
     })
   })
 

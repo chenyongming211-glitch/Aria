@@ -11,6 +11,57 @@ export default defineStore('node', () => {
   const currentNode = ref(null)
   const loading = ref(false)
 
+  function normalizeAdvertisedRoutes(routes) {
+    if (Array.isArray(routes)) return routes
+    if (!routes) return []
+    if (typeof routes !== 'string') return []
+
+    try {
+      const parsed = JSON.parse(routes)
+      return Array.isArray(parsed) ? parsed : []
+    } catch (error) {
+      console.warn('[Node Store] Invalid advertised_routes payload:', error)
+      return []
+    }
+  }
+
+  function normalizeNodeRecord(node = {}, fallback = {}) {
+    const lastSeen = node.last_seen
+    const lastSyncAt = node.last_sync_at
+    return {
+      id: node.id || fallback.id || '',
+      hostname: node.hostname || fallback.hostname || 'unknown',
+      ip: node.assigned_ip || node.private_ip || node.public_ip || fallback.ip || 'N/A',
+      publicIp: node.public_ip || fallback.publicIp || 'N/A',
+      vpnIp: node.assigned_ip || fallback.vpnIp || 'N/A',
+      region: node.region || fallback.region || 'unknown',
+      status: node.availability_status || node.status || fallback.status || 'offline',
+      rawStatus: node.status || fallback.rawStatus || 'offline',
+      version: node.kernel_version || fallback.version || '0.2.26',
+      mode: node.runtime_mode || fallback.mode || 'kernel',
+      lastSeen: lastSeen ? formatTimestamp(lastSeen) : (fallback.lastSeen || 'N/A'),
+      uptime: lastSeen ? formatUptime(lastSeen) : (fallback.uptime || '0 days'),
+      routes: normalizeAdvertisedRoutes(node.advertised_routes ?? fallback.routes),
+      pendingCmds: node.pending_cmds ?? fallback.pendingCmds ?? 0,
+      configurationStatus: node.configuration_status || fallback.configurationStatus || 'idle',
+      lastSyncAt: lastSyncAt ? formatTimestamp(lastSyncAt) : (fallback.lastSyncAt || 'N/A'),
+      desiredStateVersion: node.desired_state_version || fallback.desiredStateVersion || '',
+      desiredStateUpdatedAt: node.desired_state_updated_at ? formatDateTime(node.desired_state_updated_at) : (fallback.desiredStateUpdatedAt || 'N/A'),
+      appliedStateVersion: node.applied_state_version || fallback.appliedStateVersion || '',
+      appliedStateUpdatedAt: node.applied_state_updated_at ? formatDateTime(node.applied_state_updated_at) : (fallback.appliedStateUpdatedAt || 'N/A'),
+      observedState: node.observed_state || node.configuration_status || fallback.observedState || 'idle',
+      observedMessage: node.observed_message || node.last_sync_error || fallback.observedMessage || '',
+      observedAt: node.observed_at ? formatDateTime(node.observed_at) : (fallback.observedAt || 'N/A'),
+      stateConvergence: node.convergence_status || node.state_convergence || fallback.stateConvergence || 'idle',
+      lastCommand: node.last_command || fallback.lastCommand || null,
+      lastCommandStatus: node.last_command_status || fallback.lastCommandStatus || '',
+      lastCommandError: node.last_command_error || fallback.lastCommandError || '',
+      recentCommands: Array.isArray(node.recent_commands) ? node.recent_commands : (fallback.recentCommands || []),
+      bandwidth: fallback.bandwidth || { upload: 0, download: 0 },
+      latency: fallback.latency || 0
+    }
+  }
+
   async function loadNodes() {
     loading.value = true
     try {
@@ -36,39 +87,7 @@ export default defineStore('node', () => {
       console.log('[Node Store] Parsed node data:', nodeData)
       
       if (nodeData.length > 0) {
-        // 转换 API 响应格式
-        nodes.value = nodeData.map(node => ({
-          id: node.id || '',
-          hostname: node.hostname || 'unknown',
-          ip: node.assigned_ip || node.private_ip || node.public_ip || 'N/A',
-          publicIp: node.public_ip || 'N/A',
-          vpnIp: node.assigned_ip || 'N/A',
-          region: node.region || 'unknown',
-          status: node.availability_status || node.status || 'offline',
-          rawStatus: node.status || 'offline',
-          version: node.kernel_version || '0.2.26',
-          mode: node.runtime_mode || 'kernel',
-          lastSeen: node.last_seen ? formatTimestamp(node.last_seen) : 'N/A',
-          uptime: node.last_seen ? formatUptime(node.last_seen) : '0 days',
-          routes: node.advertised_routes || [],
-          pendingCmds: node.pending_cmds || 0,
-          configurationStatus: node.configuration_status || 'idle',
-          lastSyncAt: node.last_sync_at ? formatTimestamp(node.last_sync_at) : 'N/A',
-          desiredStateVersion: node.desired_state_version || '',
-          desiredStateUpdatedAt: node.desired_state_updated_at ? formatDateTime(node.desired_state_updated_at) : 'N/A',
-          appliedStateVersion: node.applied_state_version || '',
-          appliedStateUpdatedAt: node.applied_state_updated_at ? formatDateTime(node.applied_state_updated_at) : 'N/A',
-          observedState: node.observed_state || node.configuration_status || 'idle',
-          observedMessage: node.observed_message || node.last_sync_error || '',
-          observedAt: node.observed_at ? formatDateTime(node.observed_at) : 'N/A',
-          stateConvergence: node.convergence_status || node.state_convergence || 'idle',
-          lastCommand: node.last_command || null,
-          lastCommandStatus: node.last_command_status || '',
-          lastCommandError: node.last_command_error || '',
-          recentCommands: Array.isArray(node.recent_commands) ? node.recent_commands : [],
-          bandwidth: { upload: 0, download: 0 },
-          latency: 0
-        }))
+        nodes.value = nodeData.map(node => normalizeNodeRecord(node))
       } else {
         nodes.value = []
       }
@@ -127,7 +146,7 @@ export default defineStore('node', () => {
       mode: detail.runtime_mode || 'kernel',
       lastSeen: detail.last_seen ? formatTimestamp(detail.last_seen) : 'N/A',
       uptime: status.uptime ? formatDurationSeconds(status.uptime) : (detail.last_seen ? formatUptime(detail.last_seen) : '0 days'),
-      routes: detail.advertised_routes || [],
+      routes: normalizeAdvertisedRoutes(detail.advertised_routes),
       pendingCmds: status.pending_cmds || detail.pending_cmds || 0,
       configurationStatus: status.configuration_status || detail.configuration_status || 'idle',
       lastSyncAt: status.last_sync_at
@@ -160,26 +179,24 @@ export default defineStore('node', () => {
     return node
   }
 
-  // 格式化时间戳（转换为北京时间 UTC+8）
+  // 格式化时间戳（按 Asia/Shanghai 展示，不对原始时间手动加偏移）
   function formatTimestamp(timestamp) {
     if (!timestamp) return 'N/A'
     const date = typeof timestamp === 'number'
       ? new Date(timestamp * 1000)
       : new Date(timestamp)
     if (Number.isNaN(date.getTime())) return 'N/A'
-    
-    // 转换为北京时间（UTC+8）
-    const beijingTime = new Date(date.getTime() + 8 * 60 * 60 * 1000)
-    
-    // 格式化为 YYYY-MM-DD HH:mm:ss
-    const year = beijingTime.getUTCFullYear()
-    const month = String(beijingTime.getUTCMonth() + 1).padStart(2, '0')
-    const day = String(beijingTime.getUTCDate()).padStart(2, '0')
-    const hours = String(beijingTime.getUTCHours()).padStart(2, '0')
-    const minutes = String(beijingTime.getUTCMinutes()).padStart(2, '0')
-    const seconds = String(beijingTime.getUTCSeconds()).padStart(2, '0')
-    
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+
+    return new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).format(date).replace(/\//g, '-')
   }
 
   function formatDateTime(value) {
@@ -191,8 +208,12 @@ export default defineStore('node', () => {
 
   // 格式化运行时间
   function formatUptime(lastSeen) {
-    const now = Math.floor(Date.now() / 1000)
-    const diff = now - lastSeen
+    const lastSeenMs = typeof lastSeen === 'number'
+      ? lastSeen * 1000
+      : new Date(lastSeen).getTime()
+    if (Number.isNaN(lastSeenMs)) return '0 days'
+
+    const diff = Math.max(0, Math.floor((Date.now() - lastSeenMs) / 1000))
 
     if (diff < 60) return '< 1 minute'
     if (diff < 3600) return `${Math.floor(diff / 60)} minutes`
@@ -244,11 +265,15 @@ export default defineStore('node', () => {
       const response = await api.put(API_ENDPOINTS.TENANT.NODE_DETAIL(tenantId, id), data)
       const updatedData = response.data?.data || response.data
       
-      // 更新本地状态
       const index = nodes.value.findIndex(node => node.id === id)
       if (index !== -1) {
-        // 部分更新本地字段
-        nodes.value[index] = { ...nodes.value[index], ...data }
+        nodes.value[index] = normalizeNodeRecord(updatedData || {}, nodes.value[index])
+      }
+      if (currentNode.value?.id === id) {
+        currentNode.value = {
+          ...currentNode.value,
+          ...normalizeNodeRecord(updatedData || {}, currentNode.value)
+        }
       }
       
       return updatedData

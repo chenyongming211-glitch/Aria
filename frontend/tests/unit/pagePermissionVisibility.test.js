@@ -49,7 +49,22 @@ vi.mock('/src/composables/useAgentProxyApi', () => ({
 
 vi.mock('/src/composables/useMonitorApi', () => ({
   useMonitorApi: {
-    getNodeMetrics: vi.fn(async () => ({ upload_mbps: 0, download_mbps: 0, latency_ms: 0 }))
+    getNodeMetrics: vi.fn(async () => ({ upload_mbps: 0, download_mbps: 0, latency_ms: 0 })),
+    getStats: vi.fn(async () => ({ active_alerts_count: 1 })),
+    getEvents: vi.fn(async () => ({ items: [], total: 0 })),
+    getAlerts: vi.fn(async () => ({
+      items: [
+        {
+          id: 'alert-1',
+          alert_type: 'sync_failed',
+          severity: 'warning',
+          title: 'Sync failed',
+          message: 'sync failed',
+          context: {}
+        }
+      ]
+    })),
+    resolveAlert: vi.fn(async () => ({}))
   }
 }))
 
@@ -145,6 +160,7 @@ import Settings from '@/views/Settings.vue'
 import Nodes from '@/views/Nodes.vue'
 import Routing from '@/views/Routing.vue'
 import BandwidthControl from '@/views/BandwidthControl.vue'
+import Monitoring from '@/views/Monitoring.vue'
 
 const elementStubs = {
   'el-card': { template: '<div><slot name="header" /><slot /></div>' },
@@ -356,5 +372,17 @@ describe('page-level RBAC button visibility', () => {
     expect(deniedButtons).not.toContain('添加规则')
     expect(deniedButtons).not.toContain('删除')
     expect(deniedButtons).not.toContain('保存并应用')
+  })
+
+  it('shows/hides Monitoring resolve actions based on commands:write', async () => {
+    permissionSet.add('commands:write')
+    const allowed = mountWithStubs(Monitoring)
+    await flushPromises()
+    expect(allowed.text()).toContain('Resolve')
+
+    permissionSet.clear()
+    const denied = mountWithStubs(Monitoring)
+    await flushPromises()
+    expect(denied.text()).not.toContain('Resolve')
   })
 })

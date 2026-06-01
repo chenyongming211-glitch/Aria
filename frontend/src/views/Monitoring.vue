@@ -130,6 +130,7 @@
                 View Policy
               </el-button>
               <el-button
+                v-if="hasPermission('commands:write')"
                 size="small"
                 type="warning"
                 plain
@@ -235,7 +236,7 @@
                 View Command
               </el-button>
               <el-button
-                v-if="event.source === 'alert' && event.severity"
+                v-if="event.source === 'alert' && event.severity && hasPermission('commands:write')"
                 size="small"
                 type="warning"
                 plain
@@ -278,9 +279,12 @@ import {
   Bell
 } from '@element-plus/icons-vue'
 import { useMonitorApi } from '@/composables/useMonitorApi'
+import { usePermission } from '@/composables/usePermission'
+import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
+const { hasPermission } = usePermission()
 
 // --- State ---
 const statsLoading = ref(false)
@@ -458,6 +462,11 @@ const onPageChange = () => {
 }
 
 const handleResolve = async (alertId) => {
+  if (!hasPermission('commands:write')) {
+    ElMessage.error('Missing command permission')
+    return
+  }
+
   try {
     resolvingId.value = alertId
     await useMonitorApi.resolveAlert(alertId)
@@ -631,11 +640,20 @@ const severityDotClass = (event) => {
 }
 
 // --- Lifecycle ---
+const reloadTenantScopedData = async () => {
+  eventsPage.value = 1
+  events.value = []
+  alerts.value = []
+  await refreshAll()
+}
+
 onMounted(() => {
   loadStats()
   loadEvents()
   loadAlerts()
 })
+
+useTenantChangeReload(reloadTenantScopedData)
 </script>
 
 <style scoped>

@@ -138,6 +138,7 @@ import { ElMessage } from 'element-plus'
 import { useRouteApi } from '@/composables/useRouteApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 import { usePermission } from '@/composables/usePermission'
+import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
 
 const { hasPermission } = usePermission()
 
@@ -301,6 +302,21 @@ const handleCurrentChange = (page) => {
   currentPage.value = page
 }
 
+const reloadTenantScopedData = async () => {
+  currentPage.value = 1
+  allRoutes.value = []
+  tenantNodes.value = []
+  routeDialogVisible.value = false
+  deleteDialogVisible.value = false
+  currentDeleteRoute.value = null
+  currentRoute.value = {
+    nodeId: '',
+    cidr: '',
+    originalCidr: ''
+  }
+  await loadRoutes()
+}
+
 const shortCommandId = (commandId) => {
   if (!commandId) {
     return '-'
@@ -332,6 +348,8 @@ const getPolicyTagType = (status) => {
 onMounted(() => {
   loadRoutes()
 })
+
+useTenantChangeReload(reloadTenantScopedData)
 </script>
 
 <style scoped>
