@@ -279,7 +279,7 @@ import {
   Bell
 } from '@element-plus/icons-vue'
 import { useMonitorApi } from '@/composables/useMonitorApi'
-import { usePermission } from '@/composables/usePermission'
+import { usePermission } from '../composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
 import { ElMessage } from 'element-plus'
 
