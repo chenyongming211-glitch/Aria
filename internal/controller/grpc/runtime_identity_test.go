@@ -46,6 +46,34 @@ func TestResolveRuntimeNodeForRequestRejectsRuntimeTokenNodeMismatch(t *testing.
 	}
 }
 
+func TestResolveRuntimeNodeForRequestRejectsMissingRuntimeTokenTenant(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.MatchExpectationsInOrder(false)
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+
+	expectNodeByID(mock, nodeID, "request-node-key", tenantID, now)
+	expectNodeByPublicKey(mock, "request-node-key", nodeID, tenantID, now)
+
+	ctx := context.WithValue(context.Background(), RuntimeNodeIDKey, nodeID.String())
+
+	server := NewControllerServer(nil, nil, controllerstorage.NewStorageWithDB(db))
+	_, err = server.resolveRuntimeNodeForRequest(ctx, nodeID.String(), "request-node-key")
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("expected Unauthenticated for missing runtime token tenant, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestResolveCommandStreamNodeForRequestRejectsRuntimeTokenNodeMismatch(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

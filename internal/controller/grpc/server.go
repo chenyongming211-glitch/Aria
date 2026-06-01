@@ -260,6 +260,9 @@ func (s *ControllerServer) CommandStream(stream agentpb.ControllerService_Comman
 			}
 
 			if resp.CommandId != "" && s.store != nil {
+				if err := s.ensureCommandStreamNodeActive(nodePublicKey); err != nil {
+					return err
+				}
 				if err := s.store.UpdateAgentCommandStatusForNode(resp.CommandId, nodePublicKey, resp.Status, resp.Message, resp.Result); err != nil {
 					return fmt.Errorf("failed to update command status: %w", err)
 				}
@@ -282,6 +285,9 @@ func (s *ControllerServer) sendNextPendingCommand(stream agentpb.ControllerServi
 	if s.store == nil || agentID == "" {
 		return nil
 	}
+	if err := s.ensureCommandStreamNodeActive(agentID); err != nil {
+		return err
+	}
 
 	cmd, err := s.store.GetNextPendingAgentCommand(agentID)
 	if err != nil {
@@ -299,10 +305,30 @@ func (s *ControllerServer) sendNextPendingCommand(stream agentpb.ControllerServi
 		Priority:  int32(cmd.Priority),
 		CreatedAt: cmd.CreatedAt.Unix(),
 	}); err != nil {
+		if requeueErr := s.store.RequeueSentAgentCommand(cmd.ID, agentID, "stream send failed: "+err.Error()); requeueErr != nil {
+			return fmt.Errorf("stream send error: %w; failed to requeue command: %v", err, requeueErr)
+		}
 		return fmt.Errorf("stream send error: %w", err)
 	}
 
 	return nil
+}
+
+func (s *ControllerServer) ensureCommandStreamNodeActive(nodePublicKey string) error {
+	if s.store == nil || nodePublicKey == "" {
+		return nil
+	}
+
+	node, err := s.store.GetNode(nodePublicKey)
+	if err != nil || node == nil {
+		return status.Error(codes.Unauthenticated, "node not found")
+	}
+	switch strings.ToLower(strings.TrimSpace(node.Status)) {
+	case "deleted", "suspended", "banned":
+		return status.Errorf(codes.PermissionDenied, "node access denied: status '%s'", node.Status)
+	default:
+		return nil
+	}
 }
 
 func isTerminalCommandStatus(status string) bool {
@@ -484,14 +510,15 @@ func bindRuntimeTokenToNode(ctx context.Context, node *controllerstorage.Node) e
 	}
 
 	tokenTenantID, ok := GetRuntimeTenantID(ctx)
-	if ok && strings.TrimSpace(tokenTenantID) != "" {
-		parsedTokenTenantID, err := uuid.Parse(tokenTenantID)
-		if err != nil {
-			return status.Error(codes.Unauthenticated, "invalid runtime token tenant")
-		}
-		if parsedTokenTenantID != node.TenantID {
-			return status.Error(codes.PermissionDenied, "runtime token tenant mismatch")
-		}
+	if !ok || strings.TrimSpace(tokenTenantID) == "" {
+		return status.Error(codes.Unauthenticated, "runtime token tenant missing")
+	}
+	parsedTokenTenantID, err := uuid.Parse(tokenTenantID)
+	if err != nil {
+		return status.Error(codes.Unauthenticated, "invalid runtime token tenant")
+	}
+	if parsedTokenTenantID != node.TenantID {
+		return status.Error(codes.PermissionDenied, "runtime token tenant mismatch")
 	}
 
 	return nil

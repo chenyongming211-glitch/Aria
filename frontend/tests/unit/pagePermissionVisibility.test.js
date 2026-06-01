@@ -65,6 +65,25 @@ vi.mock('@/composables/useTenantApi', () => ({
   }
 }))
 
+vi.mock('@/composables/useRouteApi', () => ({
+  useRouteApi: {
+    getRoutes: vi.fn(async () => []),
+    addRoute: vi.fn(async () => ({})),
+    updateRoute: vi.fn(async () => ({})),
+    deleteRoute: vi.fn(async () => ({}))
+  }
+}))
+
+vi.mock('@/composables/useQosApi', () => ({
+  useQosApi: {
+    getQoSRules: vi.fn(async () => []),
+    getQoSRulesByNode: vi.fn(async () => []),
+    createQoSRule: vi.fn(async () => ({})),
+    deleteQoSRule: vi.fn(async () => ({})),
+    getProtocolName: vi.fn((protocol) => String(protocol))
+  }
+}))
+
 vi.mock('@/composables/useAclApi', () => ({
   useAclApi: {
     getACLRulesByNode: vi.fn(async () => []),
@@ -124,6 +143,8 @@ import ACLRules from '@/views/ACLRules.vue'
 import Tokens from '@/views/Tokens.vue'
 import Settings from '@/views/Settings.vue'
 import Nodes from '@/views/Nodes.vue'
+import Routing from '@/views/Routing.vue'
+import BandwidthControl from '@/views/BandwidthControl.vue'
 
 const elementStubs = {
   'el-card': { template: '<div><slot name="header" /><slot /></div>' },
@@ -143,6 +164,7 @@ const elementStubs = {
   'el-col': { template: '<div><slot /></div>' },
   'el-tabs': { template: '<div><slot /></div>' },
   'el-tab-pane': { template: '<div><slot /></div>' },
+  'el-badge': { template: '<span><slot /></span>' },
   'el-radio-group': { template: '<div><slot /></div>' },
   'el-radio': { template: '<div><slot /></div>' },
   'el-slider': { template: '<div></div>' },
@@ -268,5 +290,71 @@ describe('page-level RBAC button visibility', () => {
     await flushPromises()
     expect(denied.text()).not.toContain('Add Node')
     expect(denied.text()).not.toContain('Save Changes')
+  })
+
+  it('shows/hides Nodes command actions based on commands:write', async () => {
+    permissionSet.add('commands:write')
+    const allowed = mountWithStubs(Nodes)
+    allowed.vm.selectedNode = {
+      id: 'node-1',
+      hostname: 'node-1',
+      region: 'sh',
+      status: 'online',
+      routes: [],
+      recentCommands: []
+    }
+    await allowed.vm.$nextTick()
+    expect(allowed.text()).toContain('Force Sync')
+    expect(allowed.text()).toContain('Health Check')
+
+    permissionSet.clear()
+    const denied = mountWithStubs(Nodes)
+    denied.vm.selectedNode = {
+      id: 'node-1',
+      hostname: 'node-1',
+      region: 'sh',
+      status: 'online',
+      routes: [],
+      recentCommands: []
+    }
+    await denied.vm.$nextTick()
+    expect(denied.text()).not.toContain('Force Sync')
+    expect(denied.text()).not.toContain('Health Check')
+  })
+
+  it('shows/hides Routing write actions based on routes:write', async () => {
+    permissionSet.add('routes:write')
+    const allowed = mountWithStubs(Routing)
+    await flushPromises()
+    const allowedButtons = allowed.findAll('button').map((button) => button.text())
+    expect(allowedButtons).toContain('添加路由')
+    expect(allowedButtons).toContain('编辑')
+    expect(allowedButtons).toContain('删除')
+
+    permissionSet.clear()
+    const denied = mountWithStubs(Routing)
+    await flushPromises()
+    const deniedButtons = denied.findAll('button').map((button) => button.text())
+    expect(deniedButtons).not.toContain('添加路由')
+    expect(deniedButtons).not.toContain('编辑')
+    expect(deniedButtons).not.toContain('删除')
+  })
+
+  it('shows/hides Bandwidth write actions based on qos:write', async () => {
+    permissionSet.add('qos:write')
+    const allowed = mountWithStubs(BandwidthControl)
+    await flushPromises()
+    const allowedButtons = allowed.findAll('button').map((button) => button.text())
+    expect(allowedButtons).toContain('添加规则')
+    expect(allowedButtons).toContain('删除')
+    expect(allowedButtons).toContain('保存并应用')
+
+    permissionSet.clear()
+    const denied = mountWithStubs(BandwidthControl)
+    await flushPromises()
+    const deniedButtons = denied.findAll('button').map((button) => button.text())
+    expect(deniedButtons).not.toContain('添加规则')
+    expect(deniedButtons).not.toContain('删除')
+    expect(deniedButtons).not.toContain('保存并应用')
   })
 })

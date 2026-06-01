@@ -443,10 +443,21 @@
               <el-button size="small" @click="openPolicyCenter()">
                 Policy Center
               </el-button>
-              <el-button size="small" type="primary" :loading="commandLoading" @click="runQuickCommand('sync')">
+              <el-button
+                v-if="hasPermission('commands:write')"
+                size="small"
+                type="primary"
+                :loading="commandLoading"
+                @click="runQuickCommand('sync')"
+              >
                 Force Sync
               </el-button>
-              <el-button size="small" :loading="commandLoading" @click="runQuickCommand('health_check')">
+              <el-button
+                v-if="hasPermission('commands:write')"
+                size="small"
+                :loading="commandLoading"
+                @click="runQuickCommand('health_check')"
+              >
                 Health Check
               </el-button>
             </div>
@@ -937,6 +948,10 @@ const prependCommandIfMissing = (command) => {
 
 const runQuickCommand = async (command) => {
   if (!selectedNode.value?.id) return
+  if (!hasPermission('commands:write')) {
+    ElMessage.error('Missing permission to send commands')
+    return
+  }
 
   commandLoading.value = true
   try {

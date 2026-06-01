@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -241,6 +242,70 @@ type CreateUserRequest struct {
 	Role     string `json:"role"`
 }
 
+var (
+	legacyTenantUserRoles = map[string]struct{}{
+		"member": {},
+		"owner":  {},
+	}
+
+	errPlatformRoleNotAssignable = errors.New("platform role cannot be assigned via tenant user APIs")
+	errTenantRoleNotAssignable   = errors.New("tenant role does not exist")
+)
+
+func normalizeTenantUserRole(role string) (string, error) {
+	roleName := strings.TrimSpace(role)
+	if roleName == "" {
+		return "member", nil
+	}
+
+	lowerRoleName := strings.ToLower(roleName)
+	if lowerRoleName == middleware.RoleSuperAdmin {
+		return "", errPlatformRoleNotAssignable
+	}
+
+	if _, ok := legacyTenantUserRoles[lowerRoleName]; ok {
+		return lowerRoleName, nil
+	}
+
+	switch lowerRoleName {
+	case controllerstorage.SystemRoleAdmin, controllerstorage.SystemRoleOperator, controllerstorage.SystemRoleViewer:
+		return lowerRoleName, nil
+	default:
+		return roleName, nil
+	}
+}
+
+func (t *TenantAPI) normalizeAssignableTenantUserRole(tenantID uuid.UUID, role string) (string, error) {
+	normalizedRole, err := normalizeTenantUserRole(role)
+	if err != nil {
+		return "", err
+	}
+
+	if _, ok := legacyTenantUserRoles[normalizedRole]; ok {
+		return normalizedRole, nil
+	}
+
+	exists, err := t.tenantRoleExists(tenantID, normalizedRole)
+	if err != nil {
+		return "", fmt.Errorf("failed to validate tenant role: %w", err)
+	}
+	if !exists {
+		return "", fmt.Errorf("%w: %s", errTenantRoleNotAssignable, normalizedRole)
+	}
+
+	return normalizedRole, nil
+}
+
+func (t *TenantAPI) tenantRoleExists(tenantID uuid.UUID, role string) (bool, error) {
+	var exists bool
+	err := t.store.DB().QueryRow(
+		`SELECT EXISTS (SELECT 1 FROM roles WHERE tenant_id = $1 AND name = $2)`,
+		tenantID,
+		role,
+	).Scan(&exists)
+	return exists, err
+}
+
 func (t *TenantAPI) CreateUser(w http.ResponseWriter, r *http.Request, tenantID uuid.UUID) {
 	var req CreateUserRequest
 	if err := apibase.ParseRequestJSON(r, &req); err != nil {
@@ -253,9 +318,20 @@ func (t *TenantAPI) CreateUser(w http.ResponseWriter, r *http.Request, tenantID 
 		return
 	}
 
-	if req.Role == "" {
-		req.Role = "member"
+	normalizedRole, err := t.normalizeAssignableTenantUserRole(tenantID, req.Role)
+	if err != nil {
+		if errors.Is(err, errPlatformRoleNotAssignable) {
+			apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, err.Error(), nil)
+			return
+		}
+		if errors.Is(err, errTenantRoleNotAssignable) {
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
+			return
+		}
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeCreateUserFailed, "Failed to validate role: "+err.Error(), nil)
+		return
 	}
+	req.Role = normalizedRole
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
@@ -299,6 +375,23 @@ func (t *TenantAPI) UpdateUser(w http.ResponseWriter, r *http.Request, tenantID 
 	if err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidUserID, "Invalid user ID", nil)
 		return
+	}
+
+	if strings.TrimSpace(req.Role) != "" {
+		normalizedRole, err := t.normalizeAssignableTenantUserRole(tenantID, req.Role)
+		if err != nil {
+			if errors.Is(err, errPlatformRoleNotAssignable) {
+				apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, err.Error(), nil)
+				return
+			}
+			if errors.Is(err, errTenantRoleNotAssignable) {
+				apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
+				return
+			}
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeUpdateUserFailed, "Failed to validate role: "+err.Error(), nil)
+			return
+		}
+		req.Role = normalizedRole
 	}
 
 	if req.Password != "" {

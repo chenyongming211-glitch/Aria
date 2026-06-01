@@ -1937,11 +1937,13 @@ impl UnifiedAgent {
             
             let mut added_count = 0;
             let mut removed_count = 0;
+            let mut failures = Vec::new();
             
             // 删除多余的路由
             for route in &to_remove {
                 if let Err(e) = routing_manager.remove_vpn_route(route) {
                     tracing::error!("Failed to remove stale route {}: {:?}", route, e);
+                    failures.push(format!("remove {}: {}", route, e));
                 } else {
                     removed_count += 1;
                     tracing::info!("Removed stale route: {}", route);
@@ -1955,6 +1957,7 @@ impl UnifiedAgent {
                     let interfaces_str: Vec<&str> = interfaces.iter().map(|s| s.as_str()).collect();
                     if let Err(e) = routing_manager.add_ecmp_route(route, &interfaces_str, Some(100)) {
                         tracing::error!("Failed to add ECMP route {}: {:?}", route, e);
+                        failures.push(format!("add ecmp {}: {}", route, e));
                     } else {
                         added_count += 1;
                     }
@@ -1962,12 +1965,14 @@ impl UnifiedAgent {
                     // 单接口模式
                     if let Err(e) = routing_manager.add_vpn_route(route) {
                         tracing::error!("Failed to add route {}: {:?}", route, e);
+                        failures.push(format!("add {}: {}", route, e));
                     } else {
                         added_count += 1;
                     }
                 }
             }
             
+            fail_route_sync_if_needed(&failures)?;
             Ok((added_count, removed_count, desired_routes.len()))
         }).await?;
         
@@ -2360,13 +2365,28 @@ async fn apply_runtime_token_from_sync(
     runtime_credential: &RuntimeCredentialStore,
     sync_result: &crate::grpc_client::SyncResult,
 ) {
+    let rotated_token = sync_result.runtime_token.is_some();
     if let Some(new_token) = sync_result.runtime_token.clone() {
         config.current_credential = Some(new_token.clone());
         runtime_credential.update(Some(new_token)).await;
     }
     if let Some(expires_at) = sync_result.runtime_token_expires_at {
         config.current_credential_expires_at = Some(expires_at);
+    } else if rotated_token {
+        config.current_credential_expires_at = None;
     }
+}
+
+fn fail_route_sync_if_needed(failures: &[String]) -> Result<()> {
+    if failures.is_empty() {
+        return Ok(());
+    }
+
+    Err(anyhow::anyhow!(
+        "route sync failed: {} route operations failed: {}",
+        failures.len(),
+        failures.join("; ")
+    ))
 }
 
 fn build_completed_command_response(
@@ -2407,7 +2427,7 @@ fn build_failed_command_response_with_result(
 
 #[cfg(test)]
 mod tests {
-    use super::apply_runtime_token_from_sync;
+    use super::{apply_runtime_token_from_sync, fail_route_sync_if_needed};
     use crate::config::AgentConfig;
     use crate::grpc_client::SyncResult;
     use crate::runtime_credential::RuntimeCredentialStore;
@@ -2432,5 +2452,46 @@ mod tests {
         assert_eq!(config.current_credential.as_deref(), Some("rt.new-token"));
         assert_eq!(config.current_credential_expires_at, Some(1_700_000_000));
         assert_eq!(store.snapshot().await.as_deref(), Some("rt.new-token"));
+    }
+
+    #[tokio::test]
+    async fn runtime_token_rotation_without_expiry_clears_stale_expiry() {
+        let mut config = AgentConfig {
+            current_credential: Some("rt.old-token".to_string()),
+            current_credential_expires_at: Some(1_600_000_000),
+            ..Default::default()
+        };
+        let store = RuntimeCredentialStore::new(Some("rt.old-token".to_string()));
+        let sync_result = SyncResult {
+            peers: Vec::new(),
+            assigned_ip: String::new(),
+            desired_state_version: String::new(),
+            acl_rules: Vec::new(),
+            qos_rules: Vec::new(),
+            blacklist_rules: Vec::new(),
+            runtime_token: Some("rt.new-token".to_string()),
+            runtime_token_expires_at: None,
+        };
+
+        apply_runtime_token_from_sync(&mut config, &store, &sync_result).await;
+
+        assert_eq!(config.current_credential.as_deref(), Some("rt.new-token"));
+        assert_eq!(config.current_credential_expires_at, None);
+        assert_eq!(store.snapshot().await.as_deref(), Some("rt.new-token"));
+    }
+
+    #[test]
+    fn route_sync_failures_return_error() {
+        let failures = vec![
+            "add 10.10.0.0/16: netlink failed".to_string(),
+            "remove 10.20.0.0/16: not permitted".to_string(),
+        ];
+
+        let err = fail_route_sync_if_needed(&failures).expect_err("expected route sync failure");
+        let message = err.to_string();
+
+        assert!(message.contains("2 route operations failed"));
+        assert!(message.contains("add 10.10.0.0/16"));
+        assert!(message.contains("remove 10.20.0.0/16"));
     }
 }

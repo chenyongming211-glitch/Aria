@@ -105,6 +105,11 @@ const userFromTokenClaims = (token) => {
   })
 }
 
+export const tokenRequiresPasswordChange = (token) => {
+  const claims = decodeJwtPayload(token)
+  return Boolean(claims?.mcp)
+}
+
 const mergeTokenUserClaims = (cachedUser, token) => {
   const tokenUser = userFromTokenClaims(token)
   if (!tokenUser) return normalizeUser(cachedUser)
@@ -168,6 +173,11 @@ export default defineStore('user', () => {
       const requirePasswordChange = response.data?.data?.require_password_change || response.data?.require_password_change || false
 
       if (token) {
+        const tokenUser = userFromTokenClaims(token)
+        if (!userData && !tokenUser?.role) {
+          throw new Error('Invalid login response: no user found')
+        }
+
         // 存储 token 到 localStorage
         localStorage.setItem('aria_token', token)
         
@@ -180,14 +190,15 @@ export default defineStore('user', () => {
         localStorage.setItem('aria_last_activity', Date.now().toString())
 
         // 设置用户数据
-        user.value = normalizeUser(userData || {
-          id: 'user-1',
-          username: credentials.username,
-          role: 'admin'
-        }, credentials.username)
+        user.value = normalizeUser(userData || tokenUser, credentials.username)
 
         isAuthenticated.value = true
-        mustChangePassword.value = requirePasswordChange
+        mustChangePassword.value = requirePasswordChange || tokenRequiresPasswordChange(token)
+        if (mustChangePassword.value) {
+          localStorage.setItem('aria_must_change_password', 'true')
+        } else {
+          localStorage.removeItem('aria_must_change_password')
+        }
 
         // 存储用户会话
         localStorage.setItem('aria_user', JSON.stringify(user.value))
@@ -239,6 +250,7 @@ export default defineStore('user', () => {
       
       if (response.data?.success) {
         mustChangePassword.value = false
+        localStorage.removeItem('aria_must_change_password')
         return { success: true }
       } else {
         return { success: false, message: response.data?.message || 'Password change failed' }
@@ -262,6 +274,7 @@ export default defineStore('user', () => {
     localStorage.removeItem('aria_user')
     localStorage.removeItem('aria-current-tenant')
     localStorage.removeItem('aria_permissions')
+    localStorage.removeItem('aria_must_change_password')
     permissions.value = []
   }
 
@@ -287,6 +300,12 @@ export default defineStore('user', () => {
     }
 
     isAuthenticated.value = true
+    mustChangePassword.value = localStorage.getItem('aria_must_change_password') === 'true' || tokenRequiresPasswordChange(token)
+    if (mustChangePassword.value) {
+      localStorage.setItem('aria_must_change_password', 'true')
+    } else {
+      localStorage.removeItem('aria_must_change_password')
+    }
     localStorage.setItem('aria_user', JSON.stringify(user.value))
     if (user.value?.tenant_id) {
       persistCurrentTenant(user.value.tenant_id)
@@ -399,6 +418,12 @@ export default defineStore('user', () => {
       const token = response.data?.data?.token || response.data?.token
       if (token) {
         localStorage.setItem('aria_token', token)
+        mustChangePassword.value = tokenRequiresPasswordChange(token)
+        if (mustChangePassword.value) {
+          localStorage.setItem('aria_must_change_password', 'true')
+        } else {
+          localStorage.removeItem('aria_must_change_password')
+        }
         return { success: true }
       }
       return { success: false }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +19,13 @@ const (
 	AgentCommandStatusCompleted    = "completed"
 	AgentCommandStatusFailed       = "failed"
 )
+
+var allowedAgentCommands = map[string]struct{}{
+	"sync":          {},
+	"restart":       {},
+	"health_check":  {},
+	"config_reload": {},
+}
 
 type AgentCommand struct {
 	ID             string                 `json:"id"`
@@ -37,6 +45,12 @@ type AgentCommand struct {
 	Result         map[string]string      `json:"result,omitempty"`
 }
 
+func IsAllowedAgentCommand(command string) bool {
+	command = strings.TrimSpace(command)
+	_, ok := allowedAgentCommands[command]
+	return ok
+}
+
 func (s *Storage) QueueAgentCommand(nodePublicKey, command string, params map[string]interface{}, priority, timeoutSeconds int) (*AgentCommand, error) {
 	return queueAgentCommand(txQueryRowAdapter{s.db}, nodePublicKey, command, params, priority, timeoutSeconds)
 }
@@ -45,8 +59,12 @@ func queueAgentCommand(q queryRower, nodePublicKey, command string, params map[s
 	if nodePublicKey == "" {
 		return nil, errors.New("node public key is required")
 	}
+	command = strings.TrimSpace(command)
 	if command == "" {
 		return nil, errors.New("command is required")
+	}
+	if !IsAllowedAgentCommand(command) {
+		return nil, fmt.Errorf("unsupported agent command: %s", command)
 	}
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = 30
@@ -97,6 +115,20 @@ func (s *Storage) GetNextPendingAgentCommand(nodePublicKey string) (*AgentComman
 	}
 	defer tx.Rollback()
 
+	if _, err := tx.Exec(`
+		UPDATE agent_commands
+		SET status = $2,
+		    message = 'command delivery timed out; requeued',
+		    sent_at = NULL,
+		    updated_at = NOW()
+		WHERE node_public_key = $1
+		  AND status = $3
+		  AND sent_at IS NOT NULL
+		  AND sent_at + (timeout_seconds * interval '1 second') < NOW()
+	`, nodePublicKey, AgentCommandStatusPending, AgentCommandStatusSent); err != nil {
+		return nil, err
+	}
+
 	row := tx.QueryRow(`
 		SELECT id, node_public_key, command, params, status, COALESCE(message, ''), priority, timeout_seconds,
 		       created_at, updated_at, sent_at, acknowledged_at, completed_at, result
@@ -132,6 +164,86 @@ func (s *Storage) GetNextPendingAgentCommand(nodePublicKey string) (*AgentComman
 	cmd.SentAt = &now
 	cmd.UpdatedAt = now
 	return cmd, nil
+}
+
+func (s *Storage) RequeueSentAgentCommand(commandID, nodePublicKey, message string) error {
+	if commandID == "" {
+		return errors.New("command id is required")
+	}
+	if nodePublicKey == "" {
+		return errors.New("node public key is required")
+	}
+	if message == "" {
+		message = "command delivery failed; requeued"
+	}
+
+	result, err := s.db.Exec(`
+		UPDATE agent_commands
+		SET status = $3,
+		    message = $4,
+		    sent_at = NULL,
+		    updated_at = NOW()
+		WHERE id = $1 AND node_public_key = $2 AND status = $5
+	`, commandID, nodePublicKey, AgentCommandStatusPending, message, AgentCommandStatusSent)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return fmt.Errorf("sent agent command %s was not requeued for node %s", commandID, nodePublicKey)
+	}
+	return nil
+}
+
+func (s *Storage) FailIncompleteAgentCommandsForNode(nodePublicKey, message string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := failIncompleteAgentCommandsForNodeTx(tx, nodePublicKey, message); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func failIncompleteAgentCommandsForNodeTx(tx roleExec, nodePublicKey, message string) error {
+	if nodePublicKey == "" {
+		return errors.New("node public key is required")
+	}
+	if message == "" {
+		message = "node is no longer active"
+	}
+
+	if _, err := tx.Exec(`
+		UPDATE policy_deliveries
+		SET command_status = $2,
+		    last_error = $3,
+		    updated_at = NOW(),
+		    completed_at = NOW()
+		WHERE command_id IN (
+			SELECT id
+			FROM agent_commands
+			WHERE node_public_key = $1 AND status IN ($4, $5, $6)
+		)
+	`, nodePublicKey, AgentCommandStatusFailed, message, AgentCommandStatusPending, AgentCommandStatusSent, AgentCommandStatusAcknowledged); err != nil {
+		return err
+	}
+
+	_, err := tx.Exec(`
+		UPDATE agent_commands
+		SET status = $2,
+		    message = $3,
+		    updated_at = NOW(),
+		    completed_at = NOW()
+		WHERE node_public_key = $1 AND status IN ($4, $5, $6)
+	`, nodePublicKey, AgentCommandStatusFailed, message, AgentCommandStatusPending, AgentCommandStatusSent, AgentCommandStatusAcknowledged)
+	return err
 }
 
 func (s *Storage) UpdateAgentCommandStatus(commandID, status, message string, result map[string]string) error {

@@ -144,6 +144,7 @@ type RegisterRequest struct {
 	MachineID        string   `json:"machine_id"`
 	RegisteredAt     int64    `json:"registered_at"`
 	Token            string   `json:"token"`
+	RuntimeToken     string   `json:"runtime_token,omitempty"`
 	AdvertisedRoutes []string `json:"advertised_routes,omitempty"` // Site-to-Site VPN
 	// Capability detection fields
 	RuntimeMode   string `json:"runtime_mode,omitempty"`
@@ -181,6 +182,30 @@ type SyncResponse struct {
 	CertificatePEM      string        `json:"certificate_pem,omitempty"`
 	CertificateCA       string        `json:"certificate_ca,omitempty"`
 	CertificateNotAfter int64         `json:"certificate_not_after,omitempty"`
+}
+
+type registrationAuthResult struct {
+	RequestedTenantID uuid.UUID
+}
+
+type registrationAuthError struct {
+	status  int
+	message string
+	err     error
+}
+
+func (e *registrationAuthError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.err != nil {
+		return e.err.Error()
+	}
+	return e.message
+}
+
+func newRegistrationAuthError(status int, message string, err error) *registrationAuthError {
+	return &registrationAuthError{status: status, message: message, err: err}
 }
 
 // ACLRuleJSON represents an ACL rule in API responses.
@@ -731,77 +756,15 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	existingNode, _ := c.store.GetNode(req.PublicKey)
 	isReRegistration := (existingNode != nil)
 	requiresFreshEnrollment := nodeRequiresFreshEnrollment(existingNode)
-	var requestedTenantID uuid.UUID
-
-	if nodeRegistrationForbidden(existingNode) {
-		c.logger.Warn("Registration rejected: node %s status is %s", previewString(req.PublicKey, 8), existingNode.Status)
-		http.Error(w, "Node registration is disabled", http.StatusForbidden)
+	authResult, authErr := c.authorizeRegistrationRequest(&req, existingNode, registrationRuntimeTokenFromRequest(r, &req))
+	if authErr != nil {
+		c.logger.Warn("Registration rejected for node %s: %v", previewString(req.PublicKey, 8), authErr)
+		http.Error(w, authErr.message, authErr.status)
 		return
 	}
-
-	// 正常已注册节点可以无 token 重新注册；删除后的节点必须重新携带有效注册 token。
-	if !isReRegistration || requiresFreshEnrollment {
-		if req.Token == "" {
-			c.logger.Warn("Registration rejected: no token provided from %s", req.Hostname)
-			http.Error(w, "Token required", http.StatusUnauthorized)
-			return
-		}
-
-		// Validate token for new registration
-		tkn, err := c.tokenValidator.Validate(req.Token)
-		if err != nil {
-			c.logger.Warn("Registration rejected: %v from %s", err, req.Hostname)
-			switch err {
-			case token.ErrTokenNotFound:
-				http.Error(w, "Invalid token", http.StatusUnauthorized)
-			case token.ErrTokenExpired:
-				http.Error(w, "Token expired", http.StatusUnauthorized)
-			case token.ErrTokenExhausted:
-				http.Error(w, "Token exhausted (max uses reached)", http.StatusUnauthorized)
-			case token.ErrTokenRevoked:
-				http.Error(w, "Token revoked", http.StatusUnauthorized)
-			default:
-				http.Error(w, "Invalid token", http.StatusUnauthorized)
-			}
-			return
-		}
-
-		tokenPreview := tkn.Token
-		if len(tokenPreview) > 12 {
-			tokenPreview = tokenPreview[:12]
-		}
-		c.logger.Debug("Token validated: %s (tag: %s)", tokenPreview, tkn.Tag)
-
-		resolvedTenantID, err := c.store.GetTenantIDByToken(req.Token)
-		if err != nil {
-			c.logger.Error("Failed to get tenant ID by token: %v", err)
-			http.Error(w, "Failed to get tenant ID from token", http.StatusInternalServerError)
-			return
-		}
-		requestedTenantID = resolvedTenantID
-		if requiresFreshEnrollment && requestedTenantID != existingNode.TenantID {
-			c.logger.Warn("Registration rejected: deleted node %s attempted to switch tenant from %s to %s",
-				previewString(req.PublicKey, 8), existingNode.TenantID, requestedTenantID)
-			http.Error(w, "Node tenant ownership is immutable", http.StatusForbidden)
-			return
-		}
-	} else {
+	requestedTenantID := authResult.RequestedTenantID
+	if isReRegistration && !requiresFreshEnrollment {
 		c.logger.Debug("Re-registration from existing node: %s", previewString(req.PublicKey, 8))
-		if req.Token != "" {
-			resolvedTenantID, err := c.store.GetTenantIDByToken(req.Token)
-			if err != nil {
-				c.logger.Error("Failed to get tenant ID by token: %v", err)
-				http.Error(w, "Failed to get tenant ID from token", http.StatusInternalServerError)
-				return
-			}
-			requestedTenantID = resolvedTenantID
-			if requestedTenantID != existingNode.TenantID {
-				c.logger.Warn("Registration rejected: node %s attempted to switch tenant from %s to %s",
-					previewString(req.PublicKey, 8), existingNode.TenantID, requestedTenantID)
-				http.Error(w, "Node tenant ownership is immutable", http.StatusForbidden)
-				return
-			}
-		}
 	}
 
 	// ========== Normal Registration Flow ==========
@@ -902,13 +865,23 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		EnrolledWithToken: req.Token,            // Track which token was used
 	}
 
+	issueCertificateBeforeSave := isReRegistration && !requiresFreshEnrollment && c.certService != nil && req.CSRPEM != ""
+	if issueCertificateBeforeSave {
+		node.ID = existingNode.ID
+		if _, err := c.issueNodeCertificate(node, req.CSRPEM, nil); err != nil {
+			c.logger.Error("Certificate issuance during register failed for node %s: %v", previewString(req.PublicKey, 8), err)
+			http.Error(w, "Failed to issue node certificate", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	if err := c.store.SaveNode(node); err != nil {
 		c.logger.Error("Failed to save node %s: %v", req.Hostname, err)
 		http.Error(w, "Failed to save node", http.StatusInternalServerError)
 		return
 	}
 
-	if c.certService != nil && req.CSRPEM != "" {
+	if c.certService != nil && req.CSRPEM != "" && !issueCertificateBeforeSave {
 		if _, err := c.issueNodeCertificate(node, req.CSRPEM, nil); err != nil {
 			c.logger.Error("Certificate issuance during register failed for node %s: %v", previewString(req.PublicKey, 8), err)
 			if !isReRegistration || requiresFreshEnrollment {
@@ -925,7 +898,11 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	if req.Token != "" && (!isReRegistration || requiresFreshEnrollment) {
 		if err := c.tokenValidator.ConsumeToken(req.Token, req.PublicKey); err != nil {
 			c.logger.Warn("Failed to consume token: %v", err)
-			// Don't fail the registration, just log
+			if markErr := c.store.MarkNodeDeleted(req.PublicKey); markErr != nil {
+				c.logger.Warn("Failed to roll back node %s after token consume failure: %v", previewString(req.PublicKey, 8), markErr)
+			}
+			http.Error(w, "Failed to consume enrollment token", http.StatusInternalServerError)
+			return
 		}
 	}
 
@@ -1164,6 +1141,135 @@ func runtimeBearerTokenFromRequest(r *http.Request) (string, bool) {
 	return authz, authz != ""
 }
 
+func registrationRuntimeTokenFromRequest(r *http.Request, req *RegisterRequest) string {
+	if req != nil && strings.TrimSpace(req.RuntimeToken) != "" {
+		return strings.TrimSpace(req.RuntimeToken)
+	}
+	if r == nil {
+		return ""
+	}
+	token, ok := runtimeBearerTokenFromRequest(r)
+	if !ok {
+		return ""
+	}
+	return token
+}
+
+func (c *Controller) authorizeRegistrationRequest(req *RegisterRequest, existingNode *controllerstorage.Node, runtimeToken string) (registrationAuthResult, *registrationAuthError) {
+	if req == nil {
+		return registrationAuthResult{}, newRegistrationAuthError(http.StatusBadRequest, "Invalid registration request", fmt.Errorf("registration request is required"))
+	}
+	if nodeRegistrationForbidden(existingNode) {
+		return registrationAuthResult{}, newRegistrationAuthError(http.StatusForbidden, "Node registration is disabled", fmt.Errorf("node registration is disabled"))
+	}
+
+	isReRegistration := existingNode != nil
+	requiresFreshEnrollment := nodeRequiresFreshEnrollment(existingNode)
+	if isReRegistration && !requiresFreshEnrollment {
+		if strings.TrimSpace(runtimeToken) != "" {
+			if err := validateRegistrationRuntimeToken(runtimeToken, existingNode); err != nil {
+				return registrationAuthResult{}, err
+			}
+			return registrationAuthResult{RequestedTenantID: existingNode.TenantID}, nil
+		}
+
+		if strings.TrimSpace(req.Token) == "" {
+			return registrationAuthResult{}, newRegistrationAuthError(http.StatusUnauthorized, "Runtime token required", fmt.Errorf("runtime token required for node re-registration"))
+		}
+		tenantID, err := c.validateEnrollmentTokenTenant(req.Token)
+		if err != nil {
+			return registrationAuthResult{}, err
+		}
+		if tenantID != existingNode.TenantID {
+			return registrationAuthResult{}, newRegistrationAuthError(http.StatusForbidden, "Node tenant ownership is immutable", fmt.Errorf("node tenant ownership is immutable"))
+		}
+		if !registrationMachineIDMatches(req.MachineID, existingNode.MachineID) {
+			return registrationAuthResult{}, newRegistrationAuthError(http.StatusForbidden, "Node machine identity mismatch", fmt.Errorf("node machine identity mismatch"))
+		}
+		return registrationAuthResult{RequestedTenantID: tenantID}, nil
+	}
+
+	if strings.TrimSpace(req.Token) == "" {
+		return registrationAuthResult{}, newRegistrationAuthError(http.StatusUnauthorized, "Token required", fmt.Errorf("token required"))
+	}
+
+	tenantID, err := c.validateEnrollmentTokenTenant(req.Token)
+	if err != nil {
+		return registrationAuthResult{}, err
+	}
+	if requiresFreshEnrollment && tenantID != existingNode.TenantID {
+		return registrationAuthResult{}, newRegistrationAuthError(http.StatusForbidden, "Node tenant ownership is immutable", fmt.Errorf("node tenant ownership is immutable"))
+	}
+
+	return registrationAuthResult{RequestedTenantID: tenantID}, nil
+}
+
+func validateRegistrationRuntimeToken(runtimeToken string, existingNode *controllerstorage.Node) *registrationAuthError {
+	if existingNode == nil {
+		return newRegistrationAuthError(http.StatusUnauthorized, "Node not found", fmt.Errorf("node not found"))
+	}
+
+	claims, err := auth.ValidateRuntimeToken(runtimeToken)
+	if err != nil {
+		return newRegistrationAuthError(http.StatusUnauthorized, "Invalid runtime token", fmt.Errorf("invalid runtime token"))
+	}
+	tokenNodeID, err := uuid.Parse(claims.NodeID)
+	if err != nil {
+		return newRegistrationAuthError(http.StatusUnauthorized, "Invalid runtime token node id", fmt.Errorf("invalid runtime token node id"))
+	}
+	if tokenNodeID != existingNode.ID {
+		return newRegistrationAuthError(http.StatusForbidden, "Runtime token node mismatch", fmt.Errorf("runtime token node mismatch"))
+	}
+	if strings.TrimSpace(claims.TenantID) == "" {
+		return newRegistrationAuthError(http.StatusUnauthorized, "Runtime token tenant missing", fmt.Errorf("runtime token tenant missing"))
+	}
+	tokenTenantID, err := uuid.Parse(claims.TenantID)
+	if err != nil {
+		return newRegistrationAuthError(http.StatusUnauthorized, "Invalid runtime token tenant", fmt.Errorf("invalid runtime token tenant"))
+	}
+	if tokenTenantID != existingNode.TenantID {
+		return newRegistrationAuthError(http.StatusForbidden, "Runtime token tenant mismatch", fmt.Errorf("runtime token tenant mismatch"))
+	}
+	return nil
+}
+
+func registrationMachineIDMatches(requestMachineID, storedMachineID string) bool {
+	requestMachineID = strings.TrimSpace(requestMachineID)
+	storedMachineID = strings.TrimSpace(storedMachineID)
+	return requestMachineID != "" && storedMachineID != "" && requestMachineID == storedMachineID
+}
+
+func (c *Controller) validateEnrollmentTokenTenant(tokenValue string) (uuid.UUID, *registrationAuthError) {
+	if c.tokenValidator == nil {
+		return uuid.Nil, newRegistrationAuthError(http.StatusInternalServerError, "Token validator is not configured", fmt.Errorf("token validator is not configured"))
+	}
+
+	tkn, err := c.tokenValidator.Validate(tokenValue)
+	if err != nil {
+		switch err {
+		case token.ErrTokenNotFound:
+			return uuid.Nil, newRegistrationAuthError(http.StatusUnauthorized, "Invalid token", err)
+		case token.ErrTokenExpired:
+			return uuid.Nil, newRegistrationAuthError(http.StatusUnauthorized, "Token expired", err)
+		case token.ErrTokenExhausted:
+			return uuid.Nil, newRegistrationAuthError(http.StatusUnauthorized, "Token exhausted (max uses reached)", err)
+		case token.ErrTokenRevoked:
+			return uuid.Nil, newRegistrationAuthError(http.StatusUnauthorized, "Token revoked", err)
+		default:
+			return uuid.Nil, newRegistrationAuthError(http.StatusUnauthorized, "Invalid token", err)
+		}
+	}
+	if c.logger != nil {
+		c.logger.Debug("Token validated: %s (tag: %s)", previewString(tkn.Token, 12), tkn.Tag)
+	}
+
+	tenantID, err := c.store.GetTenantIDByToken(tokenValue)
+	if err != nil {
+		return uuid.Nil, newRegistrationAuthError(http.StatusInternalServerError, "Failed to get tenant ID from token", err)
+	}
+	return tenantID, nil
+}
+
 func (c *Controller) authorizeRuntimeNodeByPublicKey(w http.ResponseWriter, runtimeToken, publicKey string) (*controllerstorage.Node, bool) {
 	if strings.TrimSpace(publicKey) == "" {
 		http.Error(w, "Public key required", http.StatusBadRequest)
@@ -1191,7 +1297,16 @@ func (c *Controller) authorizeRuntimeNodeByPublicKey(w http.ResponseWriter, runt
 		http.Error(w, "Runtime token node mismatch", http.StatusForbidden)
 		return nil, false
 	}
-	if claims.TenantID != "" && claims.TenantID != node.TenantID.String() {
+	if strings.TrimSpace(claims.TenantID) == "" {
+		http.Error(w, "Runtime token tenant missing", http.StatusUnauthorized)
+		return nil, false
+	}
+	tokenTenantID, err := uuid.Parse(claims.TenantID)
+	if err != nil {
+		http.Error(w, "Invalid runtime token tenant", http.StatusUnauthorized)
+		return nil, false
+	}
+	if tokenTenantID != node.TenantID {
 		http.Error(w, "Runtime token tenant mismatch", http.StatusForbidden)
 		return nil, false
 	}
@@ -1331,7 +1446,14 @@ func (c *Controller) resolveCertificateRequestNode(r *http.Request, req *certifi
 		if err != nil || node == nil {
 			return nil, fmt.Errorf("node not found")
 		}
-		if claims.TenantID != "" && node.TenantID.String() != claims.TenantID {
+		if strings.TrimSpace(claims.TenantID) == "" {
+			return nil, fmt.Errorf("invalid runtime token tenant")
+		}
+		tokenTenantID, err := uuid.Parse(claims.TenantID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid runtime token tenant")
+		}
+		if tokenTenantID != node.TenantID {
 			return nil, fmt.Errorf("tenant mismatch")
 		}
 		if nodeCertificateRequestForbidden(node) {
@@ -1341,27 +1463,10 @@ func (c *Controller) resolveCertificateRequestNode(r *http.Request, req *certifi
 	}
 
 	if req.Token != "" {
-		if _, err := c.tokenValidator.Validate(req.Token); err != nil {
-			return nil, fmt.Errorf("invalid enrollment token")
-		}
-		tenantID, err := c.store.GetTenantIDByToken(req.Token)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve tenant by token")
-		}
-		node, err := c.resolveNodeByRequest(req)
-		if err != nil || node == nil {
-			return nil, fmt.Errorf("node not found")
-		}
-		if node.TenantID != tenantID {
-			return nil, fmt.Errorf("node tenant mismatch")
-		}
-		if nodeCertificateRequestForbidden(node) {
-			return nil, fmt.Errorf("node access denied: current status is '%s'", strings.ToLower(strings.TrimSpace(node.Status)))
-		}
-		return node, nil
+		return nil, fmt.Errorf("runtime_token is required for certificate issuance")
 	}
 
-	return nil, fmt.Errorf("runtime_token or token is required")
+	return nil, fmt.Errorf("runtime_token is required")
 }
 
 func (c *Controller) resolveNodeByRequest(req *certificateIssueRequest) (*controllerstorage.Node, error) {
@@ -1449,6 +1554,9 @@ func (c *Controller) attachNodeCertificateToSyncResponse(publicKey string, resp 
 	if err != nil || cert == nil || cert.Status != controllerstorage.CertStatusIssued {
 		return
 	}
+	if !cert.NotAfter.After(time.Now()) {
+		return
+	}
 	resp.CertificatePEM = cert.CertPEM
 	resp.CertificateCA = cert.CAPEM
 	resp.CertificateNotAfter = cert.NotAfter.Unix()
@@ -1461,7 +1569,8 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if !c.authorizeJWTPermission(w, r, middleware.PermRoutesWrite) {
+	claims, ok := c.authorizeJWTPermission(w, r, middleware.PermRoutesWrite)
+	if !ok {
 		return
 	}
 
@@ -1482,8 +1591,20 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Find node by hostname
-	allNodes, err := c.store.GetAllNodes()
+	// Find node by hostname within the authenticated tenant. super_admin is
+	// platform-scoped; tenant users are restricted to their JWT tenant.
+	var allNodes []*controllerstorage.Node
+	var err error
+	if claims.Role == middleware.RoleSuperAdmin {
+		allNodes, err = c.store.GetAllNodes()
+	} else {
+		tenantID, parseErr := uuid.Parse(claims.TenantID)
+		if parseErr != nil {
+			http.Error(w, "Invalid tenant context", http.StatusForbidden)
+			return
+		}
+		allNodes, err = c.store.GetNodesByTenant(tenantID)
+	}
 	if err != nil {
 		c.logger.Error("Failed to get nodes: %v", err)
 		http.Error(w, "Failed to get nodes", http.StatusInternalServerError)
@@ -1581,7 +1702,7 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 	if c.heartbeat != nil {
 		// Use Redis Pub/Sub to notify all peers
 		// Peers will receive the notification and sync at different times
-		c.heartbeat.PublishConfigChange("default", "network_update", map[string]string{
+		c.heartbeat.PublishConfigChange(targetNode.TenantID.String(), "network_update", map[string]string{
 			"hostname": req.Hostname,
 			"cidr":     req.CIDR,
 			"action":   req.Action,
@@ -1598,33 +1719,33 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-func (c *Controller) authorizeJWTPermission(w http.ResponseWriter, r *http.Request, permission string) bool {
+func (c *Controller) authorizeJWTPermission(w http.ResponseWriter, r *http.Request, permission string) (*auth.Claims, bool) {
 	tokenString, ok := runtimeBearerTokenFromRequest(r)
 	if !ok {
 		http.Error(w, "Authorization header required", http.StatusUnauthorized)
-		return false
+		return nil, false
 	}
 
 	claims, err := auth.ValidateToken(tokenString)
 	if err != nil {
 		http.Error(w, "Invalid token", http.StatusUnauthorized)
-		return false
+		return nil, false
 	}
 	if claims.MustChangePassword {
 		http.Error(w, "You must change your password before proceeding", http.StatusForbidden)
-		return false
+		return nil, false
 	}
 	if claims.Role == middleware.RoleSuperAdmin {
-		return true
+		return claims, true
 	}
 	if claims.TenantID == "" {
 		http.Error(w, "Tenant context required", http.StatusForbidden)
-		return false
+		return nil, false
 	}
 	tenantID, err := uuid.Parse(claims.TenantID)
 	if err != nil {
 		http.Error(w, "Invalid tenant context", http.StatusForbidden)
-		return false
+		return nil, false
 	}
 
 	roleName := claims.Role
@@ -1634,16 +1755,16 @@ func (c *Controller) authorizeJWTPermission(w http.ResponseWriter, r *http.Reque
 	permissions, err := c.store.GetRolePermissions(tenantID, roleName)
 	if err != nil {
 		http.Error(w, "Role not found", http.StatusForbidden)
-		return false
+		return nil, false
 	}
 	for _, p := range permissions {
 		if p == permission {
-			return true
+			return claims, true
 		}
 	}
 
 	http.Error(w, "Insufficient permissions", http.StatusForbidden)
-	return false
+	return nil, false
 }
 
 // ========== Policy Management Handlers ==========
@@ -1856,39 +1977,11 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 	existingNode, _ := c.store.GetNode(req.PublicKey)
 	isReRegistration := (existingNode != nil)
 	requiresFreshEnrollment := nodeRequiresFreshEnrollment(existingNode)
-	var requestedTenantID uuid.UUID
-
-	if nodeRegistrationForbidden(existingNode) {
-		return "", fmt.Errorf("node registration is disabled")
+	authResult, authErr := c.authorizeRegistrationRequest(req, existingNode, strings.TrimSpace(req.RuntimeToken))
+	if authErr != nil {
+		return "", authErr
 	}
-
-	if !isReRegistration || requiresFreshEnrollment {
-		if req.Token == "" {
-			return "", fmt.Errorf("token required")
-		}
-
-		tkn, err := c.tokenValidator.Validate(req.Token)
-		if err != nil {
-			return "", fmt.Errorf("invalid token: %w", err)
-		}
-		c.logger.Debug("Token validated: %s (tag: %s)", previewString(tkn.Token, 12), tkn.Tag)
-		requestedTenantID, err = c.store.GetTenantIDByToken(req.Token)
-		if err != nil {
-			return "", fmt.Errorf("failed to get tenant ID by token: %w", err)
-		}
-		if requiresFreshEnrollment && requestedTenantID != existingNode.TenantID {
-			return "", fmt.Errorf("node tenant ownership is immutable")
-		}
-	} else if req.Token != "" {
-		var err error
-		requestedTenantID, err = c.store.GetTenantIDByToken(req.Token)
-		if err != nil {
-			return "", fmt.Errorf("failed to get tenant ID by token: %w", err)
-		}
-		if requestedTenantID != existingNode.TenantID {
-			return "", fmt.Errorf("node tenant ownership is immutable")
-		}
-	}
+	requestedTenantID := authResult.RequestedTenantID
 
 	// Use provided public IP or empty
 	if req.PublicIP == "" {
@@ -1972,8 +2065,14 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 	}
 
 	if req.Token != "" && (!isReRegistration || requiresFreshEnrollment) {
-		if err := c.tokenStore.IncrementUsage(req.Token, req.PublicKey); err != nil {
-			c.logger.Warn("Failed to increment token usage: %v", err)
+		if err := c.tokenValidator.ConsumeToken(req.Token, req.PublicKey); err != nil {
+			if c.logger != nil {
+				c.logger.Warn("Failed to consume token: %v", err)
+			}
+			if markErr := c.store.MarkNodeDeleted(req.PublicKey); markErr != nil && c.logger != nil {
+				c.logger.Warn("Failed to roll back node %s after token consume failure: %v", previewString(req.PublicKey, 8), markErr)
+			}
+			return "", fmt.Errorf("failed to consume enrollment token: %w", err)
 		}
 	}
 

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import router from '@/router'
 
 const routePermissionCases = [
+  ['Dashboard', 'monitoring:read'],
   ['Nodes', 'nodes:read'],
   ['Routing', 'routes:read'],
   ['Policies', 'policies:read'],
@@ -47,13 +48,44 @@ describe('router RBAC metadata', () => {
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
     localStorage.setItem('aria_last_activity', `${Date.now()}`)
     localStorage.setItem('aria_user', JSON.stringify({ role: 'admin' }))
-    localStorage.setItem('aria_permissions', JSON.stringify(['nodes:read']))
+    localStorage.setItem('aria_permissions', JSON.stringify(['monitoring:read', 'nodes:read']))
 
     await router.push('/dashboard')
     await router.isReady()
     await router.push('/platform/tokens')
 
     expect(router.currentRoute.value.path).toBe('/dashboard')
+  })
+
+  it('redirects Dashboard access without monitoring permission to the first allowed route', async () => {
+    await router.replace('/login')
+    await router.isReady()
+
+    localStorage.setItem('aria_token', 'dummy-token')
+    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_last_activity', `${Date.now()}`)
+    localStorage.setItem('aria_user', JSON.stringify({ role: 'operator' }))
+    localStorage.setItem('aria_permissions', JSON.stringify(['nodes:read']))
+
+    await router.push('/dashboard')
+
+    expect(router.currentRoute.value.path).toBe('/nodes')
+  })
+
+  it('redirects must-change-password sessions to login before protected pages', async () => {
+    await router.replace('/login')
+    await router.isReady()
+
+    localStorage.setItem('aria_token', 'dummy-token')
+    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_last_activity', `${Date.now()}`)
+    localStorage.setItem('aria_user', JSON.stringify({ role: 'admin' }))
+    localStorage.setItem('aria_permissions', JSON.stringify(['monitoring:read']))
+    localStorage.setItem('aria_must_change_password', 'true')
+
+    await router.push('/dashboard')
+
+    expect(router.currentRoute.value.path).toBe('/login')
   })
 
   it('redirects token-only sessions to login before protected pages', async () => {

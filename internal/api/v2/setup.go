@@ -456,6 +456,10 @@ func (r *Router) updateTenant(w http.ResponseWriter, req *http.Request, tenantID
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(body.Status), "deleted") {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Tenant deletion must use DELETE /api/v2/tenants/{id}", nil)
+		return
+	}
 
 	var resourceQuota string
 	if body.ResourceQuota != nil {

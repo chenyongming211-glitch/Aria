@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/composables/useApi'
 import { API_ENDPOINTS } from '@/config/api'
+import useUserStore from '@/stores/user'
 
 export default defineStore('tenant', () => {
   const currentTenant = ref(null)
@@ -55,12 +56,25 @@ export default defineStore('tenant', () => {
     }
   }
 
-  function switchTenant(tenant) {
+  async function switchTenant(tenant) {
     currentTenant.value = tenant
-    localStorage.setItem('aria-current-tenant', JSON.stringify(tenant))
+    if (tenant?.id) {
+      localStorage.setItem('aria-current-tenant', JSON.stringify(tenant))
+    } else {
+      localStorage.removeItem('aria-current-tenant')
+    }
 
-    // Notify other parts of app about tenant change
-    window.dispatchEvent(new CustomEvent('tenantChanged', { detail: tenant }))
+    const userStore = useUserStore()
+    try {
+      if (userStore.user?.role) {
+        await userStore.loadPermissions(tenant?.id, userStore.user.role)
+      }
+    } catch (error) {
+      console.warn('Failed to reload permissions after tenant switch:', error)
+    } finally {
+      // Notify other parts of app about tenant change
+      window.dispatchEvent(new CustomEvent('tenantChanged', { detail: tenant }))
+    }
   }
 
   return {

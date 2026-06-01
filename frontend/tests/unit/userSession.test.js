@@ -166,6 +166,73 @@ describe('user session persistence', () => {
     })
   })
 
+  it('derives missing login user data from JWT claims instead of defaulting to admin', async () => {
+    api.post.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          token: makeJwt({
+            uid: 'user-2',
+            unm: 'viewer',
+            rol: 'viewer',
+            tid: 'tenant-1',
+            exp: Math.floor(Date.now() / 1000) + 3600
+          }),
+          expires_in: 7200,
+          require_password_change: false
+        }
+      }
+    })
+    api.get.mockResolvedValue({
+      data: {
+        data: {
+          role: 'viewer',
+          tenant_id: 'tenant-1',
+          permissions: ['nodes:read']
+        }
+      }
+    })
+
+    const userStore = useUserStore()
+    const result = await userStore.login({ username: 'viewer', password: 'secret' })
+
+    expect(result.success).toBe(true)
+    expect(userStore.user).toMatchObject({
+      id: 'user-2',
+      username: 'viewer',
+      role: 'viewer',
+      tenant_id: 'tenant-1'
+    })
+    expect(userStore.user.role).not.toBe('admin')
+  })
+
+  it('persists the must-change-password flag during forced-password login', async () => {
+    api.post.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          token: 'new-token',
+          expires_in: 7200,
+          require_password_change: true,
+          user: {
+            id: 'user-1',
+            username: 'sysadmin',
+            role: 'super_admin',
+            tenant_id: ''
+          }
+        }
+      }
+    })
+
+    const userStore = useUserStore()
+    const result = await userStore.login({ username: 'sysadmin', password: 'secret' })
+
+    expect(result.success).toBe(true)
+    expect(result.requirePasswordChange).toBe(true)
+    expect(userStore.mustChangePassword).toBe(true)
+    expect(localStorage.getItem('aria_must_change_password')).toBe('true')
+  })
+
   it('loads operator permissions from the current auth context without requiring roles:read', async () => {
     api.get.mockResolvedValue({
       data: {
