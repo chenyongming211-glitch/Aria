@@ -159,23 +159,31 @@ vi.mock('@/composables/usePolicyApi', () => ({
   usePolicyApi: policyApiMock
 }))
 
-const permissionMock = () => ({
-  hasPermission: () => true,
-  hasAnyPermission: () => true,
-  hasAllPermissions: () => true,
-  canAccessRoute: () => true
-})
-
 vi.mock('@/composables/usePermission', () => ({
-  usePermission: permissionMock
+  usePermission: () => ({
+    hasPermission: () => true,
+    hasAnyPermission: () => true,
+    hasAllPermissions: () => true,
+    canAccessRoute: () => true
+  })
 }))
 
 vi.mock('/src/composables/usePermission', () => ({
-  usePermission: permissionMock
+  usePermission: () => ({
+    hasPermission: () => true,
+    hasAnyPermission: () => true,
+    hasAllPermissions: () => true,
+    canAccessRoute: () => true
+  })
 }))
 
 vi.mock('/src/composables/usePermission.js', () => ({
-  usePermission: permissionMock
+  usePermission: () => ({
+    hasPermission: () => true,
+    hasAnyPermission: () => true,
+    hasAllPermissions: () => true,
+    canAccessRoute: () => true
+  })
 }))
 
 vi.mock('element-plus', () => ({
