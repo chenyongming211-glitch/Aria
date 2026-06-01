@@ -7,7 +7,8 @@ const SESSION_STORAGE_KEYS = [
   'aria_user',
   'aria_last_activity',
   'aria-current-tenant',
-  'aria_permissions'
+  'aria_permissions',
+  'aria_must_change_password'
 ]
 
 export function clearSession() {

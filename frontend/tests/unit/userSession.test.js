@@ -17,6 +17,8 @@ const makeJwt = (payload) => [
   'signature'
 ].join('.')
 
+const flushPromises = () => new Promise(resolve => setTimeout(resolve, 0))
+
 describe('user session persistence', () => {
   let storage
 
@@ -164,27 +166,102 @@ describe('user session persistence', () => {
     })
   })
 
-  it('loads built-in operator permissions without requiring roles:read', async () => {
+  it('derives missing login user data from JWT claims instead of defaulting to admin', async () => {
+    api.post.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          token: makeJwt({
+            uid: 'user-2',
+            unm: 'viewer',
+            rol: 'viewer',
+            tid: 'tenant-1',
+            exp: Math.floor(Date.now() / 1000) + 3600
+          }),
+          expires_in: 7200,
+          require_password_change: false
+        }
+      }
+    })
+    api.get.mockResolvedValue({
+      data: {
+        data: {
+          role: 'viewer',
+          tenant_id: 'tenant-1',
+          permissions: ['nodes:read']
+        }
+      }
+    })
+
+    const userStore = useUserStore()
+    const result = await userStore.login({ username: 'viewer', password: 'secret' })
+
+    expect(result.success).toBe(true)
+    expect(userStore.user).toMatchObject({
+      id: 'user-2',
+      username: 'viewer',
+      role: 'viewer',
+      tenant_id: 'tenant-1'
+    })
+    expect(userStore.user.role).not.toBe('admin')
+  })
+
+  it('persists the must-change-password flag during forced-password login', async () => {
+    api.post.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          token: 'new-token',
+          expires_in: 7200,
+          require_password_change: true,
+          user: {
+            id: 'user-1',
+            username: 'sysadmin',
+            role: 'super_admin',
+            tenant_id: ''
+          }
+        }
+      }
+    })
+
+    const userStore = useUserStore()
+    const result = await userStore.login({ username: 'sysadmin', password: 'secret' })
+
+    expect(result.success).toBe(true)
+    expect(result.requirePasswordChange).toBe(true)
+    expect(userStore.mustChangePassword).toBe(true)
+    expect(localStorage.getItem('aria_must_change_password')).toBe('true')
+  })
+
+  it('loads operator permissions from the current auth context without requiring roles:read', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        data: {
+          role: 'operator',
+          tenant_id: 'tenant-1',
+          permissions: ['nodes:read', 'custom:use']
+        }
+      }
+    })
     const userStore = useUserStore()
 
     await userStore.loadPermissions('tenant-1', 'operator')
 
-    expect(api.get).not.toHaveBeenCalled()
-    expect(userStore.permissions).toEqual(expect.arrayContaining([
-      'nodes:read',
-      'nodes:write',
-      'routes:read',
-      'acls:read',
-      'qos:read',
-      'monitoring:read',
-      'commands:write',
-      'policies:read'
-    ]))
-    expect(userStore.permissions).not.toContain('roles:read')
+    expect(api.get).toHaveBeenCalledWith('/v2/auth/permissions')
+    expect(userStore.permissions).toEqual(['nodes:read', 'custom:use'])
     expect(JSON.parse(localStorage.getItem('aria_permissions'))).toEqual(userStore.permissions)
   })
 
-  it('restores role permissions when cached permissions are missing', () => {
+  it('restores role permissions immediately and refreshes them from the server', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        data: {
+          role: 'operator',
+          tenant_id: 'tenant-1',
+          permissions: ['nodes:read', 'custom:use']
+        }
+      }
+    })
     localStorage.setItem('aria_token', 'valid-token')
     localStorage.setItem('aria_user', JSON.stringify({
       id: 'user-1',
@@ -203,6 +280,12 @@ describe('user session persistence', () => {
       'monitoring:read'
     ]))
     expect(JSON.parse(localStorage.getItem('aria_permissions'))).toEqual(userStore.permissions)
+
+    await flushPromises()
+
+    expect(api.get).toHaveBeenCalledWith('/v2/auth/permissions')
+    expect(userStore.permissions).toEqual(['nodes:read', 'custom:use'])
+    expect(JSON.parse(localStorage.getItem('aria_permissions'))).toEqual(['nodes:read', 'custom:use'])
   })
 
   it('waits for permission loading before resolving login', async () => {
@@ -239,11 +322,15 @@ describe('user session persistence', () => {
     await Promise.resolve()
     expect(settled).toBe(false)
 
+    expect(api.get).toHaveBeenCalledWith('/v2/auth/permissions')
+
     resolveRoles({
       data: {
-        data: [
-          { name: 'admin', permissions: ['nodes:read', 'roles:read'] }
-        ]
+        data: {
+          role: 'admin',
+          tenant_id: 'tenant-1',
+          permissions: ['nodes:read', 'roles:read']
+        }
       }
     })
 

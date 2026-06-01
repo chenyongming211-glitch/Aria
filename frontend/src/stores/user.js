@@ -105,6 +105,11 @@ const userFromTokenClaims = (token) => {
   })
 }
 
+export const tokenRequiresPasswordChange = (token) => {
+  const claims = decodeJwtPayload(token)
+  return Boolean(claims?.mcp)
+}
+
 const mergeTokenUserClaims = (cachedUser, token) => {
   const tokenUser = userFromTokenClaims(token)
   if (!tokenUser) return normalizeUser(cachedUser)
@@ -129,6 +134,14 @@ export default defineStore('user', () => {
     permissions.value = normalized
     localStorage.setItem('aria_permissions', JSON.stringify(permissions.value))
     return permissions.value
+  }
+
+  const persistCurrentTenant = (tenantId) => {
+    if (tenantId) {
+      localStorage.setItem('aria-current-tenant', JSON.stringify({ id: tenantId }))
+      return
+    }
+    localStorage.removeItem('aria-current-tenant')
   }
 
   const readCachedPermissions = () => {
@@ -160,6 +173,11 @@ export default defineStore('user', () => {
       const requirePasswordChange = response.data?.data?.require_password_change || response.data?.require_password_change || false
 
       if (token) {
+        const tokenUser = userFromTokenClaims(token)
+        if (!userData && !tokenUser?.role) {
+          throw new Error('Invalid login response: no user found')
+        }
+
         // 存储 token 到 localStorage
         localStorage.setItem('aria_token', token)
         
@@ -172,17 +190,19 @@ export default defineStore('user', () => {
         localStorage.setItem('aria_last_activity', Date.now().toString())
 
         // 设置用户数据
-        user.value = normalizeUser(userData || {
-          id: 'user-1',
-          username: credentials.username,
-          role: 'admin'
-        }, credentials.username)
+        user.value = normalizeUser(userData || tokenUser, credentials.username)
 
         isAuthenticated.value = true
-        mustChangePassword.value = requirePasswordChange
+        mustChangePassword.value = requirePasswordChange || tokenRequiresPasswordChange(token)
+        if (mustChangePassword.value) {
+          localStorage.setItem('aria_must_change_password', 'true')
+        } else {
+          localStorage.removeItem('aria_must_change_password')
+        }
 
         // 存储用户会话
         localStorage.setItem('aria_user', JSON.stringify(user.value))
+        persistCurrentTenant(user.value?.tenant_id)
 
         // 加载用户权限
         if (user.value?.role === 'super_admin') {
@@ -194,13 +214,6 @@ export default defineStore('user', () => {
           if (defaults.length > 0) {
             setPermissions(defaults)
           }
-        }
-
-        // 存储租户 ID 到 localStorage（用于 API 请求）
-        if (userData?.tenant_id) {
-          localStorage.setItem('aria-current-tenant', JSON.stringify({
-            id: userData.tenant_id
-          }))
         }
 
         return { success: true, token, requirePasswordChange }
@@ -237,6 +250,7 @@ export default defineStore('user', () => {
       
       if (response.data?.success) {
         mustChangePassword.value = false
+        localStorage.removeItem('aria_must_change_password')
         return { success: true }
       } else {
         return { success: false, message: response.data?.message || 'Password change failed' }
@@ -260,6 +274,7 @@ export default defineStore('user', () => {
     localStorage.removeItem('aria_user')
     localStorage.removeItem('aria-current-tenant')
     localStorage.removeItem('aria_permissions')
+    localStorage.removeItem('aria_must_change_password')
     permissions.value = []
   }
 
@@ -285,7 +300,16 @@ export default defineStore('user', () => {
     }
 
     isAuthenticated.value = true
+    mustChangePassword.value = localStorage.getItem('aria_must_change_password') === 'true' || tokenRequiresPasswordChange(token)
+    if (mustChangePassword.value) {
+      localStorage.setItem('aria_must_change_password', 'true')
+    } else {
+      localStorage.removeItem('aria_must_change_password')
+    }
     localStorage.setItem('aria_user', JSON.stringify(user.value))
+    if (user.value?.tenant_id) {
+      persistCurrentTenant(user.value.tenant_id)
+    }
 
     const cached = readCachedPermissions()
     if (Array.isArray(cached)) {
@@ -305,6 +329,12 @@ export default defineStore('user', () => {
       setPermissions(['*'])
     }
 
+    if (user.value?.role !== 'super_admin' && user.value?.tenant_id) {
+      loadCurrentPermissions().catch((error) => {
+        console.warn('Failed to refresh session permissions:', error)
+      })
+    }
+
     return true
   }
 
@@ -319,14 +349,16 @@ export default defineStore('user', () => {
     }
   }
 
-  // 加载用户权限（从角色查询）
-  const loadPermissions = async (tenantId, role) => {
-    const roleName = normalizeRoleName(role)
-    if (roleName === 'super_admin') {
-      // super_admin 拥有所有权限
-      return setPermissions(['*'])
+  const loadCurrentPermissions = async () => {
+    const response = await api.get(API_ENDPOINTS.AUTH.PERMISSIONS)
+    const data = response.data?.data || response.data || {}
+    if (Array.isArray(data.permissions)) {
+      return setPermissions(data.permissions)
     }
+    return permissions.value
+  }
 
+  const loadFallbackPermissions = async (tenantId, roleName) => {
     const defaultPermissions = permissionsForRole(roleName)
     if (defaultPermissions.length > 0 && !defaultPermissions.includes('roles:read')) {
       return setPermissions(defaultPermissions)
@@ -364,6 +396,21 @@ export default defineStore('user', () => {
     return permissions.value
   }
 
+  // 加载用户权限：优先使用当前 JWT 上下文对应的后端权限，失败时回退到本地内置权限。
+  const loadPermissions = async (tenantId, role) => {
+    const roleName = normalizeRoleName(role)
+    if (roleName === 'super_admin') {
+      return setPermissions(['*'])
+    }
+
+    try {
+      return await loadCurrentPermissions()
+    } catch (error) {
+      console.error('Load permissions error:', error)
+      return loadFallbackPermissions(tenantId, roleName)
+    }
+  }
+
   // 刷新 token
   const refreshToken = async () => {
     try {
@@ -371,6 +418,12 @@ export default defineStore('user', () => {
       const token = response.data?.data?.token || response.data?.token
       if (token) {
         localStorage.setItem('aria_token', token)
+        mustChangePassword.value = tokenRequiresPasswordChange(token)
+        if (mustChangePassword.value) {
+          localStorage.setItem('aria_must_change_password', 'true')
+        } else {
+          localStorage.removeItem('aria_must_change_password')
+        }
         return { success: true }
       }
       return { success: false }

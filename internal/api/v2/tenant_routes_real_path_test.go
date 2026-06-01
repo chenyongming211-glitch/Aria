@@ -74,6 +74,9 @@ func TestTenantUserRealDetailPathUpdatesUser(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (SELECT 1 FROM roles WHERE tenant_id = $1 AND name = $2)`)).
+		WithArgs(tenantID, "admin").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET role = COALESCE(NULLIF($1, ''), role), email = COALESCE(NULLIF($2, ''), email), updated_at = NOW() WHERE id = $3 AND tenant_id = $4`)).
 		WithArgs("admin", "", userID, tenantID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -90,6 +93,36 @@ func TestTenantUserRealDetailPathUpdatesUser(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestTenantUpdateRejectsDeletedStatusViaPut(t *testing.T) {
+	t.Setenv("RBAC_ENFORCEMENT", "enforce")
+
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectPermissionLookup(mock, tenantID, "admin", []string{"settings:write"})
+
+	store := controllerstorage.NewStorageWithDB(db)
+	router := &Router{store: store, tenantAPI: handlers.NewTenantAPI(store)}
+	req := withAuthContext(httptest.NewRequest(
+		http.MethodPut,
+		"/api/v2/tenants/"+tenantID.String(),
+		bytes.NewReader([]byte(`{"status":"deleted"}`)),
+	), "admin", tenantID)
+	rr := httptest.NewRecorder()
+	router.HandleTenantScoped(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

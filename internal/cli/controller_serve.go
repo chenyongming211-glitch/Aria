@@ -1461,7 +1461,8 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if !c.authorizeJWTPermission(w, r, middleware.PermRoutesWrite) {
+	claims, ok := c.authorizeJWTPermission(w, r, middleware.PermRoutesWrite)
+	if !ok {
 		return
 	}
 
@@ -1482,8 +1483,20 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Find node by hostname
-	allNodes, err := c.store.GetAllNodes()
+	// Find node by hostname within the authenticated tenant. super_admin is
+	// platform-scoped; tenant users are restricted to their JWT tenant.
+	var allNodes []*controllerstorage.Node
+	var err error
+	if claims.Role == middleware.RoleSuperAdmin {
+		allNodes, err = c.store.GetAllNodes()
+	} else {
+		tenantID, parseErr := uuid.Parse(claims.TenantID)
+		if parseErr != nil {
+			http.Error(w, "Invalid tenant context", http.StatusForbidden)
+			return
+		}
+		allNodes, err = c.store.GetNodesByTenant(tenantID)
+	}
 	if err != nil {
 		c.logger.Error("Failed to get nodes: %v", err)
 		http.Error(w, "Failed to get nodes", http.StatusInternalServerError)
@@ -1581,7 +1594,7 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 	if c.heartbeat != nil {
 		// Use Redis Pub/Sub to notify all peers
 		// Peers will receive the notification and sync at different times
-		c.heartbeat.PublishConfigChange("default", "network_update", map[string]string{
+		c.heartbeat.PublishConfigChange(targetNode.TenantID.String(), "network_update", map[string]string{
 			"hostname": req.Hostname,
 			"cidr":     req.CIDR,
 			"action":   req.Action,
@@ -1598,33 +1611,33 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-func (c *Controller) authorizeJWTPermission(w http.ResponseWriter, r *http.Request, permission string) bool {
+func (c *Controller) authorizeJWTPermission(w http.ResponseWriter, r *http.Request, permission string) (*auth.Claims, bool) {
 	tokenString, ok := runtimeBearerTokenFromRequest(r)
 	if !ok {
 		http.Error(w, "Authorization header required", http.StatusUnauthorized)
-		return false
+		return nil, false
 	}
 
 	claims, err := auth.ValidateToken(tokenString)
 	if err != nil {
 		http.Error(w, "Invalid token", http.StatusUnauthorized)
-		return false
+		return nil, false
 	}
 	if claims.MustChangePassword {
 		http.Error(w, "You must change your password before proceeding", http.StatusForbidden)
-		return false
+		return nil, false
 	}
 	if claims.Role == middleware.RoleSuperAdmin {
-		return true
+		return claims, true
 	}
 	if claims.TenantID == "" {
 		http.Error(w, "Tenant context required", http.StatusForbidden)
-		return false
+		return nil, false
 	}
 	tenantID, err := uuid.Parse(claims.TenantID)
 	if err != nil {
 		http.Error(w, "Invalid tenant context", http.StatusForbidden)
-		return false
+		return nil, false
 	}
 
 	roleName := claims.Role
@@ -1634,16 +1647,16 @@ func (c *Controller) authorizeJWTPermission(w http.ResponseWriter, r *http.Reque
 	permissions, err := c.store.GetRolePermissions(tenantID, roleName)
 	if err != nil {
 		http.Error(w, "Role not found", http.StatusForbidden)
-		return false
+		return nil, false
 	}
 	for _, p := range permissions {
 		if p == permission {
-			return true
+			return claims, true
 		}
 	}
 
 	http.Error(w, "Insufficient permissions", http.StatusForbidden)
-	return false
+	return nil, false
 }
 
 // ========== Policy Management Handlers ==========
@@ -2154,8 +2167,49 @@ func ipInRoutes(ipStr string, routes []string) (bool, string) {
 }
 
 func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
+	username := strings.TrimSpace(os.Getenv("ARIA_SUPER_ADMIN"))
+	rawPassword, passwordOverride := os.LookupEnv("ARIA_SUPER_ADMIN_PASSWORD")
+	password := strings.TrimSpace(rawPassword)
+
+	if username == "" {
+		username = "sysadmin"
+	}
+	if password == "" {
+		passwordOverride = false
+		password = "Sysadmin@123"
+	}
+
+	var existingUserID string
+	err := db.QueryRow(`SELECT id FROM users WHERE username = $1 AND role = 'super_admin'`, username).Scan(&existingUserID)
+	if err == nil {
+		if !passwordOverride {
+			logger.Info("Super admin already exists")
+			return nil
+		}
+
+		hashedPwd, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+		if err != nil {
+			return fmt.Errorf("failed to hash password: %w", err)
+		}
+
+		result, err := db.Exec(`UPDATE users SET password_hash = $1, must_change_password = TRUE WHERE id = $2`,
+			string(hashedPwd), existingUserID)
+		if err != nil {
+			return fmt.Errorf("failed to update super admin password: %w", err)
+		}
+		if rowsAffected, err := result.RowsAffected(); err == nil && rowsAffected == 0 {
+			return fmt.Errorf("failed to update super admin password: user %s was not updated", username)
+		}
+
+		logger.Info("Super admin password synchronized from ARIA_SUPER_ADMIN_PASSWORD: %s", username)
+		return nil
+	}
+	if err != sql.ErrNoRows {
+		return fmt.Errorf("failed to check super admin user: %w", err)
+	}
+
 	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'super_admin'").Scan(&count)
+	err = db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'super_admin'").Scan(&count)
 	if err != nil {
 		return fmt.Errorf("failed to check super admin: %w", err)
 	}
@@ -2163,16 +2217,6 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 	if count > 0 {
 		logger.Info("Super admin already exists")
 		return nil
-	}
-
-	username := os.Getenv("ARIA_SUPER_ADMIN")
-	password := os.Getenv("ARIA_SUPER_ADMIN_PASSWORD")
-
-	if username == "" {
-		username = "sysadmin"
-	}
-	if password == "" {
-		password = "Sysadmin@123"
 	}
 
 	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(password), 12)

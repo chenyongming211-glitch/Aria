@@ -77,7 +77,8 @@ export const API_ENDPOINTS = {
     LOGIN: '/v2/auth/login',
     REFRESH: '/v2/auth/refresh',
     LOGOUT: '/v2/auth/logout',
-    FORCE_CHANGE_PASSWORD: '/v2/auth/force-change-password'
+    FORCE_CHANGE_PASSWORD: '/v2/auth/force-change-password',
+    PERMISSIONS: '/v2/auth/permissions'
   },
 
   // 系统设置 API

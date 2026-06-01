@@ -46,12 +46,13 @@ func SetupRoutes(mux *http.ServeMux, store *controllerstorage.Storage, vmClient 
 		vmClient:   vmClient,
 	}
 
+	withJWT := middleware.JWTAuthMiddleware
 	mux.HandleFunc("/api/v2/auth/login", router.authAPI.HandleLogin)
 	mux.HandleFunc("/api/v2/auth/refresh", router.authAPI.HandleRefresh)
 	mux.HandleFunc("/api/v2/auth/logout", router.authAPI.HandleLogout)
 	mux.HandleFunc("/api/v2/auth/force-change-password", router.authAPI.HandleForceChangePassword)
+	mux.HandleFunc("/api/v2/auth/permissions", withJWT(router.authAPI.HandlePermissions))
 
-	withJWT := middleware.JWTAuthMiddleware
 	mux.HandleFunc("/api/v2/tenants", withJWT(router.HandleTenants))
 	mux.HandleFunc("/api/v2/tenants/", withJWT(router.HandleTenantScoped))
 	mux.HandleFunc("/api/v2/settings/", withJWT(router.HandleSettings))
@@ -453,6 +454,10 @@ func (r *Router) updateTenant(w http.ResponseWriter, req *http.Request, tenantID
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(body.Status), "deleted") {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Tenant deletion must use DELETE /api/v2/tenants/{id}", nil)
 		return
 	}
 

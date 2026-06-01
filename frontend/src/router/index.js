@@ -1,6 +1,6 @@
 // src/router/index.js
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { permissionsForRole } from '@/stores/user'
+import { permissionsForRole, tokenRequiresPasswordChange } from '@/stores/user'
 import { clearSession, isIdleSessionExpired } from '@/utils/session'
 import Layout from '@/components/Layout/Layout.vue'
 
@@ -14,7 +14,7 @@ const routes = [
         path: 'dashboard',
         name: 'Dashboard',
         component: () => import('@/views/Dashboard.vue'),
-        meta: { title: 'Dashboard', requiresAuth: true }
+        meta: { title: 'Dashboard', requiresAuth: true, permission: 'monitoring:read' }
       },
       {
         path: 'nodes',
@@ -205,6 +205,26 @@ const hasRoutePermission = (to) => {
   return permissions.includes(required)
 }
 
+const requiresPasswordChange = (token) => {
+  return localStorage.getItem('aria_must_change_password') === 'true' || tokenRequiresPasswordChange(token)
+}
+
+const routePathForChild = (child) => {
+  if (!child?.path || child.path.includes(':')) return null
+  return child.path.startsWith('/') ? child.path : `/${child.path}`
+}
+
+const findAccessibleFallbackPath = (blockedPath) => {
+  const root = routes.find((route) => route.path === '/')
+  for (const child of root?.children || []) {
+    if (child.redirect || !child.meta?.requiresAuth) continue
+    const path = routePathForChild(child)
+    if (!path || path === blockedPath) continue
+    if (hasRoutePermission(child)) return path
+  }
+  return '/login'
+}
+
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('aria_token')
   const expireTime = localStorage.getItem('aria_token_expire_time')
@@ -217,6 +237,7 @@ router.beforeEach((to, from, next) => {
 
   const hasInvalidCachedSession = token && !isExpired && !hasValidCachedUser()
   const hasIdleExpiredSession = token && !isExpired && isIdleSessionExpired()
+  const hasForcedPasswordChange = token && !isExpired && requiresPasswordChange(token)
 
   if (hasInvalidCachedSession) {
     console.warn('Invalid cached session, redirecting to login')
@@ -239,6 +260,12 @@ router.beforeEach((to, from, next) => {
     }
     return
   }
+
+  if (hasForcedPasswordChange && to.path !== '/login') {
+    console.warn('Password change required, redirecting to login')
+    next('/login')
+    return
+  }
   
   if (to.meta.requiresAuth && (!token || isExpired)) {
     if (isExpired) {
@@ -246,11 +273,15 @@ router.beforeEach((to, from, next) => {
       clearCachedSession()
     }
     next('/login')
-  } else if (to.path === '/login' && token && !isExpired) {
+  } else if (to.path === '/login' && token && !isExpired && !hasForcedPasswordChange) {
     next('/dashboard')
   } else if (to.meta.requiresAuth && !hasRoutePermission(to)) {
-    console.warn(`Permission denied for route ${to.path}, redirecting to dashboard`)
-    next('/dashboard')
+    const fallbackPath = findAccessibleFallbackPath(to.path)
+    console.warn(`Permission denied for route ${to.path}, redirecting to ${fallbackPath}`)
+    if (fallbackPath === '/login') {
+      clearCachedSession()
+    }
+    next(fallbackPath)
   } else {
     next()
   }
