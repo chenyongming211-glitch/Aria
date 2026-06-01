@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"aria/internal/logging"
 	"aria/pkg/controllerstorage"
+	"aria/pkg/logging"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
