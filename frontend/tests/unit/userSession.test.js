@@ -9,7 +9,8 @@ vi.mock('@/composables/useApi', () => ({
 }))
 
 import api from '@/composables/useApi'
-import useUserStore from '@/stores/user'
+import useUserStore, { normalizeRoleName } from '@/stores/user'
+import { clearSession } from '@/utils/session'
 
 const makeJwt = (payload) => [
   Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url'),
@@ -32,6 +33,11 @@ describe('user session persistence', () => {
       removeItem: (key) => storage.delete(key),
       clear: () => storage.clear()
     }
+  })
+
+  it('normalizes legacy owner roles to admin', () => {
+    expect(normalizeRoleName('OWNER')).toBe('admin')
+    expect(normalizeRoleName('member')).toBe('operator')
   })
 
   it('clears token-only sessions instead of leaving a half-authenticated browser state', () => {
@@ -100,6 +106,26 @@ describe('user session persistence', () => {
       name: 'sysadmin',
       initials: 'SY'
     })
+  })
+
+  it('clears the in-memory user store when session storage is cleared outside logout', () => {
+    localStorage.setItem('aria_token', 'valid-token')
+    localStorage.setItem('aria_user', JSON.stringify({
+      id: 'user-1',
+      username: 'sysadmin',
+      role: 'super_admin'
+    }))
+
+    const userStore = useUserStore()
+
+    expect(userStore.loadSession()).toBe(true)
+    expect(userStore.isAuthenticated).toBe(true)
+
+    clearSession()
+
+    expect(userStore.isAuthenticated).toBe(false)
+    expect(userStore.user).toBeNull()
+    expect(userStore.permissions).toEqual([])
   })
 
   it('repairs stale cached user roles from JWT claims during startup', () => {
@@ -338,5 +364,55 @@ describe('user session persistence', () => {
 
     expect(result.success).toBe(true)
     expect(userStore.permissions).toEqual(['nodes:read', 'roles:read'])
+  })
+
+  it('updates expiry and cached user data from refresh responses', async () => {
+    api.post.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          token: makeJwt({
+            uid: 'user-1',
+            unm: 'alice',
+            rol: 'viewer',
+            tid: 'tenant-2',
+            exp: Math.floor(Date.now() / 1000) + 3600
+          }),
+          expires_in: 1800,
+          require_password_change: false,
+          user: {
+            id: 'user-1',
+            username: 'alice',
+            role: 'viewer',
+            tenant_id: 'tenant-2'
+          }
+        }
+      }
+    })
+
+    const userStore = useUserStore()
+    userStore.user = {
+      id: 'user-1',
+      username: 'alice',
+      role: 'admin',
+      tenant_id: 'tenant-1'
+    }
+    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_must_change_password', 'true')
+
+    const beforeRefresh = Date.now()
+    const result = await userStore.refreshToken()
+
+    expect(result.success).toBe(true)
+    expect(userStore.user).toMatchObject({
+      role: 'viewer',
+      tenant_id: 'tenant-2'
+    })
+    expect(JSON.parse(localStorage.getItem('aria_user'))).toMatchObject({
+      role: 'viewer',
+      tenant_id: 'tenant-2'
+    })
+    expect(Number(localStorage.getItem('aria_token_expire_time'))).toBeGreaterThanOrEqual(beforeRefresh + 1799 * 1000)
+    expect(localStorage.getItem('aria_must_change_password')).toBeNull()
   })
 })

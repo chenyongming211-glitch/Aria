@@ -355,8 +355,8 @@ func (s *Storage) Migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_qos_rules_enabled ON qos_rules(enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_blacklist_rules_tenant_node_scope ON blacklist_rules(tenant_id, node_id, scope)`,
 		`CREATE INDEX IF NOT EXISTS idx_blacklist_rules_enabled ON blacklist_rules(enabled)`,
-		`CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)`,
-		`CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_unique ON users(username)`,
+			`CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id)`,
 
 		// AI Audit Log - 记录 AI 对话和工具调用
 		`CREATE TABLE IF NOT EXISTS ai_audit_logs (

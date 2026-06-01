@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"net/http"
 
 	"aria/internal/api/apibase"
@@ -64,14 +66,15 @@ func RequirePermission(store *controllerstorage.Storage, permission string) func
 				return
 			}
 
-			roleName := role
-			if roleName == "member" || roleName == "owner" {
-				roleName = controllerstorage.SystemRoleOperator
-			}
+			roleName := controllerstorage.NormalizeRoleName(role)
 
 			permissions, err := store.GetRolePermissions(tenantID, roleName)
 			if err != nil {
-				apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Role not found", nil)
+				if errors.Is(err, sql.ErrNoRows) {
+					apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Role not found", nil)
+					return
+				}
+				apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Role permission lookup failed", nil)
 				return
 			}
 

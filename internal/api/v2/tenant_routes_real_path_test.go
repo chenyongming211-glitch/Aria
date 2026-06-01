@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"testing"
+	"time"
 
 	"aria/internal/api/handlers"
 	"aria/pkg/controllerstorage"
@@ -123,6 +124,91 @@ func TestTenantUpdateRejectsDeletedStatusViaPut(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func expectSingleTenantSuccess(mock sqlmock.Sqlmock, tenantID uuid.UUID) {
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, code, status, resource_quota, created_at, updated_at FROM tenants WHERE id = $1`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "code", "status", "resource_quota", "created_at", "updated_at"}).
+			AddRow(tenantID, "Default", "default", "active", "{}", now, now))
+}
+
+func TestTenantListForAdminRequiresSettingsRead(t *testing.T) {
+	t.Setenv("RBAC_ENFORCEMENT", "enforce")
+
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectPermissionLookup(mock, tenantID, "admin", []string{"nodes:read"})
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withAuthContext(httptest.NewRequest(http.MethodGet, "/api/v2/tenants", nil), "admin", tenantID)
+	rr := httptest.NewRecorder()
+	router.HandleTenants(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestTenantListForAdminReturnsOnlyCurrentTenant(t *testing.T) {
+	t.Setenv("RBAC_ENFORCEMENT", "enforce")
+
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectPermissionLookup(mock, tenantID, "admin", []string{"settings:read"})
+	expectSingleTenantSuccess(mock, tenantID)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withAuthContext(httptest.NewRequest(http.MethodGet, "/api/v2/tenants", nil), "admin", tenantID)
+	rr := httptest.NewRecorder()
+	router.HandleTenants(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestTenantListMapsOwnerToAdminRole(t *testing.T) {
+	t.Setenv("RBAC_ENFORCEMENT", "enforce")
+
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectPermissionLookup(mock, tenantID, "owner", []string{"settings:read"})
+	expectSingleTenantSuccess(mock, tenantID)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withAuthContext(httptest.NewRequest(http.MethodGet, "/api/v2/tenants", nil), "owner", tenantID)
+	rr := httptest.NewRecorder()
+	router.HandleTenants(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

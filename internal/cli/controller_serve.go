@@ -1687,10 +1687,7 @@ func (c *Controller) authorizeJWTPermission(w http.ResponseWriter, r *http.Reque
 		return nil, false
 	}
 
-	roleName := claims.Role
-	if roleName == "member" || roleName == "owner" {
-		roleName = controllerstorage.SystemRoleOperator
-	}
+	roleName := controllerstorage.NormalizeRoleName(claims.Role)
 	permissions, err := c.store.GetRolePermissions(tenantID, roleName)
 	if err != nil {
 		http.Error(w, "Role not found", http.StatusForbidden)
@@ -2218,11 +2215,15 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 		username = "sysadmin"
 	}
 
-	var existingUserID string
-	err := db.QueryRow(`SELECT id FROM users WHERE username = $1 AND role = 'super_admin'`, username).Scan(&existingUserID)
+	var existingUserID, existingPasswordHash string
+	err := db.QueryRow(`SELECT id, password_hash FROM users WHERE username = $1 AND role = 'super_admin'`, username).Scan(&existingUserID, &existingPasswordHash)
 	if err == nil {
 		if !passwordConfigured {
 			logger.Info("Super admin already exists")
+			return nil
+		}
+		if bcrypt.CompareHashAndPassword([]byte(existingPasswordHash), []byte(password)) == nil {
+			logger.Info("Super admin password already synchronized: %s", username)
 			return nil
 		}
 
@@ -2253,7 +2254,7 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 		return fmt.Errorf("failed to check super admin: %w", err)
 	}
 
-	if count > 0 {
+	if count > 0 && !passwordConfigured {
 		logger.Info("Super admin already exists")
 		return nil
 	}
@@ -2272,7 +2273,7 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 		return fmt.Errorf("failed to create super admin: %w", err)
 	}
 
-	logger.Info("Default super admin created: %s (password must be changed on first login)", username)
+	logger.Info("Configured super admin created: %s (password must be changed on first login)", username)
 	return nil
 }
 

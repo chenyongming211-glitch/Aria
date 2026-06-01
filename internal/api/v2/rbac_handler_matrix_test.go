@@ -29,8 +29,10 @@ type handlerMatrixCase struct {
 
 func roleLookupName(role string) string {
 	switch role {
-	case "member", "owner":
+	case "member":
 		return controllerstorage.SystemRoleOperator
+	case "owner":
+		return controllerstorage.SystemRoleAdmin
 	default:
 		return role
 	}

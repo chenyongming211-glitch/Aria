@@ -24,6 +24,7 @@ func TestMigrationSchemaMatchesTenantAndUserHandlers(t *testing.T) {
 		"ALTER TABLE tenants ADD COLUMN IF NOT EXISTS email",
 		"ALTER TABLE tenants ADD COLUMN IF NOT EXISTS phone",
 		"ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at",
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_unique ON users(username)",
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("migration is missing %q", required)

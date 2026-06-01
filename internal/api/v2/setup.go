@@ -76,10 +76,13 @@ func (r *Router) HandleTenants(w http.ResponseWriter, req *http.Request) {
 			r.listAllTenants(w)
 			return
 		}
-		if role == "admin" || role == "owner" {
+		if controllerstorage.NormalizeRoleName(role) == controllerstorage.SystemRoleAdmin {
 			tenantID, ok := middleware.GetTenantID(req.Context())
 			if !ok {
 				apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeTenantContextNotFound, "请先选择租户：当前未设置租户上下文", nil)
+				return
+			}
+			if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermSettingsRead) {
 				return
 			}
 			r.listSingleTenant(w, tenantID)
@@ -1005,7 +1008,7 @@ func (r *Router) authorizeTenant(w http.ResponseWriter, req *http.Request, targe
 		return false
 	}
 
-	if requireAdmin && role != "admin" && role != "owner" {
+	if requireAdmin && controllerstorage.NormalizeRoleName(role) != controllerstorage.SystemRoleAdmin {
 		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Admin privileges required", nil)
 		return false
 	}
@@ -1035,10 +1038,7 @@ func (r *Router) authorizeTenantPermission(w http.ResponseWriter, req *http.Requ
 		return true
 	}
 
-	roleName := role
-	if roleName == "member" || roleName == "owner" {
-		roleName = controllerstorage.SystemRoleOperator
-	}
+	roleName := controllerstorage.NormalizeRoleName(role)
 
 	permissions, err := r.store.GetRolePermissions(targetTenantID, roleName)
 	hasPermission := err == nil && containsString(permissions, permission)

@@ -21,7 +21,7 @@ const (
 	TenantIDKey contextKey = "tenant_id"
 )
 
-var mcpWhitelist = []string{"/api/v2/auth/force-change-password", "/api/v2/auth/login", "/api/v2/auth/refresh", "/api/v2/auth/logout"}
+var mcpWhitelist = []string{"/api/v2/auth/force-change-password", "/api/v2/auth/login", "/api/v2/auth/refresh", "/api/v2/auth/logout", "/api/v2/auth/permissions"}
 
 func containsPath(paths []string, path string) bool {
 	for _, p := range paths {
@@ -102,7 +102,8 @@ func GetUserID(ctx context.Context) (string, bool) {
 	if value == nil {
 		return "", false
 	}
-	return value.(string), true
+	userID, ok := value.(string)
+	return userID, ok
 }
 
 func GetUsername(ctx context.Context) (string, bool) {
@@ -110,7 +111,8 @@ func GetUsername(ctx context.Context) (string, bool) {
 	if value == nil {
 		return "", false
 	}
-	return value.(string), true
+	username, ok := value.(string)
+	return username, ok
 }
 
 func GetUserRole(ctx context.Context) (string, bool) {
@@ -118,5 +120,6 @@ func GetUserRole(ctx context.Context) (string, bool) {
 	if value == nil {
 		return "", false
 	}
-	return value.(string), true
+	role, ok := value.(string)
+	return role, ok
 }
