@@ -1101,6 +1101,14 @@ func TestMonitoringAPI_HealthSuccessReturnsContractFields(t *testing.T) {
 	`)).
 		WithArgs(tenantID).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT COUNT(*)
+		FROM agent_commands ac
+		JOIN nodes n ON n.public_key = ac.node_public_key
+		WHERE n.tenant_id = $1 AND ac.status = 'failed'
+	`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/health", nil), tenantID)
@@ -1148,15 +1156,6 @@ func TestMonitoringAPI_HealthNodeCountFailureReturnsInternalError(t *testing.T) 
 	`)).
 		WithArgs(tenantID).
 		WillReturnError(errors.New("count unavailable"))
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT COUNT(*)
-		FROM agent_commands ac
-		JOIN nodes n ON n.public_key = ac.node_public_key
-		WHERE n.tenant_id = $1 AND ac.status = 'failed'
-	`)).
-		WithArgs(tenantID).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/health", nil), tenantID)
 	rr := httptest.NewRecorder()

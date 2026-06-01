@@ -98,10 +98,15 @@ func TestGetNodesByTenantReturnsRowsErr(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
 	rowsErr := errors.New("cursor failed")
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND status != 'deleted' ORDER BY last_seen DESC`)).
 		WithArgs(tenantID).
-		WillReturnRows(sqlmock.NewRows(testNodeSelectColumns()).RowError(0, rowsErr))
+		WillReturnRows(sqlmock.NewRows(testNodeSelectColumns()).AddRow(
+			nodeID, "pub-key-1", "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-1", "10.0.0.10", 10,
+			now.Unix(), now.Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "online", int64(0), "{}", "", now, now,
+		).RowError(0, rowsErr))
 
 	_, err = NewStorageWithDB(db).GetNodesByTenant(tenantID)
 	if !errors.Is(err, rowsErr) {

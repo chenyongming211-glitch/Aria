@@ -558,7 +558,6 @@ func TestHandleRegister_ReRegistrationRejectsEnrollmentMachineMismatch(t *testin
 
 func TestHandleRegister_ReRegistrationRejectsCrossRegionRouteConflict(t *testing.T) {
 	auth.SetRuntimeSecret("route-conflict-runtime-secret")
-	t.Cleanup(func() { auth.SetRuntimeSecret("") })
 
 	tenantID := uuid.New()
 	nodeID := uuid.New()

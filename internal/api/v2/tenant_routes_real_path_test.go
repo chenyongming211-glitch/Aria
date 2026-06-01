@@ -77,8 +77,8 @@ func TestTenantUsersRealCollectionPathReturns500OnScanError(t *testing.T) {
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, username, email, role FROM users WHERE tenant_id = $1 ORDER BY created_at DESC`)).
 		WithArgs(tenantID).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "role"}).
-			AddRow(uuid.New().String(), "alice", 42, "member"))
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).
+			AddRow(uuid.New().String()))
 
 	store := controllerstorage.NewStorageWithDB(db)
 	router := &Router{store: store, tenantAPI: handlers.NewTenantAPI(store)}
