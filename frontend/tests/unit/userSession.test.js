@@ -17,6 +17,8 @@ const makeJwt = (payload) => [
   'signature'
 ].join('.')
 
+const flushPromises = () => new Promise(resolve => setTimeout(resolve, 0))
+
 describe('user session persistence', () => {
   let storage
 
@@ -164,27 +166,35 @@ describe('user session persistence', () => {
     })
   })
 
-  it('loads built-in operator permissions without requiring roles:read', async () => {
+  it('loads operator permissions from the current auth context without requiring roles:read', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        data: {
+          role: 'operator',
+          tenant_id: 'tenant-1',
+          permissions: ['nodes:read', 'custom:use']
+        }
+      }
+    })
     const userStore = useUserStore()
 
     await userStore.loadPermissions('tenant-1', 'operator')
 
-    expect(api.get).not.toHaveBeenCalled()
-    expect(userStore.permissions).toEqual(expect.arrayContaining([
-      'nodes:read',
-      'nodes:write',
-      'routes:read',
-      'acls:read',
-      'qos:read',
-      'monitoring:read',
-      'commands:write',
-      'policies:read'
-    ]))
-    expect(userStore.permissions).not.toContain('roles:read')
+    expect(api.get).toHaveBeenCalledWith('/v2/auth/permissions')
+    expect(userStore.permissions).toEqual(['nodes:read', 'custom:use'])
     expect(JSON.parse(localStorage.getItem('aria_permissions'))).toEqual(userStore.permissions)
   })
 
-  it('restores role permissions when cached permissions are missing', () => {
+  it('restores role permissions immediately and refreshes them from the server', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        data: {
+          role: 'operator',
+          tenant_id: 'tenant-1',
+          permissions: ['nodes:read', 'custom:use']
+        }
+      }
+    })
     localStorage.setItem('aria_token', 'valid-token')
     localStorage.setItem('aria_user', JSON.stringify({
       id: 'user-1',
@@ -203,6 +213,12 @@ describe('user session persistence', () => {
       'monitoring:read'
     ]))
     expect(JSON.parse(localStorage.getItem('aria_permissions'))).toEqual(userStore.permissions)
+
+    await flushPromises()
+
+    expect(api.get).toHaveBeenCalledWith('/v2/auth/permissions')
+    expect(userStore.permissions).toEqual(['nodes:read', 'custom:use'])
+    expect(JSON.parse(localStorage.getItem('aria_permissions'))).toEqual(['nodes:read', 'custom:use'])
   })
 
   it('waits for permission loading before resolving login', async () => {
@@ -239,11 +255,15 @@ describe('user session persistence', () => {
     await Promise.resolve()
     expect(settled).toBe(false)
 
+    expect(api.get).toHaveBeenCalledWith('/v2/auth/permissions')
+
     resolveRoles({
       data: {
-        data: [
-          { name: 'admin', permissions: ['nodes:read', 'roles:read'] }
-        ]
+        data: {
+          role: 'admin',
+          tenant_id: 'tenant-1',
+          permissions: ['nodes:read', 'roles:read']
+        }
       }
     })
 
