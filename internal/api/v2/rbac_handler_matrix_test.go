@@ -210,8 +210,32 @@ func expectNodeLifecycleTransitionByPublicKey(
 			    revoke_reason = $3,
 			    updated_at = NOW()
 			WHERE node_id = $1
-		`)).
+	`)).
 		WithArgs(nodeID, controllerstorage.CertStatusRevoked, revokeReason).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE policy_deliveries
+		SET command_status = $2,
+		    last_error = $3,
+		    updated_at = NOW(),
+		    completed_at = NOW()
+		WHERE command_id IN (
+			SELECT id
+			FROM agent_commands
+			WHERE node_public_key = $1 AND status IN ($4, $5, $6)
+		)
+	`)).
+		WithArgs(publicKey, controllerstorage.AgentCommandStatusFailed, "node status changed to "+targetStatus, controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE agent_commands
+		SET status = $2,
+		    message = $3,
+		    updated_at = NOW(),
+		    completed_at = NOW()
+		WHERE node_public_key = $1 AND status IN ($4, $5, $6)
+	`)).
+		WithArgs(publicKey, controllerstorage.AgentCommandStatusFailed, "node status changed to "+targetStatus, controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`
 			INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
