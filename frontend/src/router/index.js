@@ -193,7 +193,7 @@ const hasRoutePermission = (to) => {
 
   const cachedPermissions = readPermissions()
   const fallbackPermissions = permissionsForRole(user?.role)
-  const permissions = Array.from(new Set([...cachedPermissions, ...fallbackPermissions]))
+  const permissions = cachedPermissions.length > 0 ? cachedPermissions : fallbackPermissions
   if (cachedPermissions.length === 0 && fallbackPermissions.length > 0) {
     localStorage.setItem('aria_permissions', JSON.stringify(fallbackPermissions))
   }

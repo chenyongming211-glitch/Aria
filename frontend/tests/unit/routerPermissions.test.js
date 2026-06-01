@@ -162,21 +162,6 @@ describe('router RBAC metadata', () => {
     expect(router.currentRoute.value.path).toBe('/nodes')
   })
 
-  it('uses built-in role permissions when cached operator permissions are stale or partial', async () => {
-    await router.replace('/login')
-    await router.isReady()
-
-    localStorage.setItem('aria_token', 'dummy-token')
-    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
-    localStorage.setItem('aria_last_activity', `${Date.now()}`)
-    localStorage.setItem('aria_user', JSON.stringify({ role: 'operator' }))
-    localStorage.setItem('aria_permissions', JSON.stringify(['nodes:read']))
-
-    await router.push('/connectivity/routing')
-
-    expect(router.currentRoute.value.path).toBe('/connectivity/routing')
-  })
-
   it('blocks Settings navigation for non-super_admin users', async () => {
     localStorage.setItem('aria_token', 'dummy-token')
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
