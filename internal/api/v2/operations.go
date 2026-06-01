@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	apibase "aria/internal/api/apibase"
@@ -89,6 +90,11 @@ func (r *Router) handleTenantNodeAgentCommand(w http.ResponseWriter, req *http.R
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "command is required", nil)
 		return
 	}
+	body.Command = strings.TrimSpace(body.Command)
+	if !controllerstorage.IsAllowedAgentCommand(body.Command) {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "unsupported command", nil)
+		return
+	}
 	if body.Timeout == 0 {
 		body.Timeout = 30
 	}
@@ -162,6 +168,11 @@ func (r *Router) handleTenantBatchAgentCommand(w http.ResponseWriter, req *http.
 	}
 	if body.Command.Command == "" {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "command is required", nil)
+		return
+	}
+	body.Command.Command = strings.TrimSpace(body.Command.Command)
+	if !controllerstorage.IsAllowedAgentCommand(body.Command.Command) {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "unsupported command", nil)
 		return
 	}
 	if body.Command.Timeout == 0 {

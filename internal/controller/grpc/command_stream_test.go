@@ -67,7 +67,9 @@ func TestCommandStreamPollsForCommandsAfterIdleInit(t *testing.T) {
 	now := time.Now()
 
 	expectCommandStreamNodeLookup(mock, publicKey, tenantID, nodeID, now)
+	expectCommandStreamActiveNodeLookup(mock, publicKey, tenantID, nodeID, now, "online")
 	expectNoPendingAgentCommand(mock, publicKey)
+	expectCommandStreamActiveNodeLookup(mock, publicKey, tenantID, nodeID, now, "online")
 	expectPendingAgentCommand(mock, publicKey, commandID, now)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -134,6 +136,15 @@ func expectCommandStreamNodeLookup(mock sqlmock.Sqlmock, publicKey string, tenan
 		))
 }
 
+func expectCommandStreamActiveNodeLookup(mock sqlmock.Sqlmock, publicKey string, tenantID, nodeID uuid.UUID, now time.Time, status string) {
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE public_key = $1`)).
+		WithArgs(publicKey).
+		WillReturnRows(commandStreamNodeRows().AddRow(
+			nodeID, publicKey, "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-1", "100.64.0.2", 2,
+			now.Unix(), now.Add(-time.Hour).Unix(), "member", "ebpf", "6.8", true, status, int64(0), "{}", "", now, now,
+		))
+}
+
 func commandStreamNodeRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
@@ -144,6 +155,9 @@ func commandStreamNodeRows() *sqlmock.Rows {
 
 func expectNoPendingAgentCommand(mock sqlmock.Sqlmock, publicKey string) {
 	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE agent_commands").
+		WithArgs(publicKey, controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("SELECT id, node_public_key, command, params, status").
 		WithArgs(publicKey, controllerstorage.AgentCommandStatusPending).
 		WillReturnRows(sqlmock.NewRows(agentCommandColumns()))
@@ -152,6 +166,9 @@ func expectNoPendingAgentCommand(mock sqlmock.Sqlmock, publicKey string) {
 
 func expectPendingAgentCommand(mock sqlmock.Sqlmock, publicKey, commandID string, now time.Time) {
 	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE agent_commands").
+		WithArgs(publicKey, controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("SELECT id, node_public_key, command, params, status").
 		WithArgs(publicKey, controllerstorage.AgentCommandStatusPending).
 		WillReturnRows(sqlmock.NewRows(agentCommandColumns()).AddRow(

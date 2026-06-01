@@ -59,6 +59,12 @@ func (s *Storage) ApplyNodeLifecycleTransition(publicKey string, transition Node
 		}
 	}
 
+	if nodeStatusStopsCommands(targetStatus) {
+		if err := failIncompleteAgentCommandsForNodeTx(tx, publicKey, fmt.Sprintf("node status changed to %s", targetStatus)); err != nil {
+			return nil, err
+		}
+	}
+
 	if transition.AuditEventType != "" {
 		detail := map[string]interface{}{
 			"public_key":    node.PublicKey,
@@ -87,6 +93,10 @@ func (s *Storage) ApplyNodeLifecycleTransition(publicKey string, transition Node
 }
 
 func nodeStatusRequiresCertificateRevoke(status string) bool {
+	return nodeStatusStopsCommands(status)
+}
+
+func nodeStatusStopsCommands(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "deleted", "suspended", "banned":
 		return true
