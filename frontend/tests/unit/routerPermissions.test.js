@@ -45,6 +45,7 @@ describe('router RBAC metadata', () => {
   it('blocks navigation without required permission', async () => {
     localStorage.setItem('aria_token', 'dummy-token')
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_last_activity', `${Date.now()}`)
     localStorage.setItem('aria_user', JSON.stringify({ role: 'admin' }))
     localStorage.setItem('aria_permissions', JSON.stringify(['nodes:read']))
 
@@ -85,12 +86,29 @@ describe('router RBAC metadata', () => {
     expect(localStorage.getItem('aria_user')).toBeNull()
   })
 
+  it('redirects idle-expired sessions to login before protected pages', async () => {
+    await router.replace('/login')
+    await router.isReady()
+
+    localStorage.setItem('aria_token', 'dummy-token')
+    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_last_activity', `${Date.now() - 2 * 60 * 60 * 1000}`)
+    localStorage.setItem('aria_user', JSON.stringify({ role: 'operator' }))
+
+    await router.push('/nodes')
+
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(localStorage.getItem('aria_token')).toBeNull()
+    expect(localStorage.getItem('aria_last_activity')).toBeNull()
+  })
+
   it('allows super_admin navigation without a cached permissions list', async () => {
     await router.replace('/login')
     await router.isReady()
 
     localStorage.setItem('aria_token', 'dummy-token')
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_last_activity', `${Date.now()}`)
     localStorage.setItem('aria_user', JSON.stringify({ role: 'super_admin' }))
 
     await router.push('/nodes')
@@ -104,6 +122,7 @@ describe('router RBAC metadata', () => {
 
     localStorage.setItem('aria_token', 'dummy-token')
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_last_activity', `${Date.now()}`)
     localStorage.setItem('aria_user', JSON.stringify({ role: 'operator' }))
 
     await router.push('/nodes')
@@ -114,6 +133,7 @@ describe('router RBAC metadata', () => {
   it('blocks Settings navigation for non-super_admin users', async () => {
     localStorage.setItem('aria_token', 'dummy-token')
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_last_activity', `${Date.now()}`)
     localStorage.setItem('aria_permissions', JSON.stringify(['*']))
     localStorage.setItem('aria_user', JSON.stringify({ role: 'admin' }))
 
