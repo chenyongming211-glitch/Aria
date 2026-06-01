@@ -1,6 +1,7 @@
 // src/router/index.js
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { permissionsForRole } from '@/stores/user'
+import { clearSession, isIdleSessionExpired } from '@/utils/session'
 import Layout from '@/components/Layout/Layout.vue'
 
 const routes = [
@@ -159,12 +160,7 @@ const readPermissions = () => {
 }
 
 const clearCachedSession = () => {
-  localStorage.removeItem('aria_token')
-  localStorage.removeItem('aria_token_expire_time')
-  localStorage.removeItem('aria_last_activity')
-  localStorage.removeItem('aria_user')
-  localStorage.removeItem('aria-current-tenant')
-  localStorage.removeItem('aria_permissions')
+  clearSession()
 }
 
 const readUser = () => {
@@ -220,9 +216,21 @@ router.beforeEach((to, from, next) => {
   }
 
   const hasInvalidCachedSession = token && !isExpired && !hasValidCachedUser()
+  const hasIdleExpiredSession = token && !isExpired && isIdleSessionExpired()
 
   if (hasInvalidCachedSession) {
     console.warn('Invalid cached session, redirecting to login')
+    clearCachedSession()
+    if (to.path === '/login') {
+      next()
+    } else {
+      next('/login')
+    }
+    return
+  }
+
+  if (hasIdleExpiredSession) {
+    console.warn('Session idle timeout exceeded, redirecting to login')
     clearCachedSession()
     if (to.path === '/login') {
       next()

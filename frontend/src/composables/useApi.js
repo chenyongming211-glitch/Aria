@@ -1,6 +1,12 @@
 // src/composables/useApi.js
 import axios from 'axios'
 import { API_BASE_URL, API_ENDPOINTS } from '@/config/api'
+import {
+  clearSession,
+  isIdleSessionExpired,
+  recordUserActivity,
+  startIdleSessionMonitor
+} from '@/utils/session'
 
 // Create axios instance
 const api = axios.create({
@@ -82,26 +88,12 @@ async function refreshToken() {
 
 // 检查最大不活动时间（1 小时）
 function checkMaxIdleTime() {
-  const lastActivity = localStorage.getItem('aria_last_activity')
-  if (!lastActivity) {
-    updateLastActivity()
-    return true
-  }
-  
-  const maxIdleTime = 60 * 60 * 1000 // 1 小时
-  const now = Date.now()
-  
-  if (now - parseInt(lastActivity, 10) > maxIdleTime) {
+  if (isIdleSessionExpired()) {
     console.warn('Max idle time exceeded, redirecting to login')
     return false
   }
-  
-  return true
-}
 
-// 更新最后活动时间
-function updateLastActivity() {
-  localStorage.setItem('aria_last_activity', Date.now().toString())
+  return true
 }
 
 // Request interceptor to add auth and tenant headers
@@ -169,9 +161,6 @@ api.interceptors.request.use(
       }
     }
 
-    // 更新最后活动时间
-    updateLastActivity()
-    
     return config
   },
   (error) => Promise.reject(error)
@@ -208,21 +197,28 @@ api.interceptors.response.use(
 
 // 跳转到登录页并清除会话
 function redirectToLogin() {
-  localStorage.removeItem('aria_token')
-  localStorage.removeItem('aria_token_expire_time')
-  localStorage.removeItem('aria_user')
-  localStorage.removeItem('aria_last_activity')
-  localStorage.removeItem('aria-current-tenant')
-  localStorage.removeItem('aria_permissions')
+  clearSession()
   window.location.href = '/#/login'
+}
+
+function handleUserActivity() {
+  if (!localStorage.getItem('aria_token')) return
+
+  if (!checkMaxIdleTime()) {
+    redirectToLogin()
+    return
+  }
+
+  recordUserActivity()
 }
 
 // 监听用户活动，更新最后活动时间
 if (typeof window !== 'undefined') {
   const events = ['mousedown', 'keydown', 'scroll', 'touchstart']
   events.forEach(event => {
-    document.addEventListener(event, updateLastActivity, { passive: true })
+    document.addEventListener(event, handleUserActivity, { passive: true })
   })
+  startIdleSessionMonitor(redirectToLogin)
 }
 
 export default api
