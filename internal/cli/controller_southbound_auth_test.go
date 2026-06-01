@@ -142,3 +142,36 @@ func TestHandleNetworkManageScopesHostnameLookupToJWTTenant(t *testing.T) {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
+
+func TestHandleNetworkManageSuperAdminRequiresTenantID(t *testing.T) {
+	auth.SetSecret("network-jwt-secret")
+	t.Cleanup(func() { auth.SetSecret("") })
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	token, err := auth.GenerateToken("user-1", "sysadmin", "super_admin", "")
+	if err != nil {
+		t.Fatalf("GenerateToken failed: %v", err)
+	}
+
+	controller := &Controller{
+		store:  controllerstorage.NewStorageWithDB(db),
+		logger: logging.GetLogger(),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/network", strings.NewReader(`{"hostname":"shared-host","cidr":"10.10.0.0/24","action":"add"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	controller.HandleNetworkManage(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 without tenant_id, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}

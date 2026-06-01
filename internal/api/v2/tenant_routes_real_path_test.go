@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"aria/internal/api/apibase"
 	"aria/internal/api/handlers"
 	"aria/pkg/controllerstorage"
 
@@ -60,6 +61,37 @@ func TestTenantUsersRealCollectionPathListsUsers(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestTenantUsersRealCollectionPathReturns500OnScanError(t *testing.T) {
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, username, email, role FROM users WHERE tenant_id = $1 ORDER BY created_at DESC`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "role"}).
+			AddRow(uuid.New().String(), "alice", 42, "member"))
+
+	store := controllerstorage.NewStorageWithDB(db)
+	router := &Router{store: store, tenantAPI: handlers.NewTenantAPI(store)}
+	req := withAuthContext(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/users", nil), "super_admin", tenantID)
+	rr := httptest.NewRecorder()
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if resp.Code != apibase.CodeListUsersFailed {
+		t.Fatalf("expected code %s, got %s", apibase.CodeListUsersFailed, resp.Code)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

@@ -556,6 +556,57 @@ func TestHandleRegister_ReRegistrationRejectsEnrollmentMachineMismatch(t *testin
 	}
 }
 
+func TestHandleRegister_ReRegistrationRejectsCrossRegionRouteConflict(t *testing.T) {
+	auth.SetRuntimeSecret("route-conflict-runtime-secret")
+	t.Cleanup(func() { auth.SetRuntimeSecret("") })
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	conflictNodeID := uuid.New()
+	now := time.Now()
+	publicKey := "pubkey-route-conflict-1234567890"
+	runtimeToken, _, err := auth.GenerateRuntimeToken(nodeID.String(), tenantID.String())
+	if err != nil {
+		t.Fatalf("GenerateRuntimeToken failed: %v", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, nodeID, "online", now)
+	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, nodeID, "online", now)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND status != 'deleted' ORDER BY last_seen DESC`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+			"created_at", "updated_at",
+		}).AddRow(
+			conflictNodeID, "conflict-key", "machine-b", tenantID, "2.2.2.2:51820", "10.0.0.2", "2.2.2.2", "bj", "vpc-2", "node-b", "10.0.0.11", 11,
+			time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "online", int64(0), "{10.10.0.0/16}", "", now, now,
+		))
+
+	controller := &Controller{
+		store:  controllerstorage.NewStorageWithDB(db),
+		logger: logging.GetLogger(),
+	}
+
+	body := `{"public_key":"` + publicKey + `","runtime_token":"` + runtimeToken + `","hostname":"node-a","region":"sh","advertised_routes":["10.10.1.0/24"]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/register", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	controller.HandleRegister(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestHandleRegister_CSRUsesPersistedNodeIDForCertUpsert(t *testing.T) {
 	tenantID := uuid.New()
 	persistedNodeID := uuid.New()

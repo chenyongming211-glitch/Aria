@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -843,6 +844,20 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := c.validateAdvertisedRouteConflicts(tenantID, req.PublicKey, req.Region, req.AdvertisedRoutes); err != nil {
+		var conflict *controllerstorage.RouteConflictError
+		if errors.As(err, &conflict) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		if strings.Contains(err.Error(), "invalid CIDR") {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		c.logger.Error("Failed to validate advertised routes for %s: %v", req.Hostname, err)
+		http.Error(w, "Failed to validate advertised routes", http.StatusInternalServerError)
+		return
+	}
 
 	node := &controllerstorage.Node{
 		PublicKey:         req.PublicKey,
@@ -1515,6 +1530,7 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req struct {
+		TenantID string `json:"tenant_id"`
 		Hostname string `json:"hostname"`
 		CIDR     string `json:"cidr"`
 		Action   string `json:"action"` // "add" or "remove"
@@ -1535,10 +1551,17 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 	// platform-scoped; tenant users are restricted to their JWT tenant.
 	var allNodes []*controllerstorage.Node
 	var err error
+	var tenantID uuid.UUID
 	if claims.Role == middleware.RoleSuperAdmin {
-		allNodes, err = c.store.GetAllNodes()
+		tenantID, err = uuid.Parse(strings.TrimSpace(req.TenantID))
+		if err != nil {
+			http.Error(w, "tenant_id is required for super_admin network changes", http.StatusBadRequest)
+			return
+		}
+		allNodes, err = c.store.GetNodesByTenant(tenantID)
 	} else {
-		tenantID, parseErr := uuid.Parse(claims.TenantID)
+		var parseErr error
+		tenantID, parseErr = uuid.Parse(claims.TenantID)
 		if parseErr != nil {
 			http.Error(w, "Invalid tenant context", http.StatusForbidden)
 			return
@@ -1581,33 +1604,15 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 			}
 		}
 
-		// Check for conflicts with existing routes in DIFFERENT regions
-		// Same region nodes CAN have overlapping routes (for redundancy/Active-Active)
-		// Different region nodes CANNOT have overlapping routes (for isolation)
-		for _, node := range allNodes {
-			// Skip nodes in the SAME region (allow overlap for redundancy)
-			if node.Region == targetNode.Region {
-				continue
+		if err := controllerstorage.FindAdvertisedRouteConflict(allNodes, targetNode.PublicKey, targetNode.Region, []string{newNetwork.String()}); err != nil {
+			var conflict *controllerstorage.RouteConflictError
+			if errors.As(err, &conflict) {
+				http.Error(w, fmt.Sprintf("请勿在不同 Region 添加重叠路由！路由 %s 与 Region %s 的节点 %s 冲突",
+					req.CIDR, conflict.NodeRegion, conflict.NodeHostname), http.StatusConflict)
+				return
 			}
-
-			// Skip the target node itself
-			if node.PublicKey == targetNode.PublicKey {
-				continue
-			}
-
-			for _, existingRoute := range node.AdvertisedRoutes {
-				_, existingNetwork, err := net.ParseCIDR(existingRoute)
-				if err != nil {
-					continue // Skip invalid routes
-				}
-
-				// Check if networks overlap with nodes in DIFFERENT regions
-				if cidrsOverlap(newNetwork, existingNetwork) {
-					http.Error(w, fmt.Sprintf("请勿在不同 Region 添加重叠路由！路由 %s 与 Region %s 的节点 %s 冲突",
-						req.CIDR, node.Region, node.Hostname), http.StatusConflict)
-					return
-				}
-			}
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
 
 		targetNode.AdvertisedRoutes = append(targetNode.AdvertisedRoutes, req.CIDR)
@@ -1969,6 +1974,9 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 		// Default to system tenant
 		tenantID, _ = c.store.GetOrCreateTenant("default")
 	}
+	if err := c.validateAdvertisedRouteConflicts(tenantID, req.PublicKey, req.Region, req.AdvertisedRoutes); err != nil {
+		return "", fmt.Errorf("failed to validate advertised routes: %w", err)
+	}
 
 	node := &controllerstorage.Node{
 		PublicKey:        req.PublicKey,
@@ -2184,6 +2192,17 @@ func cidrsOverlap(a, b *net.IPNet) bool {
 		return true
 	}
 	return false
+}
+
+func (c *Controller) validateAdvertisedRouteConflicts(tenantID uuid.UUID, publicKey, region string, routes []string) error {
+	if len(routes) == 0 {
+		return nil
+	}
+	nodes, err := c.store.GetNodesByTenant(tenantID)
+	if err != nil {
+		return err
+	}
+	return controllerstorage.FindAdvertisedRouteConflict(nodes, publicKey, region, routes)
 }
 
 // ipInRoutes checks if an IP address is within any of the given CIDR routes.

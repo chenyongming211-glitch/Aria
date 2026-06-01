@@ -460,6 +460,26 @@ func promQLInstanceRegex(host string) string {
 	return promQLRegexString(regexp.QuoteMeta(host) + ":.*")
 }
 
+func promQLInstanceFilterForNodes(nodes []*controllerstorage.Node) string {
+	instances := make([]string, 0, len(nodes))
+	seen := make(map[string]struct{}, len(nodes))
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		instanceRegex := promQLInstanceRegex(n.PublicIP)
+		if instanceRegex == "" {
+			continue
+		}
+		if _, ok := seen[instanceRegex]; ok {
+			continue
+		}
+		seen[instanceRegex] = struct{}{}
+		instances = append(instances, instanceRegex)
+	}
+	return strings.Join(instances, "|")
+}
+
 // handleMonitoringTraffic returns tenant-level traffic time series data.
 // GET /api/v2/tenants/{tenant_id}/monitoring/traffic?range=24h
 func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
@@ -493,7 +513,11 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 
 	// 获取租户下所有节点的标识用于 PromQL 过滤
 	nodes, err := r.store.GetNodesByTenant(tenantID)
-	if err != nil || len(nodes) == 0 {
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load tenant nodes: "+err.Error(), nil)
+		return
+	}
+	if len(nodes) == 0 {
 		apibase.WriteSuccess(w, map[string]interface{}{
 			"timestamps":          []int64{},
 			"upload_bytes":        []float64{},
@@ -504,13 +528,8 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 	}
 
 	// 构建 instance 过滤列表
-	instances := make([]string, 0, len(nodes))
-	for _, n := range nodes {
-		if instanceRegex := promQLInstanceRegex(n.PublicIP); instanceRegex != "" {
-			instances = append(instances, instanceRegex)
-		}
-	}
-	if len(instances) == 0 {
+	instanceFilter := promQLInstanceFilterForNodes(nodes)
+	if instanceFilter == "" {
 		apibase.WriteSuccess(w, map[string]interface{}{
 			"timestamps":          []int64{},
 			"upload_bytes":        []float64{},
@@ -519,18 +538,34 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 		}, "Traffic data retrieved")
 		return
 	}
-	instanceFilter := strings.Join(instances, "|")
+	if r.vmClient == nil {
+		apibase.WriteSuccess(w, map[string]interface{}{
+			"timestamps":          []int64{},
+			"upload_bytes":        []float64{},
+			"download_bytes":      []float64{},
+			"peak_bandwidth_mbps": 0,
+		}, "Traffic data retrieved")
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
 	defer cancel()
 
 	// 查询上传流量
 	txQuery := fmt.Sprintf(`sum(rate(wireguard_total_tx_bytes{instance=~"%s"}[5m]))`, instanceFilter)
-	txResult, _ := r.vmClient.QueryRange(ctx, txQuery, start, end, step)
+	txResult, err := r.vmClient.QueryRange(ctx, txQuery, start, end, step)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to query upload traffic: "+err.Error(), nil)
+		return
+	}
 
 	// 查询下载流量
 	rxQuery := fmt.Sprintf(`sum(rate(wireguard_total_rx_bytes{instance=~"%s"}[5m]))`, instanceFilter)
-	rxResult, _ := r.vmClient.QueryRange(ctx, rxQuery, start, end, step)
+	rxResult, err := r.vmClient.QueryRange(ctx, rxQuery, start, end, step)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to query download traffic: "+err.Error(), nil)
+		return
+	}
 
 	timestamps := []int64{}
 	uploadBytes := []float64{}
@@ -597,14 +632,30 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 // GET /api/v2/tenants/{tenant_id}/monitoring/health
 func (r *Router) handleMonitoringHealth(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
 	totalNodes, onlineNodes, _, err := r.store.CountNodesByTenantAndStatus(tenantID)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to count nodes: "+err.Error(), nil)
+		return
+	}
 	nodeOnlineRate := 100.0
-	if err == nil && totalNodes > 0 {
+	if totalNodes > 0 {
 		nodeOnlineRate = float64(onlineNodes) * 100.0 / float64(totalNodes)
 	}
 
-	syncRate, _ := r.store.CalcSyncSuccessRate(tenantID)
-	activeAlerts, _ := r.store.CountActiveAlerts(tenantID)
-	failedCmds, _ := r.store.CountFailedCommandsByTenant(tenantID)
+	syncRate, err := r.store.CalcSyncSuccessRate(tenantID)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to calculate sync rate: "+err.Error(), nil)
+		return
+	}
+	activeAlerts, err := r.store.CountActiveAlerts(tenantID)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to count active alerts: "+err.Error(), nil)
+		return
+	}
+	failedCmds, err := r.store.CountFailedCommandsByTenant(tenantID)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to count failed commands: "+err.Error(), nil)
+		return
+	}
 
 	apibase.WriteSuccess(w, map[string]interface{}{
 		"node_online_rate":      math.Round(nodeOnlineRate*10) / 10,
@@ -639,7 +690,11 @@ func (r *Router) handleMonitoringNodeMetrics(w http.ResponseWriter, req *http.Re
 
 		// 查询上传速率
 		txQuery := fmt.Sprintf(`sum(rate(wireguard_peer_tx_bytes{instance=~"%s"}[5m]))`, instanceFilter)
-		txResult, _ := r.vmClient.QueryInstant(ctx, txQuery)
+		txResult, err := r.vmClient.QueryInstant(ctx, txQuery)
+		if err != nil {
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to query upload metrics: "+err.Error(), nil)
+			return
+		}
 		if txResult != nil && len(txResult.Data.Result) > 0 {
 			if val, ok := txResult.Data.Result[0].Value[1].(string); ok {
 				f, _ := strconv.ParseFloat(val, 64)
@@ -649,7 +704,11 @@ func (r *Router) handleMonitoringNodeMetrics(w http.ResponseWriter, req *http.Re
 
 		// 查询下载速率
 		rxQuery := fmt.Sprintf(`sum(rate(wireguard_peer_rx_bytes{instance=~"%s"}[5m]))`, instanceFilter)
-		rxResult, _ := r.vmClient.QueryInstant(ctx, rxQuery)
+		rxResult, err := r.vmClient.QueryInstant(ctx, rxQuery)
+		if err != nil {
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to query download metrics: "+err.Error(), nil)
+			return
+		}
 		if rxResult != nil && len(rxResult.Data.Result) > 0 {
 			if val, ok := rxResult.Data.Result[0].Value[1].(string); ok {
 				f, _ := strconv.ParseFloat(val, 64)
@@ -659,7 +718,11 @@ func (r *Router) handleMonitoringNodeMetrics(w http.ResponseWriter, req *http.Re
 
 		// 查询延迟（最近握手时间作为参考）
 		latencyQuery := fmt.Sprintf(`min(wireguard_peer_last_handshake_secs{instance=~"%s"})`, instanceFilter)
-		latencyResult, _ := r.vmClient.QueryInstant(ctx, latencyQuery)
+		latencyResult, err := r.vmClient.QueryInstant(ctx, latencyQuery)
+		if err != nil {
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to query latency metrics: "+err.Error(), nil)
+			return
+		}
 		if latencyResult != nil && len(latencyResult.Data.Result) > 0 {
 			if val, ok := latencyResult.Data.Result[0].Value[1].(string); ok {
 				f, _ := strconv.ParseFloat(val, 64)
@@ -704,31 +767,33 @@ func (r *Router) handleMonitoringTopology(w http.ResponseWriter, req *http.Reque
 		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
 		defer cancel()
 
-		// 查询所有 peer 的发送速率
-		// 注意：此处不按 instance 过滤，而是获取所有数据后在内存中按租户节点匹配
-		query := `rate(wireguard_peer_tx_bytes[5m]) * 8`
-		result, err := r.vmClient.QueryInstant(ctx, query)
-		if err == nil && result != nil {
-			for _, item := range result.Data.Result {
-				metrics := item.Metric
-				valStr, ok := item.Value[1].(string)
-				if !ok {
-					continue
-				}
-				val, _ := strconv.ParseFloat(valStr, 64)
-
-				// 我们需要知道发送者是谁，接收者是谁
-				// 假设 instance 包含发送者的 IP，public_key 是接收者的公钥
-				instance := metrics["instance"]
-				remotePubKey := metrics["public_key"]
-
-				if instance != "" && remotePubKey != "" {
-					// 去掉 instance 的端口号
-					host := instance
-					if idx := strings.Index(instance, ":"); idx != -1 {
-						host = instance[:idx]
+		if instanceFilter := promQLInstanceFilterForNodes(nodes); instanceFilter != "" {
+			query := fmt.Sprintf(`rate(wireguard_peer_tx_bytes{instance=~"%s"}[5m]) * 8`, instanceFilter)
+			result, err := r.vmClient.QueryInstant(ctx, query)
+			if err != nil {
+				apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to query topology traffic: "+err.Error(), nil)
+				return
+			}
+			if result != nil {
+				for _, item := range result.Data.Result {
+					metrics := item.Metric
+					valStr, ok := item.Value[1].(string)
+					if !ok {
+						continue
 					}
-					peerTraffic[host+":"+remotePubKey] = val
+					val, _ := strconv.ParseFloat(valStr, 64)
+
+					// We identify sender by instance host and receiver by peer public key.
+					instance := metrics["instance"]
+					remotePubKey := metrics["public_key"]
+
+					if instance != "" && remotePubKey != "" {
+						host := instance
+						if idx := strings.Index(instance, ":"); idx != -1 {
+							host = instance[:idx]
+						}
+						peerTraffic[host+":"+remotePubKey] = val
+					}
 				}
 			}
 		}

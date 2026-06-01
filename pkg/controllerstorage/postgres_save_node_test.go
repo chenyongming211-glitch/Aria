@@ -1,12 +1,22 @@
 package controllerstorage
 
 import (
+	"errors"
+	"regexp"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 )
+
+func testNodeSelectColumns() []string {
+	return []string{
+		"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+		"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+		"created_at", "updated_at",
+	}
+}
 
 func TestSaveNodeBackfillsDatabaseIdentity(t *testing.T) {
 	db, mock, err := sqlmock.New()
@@ -77,5 +87,27 @@ func TestSaveNodeRejectsNilNode(t *testing.T) {
 	store := NewStorageWithDB(db)
 	if err := store.SaveNode(nil); err == nil {
 		t.Fatal("expected error for nil node")
+	}
+}
+
+func TestGetNodesByTenantReturnsRowsErr(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	tenantID := uuid.New()
+	rowsErr := errors.New("cursor failed")
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND status != 'deleted' ORDER BY last_seen DESC`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows(testNodeSelectColumns()).RowError(0, rowsErr))
+
+	_, err = NewStorageWithDB(db).GetNodesByTenant(tenantID)
+	if !errors.Is(err, rowsErr) {
+		t.Fatalf("expected rows error %v, got %v", rowsErr, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }

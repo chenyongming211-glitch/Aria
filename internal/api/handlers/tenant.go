@@ -224,12 +224,17 @@ func (t *TenantAPI) ListUsers(w http.ResponseWriter, r *http.Request, tenantID u
 		var u UserResponse
 		var email sql.NullString
 		if err := rows.Scan(&u.ID, &u.Username, &email, &u.Role); err != nil {
-			continue
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeListUsersFailed, "Failed to scan users", nil)
+			return
 		}
 		if email.Valid {
 			u.Email = email.String
 		}
 		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeListUsersFailed, "Failed to list users", nil)
+		return
 	}
 
 	apibase.WriteSuccess(w, users, fmt.Sprintf("%d users retrieved", len(users)))
