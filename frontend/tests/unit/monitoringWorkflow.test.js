@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 
 const {
   routerPush,
@@ -158,6 +159,25 @@ vi.mock('@/composables/usePolicyApi', () => ({
   usePolicyApi: policyApiMock
 }))
 
+const permissionMock = () => ({
+  hasPermission: () => true,
+  hasAnyPermission: () => true,
+  hasAllPermissions: () => true,
+  canAccessRoute: () => true
+})
+
+vi.mock('@/composables/usePermission', () => ({
+  usePermission: permissionMock
+}))
+
+vi.mock('/src/composables/usePermission', () => ({
+  usePermission: permissionMock
+}))
+
+vi.mock('/src/composables/usePermission.js', () => ({
+  usePermission: permissionMock
+}))
+
 vi.mock('element-plus', () => ({
   ElMessage: {
     success: vi.fn(),
@@ -224,6 +244,7 @@ const mountWithStubs = (component) =>
 
 describe('monitoring workflow routing', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     routerPush.mockReset()
     monitorApiMock.getEvents.mockClear()
     monitorApiMock.getAlerts.mockClear()
@@ -350,6 +371,7 @@ describe('monitoring workflow routing', () => {
 
 describe('node monitor detail context handling', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     routerPush.mockReset()
     routeState.params = { nodeId: 'node-1' }
     routeState.query = {
@@ -399,6 +421,7 @@ describe('node monitor detail context handling', () => {
 
 describe('policy center context handling', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     routerPush.mockReset()
     routeState.params = { nodeId: 'node-1' }
     routeState.query = {
