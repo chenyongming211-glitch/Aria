@@ -484,14 +484,15 @@ func bindRuntimeTokenToNode(ctx context.Context, node *controllerstorage.Node) e
 	}
 
 	tokenTenantID, ok := GetRuntimeTenantID(ctx)
-	if ok && strings.TrimSpace(tokenTenantID) != "" {
-		parsedTokenTenantID, err := uuid.Parse(tokenTenantID)
-		if err != nil {
-			return status.Error(codes.Unauthenticated, "invalid runtime token tenant")
-		}
-		if parsedTokenTenantID != node.TenantID {
-			return status.Error(codes.PermissionDenied, "runtime token tenant mismatch")
-		}
+	if !ok || strings.TrimSpace(tokenTenantID) == "" {
+		return status.Error(codes.Unauthenticated, "runtime token tenant missing")
+	}
+	parsedTokenTenantID, err := uuid.Parse(tokenTenantID)
+	if err != nil {
+		return status.Error(codes.Unauthenticated, "invalid runtime token tenant")
+	}
+	if parsedTokenTenantID != node.TenantID {
+		return status.Error(codes.PermissionDenied, "runtime token tenant mismatch")
 	}
 
 	return nil
