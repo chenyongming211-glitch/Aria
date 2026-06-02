@@ -132,7 +132,9 @@ func (s *Storage) CreateTenantNodeQoSRule(rule *QoSRuleRecord) (*QoSRuleRecord, 
 	}
 
 	// 自动提升版本
-	_ = s.bumpNodeDesiredVersion(rule.TenantID, rule.NodeID)
+	if err := s.bumpNodeDesiredVersion(rule.TenantID, rule.NodeID); err != nil {
+		return nil, err
+	}
 
 	return created, nil
 }
@@ -154,7 +156,9 @@ func (s *Storage) DeleteTenantNodeQoSRule(tenantID, nodeID uuid.UUID, category s
 	}
 
 	// 自动提升版本
-	_ = s.bumpNodeDesiredVersion(tenantID, nodeID)
+	if err := s.bumpNodeDesiredVersion(tenantID, nodeID); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -183,7 +187,9 @@ func (s *Storage) UpdateTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, ca
 		return nil, sql.ErrNoRows
 	}
 
-	_ = s.bumpNodeDesiredVersion(tenantID, nodeID)
+	if err := s.bumpNodeDesiredVersion(tenantID, nodeID); err != nil {
+		return nil, err
+	}
 
 	rule.ID = ruleID
 	rule.TenantID = tenantID
@@ -251,7 +257,9 @@ func (s *Storage) CreateTenantNodeACLRule(rule *ACLRuleRecord) (*ACLRuleRecord, 
 		return nil, err
 	}
 
-	_ = s.bumpNodeDesiredVersion(rule.TenantID, rule.NodeID)
+	if err := s.bumpNodeDesiredVersion(rule.TenantID, rule.NodeID); err != nil {
+		return nil, err
+	}
 	return created, nil
 }
 
@@ -271,7 +279,9 @@ func (s *Storage) DeleteTenantNodeACLRuleByID(tenantID, nodeID uuid.UUID, ruleID
 		return sql.ErrNoRows
 	}
 
-	_ = s.bumpNodeDesiredVersion(tenantID, nodeID)
+	if err := s.bumpNodeDesiredVersion(tenantID, nodeID); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -302,7 +312,9 @@ func (s *Storage) UpdateTenantNodeACLRule(tenantID, nodeID, ruleID uuid.UUID, ru
 		return nil, sql.ErrNoRows
 	}
 
-	_ = s.bumpNodeDesiredVersion(tenantID, nodeID)
+	if err := s.bumpNodeDesiredVersion(tenantID, nodeID); err != nil {
+		return nil, err
+	}
 
 	rule.ID = ruleID
 	rule.TenantID = tenantID
@@ -364,7 +376,9 @@ func (s *Storage) CreateTenantNodeBlacklistRule(rule *BlacklistRuleRecord) (*Bla
 	if err != nil {
 		return nil, err
 	}
-	_ = s.bumpNodeDesiredVersion(rule.TenantID, rule.NodeID)
+	if err := s.bumpNodeDesiredVersion(rule.TenantID, rule.NodeID); err != nil {
+		return nil, err
+	}
 	return created, nil
 }
 
@@ -383,7 +397,9 @@ func (s *Storage) DeleteTenantNodeBlacklistRuleByID(tenantID, nodeID uuid.UUID, 
 	if rowsAffected == 0 {
 		return sql.ErrNoRows
 	}
-	_ = s.bumpNodeDesiredVersion(tenantID, nodeID)
+	if err := s.bumpNodeDesiredVersion(tenantID, nodeID); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -402,7 +418,9 @@ func (s *Storage) DeleteTenantNodePortBlacklistRule(tenantID, nodeID uuid.UUID, 
 	if rowsAffected == 0 {
 		return sql.ErrNoRows
 	}
-	_ = s.bumpNodeDesiredVersion(tenantID, nodeID)
+	if err := s.bumpNodeDesiredVersion(tenantID, nodeID); err != nil {
+		return err
+	}
 	return nil
 }
 

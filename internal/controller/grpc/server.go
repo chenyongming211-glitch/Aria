@@ -323,12 +323,10 @@ func (s *ControllerServer) ensureCommandStreamNodeActive(nodePublicKey string) e
 	if err != nil || node == nil {
 		return status.Error(codes.Unauthenticated, "node not found")
 	}
-	switch strings.ToLower(strings.TrimSpace(node.Status)) {
-	case "deleted", "suspended", "banned":
+	if isInactiveNodeStatus(node.Status) {
 		return status.Errorf(codes.PermissionDenied, "node access denied: status '%s'", node.Status)
-	default:
-		return nil
 	}
+	return nil
 }
 
 func isTerminalCommandStatus(status string) bool {
@@ -348,9 +346,9 @@ func (s *ControllerServer) ReportMetrics(ctx context.Context, req *agentpb.Metri
 		return &agentpb.MetricsReportResponse{Success: false, Message: "Unauthorized node"}, nil
 	}
 
-	// 仅对合法授权节点更新心跳
-	node.LastSeen = time.Now().Unix()
-	if err := s.store.SaveNode(node); err != nil {
+	// Only touch heartbeat fields here. SaveNode is registration-oriented and
+	// rewrites node metadata/status, which is too broad for metrics heartbeats.
+	if err := s.store.UpdateNodeHeartbeat(node.ID, time.Now().Unix()); err != nil {
 		fmt.Printf("[ERROR] Failed to update node heartbeat: %v\n", err)
 		return &agentpb.MetricsReportResponse{Success: false, Message: "Failed to persist metrics"}, fmt.Errorf("failed to persist metrics: %w", err)
 	}
@@ -473,8 +471,8 @@ func (s *ControllerServer) resolveRuntimeNode(nodeID, publicKey string) (*contro
 		return nil, fmt.Errorf("node identity not found (node_id: %s, pubkey: %s)", nodeID, publicKey)
 	}
 
-	// 5. ❌ 状态拦截：禁止已停用节点接入
-	if resolvedNode.Status == "deleted" || resolvedNode.Status == "suspended" || resolvedNode.Status == "banned" {
+	// 5. 状态拦截：禁止已停用节点接入
+	if isInactiveNodeStatus(resolvedNode.Status) {
 		return nil, fmt.Errorf("node access denied: current status is '%s'", resolvedNode.Status)
 	}
 
@@ -533,11 +531,34 @@ func (s *ControllerServer) resolveLegacyAgentIdentity(agentID string) (*controll
 		return nil, fmt.Errorf("agent identity is required")
 	}
 
-	if parsedNodeID, err := uuid.Parse(agentID); err == nil {
-		return s.store.GetNodeByID(parsedNodeID)
+	var (
+		node *controllerstorage.Node
+		err  error
+	)
+	if parsedNodeID, parseErr := uuid.Parse(agentID); parseErr == nil {
+		node, err = s.store.GetNodeByID(parsedNodeID)
+	} else {
+		node, err = s.store.GetNode(agentID)
 	}
+	if err != nil {
+		return nil, err
+	}
+	if node == nil {
+		return nil, fmt.Errorf("node not found")
+	}
+	if isInactiveNodeStatus(node.Status) {
+		return nil, status.Errorf(codes.PermissionDenied, "node access denied: status '%s'", node.Status)
+	}
+	return node, nil
+}
 
-	return s.store.GetNode(agentID)
+func isInactiveNodeStatus(nodeStatus string) bool {
+	switch strings.ToLower(strings.TrimSpace(nodeStatus)) {
+	case "deleted", "suspended", "banned":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *ControllerServer) resolveCommandStreamNodeForRequest(ctx context.Context, resp *agentpb.CommandResponse) (*controllerstorage.Node, error) {

@@ -1,6 +1,7 @@
 package controllerstorage
 
 import (
+	"database/sql"
 	"errors"
 	"regexp"
 	"testing"
@@ -87,6 +88,34 @@ func TestSaveNodeRejectsNilNode(t *testing.T) {
 	store := NewStorageWithDB(db)
 	if err := store.SaveNode(nil); err == nil {
 		t.Fatal("expected error for nil node")
+	}
+}
+
+func TestUpdateNodeHeartbeatDoesNotReviveInactiveNode(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	nodeID := uuid.New()
+	lastSeen := time.Now().Unix()
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE nodes
+		SET last_seen = $2,
+		    status = 'online',
+		    offline_since = NULL,
+		    updated_at = NOW()
+		WHERE id = $1 AND status NOT IN ('deleted', 'suspended', 'banned')`)).
+		WithArgs(nodeID, lastSeen).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	err = NewStorageWithDB(db).UpdateNodeHeartbeat(nodeID, lastSeen)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expected sql.ErrNoRows for inactive node heartbeat, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
 

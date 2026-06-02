@@ -642,6 +642,28 @@ func (s *Storage) SaveNode(node *Node) error {
 	return nil
 }
 
+func (s *Storage) UpdateNodeHeartbeat(nodeID uuid.UUID, lastSeen int64) error {
+	result, err := s.db.Exec(`
+		UPDATE nodes
+		SET last_seen = $2,
+		    status = 'online',
+		    offline_since = NULL,
+		    updated_at = NOW()
+		WHERE id = $1 AND status NOT IN ('deleted', 'suspended', 'banned')
+	`, nodeID, lastSeen)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (s *Storage) GetNode(publicKey string) (*Node, error) {
 	query := `SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE public_key = $1`
 	row := s.db.QueryRow(query, publicKey)

@@ -1,6 +1,7 @@
 package controllerstorage
 
 import (
+	"errors"
 	"regexp"
 	"testing"
 	"time"
@@ -89,6 +90,52 @@ func TestCreateTenantNodeACLRuleDefaultsLegacySyncRangeForAnyPort(t *testing.T) 
 		Enabled:  true,
 	}); err != nil {
 		t.Fatalf("CreateTenantNodeACLRule failed: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestCreateTenantNodeACLRuleReturnsDesiredStateBumpError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+	bumpErr := errors.New("desired state unavailable")
+
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO acl_rules (tenant_id, node_id, name, action, src_cidr, dst_cidr, dst_port, protocol, priority, enabled, description, src_net, dst_net, min_port, max_port)
+		 VALUES ($1, $2, $3, $4, NULLIF($5, '')::cidr, NULLIF($6, '')::cidr, $7, $8, $9, $10, $11, $12::cidr, $13::cidr, $14, $15)
+		 RETURNING id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+		           COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
+		           created_at, updated_at`)).
+		WithArgs(tenantID, nodeID, "deny-any", "deny", "", "", nil, 0, 50, true, "", "0.0.0.0/0", "0.0.0.0/0", 0, 65535).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "priority", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(uuid.New(), tenantID, nodeID, "deny-any", "deny", "0.0.0.0/0", "0.0.0.0/0", 0, 0, 50, true, "", now, now))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO node_control_states (tenant_id, node_id, desired_state_version, desired_state_updated_at, updated_at)
+			 VALUES ($1, $2, $3, NOW(), NOW())
+			 ON CONFLICT (node_id) DO UPDATE SET
+			    desired_state_version = EXCLUDED.desired_state_version,
+			    desired_state_updated_at = NOW(),
+			    updated_at = NOW()`)).
+		WithArgs(tenantID, nodeID, sqlmock.AnyArg()).
+		WillReturnError(bumpErr)
+
+	store := NewStorageWithDB(db)
+	if _, err := store.CreateTenantNodeACLRule(&ACLRuleRecord{
+		TenantID: tenantID,
+		NodeID:   nodeID,
+		Name:     "deny-any",
+		Action:   "deny",
+		Priority: 50,
+		Enabled:  true,
+	}); !errors.Is(err, bumpErr) {
+		t.Fatalf("expected desired state bump error %v, got %v", bumpErr, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
