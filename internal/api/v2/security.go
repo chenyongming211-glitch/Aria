@@ -1,7 +1,9 @@
 package v2
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -164,18 +166,18 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 	}
 
 	var body struct {
-		Name        string `json:"name"`
-		Action      string `json:"action"`
-		SrcCIDR     string `json:"src_cidr"`
-		DstCIDR     string `json:"dst_cidr"`
-		SrcNet      string `json:"src_net"`
-		DstNet      string `json:"dst_net"`
-		DstPort     int    `json:"dst_port"`
-		MaxPort     int    `json:"max_port"`
-		Protocol    int    `json:"protocol"`
-		Priority    int    `json:"priority"`
-		Description string `json:"description"`
-		Enabled     *bool  `json:"enabled"`
+		Name        *string `json:"name"`
+		Action      *string `json:"action"`
+		SrcCIDR     *string `json:"src_cidr"`
+		DstCIDR     *string `json:"dst_cidr"`
+		SrcNet      *string `json:"src_net"`
+		DstNet      *string `json:"dst_net"`
+		DstPort     *int    `json:"dst_port"`
+		MaxPort     *int    `json:"max_port"`
+		Protocol    *int    `json:"protocol"`
+		Priority    *int    `json:"priority"`
+		Description *string `json:"description"`
+		Enabled     *bool   `json:"enabled"`
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
@@ -183,42 +185,56 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		return
 	}
 
-	src := body.SrcCIDR
-	if src == "" {
-		src = body.SrcNet
-	}
-	dst := body.DstCIDR
-	if dst == "" {
-		dst = body.DstNet
-	}
-	port := body.DstPort
-	if port == 0 {
-		port = body.MaxPort
-	}
-
-	if body.Action != "" && body.Action != "allow" && body.Action != "deny" {
-		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Action must be 'allow' or 'deny'", nil)
+	existing, err := r.store.GetTenantNodeACLRule(tenantID, node.ID, ruleID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			apibase.WriteError(w, http.StatusNotFound, apibase.CodeNotFound, "ACL rule not found", nil)
+			return
+		}
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load ACL rule: "+err.Error(), nil)
 		return
 	}
 
-	rule := &controllerstorage.ACLRuleRecord{
-		TenantID:    tenantID,
-		NodeID:      node.ID,
-		Name:        body.Name,
-		Action:      body.Action,
-		SrcCIDR:     src,
-		DstCIDR:     dst,
-		DstPort:     port,
-		Protocol:    body.Protocol,
-		Priority:    body.Priority,
-		Description: body.Description,
-		Enabled:     true,
+	rule := *existing
+	if body.Name != nil {
+		rule.Name = *body.Name
+	}
+	if body.Action != nil {
+		if *body.Action != "allow" && *body.Action != "deny" {
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Action must be 'allow' or 'deny'", nil)
+			return
+		}
+		rule.Action = *body.Action
+	}
+	if body.SrcCIDR != nil {
+		rule.SrcCIDR = *body.SrcCIDR
+	} else if body.SrcNet != nil {
+		rule.SrcCIDR = *body.SrcNet
+	}
+	if body.DstCIDR != nil {
+		rule.DstCIDR = *body.DstCIDR
+	} else if body.DstNet != nil {
+		rule.DstCIDR = *body.DstNet
+	}
+	if body.DstPort != nil {
+		rule.DstPort = *body.DstPort
+	} else if body.MaxPort != nil {
+		rule.DstPort = *body.MaxPort
+	}
+	if body.Protocol != nil {
+		rule.Protocol = *body.Protocol
+	}
+	if body.Priority != nil {
+		rule.Priority = *body.Priority
+	}
+	if body.Description != nil {
+		rule.Description = *body.Description
 	}
 	if body.Enabled != nil {
 		rule.Enabled = *body.Enabled
 	}
 
-	updated, err := r.store.UpdateTenantNodeACLRule(tenantID, node.ID, ruleID, rule)
+	updated, err := r.store.UpdateTenantNodeACLRule(tenantID, node.ID, ruleID, &rule)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to update ACL rule: "+err.Error(), nil)
 		return
@@ -521,43 +537,62 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	}
 
 	var body struct {
-		SrcCIDR       string `json:"src_cidr"`
-		DstCIDR       string `json:"dst_cidr"`
-		SrcPort       int    `json:"src_port"`
-		DstPort       int    `json:"dst_port"`
-		Protocol      int    `json:"protocol"`
-		BandwidthMbps int    `json:"bandwidth_mbps"`
-		Description   string `json:"description"`
-		Enabled       *bool  `json:"enabled"`
+		SrcCIDR       *string `json:"src_cidr"`
+		DstCIDR       *string `json:"dst_cidr"`
+		SrcPort       *int    `json:"src_port"`
+		DstPort       *int    `json:"dst_port"`
+		Protocol      *int    `json:"protocol"`
+		BandwidthMbps *int    `json:"bandwidth_mbps"`
+		Description   *string `json:"description"`
+		Enabled       *bool   `json:"enabled"`
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
 		return
 	}
-	if body.BandwidthMbps <= 0 {
-		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "bandwidth_mbps must be greater than 0", nil)
+
+	existing, err := r.store.GetTenantNodeQoSRule(tenantID, node.ID, ruleID, category)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			apibase.WriteError(w, http.StatusNotFound, apibase.CodeNotFound, "QoS rule not found", nil)
+			return
+		}
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load QoS rule: "+err.Error(), nil)
 		return
 	}
 
-	rule := &controllerstorage.QoSRuleRecord{
-		TenantID:      tenantID,
-		NodeID:        node.ID,
-		Category:      category,
-		SrcCIDR:       body.SrcCIDR,
-		DstCIDR:       body.DstCIDR,
-		SrcPort:       body.SrcPort,
-		DstPort:       body.DstPort,
-		Protocol:      body.Protocol,
-		BandwidthMbps: body.BandwidthMbps,
-		Description:   body.Description,
-		Enabled:       true,
+	rule := *existing
+	if body.SrcCIDR != nil {
+		rule.SrcCIDR = *body.SrcCIDR
+	}
+	if body.DstCIDR != nil {
+		rule.DstCIDR = *body.DstCIDR
+	}
+	if body.SrcPort != nil {
+		rule.SrcPort = *body.SrcPort
+	}
+	if body.DstPort != nil {
+		rule.DstPort = *body.DstPort
+	}
+	if body.Protocol != nil {
+		rule.Protocol = *body.Protocol
+	}
+	if body.BandwidthMbps != nil {
+		if *body.BandwidthMbps <= 0 {
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "bandwidth_mbps must be greater than 0", nil)
+			return
+		}
+		rule.BandwidthMbps = *body.BandwidthMbps
+	}
+	if body.Description != nil {
+		rule.Description = *body.Description
 	}
 	if body.Enabled != nil {
 		rule.Enabled = *body.Enabled
 	}
 
-	updated, err := r.store.UpdateTenantNodeQoSRule(tenantID, node.ID, ruleID, category, rule)
+	updated, err := r.store.UpdateTenantNodeQoSRule(tenantID, node.ID, ruleID, category, &rule)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to update QoS rule: "+err.Error(), nil)
 		return

@@ -163,6 +163,21 @@ func (s *Storage) DeleteTenantNodeQoSRule(tenantID, nodeID uuid.UUID, category s
 	return nil
 }
 
+func (s *Storage) GetTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, category string) (*QoSRuleRecord, error) {
+	rule, err := scanQoSRule(s.db.QueryRow(
+		`SELECT id, tenant_id, node_id, category, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+		        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
+		        bandwidth_mbps, enabled, COALESCE(description, ''), created_at, updated_at
+		   FROM qos_rules
+		  WHERE id = $1 AND tenant_id = $2 AND node_id = $3 AND category = $4`,
+		ruleID, tenantID, nodeID, category,
+	))
+	if err != nil {
+		return nil, err
+	}
+	return rule, nil
+}
+
 func (s *Storage) UpdateTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, category string, rule *QoSRuleRecord) (*QoSRuleRecord, error) {
 	result, err := s.db.Exec(
 		`UPDATE qos_rules SET
@@ -285,6 +300,21 @@ func (s *Storage) DeleteTenantNodeACLRuleByID(tenantID, nodeID uuid.UUID, ruleID
 	return nil
 }
 
+func (s *Storage) GetTenantNodeACLRule(tenantID, nodeID, ruleID uuid.UUID) (*ACLRuleRecord, error) {
+	rule, err := scanACLRuleRecord(s.db.QueryRow(
+		`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+		        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
+		        created_at, updated_at
+		   FROM acl_rules
+		  WHERE id = $1 AND tenant_id = $2 AND node_id = $3`,
+		ruleID, tenantID, nodeID,
+	))
+	if err != nil {
+		return nil, err
+	}
+	return rule, nil
+}
+
 func (s *Storage) UpdateTenantNodeACLRule(tenantID, nodeID, ruleID uuid.UUID, rule *ACLRuleRecord) (*ACLRuleRecord, error) {
 	srcNet := aclNetworkForSync(rule.SrcCIDR)
 	dstNet := aclNetworkForSync(rule.DstCIDR)
@@ -321,6 +351,21 @@ func (s *Storage) UpdateTenantNodeACLRule(tenantID, nodeID, ruleID uuid.UUID, ru
 	rule.NodeID = nodeID
 	rule.Name = strings.TrimSpace(rule.Name)
 	rule.UpdatedAt = time.Now()
+	return rule, nil
+}
+
+func scanACLRuleRecord(scanner interface {
+	Scan(dest ...interface{}) error
+}) (*ACLRuleRecord, error) {
+	rule := &ACLRuleRecord{}
+	err := scanner.Scan(
+		&rule.ID, &rule.TenantID, &rule.NodeID, &rule.Name, &rule.Action, &rule.SrcCIDR, &rule.DstCIDR,
+		&rule.DstPort, &rule.Protocol, &rule.Priority, &rule.Enabled, &rule.Description,
+		&rule.CreatedAt, &rule.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
 	return rule, nil
 }
 

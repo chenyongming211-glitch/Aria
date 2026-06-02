@@ -68,7 +68,7 @@ func TestSyncNodeFiltersACLRegionWithTenantNodesOnly(t *testing.T) {
 		now.Unix(), now.Add(-time.Hour).Unix(), "spoke", "kernel", "6.0", true, "online", int64(0), "{10.10.0.0/24}", "", now, now,
 	))
 	mock.ExpectQuery(regexp.QuoteMeta(`
-			SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
+			SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
 			       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
 			FROM acl_rules
 			WHERE tenant_id = $1 AND enabled = true

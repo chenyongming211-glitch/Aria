@@ -320,6 +320,53 @@ func expectQoSCreateSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 		}).AddRow(uuid.New(), tenantID, nodeID, "service", "", "", 0, 443, 6, 200, true, "qos web", now, now))
 }
 
+func expectACLGetForUpdate(mock sqlmock.Sqlmock, tenantID, nodeID, ruleID uuid.UUID) {
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+		        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
+		        created_at, updated_at
+		   FROM acl_rules
+		  WHERE id = $1 AND tenant_id = $2 AND node_id = $3`)).
+		WithArgs(ruleID, tenantID, nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "priority", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(ruleID, tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, 100, true, "allow web", now, now))
+}
+
+func expectACLUpdatePreservingExistingFields(mock sqlmock.Sqlmock, tenantID, nodeID, ruleID uuid.UUID) {
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE acl_rules SET
+			name = $4, action = $5, src_cidr = NULLIF($6, '')::cidr, dst_cidr = NULLIF($7, '')::cidr,
+			dst_port = $8, protocol = $9, priority = $10, description = $11,
+			enabled = $12, src_net = $13::cidr, dst_net = $14::cidr, min_port = $15, max_port = $16, updated_at = NOW()
+		 WHERE id = $1 AND tenant_id = $2 AND node_id = $3`)).
+		WithArgs(ruleID, tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, 100, "allow web", false, "10.0.0.0/24", "0.0.0.0/0", 443, 443).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
+func expectQoSGetForUpdate(mock sqlmock.Sqlmock, tenantID, nodeID, ruleID uuid.UUID) {
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, category, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+		        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
+		        bandwidth_mbps, enabled, COALESCE(description, ''), created_at, updated_at
+		   FROM qos_rules
+		  WHERE id = $1 AND tenant_id = $2 AND node_id = $3 AND category = $4`)).
+		WithArgs(ruleID, tenantID, nodeID, "service").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "category", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(ruleID, tenantID, nodeID, "service", "10.0.0.0/24", "0.0.0.0/0", 1000, 443, 6, 200, true, "qos web", now, now))
+}
+
+func expectQoSUpdatePreservingExistingFields(mock sqlmock.Sqlmock, tenantID, nodeID, ruleID uuid.UUID) {
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE qos_rules SET
+			src_cidr = NULLIF($5, ''), dst_cidr = NULLIF($6, ''),
+			src_port = $7, dst_port = $8, protocol = $9,
+			bandwidth_mbps = $10, description = $11,
+			enabled = $12, updated_at = NOW()
+		 WHERE id = $1 AND tenant_id = $2 AND node_id = $3 AND category = $4`)).
+		WithArgs(ruleID, tenantID, nodeID, "service", "10.0.0.0/24", "0.0.0.0/0", 1000, 443, 6, 200, "qos web", false).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
 func expectBumpDesiredState(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO node_control_states (tenant_id, node_id, desired_state_version, desired_state_updated_at, updated_at)
 		 VALUES ($1, $2, $3, NOW(), NOW())
@@ -976,6 +1023,44 @@ func TestRBACHandlerMatrix_ACLsWrite(t *testing.T) {
 	}
 }
 
+func TestACLUpdatePreservesOmittedFields(t *testing.T) {
+	t.Setenv("RBAC_ENFORCEMENT", "enforce")
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	ruleID := uuid.New()
+	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/security/acls/" + ruleID.String()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	expectPermissionLookup(mock, tenantID, "admin", []string{"acls:write"})
+	expectACLGetForUpdate(mock, tenantID, nodeID, ruleID)
+	expectACLUpdatePreservingExistingFields(mock, tenantID, nodeID, ruleID)
+	expectBumpDesiredState(mock, tenantID, nodeID)
+	expectPolicyDispatchSuccess(mock, tenantID, nodeID)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withAuthContext(httptest.NewRequest(
+		http.MethodPut,
+		path,
+		strings.NewReader(`{"enabled":false}`),
+	), "admin", tenantID)
+	rr := httptest.NewRecorder()
+	router.HandleTenantScoped(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestRBACHandlerMatrix_QoSWrite(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
@@ -1025,6 +1110,44 @@ func TestRBACHandlerMatrix_QoSWrite(t *testing.T) {
 				t.Fatalf("unmet sql expectations: %v", err)
 			}
 		})
+	}
+}
+
+func TestQoSUpdatePreservesOmittedFields(t *testing.T) {
+	t.Setenv("RBAC_ENFORCEMENT", "enforce")
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	ruleID := uuid.New()
+	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/qos/service/" + ruleID.String()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	expectPermissionLookup(mock, tenantID, "admin", []string{"qos:write"})
+	expectQoSGetForUpdate(mock, tenantID, nodeID, ruleID)
+	expectQoSUpdatePreservingExistingFields(mock, tenantID, nodeID, ruleID)
+	expectBumpDesiredState(mock, tenantID, nodeID)
+	expectPolicyDispatchSuccess(mock, tenantID, nodeID)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withAuthContext(httptest.NewRequest(
+		http.MethodPut,
+		path,
+		strings.NewReader(`{"enabled":false}`),
+	), "admin", tenantID)
+	rr := httptest.NewRecorder()
+	router.HandleTenantScoped(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
 

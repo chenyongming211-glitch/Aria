@@ -1362,7 +1362,7 @@ func (s *Storage) SaveACLRule(rule *ACLRule) error {
 // GetACLRule returns a single ACL rule by ID.
 func (s *Storage) GetACLRule(id uuid.UUID) (*ACLRule, error) {
 	query := `
-		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
+		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
 		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
 		FROM acl_rules WHERE id = $1
 	`
@@ -1381,7 +1381,7 @@ func (s *Storage) GetACLRule(id uuid.UUID) (*ACLRule, error) {
 // GetACLRuleByTenant returns a single ACL rule by ID and tenant ID for tenant isolation.
 func (s *Storage) GetACLRuleByTenant(id uuid.UUID, tenantID uuid.UUID) (*ACLRule, error) {
 	query := `
-		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
+		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
 		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
 		FROM acl_rules WHERE id = $1 AND tenant_id = $2
 	`
@@ -1400,7 +1400,7 @@ func (s *Storage) GetACLRuleByTenant(id uuid.UUID, tenantID uuid.UUID) (*ACLRule
 // GetAllACLRules returns all ACL rules ordered by priority.
 func (s *Storage) GetAllACLRules() ([]*ACLRule, error) {
 	query := `
-		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
+		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
 		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
 		FROM acl_rules
 		ORDER BY priority ASC, id ASC
@@ -1440,7 +1440,7 @@ func (s *Storage) ScanACLRuleRows(rows *sql.Rows) (*ACLRule, error) {
 // GetEnabledACLRulesByTenant returns only enabled ACL rules for a specific tenant.
 func (s *Storage) GetEnabledACLRulesByTenant(tenantID uuid.UUID) ([]*ACLRule, error) {
 	query := `
-		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
+		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
 		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
 		FROM acl_rules
 		WHERE tenant_id = $1 AND enabled = true
@@ -1466,7 +1466,7 @@ func (s *Storage) GetEnabledACLRulesByTenant(tenantID uuid.UUID) ([]*ACLRule, er
 // GetEnabledACLRules returns only enabled ACL rules for sync.
 func (s *Storage) GetEnabledACLRules() ([]*ACLRule, error) {
 	query := `
-		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
+		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
 		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
 		FROM acl_rules
 		WHERE enabled = true
@@ -1497,7 +1497,7 @@ func (s *Storage) GetEnabledACLRules() ([]*ACLRule, error) {
 // GetACLRulesByTenant returns all ACL rules for a specific tenant.
 func (s *Storage) GetACLRulesByTenant(tenantID uuid.UUID) ([]*ACLRule, error) {
 	query := `
-		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
+		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
 		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
 		FROM acl_rules
 		WHERE tenant_id = $1

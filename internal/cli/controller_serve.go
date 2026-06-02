@@ -1598,17 +1598,6 @@ type PolicyResponse struct {
 	Action   string `json:"action"`
 }
 
-// HandlePolicies manages ACL policies (CRUD operations)
-func (c *Controller) getRegionByNetwork(network string) string {
-	nodes, err := c.store.GetAllNodes()
-	if err != nil {
-		c.logger.Error("Failed to get nodes for region lookup: %v", err)
-		return ""
-	}
-
-	return c.getRegionByNetworkInNodes(network, nodes)
-}
-
 func (c *Controller) getRegionByNetworkInNodes(network string, nodes []*controllerstorage.Node) string {
 	// Parse the target network
 	_, targetNet, err := net.ParseCIDR(network)
@@ -1648,18 +1637,6 @@ func (c *Controller) getTenantEnabledACLRules(ctx context.Context) ([]*controlle
 	}
 	// Fallback to original method if tenant-scoped storage not available
 	return c.store.GetEnabledACLRules()
-}
-
-// getACLRulesForRegion filters ACL rules relevant to a specific region.
-// A rule is relevant if either the source or destination network belongs to the region.
-// This supports bidirectional traffic and asymmetric routing.
-func (c *Controller) getACLRulesForRegion(region string, allRules []*controllerstorage.ACLRule) []ACLRuleJSON {
-	nodes, err := c.store.GetAllNodes()
-	if err != nil {
-		c.logger.Error("Failed to get nodes for ACL region lookup: %v", err)
-		return nil
-	}
-	return c.getACLRulesForRegionInNodes(region, allRules, nodes)
 }
 
 func (c *Controller) getACLRulesForRegionInNodes(region string, allRules []*controllerstorage.ACLRule, nodes []*controllerstorage.Node) []ACLRuleJSON {

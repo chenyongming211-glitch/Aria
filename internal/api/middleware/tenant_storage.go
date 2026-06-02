@@ -190,7 +190,7 @@ func (ts *TenantScopedStorage) GetTenantACLRules(ctx context.Context) ([]*contro
 	}
 
 	query := `
-		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
+		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
 		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
 		FROM acl_rules
 		WHERE tenant_id = $1
@@ -225,7 +225,7 @@ func (ts *TenantScopedStorage) GetTenantACLRule(ctx context.Context, id int) (*c
 	}
 
 	query := `
-		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
+		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
 		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
 		FROM acl_rules
 		WHERE id = $1 AND tenant_id = $2
@@ -287,7 +287,7 @@ func (ts *TenantScopedStorage) DeleteTenantACLRule(ctx context.Context, id int) 
 	}
 	count, _ := result.RowsAffected()
 	if count == 0 {
-		return sql.ErrNoRows 
+		return sql.ErrNoRows
 	}
 	return nil
 }
@@ -299,7 +299,7 @@ func (ts *TenantScopedStorage) GetEnabledTenantACLRules(ctx context.Context) ([]
 	}
 
 	query := `
-		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), src_net, COALESCE(dst_node, ''), dst_net, protocol, min_port, max_port,
+		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
 		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
 		FROM acl_rules
 		WHERE tenant_id = $1 AND enabled = true
