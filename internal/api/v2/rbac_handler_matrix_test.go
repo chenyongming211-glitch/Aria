@@ -45,7 +45,12 @@ func withAuthContext(req *http.Request, role string, tenantID uuid.UUID) *http.R
 }
 
 func expectPermissionLookup(mock sqlmock.Sqlmock, tenantID uuid.UUID, role string, permissions []string) {
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT permissions FROM roles WHERE tenant_id = $1 AND name = $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT permissions FROM roles
+		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
+		ORDER BY CASE WHEN name = $2 THEN 0 ELSE 1 END
+		LIMIT 1
+	`)).
 		WithArgs(tenantID, roleLookupName(role)).
 		WillReturnRows(sqlmock.NewRows([]string{"permissions"}).AddRow("{" + strings.Join(permissions, ",") + "}"))
 }

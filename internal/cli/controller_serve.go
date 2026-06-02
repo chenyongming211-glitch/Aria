@@ -2160,6 +2160,24 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
 
+	if count == 1 {
+		var migrateUserID, migrateUsername string
+		err := db.QueryRow(`SELECT id, username FROM users WHERE role = 'super_admin' ORDER BY created_at ASC LIMIT 1`).Scan(&migrateUserID, &migrateUsername)
+		if err != nil {
+			return fmt.Errorf("failed to load existing super admin for migration: %w", err)
+		}
+		result, err := db.Exec(`UPDATE users SET username = $1, password_hash = $2, must_change_password = TRUE WHERE id = $3`,
+			username, string(hashedPwd), migrateUserID)
+		if err != nil {
+			return fmt.Errorf("failed to migrate super admin username: %w", err)
+		}
+		if rowsAffected, err := result.RowsAffected(); err == nil && rowsAffected == 0 {
+			return fmt.Errorf("failed to migrate super admin username: user %s was not updated", migrateUsername)
+		}
+		logger.Info("Super admin username migrated from %s to %s", migrateUsername, username)
+		return nil
+	}
+
 	_, err = db.Exec(`INSERT INTO users (username, password_hash, role, tenant_id, must_change_password) VALUES ($1, $2, 'super_admin', NULL, TRUE)`,
 		username, string(hashedPwd))
 	if err != nil {

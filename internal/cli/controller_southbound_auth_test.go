@@ -109,7 +109,12 @@ func TestHandleNetworkManageScopesHostnameLookupToJWTTenant(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT permissions FROM roles WHERE tenant_id = $1 AND name = $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT permissions FROM roles
+		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
+		ORDER BY CASE WHEN name = $2 THEN 0 ELSE 1 END
+		LIMIT 1
+	`)).
 		WithArgs(tenantID, controllerstorage.SystemRoleAdmin).
 		WillReturnRows(sqlmock.NewRows([]string{"permissions"}).AddRow("{routes:write}"))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND status != 'deleted' ORDER BY last_seen DESC`)).

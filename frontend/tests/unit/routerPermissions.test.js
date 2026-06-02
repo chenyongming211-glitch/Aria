@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
+import { setActivePinia } from 'pinia'
 import router from '@/router'
 
 const routePermissionCases = [
@@ -19,6 +20,7 @@ describe('router RBAC metadata', () => {
   let storage
 
   beforeEach(() => {
+    setActivePinia(undefined)
     storage = new Map()
     globalThis.localStorage = {
       getItem: (key) => (storage.has(key) ? storage.get(key) : null),

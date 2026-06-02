@@ -157,7 +157,7 @@ func TestEnsureSuperAdminRequiresConfiguredPasswordForFreshInstall(t *testing.T)
 	}
 }
 
-func TestEnsureSuperAdminCreatesConfiguredUsernameWhenAnotherSuperAdminExists(t *testing.T) {
+func TestEnsureSuperAdminMigratesConfiguredUsernameWhenSingleSuperAdminExists(t *testing.T) {
 	t.Setenv("ARIA_SUPER_ADMIN", "ops-admin")
 	t.Setenv("ARIA_SUPER_ADMIN_PASSWORD", "OpsSecret@123")
 
@@ -172,8 +172,11 @@ func TestEnsureSuperAdminCreatesConfiguredUsernameWhenAnotherSuperAdminExists(t 
 		WillReturnRows(sqlmock.NewRows([]string{"id", "password_hash"}))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM users WHERE role = 'super_admin'")).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO users (username, password_hash, role, tenant_id, must_change_password) VALUES ($1, $2, 'super_admin', NULL, TRUE)`)).
-		WithArgs("ops-admin", bcryptHashForPassword{password: "OpsSecret@123"}).
+	userID := uuid.New().String()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, username FROM users WHERE role = 'super_admin' ORDER BY created_at ASC LIMIT 1`)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username"}).AddRow(userID, "sysadmin"))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET username = $1, password_hash = $2, must_change_password = TRUE WHERE id = $3`)).
+		WithArgs("ops-admin", bcryptHashForPassword{password: "OpsSecret@123"}, userID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	logger, err := logging.NewLogger(&logging.Config{LogDir: t.TempDir(), Component: "test"})

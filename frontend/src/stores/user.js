@@ -306,6 +306,9 @@ export default defineStore('user', () => {
     }
 
     isAuthenticated.value = true
+    if (!localStorage.getItem('aria_last_activity')) {
+      localStorage.setItem('aria_last_activity', Date.now().toString())
+    }
     mustChangePassword.value = localStorage.getItem('aria_must_change_password') === 'true' || tokenRequiresPasswordChange(token)
     if (mustChangePassword.value) {
       localStorage.setItem('aria_must_change_password', 'true')

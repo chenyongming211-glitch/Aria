@@ -76,7 +76,12 @@ func TestAuthorizeTenantPermission_EnforcementModes(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = db.Close() })
 
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT permissions FROM roles WHERE tenant_id = $1 AND name = $2`)).
+		mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT permissions FROM roles
+		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
+		ORDER BY CASE WHEN name = $2 THEN 0 ELSE 1 END
+		LIMIT 1
+	`)).
 			WithArgs(tenantID, controllerstorage.SystemRoleOperator).
 			WillReturnRows(sqlmock.NewRows([]string{"permissions"}).AddRow("{nodes:read}"))
 
@@ -106,7 +111,12 @@ func TestAuthorizeTenantPermission_EnforcementModes(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = db.Close() })
 
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT permissions FROM roles WHERE tenant_id = $1 AND name = $2`)).
+		mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT permissions FROM roles
+		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
+		ORDER BY CASE WHEN name = $2 THEN 0 ELSE 1 END
+		LIMIT 1
+	`)).
 			WithArgs(tenantID, "viewer").
 			WillReturnRows(sqlmock.NewRows([]string{"permissions"}).AddRow("{nodes:read}"))
 
@@ -136,7 +146,12 @@ func TestAuthorizeTenantPermission_EnforcementModes(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = db.Close() })
 
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT permissions FROM roles WHERE tenant_id = $1 AND name = $2`)).
+		mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT permissions FROM roles
+		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
+		ORDER BY CASE WHEN name = $2 THEN 0 ELSE 1 END
+		LIMIT 1
+	`)).
 			WithArgs(tenantID, "viewer").
 			WillReturnError(errors.New("lookup failed"))
 
@@ -169,7 +184,12 @@ func TestAuthorizeTenantPermission_EnforcementModes(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = db.Close() })
 
-		mock.ExpectQuery(regexp.QuoteMeta(`SELECT permissions FROM roles WHERE tenant_id = $1 AND name = $2`)).
+		mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT permissions FROM roles
+		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
+		ORDER BY CASE WHEN name = $2 THEN 0 ELSE 1 END
+		LIMIT 1
+	`)).
 			WithArgs(tenantID, "admin").
 			WillReturnRows(sqlmock.NewRows([]string{"permissions"}).AddRow("{nodes:read,users:write}"))
 

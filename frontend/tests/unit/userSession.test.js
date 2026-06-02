@@ -66,6 +66,21 @@ describe('user session persistence', () => {
     expect(localStorage.getItem('aria_user')).toBeNull()
   })
 
+  it('initializes last activity when restoring an existing session', () => {
+    localStorage.setItem('aria_token', 'valid-token')
+    localStorage.setItem('aria_user', JSON.stringify({
+      id: 'user-1',
+      username: 'operator',
+      role: 'operator',
+      tenant_id: 'tenant-1'
+    }))
+
+    const userStore = useUserStore()
+
+    expect(userStore.loadSession()).toBe(true)
+    expect(Number(localStorage.getItem('aria_last_activity'))).toBeGreaterThan(0)
+  })
+
   it('drops malformed cached permissions while keeping a valid cached user', () => {
     localStorage.setItem('aria_token', 'valid-token')
     localStorage.setItem('aria_user', JSON.stringify({

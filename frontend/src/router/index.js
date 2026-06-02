@@ -1,6 +1,7 @@
 // src/router/index.js
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { permissionsForRole, tokenRequiresPasswordChange } from '@/stores/user'
+import { getActivePinia } from 'pinia'
+import useUserStore, { permissionsForRole, tokenRequiresPasswordChange } from '@/stores/user'
 import { clearSession, isIdleSessionExpired } from '@/utils/session'
 import Layout from '@/components/Layout/Layout.vue'
 
@@ -159,7 +160,20 @@ const readPermissions = () => {
   }
 }
 
+let refreshedPermissionKey = ''
+
+const activeUserStore = () => {
+  if (!getActivePinia()) return null
+  try {
+    return useUserStore()
+  } catch (error) {
+    console.warn('Failed to access user store for route permissions:', error)
+    return null
+  }
+}
+
 const clearCachedSession = () => {
+  refreshedPermissionKey = ''
   clearSession()
 }
 
@@ -178,7 +192,41 @@ const hasValidCachedUser = () => {
   return Boolean(user?.role)
 }
 
-const hasRoutePermission = (to) => {
+const loadRoutePermissions = async (user) => {
+  if (user?.role === 'super_admin') return ['*']
+
+  const store = activeUserStore()
+  const fallbackPermissions = permissionsForRole(user?.role)
+  if (!store || !user?.tenant_id) {
+    const cachedPermissions = readPermissions()
+    const permissions = cachedPermissions.length > 0 ? cachedPermissions : fallbackPermissions
+    if (cachedPermissions.length === 0 && fallbackPermissions.length > 0) {
+      localStorage.setItem('aria_permissions', JSON.stringify(fallbackPermissions))
+    }
+    return permissions
+  }
+
+  const key = `${user.tenant_id}:${user.role}`
+  if (refreshedPermissionKey !== key) {
+    try {
+      await store.loadPermissions(user.tenant_id, user.role)
+    } catch (error) {
+      console.warn('Failed to refresh route permissions:', error)
+    }
+    refreshedPermissionKey = key
+  }
+
+  if (store.permissions?.length > 0) return store.permissions
+
+  const cachedPermissions = readPermissions()
+  const permissions = cachedPermissions.length > 0 ? cachedPermissions : fallbackPermissions
+  if (cachedPermissions.length === 0 && fallbackPermissions.length > 0) {
+    localStorage.setItem('aria_permissions', JSON.stringify(fallbackPermissions))
+  }
+  return permissions
+}
+
+const hasRoutePermission = async (to) => {
   const requiredRole = to.meta?.role
   if (requiredRole) {
     const user = readUser()
@@ -191,12 +239,7 @@ const hasRoutePermission = (to) => {
   const user = readUser()
   if (user?.role === 'super_admin') return true
 
-  const cachedPermissions = readPermissions()
-  const fallbackPermissions = permissionsForRole(user?.role)
-  const permissions = cachedPermissions.length > 0 ? cachedPermissions : fallbackPermissions
-  if (cachedPermissions.length === 0 && fallbackPermissions.length > 0) {
-    localStorage.setItem('aria_permissions', JSON.stringify(fallbackPermissions))
-  }
+  const permissions = await loadRoutePermissions(user)
   if (permissions.includes('*')) return true
 
   if (Array.isArray(required)) {
@@ -214,18 +257,18 @@ const routePathForChild = (child) => {
   return child.path.startsWith('/') ? child.path : `/${child.path}`
 }
 
-const findAccessibleFallbackPath = (blockedPath) => {
+const findAccessibleFallbackPath = async (blockedPath) => {
   const root = routes.find((route) => route.path === '/')
   for (const child of root?.children || []) {
     if (child.redirect || !child.meta?.requiresAuth) continue
     const path = routePathForChild(child)
     if (!path || path === blockedPath) continue
-    if (hasRoutePermission(child)) return path
+    if (await hasRoutePermission(child)) return path
   }
   return '/login'
 }
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const token = localStorage.getItem('aria_token')
   const expireTime = localStorage.getItem('aria_token_expire_time')
   
@@ -275,8 +318,8 @@ router.beforeEach((to, from, next) => {
     next('/login')
   } else if (to.path === '/login' && token && !isExpired && !hasForcedPasswordChange) {
     next('/dashboard')
-  } else if (to.meta.requiresAuth && !hasRoutePermission(to)) {
-    const fallbackPath = findAccessibleFallbackPath(to.path)
+  } else if (to.meta.requiresAuth && !(await hasRoutePermission(to))) {
+    const fallbackPath = await findAccessibleFallbackPath(to.path)
     console.warn(`Permission denied for route ${to.path}, redirecting to ${fallbackPath}`)
     if (fallbackPath === '/login') {
       clearCachedSession()

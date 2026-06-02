@@ -34,7 +34,12 @@ func TestHandlePermissionsReturnsTenantRolePermissions(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT permissions FROM roles WHERE tenant_id = $1 AND name = $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT permissions FROM roles
+		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
+		ORDER BY CASE WHEN name = $2 THEN 0 ELSE 1 END
+		LIMIT 1
+	`)).
 		WithArgs(tenantID, controllerstorage.SystemRoleOperator).
 		WillReturnRows(sqlmock.NewRows([]string{"permissions"}).AddRow("{nodes:read,custom:use}"))
 
@@ -86,6 +91,57 @@ func TestHandlePermissionsReturnsTenantRolePermissions(t *testing.T) {
 	}
 }
 
+func TestHandlePermissionsMatchesCustomRoleCaseInsensitively(t *testing.T) {
+	auth.SetSecret("test-jwt-secret")
+	t.Cleanup(func() { auth.SetSecret("") })
+
+	tenantID := uuid.New()
+	userID := uuid.New()
+	token, err := auth.GenerateToken(userID.String(), "operator", "OpsRole", tenantID.String())
+	if err != nil {
+		t.Fatalf("GenerateToken failed: %v", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT permissions FROM roles
+		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
+		ORDER BY CASE WHEN name = $2 THEN 0 ELSE 1 END
+		LIMIT 1
+	`)).
+		WithArgs(tenantID, "OpsRole").
+		WillReturnRows(sqlmock.NewRows([]string{"permissions"}).AddRow("{nodes:read,custom:use}"))
+
+	api := NewAuthAPI(controllerstorage.NewStorageWithDB(db))
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/auth/permissions", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+
+	middleware.JWTAuthMiddleware(api.HandlePermissions)(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var resp apibase.APIResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	data := resp.Data.(map[string]interface{})
+	if got := data["role"]; got != "OpsRole" {
+		t.Fatalf("expected role %q, got %#v", "OpsRole", got)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestHandlePermissionsMapsOwnerToAdmin(t *testing.T) {
 	auth.SetSecret("test-jwt-secret")
 	t.Cleanup(func() { auth.SetSecret("") })
@@ -103,7 +159,12 @@ func TestHandlePermissionsMapsOwnerToAdmin(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT permissions FROM roles WHERE tenant_id = $1 AND name = $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT permissions FROM roles
+		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
+		ORDER BY CASE WHEN name = $2 THEN 0 ELSE 1 END
+		LIMIT 1
+	`)).
 		WithArgs(tenantID, controllerstorage.SystemRoleAdmin).
 		WillReturnRows(sqlmock.NewRows([]string{"permissions"}).AddRow("{settings:read,users:read}"))
 
@@ -147,7 +208,12 @@ func TestHandlePermissionsReturnsInternalServerErrorOnPermissionLookupFailure(t 
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT permissions FROM roles WHERE tenant_id = $1 AND name = $2`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT permissions FROM roles
+		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
+		ORDER BY CASE WHEN name = $2 THEN 0 ELSE 1 END
+		LIMIT 1
+	`)).
 		WithArgs(tenantID, controllerstorage.SystemRoleOperator).
 		WillReturnError(errors.New("database unavailable"))
 

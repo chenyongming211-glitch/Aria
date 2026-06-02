@@ -212,7 +212,10 @@ func (s *Storage) DeleteRole(tenantID, roleID uuid.UUID) error {
 func (s *Storage) GetRolePermissions(tenantID uuid.UUID, roleName string) ([]string, error) {
 	var permissions []string
 	err := s.db.QueryRow(`
-		SELECT permissions FROM roles WHERE tenant_id = $1 AND name = $2
+		SELECT permissions FROM roles
+		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
+		ORDER BY CASE WHEN name = $2 THEN 0 ELSE 1 END
+		LIMIT 1
 	`, tenantID, roleName).Scan(pq.Array(&permissions))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get permissions for role '%s': %w", roleName, err)
