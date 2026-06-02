@@ -80,6 +80,7 @@ const (
 	CodeRateLimitExceeded   = "RATE_LIMIT_EXCEEDED"
 	CodeMethodNotAllowed    = "METHOD_NOT_ALLOWED"
 	CodeNotImplemented      = "NOT_IMPLEMENTED"
+	CodeServiceUnavailable  = "SERVICE_UNAVAILABLE"
 	CodeEndpointNotFound    = "ENDPOINT_NOT_FOUND"
 	CodeInvalidPath         = "INVALID_PATH"
 
@@ -121,7 +122,7 @@ const (
 	CodeUserNotFound     = "USER_NOT_FOUND"
 
 	// 令牌相关错误码
-	CodeInvalidTokenID = "INVALID_TOKEN_ID"
-	CodeTokenNotFound   = "TOKEN_NOT_FOUND"
+	CodeInvalidTokenID    = "INVALID_TOKEN_ID"
+	CodeTokenNotFound     = "TOKEN_NOT_FOUND"
 	CodeDeleteTokenFailed = "DELETE_TOKEN_FAILED"
 )

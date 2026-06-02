@@ -480,6 +480,10 @@ func promQLInstanceFilterForNodes(nodes []*controllerstorage.Node) string {
 	return strings.Join(instances, "|")
 }
 
+func writeMonitoringBackendUnavailable(w http.ResponseWriter) {
+	apibase.WriteError(w, http.StatusServiceUnavailable, apibase.CodeServiceUnavailable, "VictoriaMetrics client is not configured", nil)
+}
+
 // handleMonitoringTraffic returns tenant-level traffic time series data.
 // GET /api/v2/tenants/{tenant_id}/monitoring/traffic?range=24h
 func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
@@ -539,12 +543,7 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	if r.vmClient == nil {
-		apibase.WriteSuccess(w, map[string]interface{}{
-			"timestamps":          []int64{},
-			"upload_bytes":        []float64{},
-			"download_bytes":      []float64{},
-			"peak_bandwidth_mbps": 0,
-		}, "Traffic data retrieved")
+		writeMonitoringBackendUnavailable(w)
 		return
 	}
 
@@ -682,7 +681,12 @@ func (r *Router) handleMonitoringNodeMetrics(w http.ResponseWriter, req *http.Re
 	downloadMbps := 0.0
 	latencyMs := 0.0
 
-	if r.vmClient != nil && node.PublicIP != "" {
+	if r.vmClient == nil {
+		writeMonitoringBackendUnavailable(w)
+		return
+	}
+
+	if node.PublicIP != "" {
 		ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
 		defer cancel()
 

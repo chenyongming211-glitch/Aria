@@ -136,13 +136,13 @@ func NewListNodesToolWithStore(store *controllerstorage.Storage) Tool {
 				fmt.Printf("[Tool:list_nodes] No nodes found\n")
 				// 返回统计信息而不是空数组
 				stats := map[string]interface{}{
-					"title":        "节点列表",
-					"total_nodes":  0,
-					"online_nodes": 0,
+					"title":         "节点列表",
+					"total_nodes":   0,
+					"online_nodes":  0,
 					"offline_nodes": 0,
-					"message":      "当前没有注册的节点。请使用 Token 将 Agent 注册到 Controller。",
-					"by_region":    make(map[string]int),
-					"by_status":    make(map[string]int),
+					"message":       "当前没有注册的节点。请使用 Token 将 Agent 注册到 Controller。",
+					"by_region":     make(map[string]int),
+					"by_status":     make(map[string]int),
 				}
 				data, err := json.Marshal(stats)
 				if err != nil {
@@ -191,9 +191,15 @@ func NewGetNodeDetailTool(store *controllerstorage.Storage) Tool {
 			}
 
 			// 查询节点
-			node, err := store.GetNodeByHostname(nodeName)
+			node, matchCount, err := findUniqueNodeByHostname(store, nodeName)
 			if err != nil {
 				return "", fmt.Errorf("查询节点失败: %v", err)
+			}
+			if matchCount > 1 {
+				return "", fmt.Errorf("节点名称 [%s] 在多个租户中重复，请使用更明确的节点标识", nodeName)
+			}
+			if node == nil {
+				return fmt.Sprintf("节点 [%s] 不存在", nodeName), nil
 			}
 
 			// 转换为易读格式

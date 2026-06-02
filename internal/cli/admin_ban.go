@@ -57,13 +57,30 @@ func runAdminBan(cmd *cobra.Command, args []string) error {
 	var hostname string
 
 	if banHostname != "" {
-		// Find by hostname
-		node, err := store.GetNodeByHostname(banHostname)
-		if err != nil || node == nil {
+		// Find by hostname. Hostnames are not globally unique across tenants, so
+		// refuse ambiguous matches instead of banning an arbitrary first row.
+		nodes, err := store.GetAllNodes()
+		if err != nil {
+			return fmt.Errorf("failed to get nodes: %w", err)
+		}
+		var matchedNode *controllerstorage.Node
+		matchCount := 0
+		for _, node := range nodes {
+			if node.Hostname == banHostname {
+				matchCount++
+				if matchedNode == nil {
+					matchedNode = node
+				}
+			}
+		}
+		if matchCount > 1 {
+			return fmt.Errorf("multiple devices use hostname %q, please ban by public key prefix", banHostname)
+		}
+		if matchedNode == nil {
 			return fmt.Errorf("device not found with hostname: %s", banHostname)
 		}
-		publicKey = node.PublicKey
-		hostname = node.Hostname
+		publicKey = matchedNode.PublicKey
+		hostname = matchedNode.Hostname
 	} else {
 		// Find by public key (partial match)
 		deviceID := args[0]

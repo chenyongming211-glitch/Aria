@@ -56,14 +56,10 @@ func NewAddRouteTool(store *controllerstorage.Storage) Tool {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
 
-			var targetNode *controllerstorage.Node
-			for _, node := range allNodes {
-				if node.Hostname == hostname {
-					targetNode = node
-					break
-				}
+			targetNode, matchCount := findUniqueNodeByHostnameInNodes(allNodes, hostname)
+			if matchCount > 1 {
+				return "", fmt.Errorf("节点名称 [%s] 在多个租户中重复，请使用更明确的节点标识", hostname)
 			}
-
 			if targetNode == nil {
 				return fmt.Sprintf("节点 [%s] 不存在", hostname), nil
 			}
@@ -102,10 +98,10 @@ func NewAddRouteTool(store *controllerstorage.Storage) Tool {
 			}
 
 			result := map[string]interface{}{
-				"hostname":  hostname,
-				"cidr":      cidr,
-				"region":    targetNode.Region,
-				"added":     true,
+				"hostname": hostname,
+				"cidr":     cidr,
+				"region":   targetNode.Region,
+				"added":    true,
 				"routes":   targetNode.AdvertisedRoutes,
 			}
 
@@ -114,7 +110,7 @@ func NewAddRouteTool(store *controllerstorage.Storage) Tool {
 				return "", fmt.Errorf("数据序列化失败: %v", err)
 			}
 			// 使用特殊标记告诉飞书 handler 这是卡片数据
-		return fmt.Sprintf("CARD_DATA:%s", string(data)), nil
+			return fmt.Sprintf("CARD_DATA:%s", string(data)), nil
 		},
 	}
 }
@@ -161,14 +157,10 @@ func NewRemoveRouteTool(store *controllerstorage.Storage) Tool {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
 
-			var targetNode *controllerstorage.Node
-			for _, node := range allNodes {
-				if node.Hostname == hostname {
-					targetNode = node
-					break
-				}
+			targetNode, matchCount := findUniqueNodeByHostnameInNodes(allNodes, hostname)
+			if matchCount > 1 {
+				return "", fmt.Errorf("节点名称 [%s] 在多个租户中重复，请使用更明确的节点标识", hostname)
 			}
-
 			if targetNode == nil {
 				return fmt.Sprintf("节点 [%s] 不存在", hostname), nil
 			}
@@ -237,15 +229,21 @@ func NewGetNodeRoutesTool(store *controllerstorage.Storage) Tool {
 			}
 
 			// 查找节点
-			node, err := store.GetNodeByHostname(hostname)
-			if err != nil || node == nil {
+			node, matchCount, err := findUniqueNodeByHostname(store, hostname)
+			if err != nil {
+				return "", fmt.Errorf("查询节点失败: %v", err)
+			}
+			if matchCount > 1 {
+				return "", fmt.Errorf("节点名称 [%s] 在多个租户中重复，请使用更明确的节点标识", hostname)
+			}
+			if node == nil {
 				return fmt.Sprintf("节点 [%s] 不存在", hostname), nil
 			}
 
 			result := map[string]interface{}{
-				"hostname":   hostname,
-				"region":     node.Region,
-				"routes":     node.AdvertisedRoutes,
+				"hostname":    hostname,
+				"region":      node.Region,
+				"routes":      node.AdvertisedRoutes,
 				"route_count": len(node.AdvertisedRoutes),
 			}
 
@@ -318,10 +316,10 @@ func NewListAllRoutesTool(store *controllerstorage.Storage) Tool {
 			nodeRoutes := make([]map[string]interface{}, 0, len(nodes))
 			for _, node := range nodes {
 				routeInfo := map[string]interface{}{
-					"hostname":     node.Hostname,
-					"region":       node.Region,
-					"routes":       node.AdvertisedRoutes,
-					"route_count":  len(node.AdvertisedRoutes),
+					"hostname":    node.Hostname,
+					"region":      node.Region,
+					"routes":      node.AdvertisedRoutes,
+					"route_count": len(node.AdvertisedRoutes),
 				}
 				if node.PublicIP != "" {
 					routeInfo["public_ip"] = node.PublicIP
