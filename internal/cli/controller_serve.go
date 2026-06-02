@@ -752,177 +752,41 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ========== Token Validation ==========
-	// 检查是否为已注册节点（重新注册以同步配置）
-	existingNode, _ := c.store.GetNode(req.PublicKey)
-	isReRegistration := (existingNode != nil)
-	requiresFreshEnrollment := nodeRequiresFreshEnrollment(existingNode)
-	authResult, authErr := c.authorizeRegistrationRequest(&req, existingNode, registrationRuntimeTokenFromRequest(r, &req))
-	if authErr != nil {
-		c.logger.Warn("Registration rejected for node %s: %v", previewString(req.PublicKey, 8), authErr)
-		http.Error(w, authErr.message, authErr.status)
-		return
-	}
-	requestedTenantID := authResult.RequestedTenantID
-	if isReRegistration && !requiresFreshEnrollment {
-		c.logger.Debug("Re-registration from existing node: %s", previewString(req.PublicKey, 8))
-	}
-
-	// ========== Normal Registration Flow ==========
 	publicIP := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(publicIP); err == nil {
 		publicIP = host
 	}
 
-	if req.PublicIP == "" {
-		req.PublicIP = publicIP
-	}
-
-	c.logger.Debug("Processing registration: hostname=%s, publicIP=%s, publicKey=%s...",
-		req.Hostname, req.PublicIP, previewString(req.PublicKey, 8))
-
-	var assignedIP string
-	var ipOffset int
-
-	existingNode, err := c.store.GetNode(req.PublicKey)
-	if err == nil && existingNode != nil {
-		assignedIP = existingNode.AssignedIP
-		ipOffset = existingNode.IPOffset
-		c.logger.Info("Node re-registered: %s (hostname=%s), reusing IP: %s",
-			previewString(req.PublicKey, 8), req.Hostname, assignedIP)
-		// Preserve existing advertised routes if not provided in re-registration
-		if len(req.AdvertisedRoutes) == 0 && len(existingNode.AdvertisedRoutes) > 0 {
-			req.AdvertisedRoutes = existingNode.AdvertisedRoutes
-			c.logger.Info("Preserving existing advertised routes for node %s: %v",
-				req.Hostname, req.AdvertisedRoutes)
-		}
-	} else {
-		// Try atomic hostname reuse with tenant isolation
-		if requestedTenantID != uuid.Nil {
-			reusedIP, reusedOffset, err := c.store.ReuseHostnameIP(req.Hostname, requestedTenantID)
-			if err == nil {
-				assignedIP = reusedIP
-				ipOffset = reusedOffset
-				c.logger.Info("Atomically reused IP for hostname %s: %s", req.Hostname, assignedIP)
-			}
-			// err == sql.ErrNoRows means no matching hostname, proceed to new allocation
-		}
-
-		if assignedIP == "" {
-			offset, err := c.store.GetNextAvailableOffset()
-			if err != nil {
-				c.logger.Error("Failed to get next available offset: %v", err)
-				http.Error(w, "Failed to allocate IP", http.StatusInternalServerError)
-				return
-			}
-			ipOffset = offset
-
-			newIP, err := c.store.CalculateIP(ipOffset)
-			if err != nil {
-				c.logger.Error("Failed to calculate IP for offset %d: %v", ipOffset, err)
-				http.Error(w, "Failed to allocate IP", http.StatusInternalServerError)
-				return
-			}
-			assignedIP = newIP
-			c.logger.Info("New node registered: %s (hostname=%s), assigned IP: %s (offset=%d)",
-				previewString(req.PublicKey, 8), req.Hostname, assignedIP, ipOffset)
-		}
-	}
-
-	// Get tenant ID from token
-	var tenantID uuid.UUID
-	if existingNode != nil {
-		tenantID = existingNode.TenantID
-	} else if requestedTenantID != uuid.Nil {
-		tenantID = requestedTenantID
-	} else {
-		// Default to system tenant if no token provided (should not happen)
-		tenantID, err = c.store.GetOrCreateTenant("default")
-		if err != nil {
-			c.logger.Error("Failed to get default tenant: %v", err)
-			http.Error(w, "Failed to assign tenant", http.StatusInternalServerError)
-			return
-		}
-	}
-	if err := c.validateAdvertisedRouteConflicts(tenantID, req.PublicKey, req.Region, req.AdvertisedRoutes); err != nil {
-		var conflict *controllerstorage.RouteConflictError
-		if errors.As(err, &conflict) {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-		if strings.Contains(err.Error(), "invalid CIDR") {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		c.logger.Error("Failed to validate advertised routes for %s: %v", req.Hostname, err)
-		http.Error(w, "Failed to validate advertised routes", http.StatusInternalServerError)
+	req.RuntimeToken = registrationRuntimeTokenFromRequest(r, &req)
+	assignedIP, err := c.processRegistration(&req, publicIP)
+	if err != nil {
+		c.writeRegistrationError(w, &req, err)
 		return
-	}
-
-	node := &controllerstorage.Node{
-		PublicKey:         req.PublicKey,
-		MachineID:         req.MachineID,
-		TenantID:          tenantID,
-		Endpoint:          req.Endpoint,
-		PrivateIP:         req.PrivateIP,
-		PublicIP:          req.PublicIP,
-		Region:            req.Region,
-		VPCID:             req.VPCID,
-		Hostname:          req.Hostname,
-		AssignedIP:        assignedIP,
-		IPOffset:          ipOffset,
-		LastSeen:          time.Now().Unix(),
-		RegisteredAt:      req.RegisteredAt,
-		RuntimeMode:       req.RuntimeMode,
-		KernelVersion:     req.KernelVersion,
-		HasAESNI:          req.HasAESNI,
-		AdvertisedRoutes:  req.AdvertisedRoutes, // Site-to-Site VPN
-		EnrolledWithToken: req.Token,            // Track which token was used
-	}
-	if existingNode != nil && strings.TrimSpace(existingNode.Role) != "" {
-		node.Role = existingNode.Role
-	} else {
-		node.Role = "agent"
-	}
-
-	issueCertificateBeforeSave := isReRegistration && !requiresFreshEnrollment && c.certService != nil && req.CSRPEM != ""
-	if issueCertificateBeforeSave {
-		node.ID = existingNode.ID
-		if _, err := c.issueNodeCertificate(node, req.CSRPEM, nil); err != nil {
-			c.logger.Error("Certificate issuance during register failed for node %s: %v", previewString(req.PublicKey, 8), err)
-			http.Error(w, "Failed to issue node certificate", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	if strings.TrimSpace(req.Token) != "" {
-		if err := c.tokenValidator.ConsumeToken(req.Token, req.PublicKey); err != nil {
-			c.logger.Warn("Failed to consume token: %v", err)
-			http.Error(w, "Failed to consume enrollment token", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	if err := c.store.SaveNode(node); err != nil {
-		c.logger.Error("Failed to save node %s: %v", req.Hostname, err)
-		http.Error(w, "Failed to save node", http.StatusInternalServerError)
-		return
-	}
-
-	if c.certService != nil && req.CSRPEM != "" && !issueCertificateBeforeSave {
-		if _, err := c.issueNodeCertificate(node, req.CSRPEM, nil); err != nil {
-			c.logger.Error("Certificate issuance during register failed for node %s: %v", previewString(req.PublicKey, 8), err)
-			if !isReRegistration || requiresFreshEnrollment {
-				if markErr := c.store.MarkNodeDeleted(req.PublicKey); markErr != nil {
-					c.logger.Warn("Failed to roll back node %s after certificate issuance failure: %v", previewString(req.PublicKey, 8), markErr)
-				}
-			}
-			http.Error(w, "Failed to issue node certificate", http.StatusInternalServerError)
-			return
-		}
 	}
 
 	c.syncNode(&req, assignedIP, w)
+}
+
+func (c *Controller) writeRegistrationError(w http.ResponseWriter, req *RegisterRequest, err error) {
+	var authErr *registrationAuthError
+	if errors.As(err, &authErr) {
+		c.logger.Warn("Registration rejected for node %s: %v", previewString(req.PublicKey, 8), authErr)
+		http.Error(w, authErr.message, authErr.status)
+		return
+	}
+
+	var conflict *controllerstorage.RouteConflictError
+	if errors.As(err, &conflict) {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if strings.Contains(err.Error(), "invalid CIDR") {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	c.logger.Error("Registration failed for node %s: %v", previewString(req.PublicKey, 8), err)
+	http.Error(w, "Failed to register node", http.StatusInternalServerError)
 }
 
 func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.ResponseWriter) {
@@ -1917,6 +1781,8 @@ func (c *Controller) createSyncAdapter() func(string) (interface{}, string, inte
 func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) (string, error) {
 	// Token Validation
 	existingNode, _ := c.store.GetNode(req.PublicKey)
+	isReRegistration := existingNode != nil
+	requiresFreshEnrollment := nodeRequiresFreshEnrollment(existingNode)
 	authResult, authErr := c.authorizeRegistrationRequest(req, existingNode, strings.TrimSpace(req.RuntimeToken))
 	if authErr != nil {
 		return "", authErr
@@ -1933,6 +1799,8 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 
 	existingNode, err := c.store.GetNode(req.PublicKey)
 	if err == nil && existingNode != nil {
+		isReRegistration = true
+		requiresFreshEnrollment = nodeRequiresFreshEnrollment(existingNode)
 		assignedIP = existingNode.AssignedIP
 		ipOffset = existingNode.IPOffset
 		c.logger.Info("Node re-registered: %s (hostname=%s), reusing IP: %s",
@@ -1972,30 +1840,35 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 		tenantID = requestedTenantID
 	} else {
 		// Default to system tenant
-		tenantID, _ = c.store.GetOrCreateTenant("default")
+		defaultTenantID, err := c.store.GetOrCreateTenant("default")
+		if err != nil {
+			return "", fmt.Errorf("failed to assign default tenant: %w", err)
+		}
+		tenantID = defaultTenantID
 	}
 	if err := c.validateAdvertisedRouteConflicts(tenantID, req.PublicKey, req.Region, req.AdvertisedRoutes); err != nil {
 		return "", fmt.Errorf("failed to validate advertised routes: %w", err)
 	}
 
 	node := &controllerstorage.Node{
-		PublicKey:        req.PublicKey,
-		Endpoint:         req.Endpoint,
-		PrivateIP:        req.PrivateIP,
-		PublicIP:         req.PublicIP,
-		Region:           req.Region,
-		VPCID:            req.VPCID,
-		Hostname:         req.Hostname,
-		MachineID:        req.MachineID,
-		AssignedIP:       assignedIP,
-		IPOffset:         ipOffset,
-		AdvertisedRoutes: req.AdvertisedRoutes,
-		RuntimeMode:      req.RuntimeMode,
-		KernelVersion:    req.KernelVersion,
-		HasAESNI:         req.HasAESNI,
-		LastSeen:         time.Now().Unix(),
-		RegisteredAt:     req.RegisteredAt,
-		TenantID:         tenantID,
+		PublicKey:         req.PublicKey,
+		Endpoint:          req.Endpoint,
+		PrivateIP:         req.PrivateIP,
+		PublicIP:          req.PublicIP,
+		Region:            req.Region,
+		VPCID:             req.VPCID,
+		Hostname:          req.Hostname,
+		MachineID:         req.MachineID,
+		AssignedIP:        assignedIP,
+		IPOffset:          ipOffset,
+		AdvertisedRoutes:  req.AdvertisedRoutes,
+		RuntimeMode:       req.RuntimeMode,
+		KernelVersion:     req.KernelVersion,
+		HasAESNI:          req.HasAESNI,
+		EnrolledWithToken: req.Token,
+		LastSeen:          time.Now().Unix(),
+		RegisteredAt:      req.RegisteredAt,
+		TenantID:          tenantID,
 	}
 	if existingNode != nil && strings.TrimSpace(existingNode.Role) != "" {
 		node.Role = existingNode.Role
@@ -2004,7 +1877,19 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 	}
 
 	if existingNode != nil {
+		node.ID = existingNode.ID
 		node.RegisteredAt = existingNode.RegisteredAt
+	}
+
+	issueCertificateBeforeSave := isReRegistration && !requiresFreshEnrollment && c.certService != nil && strings.TrimSpace(req.CSRPEM) != ""
+	if issueCertificateBeforeSave {
+		if _, err := c.issueNodeCertificate(node, req.CSRPEM, nil); err != nil {
+			return "", fmt.Errorf("failed to issue node certificate: %w", err)
+		}
+	}
+
+	if err := c.store.SaveNode(node); err != nil {
+		return "", fmt.Errorf("failed to save node: %w", err)
 	}
 
 	if strings.TrimSpace(req.Token) != "" {
@@ -2012,12 +1897,24 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 			if c.logger != nil {
 				c.logger.Warn("Failed to consume token: %v", err)
 			}
+			if !isReRegistration || requiresFreshEnrollment {
+				if markErr := c.store.MarkNodeDeleted(req.PublicKey); markErr != nil && c.logger != nil {
+					c.logger.Warn("Failed to roll back node %s after enrollment token consume failure: %v", previewString(req.PublicKey, 8), markErr)
+				}
+			}
 			return "", fmt.Errorf("failed to consume enrollment token: %w", err)
 		}
 	}
 
-	if err := c.store.SaveNode(node); err != nil {
-		return "", fmt.Errorf("failed to save node: %w", err)
+	if c.certService != nil && strings.TrimSpace(req.CSRPEM) != "" && !issueCertificateBeforeSave {
+		if _, err := c.issueNodeCertificate(node, req.CSRPEM, nil); err != nil {
+			if !isReRegistration || requiresFreshEnrollment {
+				if markErr := c.store.MarkNodeDeleted(req.PublicKey); markErr != nil && c.logger != nil {
+					c.logger.Warn("Failed to roll back node %s after certificate issuance failure: %v", previewString(req.PublicKey, 8), markErr)
+				}
+			}
+			return "", fmt.Errorf("failed to issue node certificate: %w", err)
+		}
 	}
 
 	c.logger.Info("Node registered successfully: %s (hostname=%s, IP=%s, region=%s)",

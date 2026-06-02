@@ -664,8 +664,8 @@ func TestHandleRegister_CSRFailureRollsBackFreshEnrollment(t *testing.T) {
 	expectEnrollmentTokenValidate(mock, enrollToken, tenantID, now)
 	expectTenantIDByTokenLookup(mock, enrollToken, tenantID)
 	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, persistedNodeID, "deleted", now)
-	expectEnrollmentTokenConsume(mock, enrollToken, publicKey)
 	expectSaveNodeSuccess(mock, publicKey, tenantID, persistedNodeID)
+	expectEnrollmentTokenConsume(mock, enrollToken, publicKey)
 	expectNodeCertificateUpsert(mock, tenantID, persistedNodeID, nil).
 		WillReturnError(sql.ErrConnDone)
 	expectMarkNodeDeleted(mock, publicKey)
@@ -690,12 +690,12 @@ func TestHandleRegister_CSRFailureRollsBackFreshEnrollment(t *testing.T) {
 	}
 }
 
-func TestHandleRegisterConsumesEnrollmentTokenBeforeSavingFreshEnrollment(t *testing.T) {
+func TestHandleRegisterDoesNotConsumeEnrollmentTokenWhenSaveFails(t *testing.T) {
 	tenantID := uuid.New()
 	persistedNodeID := uuid.New()
 	now := time.Now()
-	publicKey := "pubkey-register-consume-before-save-1234567890"
-	enrollToken := "tk_register_consume_before_save"
+	publicKey := "pubkey-register-save-fails-before-consume-1234567890"
+	enrollToken := "tk_register_save_fails_before_consume"
 
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -707,7 +707,6 @@ func TestHandleRegisterConsumesEnrollmentTokenBeforeSavingFreshEnrollment(t *tes
 	expectEnrollmentTokenValidate(mock, enrollToken, tenantID, now)
 	expectTenantIDByTokenLookup(mock, enrollToken, tenantID)
 	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, persistedNodeID, "deleted", now)
-	expectEnrollmentTokenConsume(mock, enrollToken, publicKey)
 	mock.ExpectQuery(`INSERT INTO nodes \(`).
 		WithArgs(
 			publicKey,
