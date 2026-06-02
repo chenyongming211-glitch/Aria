@@ -134,7 +134,35 @@ func TestResolveCommandStreamNodeForRequestRejectsRuntimeTokenNodeMismatch(t *te
 	}
 }
 
+func TestResolveLegacyAgentIdentityRejectsInactiveNode(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+
+	expectNodeByIDWithStatus(mock, nodeID, "legacy-node-key", tenantID, now, "suspended")
+
+	server := NewControllerServer(nil, nil, controllerstorage.NewStorageWithDB(db))
+	_, err = server.resolveLegacyAgentIdentity(nodeID.String())
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("expected PermissionDenied for inactive legacy identity, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func expectNodeByID(mock sqlmock.Sqlmock, nodeID uuid.UUID, publicKey string, tenantID uuid.UUID, now time.Time) {
+	expectNodeByIDWithStatus(mock, nodeID, publicKey, tenantID, now, "online")
+}
+
+func expectNodeByIDWithStatus(mock sqlmock.Sqlmock, nodeID uuid.UUID, publicKey string, tenantID uuid.UUID, now time.Time, nodeStatus string) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE id = $1`)).
 		WithArgs(nodeID).
 		WillReturnRows(sqlmock.NewRows(nodeRowColumns()).AddRow(
@@ -143,7 +171,7 @@ func expectNodeByID(mock sqlmock.Sqlmock, nodeID uuid.UUID, publicKey string, te
 			"", "node-"+publicKey, "100.64.0.2", 2,
 			now.Unix(), now.Unix(), "agent",
 			"ebpf", "6.8.0", true,
-			"online", int64(0), pq.StringArray{},
+			nodeStatus, int64(0), pq.StringArray{},
 			"", now, now,
 		))
 }

@@ -52,7 +52,7 @@ func TestRegisterFailsWhenRuntimeTokenCannotBeIssued(t *testing.T) {
 	}
 }
 
-func TestReportMetricsReturnsFailureWhenHeartbeatSaveFails(t *testing.T) {
+func TestReportMetricsUsesHeartbeatOnlyUpdate(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -67,28 +67,13 @@ func TestReportMetricsReturnsFailureWhenHeartbeatSaveFails(t *testing.T) {
 
 	expectNodeByID(mock, nodeID, publicKey, tenantID, now)
 	expectNodeByPublicKey(mock, publicKey, nodeID, tenantID, now)
-	mock.ExpectQuery(`INSERT INTO nodes \(`).
-		WithArgs(
-			publicKey,
-			sqlmock.AnyArg(),
-			tenantID,
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-			sqlmock.AnyArg(),
-		).
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE nodes
+		SET last_seen = $2,
+		    status = 'online',
+		    offline_since = NULL,
+		    updated_at = NOW()
+		WHERE id = $1 AND status NOT IN ('deleted', 'suspended', 'banned')`)).
+		WithArgs(nodeID, sqlmock.AnyArg()).
 		WillReturnError(sql.ErrConnDone)
 
 	ctx := context.WithValue(context.Background(), RuntimeNodeIDKey, nodeID.String())
