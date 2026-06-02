@@ -269,6 +269,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Connection, Histogram, Lock, Refresh, View } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { usePolicyApi } from '@/composables/usePolicyApi'
+import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
 
 const router = useRouter()
 const route = useRoute()
@@ -596,6 +597,13 @@ const policyRowClassName = ({ row }) => {
 onMounted(() => {
   syncFiltersFromRoute()
   fetchPolicies()
+})
+
+useTenantChangeReload(async () => {
+  policies.value = []
+  selectedPolicy.value = null
+  detailVisible.value = false
+  await fetchPolicies()
 })
 
 watch(() => route.fullPath, () => {

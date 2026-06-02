@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
-	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -35,11 +35,7 @@ type PermissionsResponse struct {
 }
 
 func normalizeAuthRole(role string) string {
-	roleName := strings.TrimSpace(role)
-	if roleName == "member" || roleName == "owner" {
-		return controllerstorage.SystemRoleOperator
-	}
-	return roleName
+	return controllerstorage.NormalizeRoleName(role)
 }
 
 func (a *AuthAPI) HandleLogin(w http.ResponseWriter, r *http.Request) {
@@ -130,7 +126,28 @@ func (a *AuthAPI) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newToken, err := auth.GenerateToken(claims.UserID, claims.Username, claims.Role, claims.TenantID, claims.MustChangePassword)
+	var username, role string
+	var tenantID sql.NullString
+	var mustChangePassword bool
+	err = a.store.DB().QueryRow(
+		`SELECT username, role, tenant_id, COALESCE(must_change_password, FALSE) FROM users WHERE id = $1`,
+		claims.UserID,
+	).Scan(&username, &role, &tenantID, &mustChangePassword)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "User no longer exists", nil)
+			return
+		}
+		apibase.WriteError(w, http.StatusInternalServerError, "DB_ERROR", "Database query failed", nil)
+		return
+	}
+
+	tID := ""
+	if tenantID.Valid {
+		tID = tenantID.String
+	}
+
+	newToken, err := auth.GenerateToken(claims.UserID, username, role, tID, mustChangePassword)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeCreateTokenFailed, "Failed to refresh token", nil)
 		return
@@ -139,6 +156,13 @@ func (a *AuthAPI) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"token":      newToken,
 		"expires_in": 7200,
+		"user": map[string]interface{}{
+			"id":        claims.UserID,
+			"username":  username,
+			"role":      role,
+			"tenant_id": tID,
+		},
+		"require_password_change": mustChangePassword,
 	}
 
 	apibase.WriteSuccess(w, resp, "Token refreshed successfully")
@@ -187,7 +211,11 @@ func (a *AuthAPI) HandlePermissions(w http.ResponseWriter, r *http.Request) {
 
 	permissions, err := a.store.GetRolePermissions(tenantID, roleName)
 	if err != nil {
-		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Role permission lookup failed", nil)
+		if errors.Is(err, sql.ErrNoRows) {
+			apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Role not found", nil)
+			return
+		}
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Role permission lookup failed", nil)
 		return
 	}
 	if permissions == nil {

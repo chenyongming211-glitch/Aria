@@ -224,12 +224,17 @@ func (t *TenantAPI) ListUsers(w http.ResponseWriter, r *http.Request, tenantID u
 		var u UserResponse
 		var email sql.NullString
 		if err := rows.Scan(&u.ID, &u.Username, &email, &u.Role); err != nil {
-			continue
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeListUsersFailed, "Failed to scan users", nil)
+			return
 		}
 		if email.Valid {
 			u.Email = email.String
 		}
 		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeListUsersFailed, "Failed to list users", nil)
+		return
 	}
 
 	apibase.WriteSuccess(w, users, fmt.Sprintf("%d users retrieved", len(users)))
@@ -401,15 +406,26 @@ func (t *TenantAPI) UpdateUser(w http.ResponseWriter, r *http.Request, tenantID 
 			return
 		}
 		query := `UPDATE users SET password_hash = $1, role = COALESCE(NULLIF($2, ''), role), email = COALESCE(NULLIF($3, ''), email), updated_at = NOW() WHERE id = $4 AND tenant_id = $5`
-		_, err = t.store.DB().Exec(query, string(hashedPassword), req.Role, req.Email, userUUID, tenantID)
+		result, execErr := t.store.DB().Exec(query, string(hashedPassword), req.Role, req.Email, userUUID, tenantID)
+		if execErr != nil {
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeUpdateUserFailed, "Failed to update user: "+execErr.Error(), nil)
+			return
+		}
+		if rowsAffected, err := result.RowsAffected(); err == nil && rowsAffected == 0 {
+			apibase.WriteError(w, http.StatusNotFound, apibase.CodeUserNotFound, "User not found", nil)
+			return
+		}
 	} else {
 		query := `UPDATE users SET role = COALESCE(NULLIF($1, ''), role), email = COALESCE(NULLIF($2, ''), email), updated_at = NOW() WHERE id = $3 AND tenant_id = $4`
-		_, err = t.store.DB().Exec(query, req.Role, req.Email, userUUID, tenantID)
-	}
-
-	if err != nil {
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeUpdateUserFailed, "Failed to update user: "+err.Error(), nil)
-		return
+		result, execErr := t.store.DB().Exec(query, req.Role, req.Email, userUUID, tenantID)
+		if execErr != nil {
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeUpdateUserFailed, "Failed to update user: "+execErr.Error(), nil)
+			return
+		}
+		if rowsAffected, err := result.RowsAffected(); err == nil && rowsAffected == 0 {
+			apibase.WriteError(w, http.StatusNotFound, apibase.CodeUserNotFound, "User not found", nil)
+			return
+		}
 	}
 
 	apibase.WriteSuccess(w, map[string]string{"id": userID}, "User updated successfully")

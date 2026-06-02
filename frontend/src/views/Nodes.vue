@@ -668,6 +668,7 @@ import useNodeStore from '../stores/node'
 import { useAgentProxyApi } from '../composables/useAgentProxyApi'
 import { useMonitorApi } from '../composables/useMonitorApi'
 import { usePermission } from '../composables/usePermission'
+import { useTenantChangeReload } from '../composables/useTenantChangeReload'
 
 // 使用节点 store
 const nodeStore = useNodeStore()
@@ -761,10 +762,10 @@ const filteredNodes = computed(() => {
   }
   const query = searchQuery.value.toLowerCase()
   return nodes.value.filter(node =>
-    node.hostname.toLowerCase().includes(query) ||
-    node.publicIp.includes(query) ||
-    node.vpnIp.includes(query) ||
-    node.region.toLowerCase().includes(query)
+    String(node.hostname || '').toLowerCase().includes(query) ||
+    String(node.publicIp || '').includes(query) ||
+    String(node.vpnIp || '').includes(query) ||
+    String(node.region || '').toLowerCase().includes(query)
   )
 })
 
@@ -1059,9 +1060,19 @@ const formatCommandTime = (value) => {
   return date.toLocaleString()
 }
 
+const reloadTenantScopedData = async () => {
+  currentPage.value = 1
+  selectedNode.value = null
+  detailDialogVisible.value = false
+  editDialogVisible.value = false
+  await refreshNodes()
+}
+
 onMounted(() => {
   refreshNodes()
 })
+
+useTenantChangeReload(reloadTenantScopedData)
 </script>
 
 <style scoped>

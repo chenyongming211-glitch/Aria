@@ -3,6 +3,14 @@ import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 
 const aclRuleNodeMap = new Map()
 
+const aclRuleKey = (tenantId, ruleId) => `${tenantId}:${String(ruleId)}`
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('tenantChanged', () => {
+    aclRuleNodeMap.clear()
+  })
+}
+
 function normalizeRuleRecord(rule, nodeId) {
   const dstPort = Number(rule.dst_port ?? rule.max_port ?? 0)
   return {
@@ -104,7 +112,7 @@ export const useAclApi = {
           ...normalizeDeliveryFields(rule)
         }
         // 缓存映射用于后续更新删除
-        aclRuleNodeMap.set(normalized.id, { nodeId, rule: normalized })
+        aclRuleNodeMap.set(aclRuleKey(tenantId, normalized.id), { nodeId, rule: normalized })
         return normalized
       })
 
@@ -146,7 +154,7 @@ export const useAclApi = {
   updateACLRule: async (ruleId, rule) => {
     try {
       const tenantId = requireCurrentTenantId()
-      const mapping = aclRuleNodeMap.get(ruleId)
+      const mapping = aclRuleNodeMap.get(aclRuleKey(tenantId, ruleId))
       const nodeId = rule.node_id || mapping?.nodeId
 
       if (!nodeId) {
@@ -167,7 +175,7 @@ export const useAclApi = {
   deleteACLRule: async (ruleId, nodeId) => {
     try {
       const tenantId = requireCurrentTenantId()
-      const mapping = aclRuleNodeMap.get(ruleId)
+      const mapping = aclRuleNodeMap.get(aclRuleKey(tenantId, ruleId))
       const resolvedNodeId = nodeId || mapping?.nodeId
 
       if (!resolvedNodeId) {
@@ -175,7 +183,7 @@ export const useAclApi = {
       }
 
       const response = await api.delete(API_ENDPOINTS.TENANT.NODE_ACL(tenantId, resolvedNodeId, ruleId))
-      aclRuleNodeMap.delete(ruleId)
+      aclRuleNodeMap.delete(aclRuleKey(tenantId, ruleId))
       return response.data?.data || response.data
     } catch (error) {
       console.error('删除 ACL 规则失败:', error)

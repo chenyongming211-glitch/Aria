@@ -29,8 +29,10 @@ type handlerMatrixCase struct {
 
 func roleLookupName(role string) string {
 	switch role {
-	case "member", "owner":
+	case "member":
 		return controllerstorage.SystemRoleOperator
+	case "owner":
+		return controllerstorage.SystemRoleAdmin
 	default:
 		return role
 	}
@@ -248,11 +250,11 @@ func expectNodeLifecycleTransitionByPublicKey(
 
 func expectACLListSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 	now := time.Now()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
-		        COALESCE(dst_port, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
-		        created_at, updated_at
-		   FROM acl_rules
-		  WHERE tenant_id = $1 AND node_id = $2
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+			        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
+			        created_at, updated_at
+			   FROM acl_rules
+			  WHERE tenant_id = $1 AND node_id = $2
 		  ORDER BY priority DESC, created_at DESC`)).
 		WithArgs(tenantID, nodeID).
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -294,12 +296,12 @@ func expectUsersCreateSuccess(mock sqlmock.Sqlmock, tenantID uuid.UUID) {
 
 func expectACLCreateSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 	now := time.Now()
-	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO acl_rules (tenant_id, node_id, name, action, src_cidr, dst_cidr, dst_port, protocol, priority, enabled, description)
-		 VALUES ($1, $2, $3, $4, NULLIF($5, '')::cidr, NULLIF($6, '')::cidr, $7, $8, $9, $10, $11)
-		 RETURNING id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
-		           COALESCE(dst_port, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
-		           created_at, updated_at`)).
-		WithArgs(tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, 100, true, "allow web").
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO acl_rules (tenant_id, node_id, name, action, src_cidr, dst_cidr, dst_port, protocol, priority, enabled, description, src_net, dst_net, min_port, max_port)
+			 VALUES ($1, $2, $3, $4, NULLIF($5, '')::cidr, NULLIF($6, '')::cidr, $7, $8, $9, $10, $11, $12::cidr, $13::cidr, $14, $15)
+			 RETURNING id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+			           COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
+			           created_at, updated_at`)).
+		WithArgs(tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, 100, true, "allow web", "10.0.0.0/24", "0.0.0.0/0", 443, 443).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "priority", "enabled", "description", "created_at", "updated_at",
 		}).AddRow(uuid.New(), tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, 100, true, "allow web", now, now))

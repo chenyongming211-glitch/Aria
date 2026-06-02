@@ -51,7 +51,7 @@ func (t *Token) IsValid() bool {
 	if time.Now().UTC().After(t.ExpiresAt) {
 		return false
 	}
-	if t.UsedCount >= t.MaxUses {
+	if t.MaxUses > 0 && t.UsedCount >= t.MaxUses {
 		return false
 	}
 	return true
@@ -59,6 +59,9 @@ func (t *Token) IsValid() bool {
 
 // RemainingUses returns how many times the token can still be used
 func (t *Token) RemainingUses() int {
+	if t.MaxUses == 0 {
+		return -1
+	}
 	remaining := t.MaxUses - t.UsedCount
 	if remaining < 0 {
 		return 0

@@ -13,6 +13,9 @@ const SESSION_STORAGE_KEYS = [
 
 export function clearSession() {
   SESSION_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key))
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('aria-session-cleared'))
+  }
 }
 
 export function readLastActivity() {

@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -843,6 +844,20 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := c.validateAdvertisedRouteConflicts(tenantID, req.PublicKey, req.Region, req.AdvertisedRoutes); err != nil {
+		var conflict *controllerstorage.RouteConflictError
+		if errors.As(err, &conflict) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		if strings.Contains(err.Error(), "invalid CIDR") {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		c.logger.Error("Failed to validate advertised routes for %s: %v", req.Hostname, err)
+		http.Error(w, "Failed to validate advertised routes", http.StatusInternalServerError)
+		return
+	}
 
 	node := &controllerstorage.Node{
 		PublicKey:         req.PublicKey,
@@ -864,6 +879,11 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		AdvertisedRoutes:  req.AdvertisedRoutes, // Site-to-Site VPN
 		EnrolledWithToken: req.Token,            // Track which token was used
 	}
+	if existingNode != nil && strings.TrimSpace(existingNode.Role) != "" {
+		node.Role = existingNode.Role
+	} else {
+		node.Role = "agent"
+	}
 
 	issueCertificateBeforeSave := isReRegistration && !requiresFreshEnrollment && c.certService != nil && req.CSRPEM != ""
 	if issueCertificateBeforeSave {
@@ -871,6 +891,14 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		if _, err := c.issueNodeCertificate(node, req.CSRPEM, nil); err != nil {
 			c.logger.Error("Certificate issuance during register failed for node %s: %v", previewString(req.PublicKey, 8), err)
 			http.Error(w, "Failed to issue node certificate", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if strings.TrimSpace(req.Token) != "" {
+		if err := c.tokenValidator.ConsumeToken(req.Token, req.PublicKey); err != nil {
+			c.logger.Warn("Failed to consume token: %v", err)
+			http.Error(w, "Failed to consume enrollment token", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -890,18 +918,6 @@ func (c *Controller) HandleRegister(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			http.Error(w, "Failed to issue node certificate", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	// ========== Consume Token ==========
-	if req.Token != "" && (!isReRegistration || requiresFreshEnrollment) {
-		if err := c.tokenValidator.ConsumeToken(req.Token, req.PublicKey); err != nil {
-			c.logger.Warn("Failed to consume token: %v", err)
-			if markErr := c.store.MarkNodeDeleted(req.PublicKey); markErr != nil {
-				c.logger.Warn("Failed to roll back node %s after token consume failure: %v", previewString(req.PublicKey, 8), markErr)
-			}
-			http.Error(w, "Failed to consume enrollment token", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -930,86 +946,25 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 		}
 	}
 
-	// 只获取同租户的节点
-	query := `SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1`
+	// 只获取同租户且可参与同步的节点。删除、暂停、封禁节点不能继续作为 peer 下发。
+	query := `SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND COALESCE(status, 'online') NOT IN ('deleted', 'suspended', 'banned')`
 	rows, err := c.store.DB().Query(query, nodeTenantID)
 	if err != nil {
 		c.logger.Error("Failed to get peers for tenant %s: %v", nodeTenantID, err)
-		peers := []*controllerstorage.Node{}
-		var peerInfos []NodeInfo
-		for _, peer := range peers {
-			if peer.PublicKey != req.PublicKey {
-				role := peer.Role
-				if role == "" {
-					role = "spoke"
-				}
-				peerInfos = append(peerInfos, NodeInfo{
-					PublicKey:     peer.PublicKey,
-					Endpoint:      fmt.Sprintf("%s:51820", peer.PublicIP),
-					PrivateIP:     peer.PrivateIP,
-					PublicIP:      peer.PublicIP,
-					Region:        peer.Region,
-					VPCID:         peer.VPCID,
-					Hostname:      peer.Hostname,
-					LastSeen:      peer.LastSeen,
-					AssignedIP:    peer.AssignedIP,
-					Role:          role,
-					RuntimeMode:   peer.RuntimeMode,
-					KernelVersion: peer.KernelVersion,
-				})
-			}
-		}
-
-		// Get enabled ACL rules for sync (filtered by region and tenant)
-		var aclRulesJSON []ACLRuleJSON
-		var aclRules []*controllerstorage.ACLRule
-		var err error
-
-		// Use tenant-scoped ACL rules if available, fallback to global if not
-		if c.tenantScopedStore != nil {
-			// Create a temporary context with the node's tenant ID
-			tempCtx := context.WithValue(context.Background(), middleware.TenantIDKey, nodeTenantID)
-			aclRules, err = c.getTenantEnabledACLRules(tempCtx)
-		} else {
-			// Fallback to global ACL rules
-			aclRules, err = c.store.GetEnabledACLRules()
-		}
-
-		if err != nil {
-			c.logger.Error("Failed to get ACL rules: %v", err)
-		} else {
-			// Filter rules by region
-			aclRulesJSON = c.getACLRulesForRegion(req.Region, aclRules)
-			// Safe truncation of public key
-			pk := req.PublicKey
-			if len(pk) > 16 {
-				pk = pk[:16]
-			}
-			c.logger.Info("Agent %s (Region: %s): sending %d ACL rules", pk, req.Region, len(aclRulesJSON))
-		}
-
-		response := SyncResponse{
-			Peers:              peerInfos,
-			AssignedIP:         assignedIP,
-			LastUpdate:         time.Now().Unix(),
-			ACLRules:           aclRulesJSON,
-			MetricsPushGateway: c.metricsPushGateway,
-		}
-		c.attachNodeCertificateToSyncResponse(req.PublicKey, &response)
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		http.Error(w, "Failed to load tenant peers", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
 	var peerInfos []NodeInfo
+	var tenantNodes []*controllerstorage.Node
 	for rows.Next() {
 		peer, err := c.store.ScanNodeRows(rows)
 		if err != nil {
 			c.logger.Error("Failed to scan peer: %v", err)
 			continue
 		}
+		tenantNodes = append(tenantNodes, peer)
 
 		// Skip the requesting node itself
 		if peer.PublicKey != req.PublicKey {
@@ -1041,7 +996,7 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 		c.logger.Error("Failed to get ACL rules for tenant %s: %v", nodeTenantID, err)
 	} else {
 		// Filter rules by region
-		aclRulesJSON = c.getACLRulesForRegion(req.Region, aclRules)
+		aclRulesJSON = c.getACLRulesForRegionInNodes(req.Region, aclRules, tenantNodes)
 		// Safe truncation of public key
 		pk := req.PublicKey
 		if len(pk) > 16 {
@@ -1575,6 +1530,7 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req struct {
+		TenantID string `json:"tenant_id"`
 		Hostname string `json:"hostname"`
 		CIDR     string `json:"cidr"`
 		Action   string `json:"action"` // "add" or "remove"
@@ -1595,10 +1551,17 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 	// platform-scoped; tenant users are restricted to their JWT tenant.
 	var allNodes []*controllerstorage.Node
 	var err error
+	var tenantID uuid.UUID
 	if claims.Role == middleware.RoleSuperAdmin {
-		allNodes, err = c.store.GetAllNodes()
+		tenantID, err = uuid.Parse(strings.TrimSpace(req.TenantID))
+		if err != nil {
+			http.Error(w, "tenant_id is required for super_admin network changes", http.StatusBadRequest)
+			return
+		}
+		allNodes, err = c.store.GetNodesByTenant(tenantID)
 	} else {
-		tenantID, parseErr := uuid.Parse(claims.TenantID)
+		var parseErr error
+		tenantID, parseErr = uuid.Parse(claims.TenantID)
 		if parseErr != nil {
 			http.Error(w, "Invalid tenant context", http.StatusForbidden)
 			return
@@ -1641,33 +1604,15 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 			}
 		}
 
-		// Check for conflicts with existing routes in DIFFERENT regions
-		// Same region nodes CAN have overlapping routes (for redundancy/Active-Active)
-		// Different region nodes CANNOT have overlapping routes (for isolation)
-		for _, node := range allNodes {
-			// Skip nodes in the SAME region (allow overlap for redundancy)
-			if node.Region == targetNode.Region {
-				continue
+		if err := controllerstorage.FindAdvertisedRouteConflict(allNodes, targetNode.PublicKey, targetNode.Region, []string{newNetwork.String()}); err != nil {
+			var conflict *controllerstorage.RouteConflictError
+			if errors.As(err, &conflict) {
+				http.Error(w, fmt.Sprintf("请勿在不同 Region 添加重叠路由！路由 %s 与 Region %s 的节点 %s 冲突",
+					req.CIDR, conflict.NodeRegion, conflict.NodeHostname), http.StatusConflict)
+				return
 			}
-
-			// Skip the target node itself
-			if node.PublicKey == targetNode.PublicKey {
-				continue
-			}
-
-			for _, existingRoute := range node.AdvertisedRoutes {
-				_, existingNetwork, err := net.ParseCIDR(existingRoute)
-				if err != nil {
-					continue // Skip invalid routes
-				}
-
-				// Check if networks overlap with nodes in DIFFERENT regions
-				if cidrsOverlap(newNetwork, existingNetwork) {
-					http.Error(w, fmt.Sprintf("请勿在不同 Region 添加重叠路由！路由 %s 与 Region %s 的节点 %s 冲突",
-						req.CIDR, node.Region, node.Hostname), http.StatusConflict)
-					return
-				}
-			}
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
 
 		targetNode.AdvertisedRoutes = append(targetNode.AdvertisedRoutes, req.CIDR)
@@ -1748,10 +1693,7 @@ func (c *Controller) authorizeJWTPermission(w http.ResponseWriter, r *http.Reque
 		return nil, false
 	}
 
-	roleName := claims.Role
-	if roleName == "member" || roleName == "owner" {
-		roleName = controllerstorage.SystemRoleOperator
-	}
+	roleName := controllerstorage.NormalizeRoleName(claims.Role)
 	permissions, err := c.store.GetRolePermissions(tenantID, roleName)
 	if err != nil {
 		http.Error(w, "Role not found", http.StatusForbidden)
@@ -1975,8 +1917,6 @@ func (c *Controller) createSyncAdapter() func(string) (interface{}, string, inte
 func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) (string, error) {
 	// Token Validation
 	existingNode, _ := c.store.GetNode(req.PublicKey)
-	isReRegistration := (existingNode != nil)
-	requiresFreshEnrollment := nodeRequiresFreshEnrollment(existingNode)
 	authResult, authErr := c.authorizeRegistrationRequest(req, existingNode, strings.TrimSpace(req.RuntimeToken))
 	if authErr != nil {
 		return "", authErr
@@ -2034,6 +1974,9 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 		// Default to system tenant
 		tenantID, _ = c.store.GetOrCreateTenant("default")
 	}
+	if err := c.validateAdvertisedRouteConflicts(tenantID, req.PublicKey, req.Region, req.AdvertisedRoutes); err != nil {
+		return "", fmt.Errorf("failed to validate advertised routes: %w", err)
+	}
 
 	node := &controllerstorage.Node{
 		PublicKey:        req.PublicKey,
@@ -2052,28 +1995,29 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 		HasAESNI:         req.HasAESNI,
 		LastSeen:         time.Now().Unix(),
 		RegisteredAt:     req.RegisteredAt,
-		Role:             "agent",
 		TenantID:         tenantID,
+	}
+	if existingNode != nil && strings.TrimSpace(existingNode.Role) != "" {
+		node.Role = existingNode.Role
+	} else {
+		node.Role = "agent"
 	}
 
 	if existingNode != nil {
 		node.RegisteredAt = existingNode.RegisteredAt
 	}
 
-	if err := c.store.SaveNode(node); err != nil {
-		return "", fmt.Errorf("failed to save node: %w", err)
-	}
-
-	if req.Token != "" && (!isReRegistration || requiresFreshEnrollment) {
+	if strings.TrimSpace(req.Token) != "" {
 		if err := c.tokenValidator.ConsumeToken(req.Token, req.PublicKey); err != nil {
 			if c.logger != nil {
 				c.logger.Warn("Failed to consume token: %v", err)
 			}
-			if markErr := c.store.MarkNodeDeleted(req.PublicKey); markErr != nil && c.logger != nil {
-				c.logger.Warn("Failed to roll back node %s after token consume failure: %v", previewString(req.PublicKey, 8), markErr)
-			}
 			return "", fmt.Errorf("failed to consume enrollment token: %w", err)
 		}
+	}
+
+	if err := c.store.SaveNode(node); err != nil {
+		return "", fmt.Errorf("failed to save node: %w", err)
 	}
 
 	c.logger.Info("Node registered successfully: %s (hostname=%s, IP=%s, region=%s)",
@@ -2101,7 +2045,12 @@ func (c *Controller) processSync(publicKey string) (interface{}, string, interfa
 	}
 
 	var peers []map[string]interface{}
+	syncNodes := make([]*controllerstorage.Node, 0, len(tenantNodes))
 	for _, n := range tenantNodes {
+		if !nodeEligibleForSync(n) {
+			continue
+		}
+		syncNodes = append(syncNodes, n)
 		if n.PublicKey == publicKey {
 			continue
 		}
@@ -2132,7 +2081,7 @@ func (c *Controller) processSync(publicKey string) (interface{}, string, interfa
 		}
 	}
 
-	regionACLs := c.getACLRulesForRegionInNodes(node.Region, enabledACLRules, tenantNodes)
+	regionACLs := c.getACLRulesForRegionInNodes(node.Region, enabledACLRules, syncNodes)
 	var aclRules []map[string]interface{}
 	for _, rule := range regionACLs {
 		aclRules = append(aclRules, map[string]interface{}{
@@ -2146,6 +2095,18 @@ func (c *Controller) processSync(publicKey string) (interface{}, string, interfa
 	}
 
 	return peers, node.AssignedIP, aclRules, node.TenantID, nil
+}
+
+func nodeEligibleForSync(node *controllerstorage.Node) bool {
+	if node == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(node.Status)) {
+	case "deleted", "suspended", "banned":
+		return false
+	default:
+		return true
+	}
 }
 
 // 辅助函数：从 map 中安全获取字符串
@@ -2233,6 +2194,17 @@ func cidrsOverlap(a, b *net.IPNet) bool {
 	return false
 }
 
+func (c *Controller) validateAdvertisedRouteConflicts(tenantID uuid.UUID, publicKey, region string, routes []string) error {
+	if len(routes) == 0 {
+		return nil
+	}
+	nodes, err := c.store.GetNodesByTenant(tenantID)
+	if err != nil {
+		return err
+	}
+	return controllerstorage.FindAdvertisedRouteConflict(nodes, publicKey, region, routes)
+}
+
 // ipInRoutes checks if an IP address is within any of the given CIDR routes.
 func ipInRoutes(ipStr string, routes []string) (bool, string) {
 	ip := net.ParseIP(ipStr)
@@ -2256,20 +2228,21 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 	username := strings.TrimSpace(os.Getenv("ARIA_SUPER_ADMIN"))
 	rawPassword, passwordOverride := os.LookupEnv("ARIA_SUPER_ADMIN_PASSWORD")
 	password := strings.TrimSpace(rawPassword)
+	passwordConfigured := passwordOverride && password != ""
 
 	if username == "" {
 		username = "sysadmin"
 	}
-	if password == "" {
-		passwordOverride = false
-		password = "Sysadmin@123"
-	}
 
-	var existingUserID string
-	err := db.QueryRow(`SELECT id FROM users WHERE username = $1 AND role = 'super_admin'`, username).Scan(&existingUserID)
+	var existingUserID, existingPasswordHash string
+	err := db.QueryRow(`SELECT id, password_hash FROM users WHERE username = $1 AND role = 'super_admin'`, username).Scan(&existingUserID, &existingPasswordHash)
 	if err == nil {
-		if !passwordOverride {
+		if !passwordConfigured {
 			logger.Info("Super admin already exists")
+			return nil
+		}
+		if bcrypt.CompareHashAndPassword([]byte(existingPasswordHash), []byte(password)) == nil {
+			logger.Info("Super admin password already synchronized: %s", username)
 			return nil
 		}
 
@@ -2300,9 +2273,12 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 		return fmt.Errorf("failed to check super admin: %w", err)
 	}
 
-	if count > 0 {
+	if count > 0 && !passwordConfigured {
 		logger.Info("Super admin already exists")
 		return nil
+	}
+	if !passwordConfigured {
+		return fmt.Errorf("ARIA_SUPER_ADMIN_PASSWORD is required when creating the initial super admin user")
 	}
 
 	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(password), 12)
@@ -2316,7 +2292,7 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 		return fmt.Errorf("failed to create super admin: %w", err)
 	}
 
-	logger.Info("Default super admin created: %s (password must be changed on first login)", username)
+	logger.Info("Configured super admin created: %s (password must be changed on first login)", username)
 	return nil
 }
 

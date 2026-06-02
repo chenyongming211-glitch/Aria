@@ -29,7 +29,7 @@
       </template>
 
       <el-table
-        :data="filteredTenants"
+        :data="paginatedTenants"
         stripe
         style="width: 100%"
         v-loading="loading"
@@ -153,7 +153,7 @@
               <el-table-column prop="email" label="邮箱" width="200" />
               <el-table-column prop="role" label="角色" width="120">
                 <template #default="{ row }">
-                  <el-tag :type="getRoleType(row.role)">{{ row.role === 'admin' ? '管理员' : '成员' }}</el-tag>
+                  <el-tag :type="getRoleType(row.role)">{{ getRoleLabel(row.role) }}</el-tag>
                 </template>
               </el-table-column>
               <el-table-column label="操作" width="150">
@@ -172,26 +172,41 @@
             </el-table>
           </el-tab-pane>
 
-          <el-tab-pane label="Permissions" name="permissions">
-            <el-card>
-              <h4>Resource Permissions</h4>
-              <el-checkbox-group v-model="selectedTenant.permissions">
-                <el-checkbox label="view_nodes">View Nodes</el-checkbox>
-                <el-checkbox label="manage_nodes">Manage Nodes</el-checkbox>
-                <el-checkbox label="view_topology">View Topology</el-checkbox>
-                <el-checkbox label="manage_tokens">Manage Tokens</el-checkbox>
-                <el-checkbox label="view_monitoring">View Monitoring</el-checkbox>
-                <el-checkbox label="receive_alerts">Receive Alerts</el-checkbox>
-              </el-checkbox-group>
-            </el-card>
-          </el-tab-pane>
         </el-tabs>
       </div>
 
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="accessDialogVisible = false">Cancel</el-button>
-          <el-button type="primary" @click="saveAccessChanges">Save Changes</el-button>
+          <el-button @click="accessDialogVisible = false">关闭</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="roleDialogVisible"
+      title="修改用户角色"
+      width="420px"
+    >
+      <el-form :model="roleForm" label-width="80px">
+        <el-form-item label="用户">
+          <el-input :value="editingUser?.username || ''" disabled />
+        </el-form-item>
+        <el-form-item label="角色">
+          <el-select v-model="roleForm.role" style="width: 100%">
+            <el-option
+              v-for="role in roleOptions"
+              :key="role.value"
+              :label="role.label"
+              :value="role.value"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="roleDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="roleSaving" @click="saveUserRole">更新</el-button>
         </span>
       </template>
     </el-dialog>
@@ -219,13 +234,12 @@ const loadTenants = async () => {
     const tenantList = response.data?.data || response.data || []
     tenants.value = tenantList.map(t => ({
       ...t,
-      status: 'active',
+      status: t.status || 'active',
       nodeCount: 0,
       tokenCount: 0,
       createdAt: t.created_at || new Date().toISOString(),
       description: t.description || '',
-      users: [],
-      permissions: []
+      users: []
     }))
   } catch (error) {
     console.error('Failed to load tenants:', error)
@@ -245,17 +259,37 @@ const selectedTenant = ref(null)
 const accessTab = ref('users')
 const isEditingExisting = ref(false)
 const tenantFormRef = ref(null)
+const roleDialogVisible = ref(false)
+const roleSaving = ref(false)
+const editingUser = ref(null)
+const roleForm = reactive({
+  role: 'operator'
+})
+
+const roleOptions = [
+  { value: 'admin', label: '管理员 (admin)' },
+  { value: 'operator', label: '操作员 (operator)' },
+  { value: 'viewer', label: '只读 (viewer)' }
+]
+
+const safeLower = (value) => String(value ?? '').toLowerCase()
 
 const filteredTenants = computed(() => {
   if (!searchQuery.value) {
     return tenants.value
   }
 
+  const query = safeLower(searchQuery.value)
   return tenants.value.filter(tenant =>
-    tenant.name.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-    tenant.code.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-    tenant.description.toLowerCase().includes(searchQuery.value.toLowerCase())
+    safeLower(tenant.name).includes(query) ||
+    safeLower(tenant.code).includes(query) ||
+    safeLower(tenant.description).includes(query)
   )
+})
+
+const paginatedTenants = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredTenants.value.slice(start, start + pageSize.value)
 })
 
 const dialogTitle = computed(() => {
@@ -283,9 +317,20 @@ const getStatusText = (status) => {
 const getRoleType = (role) => {
   switch(role) {
     case 'admin': return 'primary'
+    case 'operator':
     case 'member': return 'success'
     case 'viewer': return 'info'
     default: return 'default'
+  }
+}
+
+const getRoleLabel = (role) => {
+  switch (role) {
+    case 'admin': return '管理员'
+    case 'operator': return '操作员'
+    case 'member': return '成员'
+    case 'viewer': return '只读'
+    default: return role || '-'
   }
 }
 
@@ -312,8 +357,7 @@ const createTenant = () => {
     status: 'active',
     description: '',
     limits: { maxNodes: 10, maxTokens: 5, maxBandwidth: 100 },
-    users: [],
-    permissions: []
+    users: []
   }
   isEditingExisting.value = false
   detailDialogVisible.value = true
@@ -331,12 +375,27 @@ const editTenant = (tenant) => {
   detailDialogVisible.value = true
 }
 
-const toggleTenantStatus = (tenant) => {
+const toggleTenantStatus = async (tenant) => {
+  const previousStatus = tenant.status
   const newStatus = tenant.status === 'active' ? 'suspended' : 'active'
-  tenant.status = newStatus
+  try {
+    await api.put(API_ENDPOINTS.TENANT.DETAIL(tenant.id), {
+      status: newStatus
+    })
+    tenant.status = newStatus
 
-  const action = newStatus === 'active' ? 'activated' : 'suspended'
-  ElMessage.success(`Tenant ${tenant.name} has been ${action}`)
+    const index = tenants.value.findIndex(t => t.id === tenant.id)
+    if (index !== -1) {
+      tenants.value[index] = { ...tenants.value[index], status: newStatus }
+    }
+
+    const action = newStatus === 'active' ? 'activated' : 'suspended'
+    ElMessage.success(`Tenant ${tenant.name} has been ${action}`)
+  } catch (error) {
+    tenant.status = previousStatus
+    console.error('Failed to update tenant status:', error)
+    ElMessage.error('更新租户状态失败')
+  }
 }
 
 const deleteTenant = async (id) => {
@@ -373,12 +432,11 @@ const saveTenant = async () => {
       const response = await api.post(API_ENDPOINTS.TENANT.LIST, tenantData)
       const newTenant = {
         ...response.data?.data || tenantData,
-        status: 'active',
+        status: response.data?.data?.status || 'active',
         nodeCount: 0,
         tokenCount: 0,
         createdAt: new Date().toISOString(),
-        users: [],
-        permissions: []
+        users: []
       }
       tenants.value.push(newTenant)
       ElMessage.success('Tenant created successfully')
@@ -405,7 +463,7 @@ const manageAccess = async (tenant) => {
 }
 
 const addUserToTenant = () => {
-  ElMessageBox.confirm('请输入用户信息', '添加用户', {
+  ElMessageBox.prompt('请输入用户名', '添加用户', {
     confirmButtonText: '添加',
     cancelButtonText: '取消',
     inputPattern: /\S+/,
@@ -422,7 +480,7 @@ const addUserToTenant = () => {
         await api.post(API_ENDPOINTS.TENANT.USERS(selectedTenant.value.id), {
           username,
           password,
-          role: 'member',
+          role: 'operator',
           email: ''
         })
         ElMessage.success('用户添加成功')
@@ -436,29 +494,31 @@ const addUserToTenant = () => {
 }
 
 const editUserRole = (user) => {
-  ElMessageBox({
-    title: '修改用户角色',
-    message: `选择 ${user.username} 的新角色`,
-    showCancelButton: true,
-    confirmButtonText: '更新',
-    inputType: 'select',
-    inputOptions: [
-      { value: 'member', label: '成员(Member)' },
-      { value: 'admin', label: '管理员(Admin)' }
-    ],
-    inputValue: user.role
-  }).then(async ({ value }) => {
-    try {
-      await api.put(API_ENDPOINTS.TENANT.USER_DETAIL(selectedTenant.value.id, user.id), {
-        role: value
-      })
-      ElMessage.success('角色更新成功')
-      manageAccess(selectedTenant.value)
-    } catch (error) {
-      console.error('Failed to update user:', error)
-      ElMessage.error('更新用户失败')
-    }
-  }).catch(() => {})
+  editingUser.value = user
+  roleForm.role = ['admin', 'operator', 'viewer'].includes(user.role) ? user.role : 'operator'
+  roleDialogVisible.value = true
+}
+
+const saveUserRole = async () => {
+  if (!selectedTenant.value?.id || !editingUser.value?.id) {
+    ElMessage.error('缺少租户或用户信息')
+    return
+  }
+
+  roleSaving.value = true
+  try {
+    await api.put(API_ENDPOINTS.TENANT.USER_DETAIL(selectedTenant.value.id, editingUser.value.id), {
+      role: roleForm.role
+    })
+    ElMessage.success('角色更新成功')
+    roleDialogVisible.value = false
+    await manageAccess(selectedTenant.value)
+  } catch (error) {
+    console.error('Failed to update user:', error)
+    ElMessage.error('更新用户失败')
+  } finally {
+    roleSaving.value = false
+  }
 }
 
 const removeUserFromTenant = async (userId) => {
@@ -470,17 +530,6 @@ const removeUserFromTenant = async (userId) => {
     console.error('Failed to delete user:', error)
     ElMessage.error('删除用户失败')
   }
-}
-
-const saveAccessChanges = () => {
-  // Find and update the tenant in the main list
-  const index = tenants.value.findIndex(t => t.id === selectedTenant.value.id)
-  if (index !== -1) {
-    tenants.value[index] = { ...selectedTenant.value }
-  }
-
-  accessDialogVisible.value = false
-  ElMessage.success('Access settings saved')
 }
 
 const closeDetailDialog = () => {

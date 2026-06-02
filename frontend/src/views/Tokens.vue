@@ -29,13 +29,17 @@
       </template>
 
       <el-table
-        :data="filteredTokens"
+        :data="paginatedTokens"
         stripe
         style="width: 100%"
         v-loading="loading"
       >
         <el-table-column prop="id" label="ID" width="200" />
-        <el-table-column prop="token" label="Token" width="200" />
+        <el-table-column label="Token" width="220">
+          <template #default="{ row }">
+            {{ tokenDisplay(row) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="tenant_id" label="Tenant ID" width="200" />
         <el-table-column prop="tag" label="Tag" width="150" />
         <el-table-column prop="used_count" label="Usage" width="100">
@@ -64,7 +68,7 @@
                 <el-button size="small" type="danger">{{ t('common.revoke') }}</el-button>
               </template>
             </el-popconfirm>
-            <el-button size="small" @click="copyToken(row.token)" type="info">Copy</el-button>
+            <el-button size="small" :disabled="!row.token" @click="copyToken(row.token)" type="info">Copy</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -113,9 +117,12 @@
         <el-form-item label="Token" v-if="!isCreating">
           <el-input :value="currentToken.token" readonly>
             <template #append>
-              <el-button @click="copyToken(currentToken.token)">Copy</el-button>
+              <el-button :disabled="!currentToken.token" @click="copyToken(currentToken.token)">Copy</el-button>
             </template>
           </el-input>
+          <div v-if="!currentToken.token && currentToken.token_preview" class="token-preview">
+            {{ currentToken.token_preview }}
+          </div>
         </el-form-item>
         <el-form-item label="Tenant ID" v-if="currentToken.tenant_id">
           <el-input :value="currentToken.tenant_id" readonly />
@@ -148,6 +155,7 @@ import { ElMessage, ElNotification } from 'element-plus'
 import { t } from '@/i18n'
 import { useTokenApi } from '@/composables/useTokenApi'
 import { usePermission } from '@/composables/usePermission'
+import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
 
 const { hasPermission } = usePermission()
 
@@ -173,16 +181,27 @@ const getStatusType = (status) => {
 }
 
 // Computed property for filtered tokens
+const safeLower = (value) => String(value ?? '').toLowerCase()
+
+const tokenDisplay = (token) => token?.token_preview || token?.token || ''
+
 const filteredTokens = computed(() => {
   if (!searchQuery.value) {
     return tokens.value
   }
 
+  const query = safeLower(searchQuery.value)
   return tokens.value.filter(token =>
-    token.id.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-    token.token.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-    token.tag.toLowerCase().includes(searchQuery.value.toLowerCase())
+    safeLower(token.id).includes(query) ||
+    safeLower(token.token).includes(query) ||
+    safeLower(token.token_preview).includes(query) ||
+    safeLower(token.tag).includes(query)
   )
+})
+
+const paginatedTokens = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return filteredTokens.value.slice(start, start + pageSize.value)
 })
 
 // Fetch tokens from backend
@@ -244,6 +263,11 @@ const viewToken = async (token) => {
 
 // Copy token to clipboard
 const copyToken = async (tokenValue) => {
+  if (!tokenValue) {
+    ElMessage.warning('Token value is only shown when it is first created')
+    return
+  }
+
   try {
     await navigator.clipboard.writeText(tokenValue)
     ElNotification({
@@ -278,7 +302,7 @@ const saveToken = async () => {
     ElMessage.success('Token created successfully!')
     ElNotification({
       title: 'Token Created',
-      message: `Token created: ${response.token}. Please copy it now as it won't be shown again.`,
+      message: `Token created: ${tokenDisplay(response)}. Please copy it now as it won't be shown again.`,
       type: 'success',
       duration: 0 // Don't auto-close
     })
@@ -322,6 +346,11 @@ const handleCurrentChange = (page) => {
 onMounted(() => {
   fetchTokens()
 })
+
+useTenantChangeReload(() => {
+  currentPage.value = 1
+  return fetchTokens()
+})
 </script>
 
 <style scoped>
@@ -350,5 +379,11 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+}
+
+.token-preview {
+  margin-top: 6px;
+  color: #909399;
+  font-size: 12px;
 }
 </style>

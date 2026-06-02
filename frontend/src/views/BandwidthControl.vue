@@ -203,6 +203,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useQosApi } from '@/composables/useQosApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 import { usePermission } from '@/composables/usePermission'
+import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
 
 const { hasPermission } = usePermission()
 
@@ -220,6 +221,12 @@ const rules = reactive({
   peers: [],
   ip: []
 })
+
+const clearRules = () => {
+  rules.service = []
+  rules.peers = []
+  rules.ip = []
+}
 
 const form = reactive({
   description: '',
@@ -244,6 +251,9 @@ const loadNodes = async () => {
     if (tenantNodes.value.length > 0) {
       selectedNodeId.value = tenantNodes.value[0].id
       refreshData()
+    } else {
+      selectedNodeId.value = ''
+      clearRules()
     }
   } catch (error) {
     console.error('加载节点失败:', error)
@@ -272,9 +282,7 @@ const onNodeChange = () => {
 
 // 切换分类
 const onCategoryChange = () => {
-  if (rules[activeCategory.value].length === 0) {
-    refreshData()
-  }
+  refreshData()
 }
 
 const getCategoryLabel = (cat) => {
@@ -357,9 +365,18 @@ const handleDelete = async (row) => {
   }
 }
 
+const reloadTenantScopedData = async () => {
+  selectedNodeId.value = ''
+  tenantNodes.value = []
+  clearRules()
+  await loadNodes()
+}
+
 onMounted(() => {
-  loadNodes()
+  reloadTenantScopedData()
 })
+
+useTenantChangeReload(reloadTenantScopedData)
 </script>
 
 <style scoped>

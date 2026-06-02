@@ -192,9 +192,11 @@ func (r *Router) handleTenantBatchAgentCommand(w http.ResponseWriter, req *http.
 	} else {
 		for _, nodeID := range body.NodeIDs {
 			node, err := r.getTenantNodeRecord(nodeID, tenantID)
-			if err == nil && node != nil {
-				nodes = append(nodes, node)
+			if err != nil {
+				r.writeNodeLookupError(w, err)
+				return
 			}
+			nodes = append(nodes, node)
 		}
 	}
 	if len(nodes) == 0 {

@@ -41,25 +41,25 @@ func (c *Client) QueryRange(ctx context.Context, query string, start, end time.T
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		log.Printf("[victoriametrics] failed to create query_range request: %v", err)
-		return emptyRangeResult(), nil
+		return nil, err
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		log.Printf("[victoriametrics] query_range request failed: %v", err)
-		return emptyRangeResult(), nil
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[victoriametrics] query_range returned status %d", resp.StatusCode)
-		return emptyRangeResult(), nil
+		return nil, fmt.Errorf("query_range returned status %d", resp.StatusCode)
 	}
 
 	var result QueryRangeResult
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		log.Printf("[victoriametrics] failed to decode query_range response: %v", err)
-		return emptyRangeResult(), nil
+		return nil, err
 	}
 
 	return &result, nil
@@ -75,25 +75,25 @@ func (c *Client) QueryInstant(ctx context.Context, query string) (*QueryInstantR
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		log.Printf("[victoriametrics] failed to create query request: %v", err)
-		return emptyInstantResult(), nil
+		return nil, err
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		log.Printf("[victoriametrics] query request failed: %v", err)
-		return emptyInstantResult(), nil
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[victoriametrics] query returned status %d", resp.StatusCode)
-		return emptyInstantResult(), nil
+		return nil, fmt.Errorf("query returned status %d", resp.StatusCode)
 	}
 
 	var result QueryInstantResult
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		log.Printf("[victoriametrics] failed to decode query response: %v", err)
-		return emptyInstantResult(), nil
+		return nil, err
 	}
 
 	return &result, nil

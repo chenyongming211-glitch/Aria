@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -76,10 +77,13 @@ func (r *Router) HandleTenants(w http.ResponseWriter, req *http.Request) {
 			r.listAllTenants(w)
 			return
 		}
-		if role == "admin" || role == "owner" {
+		if controllerstorage.NormalizeRoleName(role) == controllerstorage.SystemRoleAdmin {
 			tenantID, ok := middleware.GetTenantID(req.Context())
 			if !ok {
 				apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeTenantContextNotFound, "请先选择租户：当前未设置租户上下文", nil)
+				return
+			}
+			if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermSettingsRead) {
 				return
 			}
 			r.listSingleTenant(w, tenantID)
@@ -586,10 +590,19 @@ func (r *Router) updateTenantNode(w http.ResponseWriter, req *http.Request, tena
 	if routes == nil {
 		routes = node.AdvertisedRoutes
 	}
+	normalizedRoutes, err := normalizeRoutes(routes)
+	if err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
+		return
+	}
 
 	role := body.Role
 	if role == "" {
 		role = node.Role
+	}
+	targetRegion := firstNonEmpty(body.Region, node.Region)
+	if (body.AdvertisedRoutes != nil || strings.TrimSpace(body.Region) != "") && !r.validateTenantAdvertisedRouteConflicts(w, tenantID, node, targetRegion, normalizedRoutes) {
+		return
 	}
 
 	query := `UPDATE nodes SET 
@@ -612,7 +625,7 @@ func (r *Router) updateTenantNode(w http.ResponseWriter, req *http.Request, tena
 		body.Region,
 		body.VPCID,
 		role,
-		pq.Array(routes),
+		pq.Array(normalizedRoutes),
 		node.ID,
 		tenantID,
 	); err != nil {
@@ -624,7 +637,7 @@ func (r *Router) updateTenantNode(w http.ResponseWriter, req *http.Request, tena
 		"id":                node.ID.String(),
 		"tenant_id":         tenantID.String(),
 		"role":              role,
-		"advertised_routes": routes,
+		"advertised_routes": normalizedRoutes,
 	}, "Node updated successfully")
 }
 
@@ -740,6 +753,9 @@ func (r *Router) addTenantNodeRoute(w http.ResponseWriter, req *http.Request, te
 		apibase.WriteSuccess(w, map[string]string{"id": route, "cidr": route}, "Route already exists")
 		return
 	}
+	if !r.validateTenantAdvertisedRouteConflicts(w, tenantID, node, node.Region, normalized) {
+		return
+	}
 
 	if err := r.updateTenantNodeRoutes(node.ID, tenantID, normalized); err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeUpdateNodeFailed, "Failed to add route", nil)
@@ -786,6 +802,9 @@ func (r *Router) replaceTenantNodeRoute(w http.ResponseWriter, req *http.Request
 	normalized, err := normalizeRoutes(updated)
 	if err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
+		return
+	}
+	if !r.validateTenantAdvertisedRouteConflicts(w, tenantID, node, node.Region, normalized) {
 		return
 	}
 
@@ -962,12 +981,9 @@ func (r *Router) writePolicyMutationSuccess(
 		data = map[string]interface{}{}
 	}
 	if err != nil {
-		data["dispatch"] = map[string]interface{}{
-			"status": "failed",
-			"error":  err.Error(),
-		}
-		data["dispatch_error"] = err.Error()
-		apibase.WriteSuccess(w, data, message)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, message+": policy dispatch failed", map[string]string{
+			"dispatch_error": err.Error(),
+		})
 		return
 	}
 
@@ -1008,7 +1024,7 @@ func (r *Router) authorizeTenant(w http.ResponseWriter, req *http.Request, targe
 		return false
 	}
 
-	if requireAdmin && role != "admin" && role != "owner" {
+	if requireAdmin && controllerstorage.NormalizeRoleName(role) != controllerstorage.SystemRoleAdmin {
 		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Admin privileges required", nil)
 		return false
 	}
@@ -1038,10 +1054,7 @@ func (r *Router) authorizeTenantPermission(w http.ResponseWriter, req *http.Requ
 		return true
 	}
 
-	roleName := role
-	if roleName == "member" || roleName == "owner" {
-		roleName = controllerstorage.SystemRoleOperator
-	}
+	roleName := controllerstorage.NormalizeRoleName(role)
 
 	permissions, err := r.store.GetRolePermissions(targetTenantID, roleName)
 	hasPermission := err == nil && containsString(permissions, permission)
@@ -1308,6 +1321,24 @@ func normalizeRoutes(routes []string) ([]string, error) {
 	return result, nil
 }
 
+func (r *Router) validateTenantAdvertisedRouteConflicts(w http.ResponseWriter, tenantID uuid.UUID, node *controllerstorage.Node, targetRegion string, routes []string) bool {
+	tenantNodes, err := r.store.GetNodesByTenant(tenantID)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeGetNodesFailed, "Failed to load tenant nodes", nil)
+		return false
+	}
+	if err := controllerstorage.FindAdvertisedRouteConflict(tenantNodes, node.PublicKey, targetRegion, routes); err != nil {
+		var conflict *controllerstorage.RouteConflictError
+		if errors.As(err, &conflict) {
+			apibase.WriteError(w, http.StatusConflict, apibase.CodeBadRequest, err.Error(), nil)
+			return false
+		}
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, err.Error(), nil)
+		return false
+	}
+	return true
+}
+
 func (r *Router) buildTenantNodeACLPolicies(tenantID uuid.UUID, node *controllerstorage.Node) ([]map[string]interface{}, error) {
 	rules, err := r.store.ListTenantNodeACLRules(tenantID, node.ID)
 	if err != nil {
@@ -1347,7 +1378,7 @@ func (r *Router) buildTenantNodeQoSPolicies(tenantID uuid.UUID, node *controller
 	for _, cat := range categories {
 		rules, err := r.store.ListTenantNodeQoSRules(tenantID, node.ID, cat)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("failed to load %s QoS rules: %w", cat, err)
 		}
 		for _, rule := range rules {
 			allPolicies = append(allPolicies, map[string]interface{}{

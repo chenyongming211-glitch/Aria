@@ -3,6 +3,7 @@ package controllerstorage
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -64,6 +65,21 @@ var (
 		"policies:read",
 	}
 )
+
+func NormalizeRoleName(role string) string {
+	roleName := strings.TrimSpace(role)
+	lowerRoleName := strings.ToLower(roleName)
+	switch lowerRoleName {
+	case "member":
+		return SystemRoleOperator
+	case "owner":
+		return SystemRoleAdmin
+	case SystemRoleAdmin, SystemRoleOperator, SystemRoleViewer, "super_admin":
+		return lowerRoleName
+	default:
+		return roleName
+	}
+}
 
 type roleExec interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)

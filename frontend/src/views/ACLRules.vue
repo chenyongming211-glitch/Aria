@@ -47,7 +47,7 @@
       </el-button>
     </div>
 
-    <el-table :data="rules" v-loading="loading" style="width: 100%">
+    <el-table :data="paginatedRules" v-loading="loading" style="width: 100%">
       <el-table-column prop="node_name" label="节点" width="160" />
       <el-table-column prop="priority" label="优先级" width="80" sortable />
       <el-table-column prop="name" label="名称" width="150" />
@@ -204,6 +204,7 @@ import { Plus, Search } from '@element-plus/icons-vue'
 import { useAclApi } from '@/composables/useAclApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 import { usePermission } from '@/composables/usePermission'
+import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
 
 const { hasPermission } = usePermission()
 
@@ -274,12 +275,21 @@ const formRules = {
 
 const dialogTitle = computed(() => form.id ? '编辑规则' : '新建规则')
 
+const paginatedRules = computed(() => {
+  const start = (pagination.page - 1) * pagination.pageSize
+  return rules.value.slice(start, start + pagination.pageSize)
+})
+
 const loadNodes = async () => {
   try {
     tenantNodes.value = await useTenantApi.getTenantNodes()
     if (!filters.node_id && tenantNodes.value.length > 0) {
       filters.node_id = tenantNodes.value[0].id
-      loadRules()
+      await loadRules()
+    } else if (tenantNodes.value.length === 0) {
+      filters.node_id = ''
+      rules.value = []
+      pagination.total = 0
     }
   } catch (error) {
     console.error('加载节点失败:', error)
@@ -289,6 +299,7 @@ const loadNodes = async () => {
 const loadRules = async () => {
   if (!filters.node_id) {
     rules.value = []
+    pagination.total = 0
     return
   }
 
@@ -454,10 +465,20 @@ const shortCommandId = (commandId) => {
   return commandId.slice(0, 8)
 }
 
+const reloadTenantScopedData = async () => {
+  rules.value = []
+  tenantNodes.value = []
+  filters.node_id = ''
+  pagination.page = 1
+  pagination.total = 0
+  await loadNodes()
+}
+
 onMounted(() => {
-  loadNodes()
-  loadRules()
+  reloadTenantScopedData()
 })
+
+useTenantChangeReload(reloadTenantScopedData)
 </script>
 
 <style scoped>

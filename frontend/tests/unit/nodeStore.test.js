@@ -38,6 +38,48 @@ describe('node store', () => {
     expect(store.nodes).toEqual([{ id: 'node-2' }])
   })
 
+  it('updates cached nodes from the server response instead of submitted form data', async () => {
+    api.put.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          id: 'node-1',
+          hostname: 'server-hostname',
+          region: 'server-region',
+          advertised_routes: ['10.20.0.0/16'],
+          status: 'offline'
+        }
+      }
+    })
+
+    const store = useNodeStore()
+    store.nodes = [
+      {
+        id: 'node-1',
+        hostname: 'old-hostname',
+        region: 'old-region',
+        routes: ['10.10.0.0/16'],
+        status: 'online'
+      }
+    ]
+
+    await store.updateNodeRemote('node-1', {
+      hostname: 'submitted-hostname',
+      region: 'submitted-region',
+      advertised_routes: ['10.30.0.0/16']
+    })
+
+    expect(api.put).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1', {
+      hostname: 'submitted-hostname',
+      region: 'submitted-region',
+      advertised_routes: ['10.30.0.0/16']
+    })
+    expect(store.nodes[0].hostname).toBe('server-hostname')
+    expect(store.nodes[0].region).toBe('server-region')
+    expect(store.nodes[0].routes).toEqual(['10.20.0.0/16'])
+    expect(store.nodes[0].status).toBe('offline')
+  })
+
   it('normalizes monitoring detail fields for the node workbench', async () => {
     api.get.mockImplementation(async (url) => {
       if (url === '/v2/tenants/tenant-1/nodes/node-1') {

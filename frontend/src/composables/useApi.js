@@ -51,6 +51,36 @@ function isTokenExpiringSoon() {
   return expireTime - now < tenMinutes
 }
 
+function applyAuthHeaders(config, tokenOverride = null) {
+  if (!config.headers) {
+    config.headers = {}
+  }
+
+  const token = tokenOverride || localStorage.getItem('aria_token')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+
+  const currentTenant = localStorage.getItem('aria-current-tenant')
+  if (currentTenant) {
+    try {
+      const tenant = JSON.parse(currentTenant)
+      if (tenant?.id) {
+        config.headers['X-Tenant-ID'] = tenant.id
+      } else {
+        localStorage.removeItem('aria-current-tenant')
+        delete config.headers['X-Tenant-ID']
+      }
+    } catch (error) {
+      console.warn('Invalid aria-current-tenant in localStorage, clearing it:', error)
+      localStorage.removeItem('aria-current-tenant')
+      delete config.headers['X-Tenant-ID']
+    }
+  }
+
+  return config
+}
+
 // 刷新 token
 async function refreshToken() {
   const token = localStorage.getItem('aria_token')
@@ -126,9 +156,7 @@ api.interceptors.request.use(
         return new Promise((resolve, reject) => {
           subscribeTokenRefresh((newToken) => {
             if (newToken) {
-              // 刷新成功，使用新 token 继续请求
-              config.headers.Authorization = `Bearer ${newToken}`
-              resolve(config)
+              resolve(applyAuthHeaders(config, newToken))
             } else {
               // 刷新失败，跳转登录并 reject Promise
               redirectToLogin()
@@ -139,29 +167,7 @@ api.interceptors.request.use(
       }
     }
     
-    // Add token to requests if available
-    const currentToken = localStorage.getItem('aria_token')
-    if (currentToken) {
-      config.headers.Authorization = `Bearer ${currentToken}`
-    }
-
-    // Add tenant header
-    const currentTenant = localStorage.getItem('aria-current-tenant')
-    if (currentTenant) {
-      try {
-        const tenant = JSON.parse(currentTenant)
-        if (tenant?.id) {
-          config.headers['X-Tenant-ID'] = tenant.id
-        } else {
-          localStorage.removeItem('aria-current-tenant')
-        }
-      } catch (error) {
-        console.warn('Invalid aria-current-tenant in localStorage, clearing it:', error)
-        localStorage.removeItem('aria-current-tenant')
-      }
-    }
-
-    return config
+    return applyAuthHeaders(config)
   },
   (error) => Promise.reject(error)
 )

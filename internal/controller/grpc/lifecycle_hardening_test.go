@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"regexp"
 	"testing"
@@ -44,6 +45,65 @@ func TestRegisterFailsWhenRuntimeTokenCannotBeIssued(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected Register to fail when runtime token cannot be issued")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestReportMetricsReturnsFailureWhenHeartbeatSaveFails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.MatchExpectationsInOrder(false)
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	publicKey := "metrics-node-key"
+	now := time.Now()
+
+	expectNodeByID(mock, nodeID, publicKey, tenantID, now)
+	expectNodeByPublicKey(mock, publicKey, nodeID, tenantID, now)
+	mock.ExpectQuery(`INSERT INTO nodes \(`).
+		WithArgs(
+			publicKey,
+			sqlmock.AnyArg(),
+			tenantID,
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+		).
+		WillReturnError(sql.ErrConnDone)
+
+	ctx := context.WithValue(context.Background(), RuntimeNodeIDKey, nodeID.String())
+	ctx = context.WithValue(ctx, RuntimeTenantIDKey, tenantID.String())
+
+	server := NewControllerServer(nil, nil, controllerstorage.NewStorageWithDB(db))
+	resp, err := server.ReportMetrics(ctx, &agentpb.MetricsReportRequest{
+		NodeId:    nodeID.String(),
+		PublicKey: publicKey,
+	})
+	if err == nil {
+		t.Fatalf("expected ReportMetrics to return persistence error")
+	}
+	if resp == nil || resp.Success {
+		t.Fatalf("expected unsuccessful response, got %#v", resp)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

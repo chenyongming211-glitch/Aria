@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/composables/useApi'
 import { API_ENDPOINTS } from '@/config/api'
+import { clearSession } from '@/utils/session'
 
 export const SYSTEM_ROLE_PERMISSIONS = Object.freeze({
   admin: Object.freeze([
@@ -45,7 +46,10 @@ export const SYSTEM_ROLE_PERMISSIONS = Object.freeze({
 
 export const normalizeRoleName = (role) => {
   const roleName = String(role || '').trim()
-  if (roleName === 'member' || roleName === 'owner') return 'operator'
+  const lowerRoleName = roleName.toLowerCase()
+  if (lowerRoleName === 'member') return 'operator'
+  if (lowerRoleName === 'owner') return 'admin'
+  if (['admin', 'operator', 'viewer', 'super_admin'].includes(lowerRoleName)) return lowerRoleName
   return roleName
 }
 
@@ -128,6 +132,17 @@ export default defineStore('user', () => {
   const isAuthenticated = ref(false)
   const mustChangePassword = ref(false)
   const permissions = ref([])
+
+  const resetSessionState = () => {
+    user.value = null
+    isAuthenticated.value = false
+    mustChangePassword.value = false
+    permissions.value = []
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('aria-session-cleared', resetSessionState)
+  }
 
   const setPermissions = (nextPermissions) => {
     const normalized = Array.from(new Set((nextPermissions || []).filter(Boolean)))
@@ -265,17 +280,8 @@ export default defineStore('user', () => {
   }
 
   const logout = () => {
-    user.value = null
-    isAuthenticated.value = false
-    mustChangePassword.value = false
-    localStorage.removeItem('aria_token')
-    localStorage.removeItem('aria_token_expire_time')
-    localStorage.removeItem('aria_last_activity')
-    localStorage.removeItem('aria_user')
-    localStorage.removeItem('aria-current-tenant')
-    localStorage.removeItem('aria_permissions')
-    localStorage.removeItem('aria_must_change_password')
-    permissions.value = []
+    clearSession()
+    resetSessionState()
   }
 
   const loadSession = () => {
@@ -417,8 +423,21 @@ export default defineStore('user', () => {
       const response = await api.post(API_ENDPOINTS.AUTH.REFRESH)
       const token = response.data?.data?.token || response.data?.token
       if (token) {
+        const responseData = response.data?.data || response.data || {}
+        const expiresIn = responseData.expires_in || 7200
+        const refreshedUser = responseData.user || userFromTokenClaims(token)
+        const requirePasswordChange = responseData.require_password_change ?? tokenRequiresPasswordChange(token)
+
         localStorage.setItem('aria_token', token)
-        mustChangePassword.value = tokenRequiresPasswordChange(token)
+        localStorage.setItem('aria_token_expire_time', (Date.now() + expiresIn * 1000).toString())
+
+        if (refreshedUser) {
+          user.value = normalizeUser(refreshedUser, user.value?.username)
+          localStorage.setItem('aria_user', JSON.stringify(user.value))
+          persistCurrentTenant(user.value?.tenant_id)
+        }
+
+        mustChangePassword.value = Boolean(requirePasswordChange)
         if (mustChangePassword.value) {
           localStorage.setItem('aria_must_change_password', 'true')
         } else {

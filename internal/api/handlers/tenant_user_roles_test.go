@@ -200,6 +200,38 @@ func TestUpdateUserAllowsAdminRole(t *testing.T) {
 	}
 }
 
+func TestUpdateUserReturnsNotFoundWhenNoRowsUpdated(t *testing.T) {
+	tenantID := uuid.New()
+	userID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectTenantRoleExists(mock, tenantID, "admin", true)
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET role = COALESCE(NULLIF($1, ''), role), email = COALESCE(NULLIF($2, ''), email), updated_at = NOW() WHERE id = $3 AND tenant_id = $4`)).
+		WithArgs("admin", "", userID, tenantID).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	api := NewTenantAPI(controllerstorage.NewStorageWithDB(db))
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v2/tenants/"+tenantID.String()+"/users/"+userID.String(),
+		bytes.NewReader([]byte(`{"role":"admin"}`)),
+	)
+	rr := httptest.NewRecorder()
+
+	api.UpdateUser(rr, req, tenantID, userID.String())
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestUpdateUserAllowsCustomTenantRole(t *testing.T) {
 	tenantID := uuid.New()
 	userID := uuid.New()

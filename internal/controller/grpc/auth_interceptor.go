@@ -26,7 +26,8 @@ func GetRuntimeNodeID(ctx context.Context) (string, bool) {
 	if val == nil {
 		return "", false
 	}
-	return val.(string), true
+	nodeID, ok := val.(string)
+	return nodeID, ok
 }
 
 func GetRuntimeTenantID(ctx context.Context) (string, bool) {
@@ -34,7 +35,8 @@ func GetRuntimeTenantID(ctx context.Context) (string, bool) {
 	if val == nil {
 		return "", false
 	}
-	return val.(string), true
+	tenantID, ok := val.(string)
+	return tenantID, ok
 }
 
 func extractBearerToken(ctx context.Context) (string, error) {
@@ -48,8 +50,12 @@ func extractBearerToken(ctx context.Context) (string, error) {
 		return "", status.Error(codes.Unauthenticated, "missing authorization header")
 	}
 
-	token := strings.TrimPrefix(values[0], "Bearer ")
-	if token == values[0] || token == "" {
+	authHeader := strings.TrimSpace(values[0])
+	if !strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+		return "", status.Error(codes.Unauthenticated, "invalid authorization format")
+	}
+	token := strings.TrimSpace(authHeader[len("bearer "):])
+	if token == "" {
 		return "", status.Error(codes.Unauthenticated, "invalid authorization format")
 	}
 
