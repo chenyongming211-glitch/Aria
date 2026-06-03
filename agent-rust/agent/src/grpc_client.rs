@@ -306,6 +306,8 @@ impl GrpcClient {
             }).collect(),
             runtime_token: new_runtime_token,
             runtime_token_expires_at: new_runtime_token_expires_at,
+            snapshot_complete: resp.snapshot_complete,
+            domain_versions: resp.domain_versions,
         })
     }
 
@@ -406,6 +408,8 @@ pub struct SyncResult {
     pub blacklist_rules: Vec<BlacklistRule>,
     pub runtime_token: Option<String>,
     pub runtime_token_expires_at: Option<i64>,
+    pub snapshot_complete: bool,
+    pub domain_versions: HashMap<String, String>,
 }
 
 #[allow(dead_code)]

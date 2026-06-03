@@ -332,16 +332,18 @@ func (x *SyncRequest) GetObservedMessage() string {
 
 type SyncResponse struct {
 	state                 protoimpl.MessageState `protogen:"open.v1"`
-	Peers                 []*PeerInfo            `protobuf:"bytes,1,rep,name=peers,proto3" json:"peers,omitempty"`                                                                    // WireGuard Peers 列表
-	AssignedIp            string                 `protobuf:"bytes,2,opt,name=assigned_ip,json=assignedIp,proto3" json:"assigned_ip,omitempty"`                                        // 当前节点的 VPN IP
-	LastUpdate            int64                  `protobuf:"varint,3,opt,name=last_update,json=lastUpdate,proto3" json:"last_update,omitempty"`                                       // 最后更新时间戳
-	AclRules              []*ACLRule             `protobuf:"bytes,4,rep,name=acl_rules,json=aclRules,proto3" json:"acl_rules,omitempty"`                                              // 防火墙 ACL 规则
-	MetricsPushGateway    string                 `protobuf:"bytes,5,opt,name=metrics_push_gateway,json=metricsPushGateway,proto3" json:"metrics_push_gateway,omitempty"`              // Prometheus Push Gateway URL
-	QosRules              []*QoSRule             `protobuf:"bytes,6,rep,name=qos_rules,json=qosRules,proto3" json:"qos_rules,omitempty"`                                              // QoS 限速规则
-	BlacklistRules        []*BlacklistRule       `protobuf:"bytes,7,rep,name=blacklist_rules,json=blacklistRules,proto3" json:"blacklist_rules,omitempty"`                            // 黑名单规则
-	DesiredStateVersion   string                 `protobuf:"bytes,8,opt,name=desired_state_version,json=desiredStateVersion,proto3" json:"desired_state_version,omitempty"`           // Controller 当前期望配置版本
-	RuntimeToken          string                 `protobuf:"bytes,9,opt,name=runtime_token,json=runtimeToken,proto3" json:"runtime_token,omitempty"`                                  // 刷新后的运行期凭据
-	RuntimeTokenExpiresAt int64                  `protobuf:"varint,10,opt,name=runtime_token_expires_at,json=runtimeTokenExpiresAt,proto3" json:"runtime_token_expires_at,omitempty"` // 运行期凭据过期时间戳
+	Peers                 []*PeerInfo            `protobuf:"bytes,1,rep,name=peers,proto3" json:"peers,omitempty"`                                                                                                                    // WireGuard Peers 列表
+	AssignedIp            string                 `protobuf:"bytes,2,opt,name=assigned_ip,json=assignedIp,proto3" json:"assigned_ip,omitempty"`                                                                                        // 当前节点的 VPN IP
+	LastUpdate            int64                  `protobuf:"varint,3,opt,name=last_update,json=lastUpdate,proto3" json:"last_update,omitempty"`                                                                                       // 最后更新时间戳
+	AclRules              []*ACLRule             `protobuf:"bytes,4,rep,name=acl_rules,json=aclRules,proto3" json:"acl_rules,omitempty"`                                                                                              // 防火墙 ACL 规则
+	MetricsPushGateway    string                 `protobuf:"bytes,5,opt,name=metrics_push_gateway,json=metricsPushGateway,proto3" json:"metrics_push_gateway,omitempty"`                                                              // Prometheus Push Gateway URL
+	QosRules              []*QoSRule             `protobuf:"bytes,6,rep,name=qos_rules,json=qosRules,proto3" json:"qos_rules,omitempty"`                                                                                              // QoS 限速规则
+	BlacklistRules        []*BlacklistRule       `protobuf:"bytes,7,rep,name=blacklist_rules,json=blacklistRules,proto3" json:"blacklist_rules,omitempty"`                                                                            // 黑名单规则
+	DesiredStateVersion   string                 `protobuf:"bytes,8,opt,name=desired_state_version,json=desiredStateVersion,proto3" json:"desired_state_version,omitempty"`                                                           // Controller 当前期望配置版本
+	RuntimeToken          string                 `protobuf:"bytes,9,opt,name=runtime_token,json=runtimeToken,proto3" json:"runtime_token,omitempty"`                                                                                  // 刷新后的运行期凭据
+	RuntimeTokenExpiresAt int64                  `protobuf:"varint,10,opt,name=runtime_token_expires_at,json=runtimeTokenExpiresAt,proto3" json:"runtime_token_expires_at,omitempty"`                                                 // 运行期凭据过期时间戳
+	SnapshotComplete      bool                   `protobuf:"varint,11,opt,name=snapshot_complete,json=snapshotComplete,proto3" json:"snapshot_complete,omitempty"`                                                                    // 本轮同步快照是否完整
+	DomainVersions        map[string]string      `protobuf:"bytes,12,rep,name=domain_versions,json=domainVersions,proto3" json:"domain_versions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // 各控制面 domain 的版本
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -444,6 +446,20 @@ func (x *SyncResponse) GetRuntimeTokenExpiresAt() int64 {
 		return x.RuntimeTokenExpiresAt
 	}
 	return 0
+}
+
+func (x *SyncResponse) GetSnapshotComplete() bool {
+	if x != nil {
+		return x.SnapshotComplete
+	}
+	return false
+}
+
+func (x *SyncResponse) GetDomainVersions() map[string]string {
+	if x != nil {
+		return x.DomainVersions
+	}
+	return nil
 }
 
 type PeerInfo struct {
@@ -1745,7 +1761,7 @@ const file_aria_agent_proto_rawDesc = "" +
 	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x122\n" +
 	"\x15applied_state_version\x18\x03 \x01(\tR\x13appliedStateVersion\x12%\n" +
 	"\x0eobserved_state\x18\x04 \x01(\tR\robservedState\x12)\n" +
-	"\x10observed_message\x18\x05 \x01(\tR\x0fobservedMessage\"\xe8\x03\n" +
+	"\x10observed_message\x18\x05 \x01(\tR\x0fobservedMessage\"\xaf\x05\n" +
 	"\fSyncResponse\x12*\n" +
 	"\x05peers\x18\x01 \x03(\v2\x14.aria.agent.PeerInfoR\x05peers\x12\x1f\n" +
 	"\vassigned_ip\x18\x02 \x01(\tR\n" +
@@ -1759,7 +1775,12 @@ const file_aria_agent_proto_rawDesc = "" +
 	"\x15desired_state_version\x18\b \x01(\tR\x13desiredStateVersion\x12#\n" +
 	"\rruntime_token\x18\t \x01(\tR\fruntimeToken\x127\n" +
 	"\x18runtime_token_expires_at\x18\n" +
-	" \x01(\x03R\x15runtimeTokenExpiresAt\"\xae\x02\n" +
+	" \x01(\x03R\x15runtimeTokenExpiresAt\x12+\n" +
+	"\x11snapshot_complete\x18\v \x01(\bR\x10snapshotComplete\x12U\n" +
+	"\x0fdomain_versions\x18\f \x03(\v2,.aria.agent.SyncResponse.DomainVersionsEntryR\x0edomainVersions\x1aA\n" +
+	"\x13DomainVersionsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xae\x02\n" +
 	"\bPeerInfo\x12\x1d\n" +
 	"\n" +
 	"public_key\x18\x01 \x01(\tR\tpublicKey\x12\x1a\n" +
@@ -1911,7 +1932,7 @@ func file_aria_agent_proto_rawDescGZIP() []byte {
 	return file_aria_agent_proto_rawDescData
 }
 
-var file_aria_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_aria_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_aria_agent_proto_goTypes = []any{
 	(*RegisterRequest)(nil),       // 0: aria.agent.RegisterRequest
 	(*RegisterResponse)(nil),      // 1: aria.agent.RegisterResponse
@@ -1933,43 +1954,45 @@ var file_aria_agent_proto_goTypes = []any{
 	(*CommandResponse)(nil),       // 17: aria.agent.CommandResponse
 	(*MetricsReportRequest)(nil),  // 18: aria.agent.MetricsReportRequest
 	(*MetricsReportResponse)(nil), // 19: aria.agent.MetricsReportResponse
-	nil,                           // 20: aria.agent.CommandRequest.ParamsEntry
-	nil,                           // 21: aria.agent.CommandResponse.ResultEntry
-	nil,                           // 22: aria.agent.MetricsReportRequest.CustomMetricsEntry
+	nil,                           // 20: aria.agent.SyncResponse.DomainVersionsEntry
+	nil,                           // 21: aria.agent.CommandRequest.ParamsEntry
+	nil,                           // 22: aria.agent.CommandResponse.ResultEntry
+	nil,                           // 23: aria.agent.MetricsReportRequest.CustomMetricsEntry
 }
 var file_aria_agent_proto_depIdxs = []int32{
 	4,  // 0: aria.agent.SyncResponse.peers:type_name -> aria.agent.PeerInfo
 	5,  // 1: aria.agent.SyncResponse.acl_rules:type_name -> aria.agent.ACLRule
 	6,  // 2: aria.agent.SyncResponse.qos_rules:type_name -> aria.agent.QoSRule
 	7,  // 3: aria.agent.SyncResponse.blacklist_rules:type_name -> aria.agent.BlacklistRule
-	10, // 4: aria.agent.SyncConfigRequest.peers:type_name -> aria.agent.PeerConfig
-	5,  // 5: aria.agent.SyncConfigRequest.acl_rules:type_name -> aria.agent.ACLRule
-	6,  // 6: aria.agent.SyncConfigRequest.qos_rules:type_name -> aria.agent.QoSRule
-	7,  // 7: aria.agent.SyncConfigRequest.blacklist_rules:type_name -> aria.agent.BlacklistRule
-	13, // 8: aria.agent.HealthCheckResponse.stats:type_name -> aria.agent.AgentStats
-	13, // 9: aria.agent.ReportStatsRequest.stats:type_name -> aria.agent.AgentStats
-	20, // 10: aria.agent.CommandRequest.params:type_name -> aria.agent.CommandRequest.ParamsEntry
-	21, // 11: aria.agent.CommandResponse.result:type_name -> aria.agent.CommandResponse.ResultEntry
-	22, // 12: aria.agent.MetricsReportRequest.custom_metrics:type_name -> aria.agent.MetricsReportRequest.CustomMetricsEntry
-	0,  // 13: aria.agent.ControllerService.Register:input_type -> aria.agent.RegisterRequest
-	2,  // 14: aria.agent.ControllerService.Sync:input_type -> aria.agent.SyncRequest
-	17, // 15: aria.agent.ControllerService.CommandStream:input_type -> aria.agent.CommandResponse
-	18, // 16: aria.agent.ControllerService.ReportMetrics:input_type -> aria.agent.MetricsReportRequest
-	8,  // 17: aria.agent.AgentService.SyncConfig:input_type -> aria.agent.SyncConfigRequest
-	11, // 18: aria.agent.AgentService.HealthCheck:input_type -> aria.agent.HealthCheckRequest
-	14, // 19: aria.agent.AgentService.ReportStats:input_type -> aria.agent.ReportStatsRequest
-	1,  // 20: aria.agent.ControllerService.Register:output_type -> aria.agent.RegisterResponse
-	3,  // 21: aria.agent.ControllerService.Sync:output_type -> aria.agent.SyncResponse
-	16, // 22: aria.agent.ControllerService.CommandStream:output_type -> aria.agent.CommandRequest
-	19, // 23: aria.agent.ControllerService.ReportMetrics:output_type -> aria.agent.MetricsReportResponse
-	9,  // 24: aria.agent.AgentService.SyncConfig:output_type -> aria.agent.SyncConfigResponse
-	12, // 25: aria.agent.AgentService.HealthCheck:output_type -> aria.agent.HealthCheckResponse
-	15, // 26: aria.agent.AgentService.ReportStats:output_type -> aria.agent.ReportStatsResponse
-	20, // [20:27] is the sub-list for method output_type
-	13, // [13:20] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	20, // 4: aria.agent.SyncResponse.domain_versions:type_name -> aria.agent.SyncResponse.DomainVersionsEntry
+	10, // 5: aria.agent.SyncConfigRequest.peers:type_name -> aria.agent.PeerConfig
+	5,  // 6: aria.agent.SyncConfigRequest.acl_rules:type_name -> aria.agent.ACLRule
+	6,  // 7: aria.agent.SyncConfigRequest.qos_rules:type_name -> aria.agent.QoSRule
+	7,  // 8: aria.agent.SyncConfigRequest.blacklist_rules:type_name -> aria.agent.BlacklistRule
+	13, // 9: aria.agent.HealthCheckResponse.stats:type_name -> aria.agent.AgentStats
+	13, // 10: aria.agent.ReportStatsRequest.stats:type_name -> aria.agent.AgentStats
+	21, // 11: aria.agent.CommandRequest.params:type_name -> aria.agent.CommandRequest.ParamsEntry
+	22, // 12: aria.agent.CommandResponse.result:type_name -> aria.agent.CommandResponse.ResultEntry
+	23, // 13: aria.agent.MetricsReportRequest.custom_metrics:type_name -> aria.agent.MetricsReportRequest.CustomMetricsEntry
+	0,  // 14: aria.agent.ControllerService.Register:input_type -> aria.agent.RegisterRequest
+	2,  // 15: aria.agent.ControllerService.Sync:input_type -> aria.agent.SyncRequest
+	17, // 16: aria.agent.ControllerService.CommandStream:input_type -> aria.agent.CommandResponse
+	18, // 17: aria.agent.ControllerService.ReportMetrics:input_type -> aria.agent.MetricsReportRequest
+	8,  // 18: aria.agent.AgentService.SyncConfig:input_type -> aria.agent.SyncConfigRequest
+	11, // 19: aria.agent.AgentService.HealthCheck:input_type -> aria.agent.HealthCheckRequest
+	14, // 20: aria.agent.AgentService.ReportStats:input_type -> aria.agent.ReportStatsRequest
+	1,  // 21: aria.agent.ControllerService.Register:output_type -> aria.agent.RegisterResponse
+	3,  // 22: aria.agent.ControllerService.Sync:output_type -> aria.agent.SyncResponse
+	16, // 23: aria.agent.ControllerService.CommandStream:output_type -> aria.agent.CommandRequest
+	19, // 24: aria.agent.ControllerService.ReportMetrics:output_type -> aria.agent.MetricsReportResponse
+	9,  // 25: aria.agent.AgentService.SyncConfig:output_type -> aria.agent.SyncConfigResponse
+	12, // 26: aria.agent.AgentService.HealthCheck:output_type -> aria.agent.HealthCheckResponse
+	15, // 27: aria.agent.AgentService.ReportStats:output_type -> aria.agent.ReportStatsResponse
+	21, // [21:28] is the sub-list for method output_type
+	14, // [14:21] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_aria_agent_proto_init() }
@@ -1983,7 +2006,7 @@ func file_aria_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aria_agent_proto_rawDesc), len(file_aria_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   23,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

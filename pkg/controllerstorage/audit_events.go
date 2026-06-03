@@ -10,6 +10,18 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	AuditNodeRegistered   = "node.registered"
+	AuditNodeReregistered = "node.reregistered"
+	AuditNodeSuspended    = "node.suspended"
+	AuditNodeDeleted      = "node.deleted"
+	AuditCertIssued       = "cert.issued"
+	AuditCertRevoked      = "cert.revoked"
+	AuditPolicyChanged    = "policy.changed"
+	AuditCommandQueued    = "command.queued"
+	AuditCommandResult    = "command.result"
+)
+
 // AuditEvent represents an audit event record in the audit_events table.
 type AuditEvent struct {
 	ID        uuid.UUID              `json:"id"`

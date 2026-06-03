@@ -2,7 +2,7 @@
 
 > Living document from pre-landing reviews.  
 > Last updated: 2026-06-03.  
-> Reviewed tree: `codex/control-plane-phase1-prep` through the GRPC-003 typed registration fix plus prior `master` fixes through `7736374`.
+> Reviewed tree: `codex/control-plane-phase1-prep` through the Phase 1 control-plane foundation work plus prior `master` fixes through `7736374`.
 
 Status legend: `open` | `fixed` | `partial` | `wontfix` | `deferred`
 
@@ -57,10 +57,15 @@ reviewed tree.
 
 ## Phase 1 Control-Plane Preconditions
 
-Before starting the Phase 1 control-plane work, close or explicitly defer:
+Closed before starting the Phase 1 control-plane work:
 
-1. `AUTH-019`: not blocking Phase 1 if treated as an RBAC architecture cleanup,
-   but it should be marked `deferred` if not implemented.
+1. `ENROLL-002`: fixed; enrollment token consumption no longer happens before
+   successful node persistence.
+2. `GRPC-001` / `GRPC-002`: fixed; lifecycle gates now apply to legacy identity
+   fallback and runtime-token node binding.
+3. `GRPC-003`: fixed; gRPC Register now shares the typed registration result
+   contract with the REST registration path.
 
-`AUTH-002` and `HOST-001` are useful follow-ups, but they do not block Phase 1
-if their current behavior is accepted and documented.
+`AUTH-019` remains open, but it is an RBAC architecture cleanup rather than a
+current permission bypass. `AUTH-002` and `HOST-001` are useful follow-ups, but
+they do not block Phase 1 if their current behavior is accepted and documented.

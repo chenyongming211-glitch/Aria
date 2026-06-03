@@ -175,14 +175,16 @@ type NodeInfo struct {
 
 // SyncResponse is the response for sync and register endpoints
 type SyncResponse struct {
-	Peers               []NodeInfo    `json:"peers"`
-	AssignedIP          string        `json:"assigned_ip"`
-	LastUpdate          int64         `json:"last_update"`
-	ACLRules            []ACLRuleJSON `json:"acl_rules,omitempty"`            // Firewall ACL rules
-	MetricsPushGateway  string        `json:"metrics_push_gateway,omitempty"` // VictoriaMetrics push gateway URL
-	CertificatePEM      string        `json:"certificate_pem,omitempty"`
-	CertificateCA       string        `json:"certificate_ca,omitempty"`
-	CertificateNotAfter int64         `json:"certificate_not_after,omitempty"`
+	Peers               []NodeInfo        `json:"peers"`
+	AssignedIP          string            `json:"assigned_ip"`
+	LastUpdate          int64             `json:"last_update"`
+	ACLRules            []ACLRuleJSON     `json:"acl_rules,omitempty"`            // Firewall ACL rules
+	MetricsPushGateway  string            `json:"metrics_push_gateway,omitempty"` // VictoriaMetrics push gateway URL
+	SnapshotComplete    bool              `json:"snapshot_complete"`
+	DomainVersions      map[string]string `json:"domain_versions,omitempty"`
+	CertificatePEM      string            `json:"certificate_pem,omitempty"`
+	CertificateCA       string            `json:"certificate_ca,omitempty"`
+	CertificateNotAfter int64             `json:"certificate_not_after,omitempty"`
 }
 
 type registrationAuthResult struct {
@@ -822,6 +824,7 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 
 	var peerInfos []NodeInfo
 	var tenantNodes []*controllerstorage.Node
+	var requestingNode *controllerstorage.Node
 	for rows.Next() {
 		peer, err := c.store.ScanNodeRows(rows)
 		if err != nil {
@@ -829,6 +832,9 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 			continue
 		}
 		tenantNodes = append(tenantNodes, peer)
+		if peer.PublicKey == req.PublicKey {
+			requestingNode = peer
+		}
 
 		// Skip the requesting node itself
 		if peer.PublicKey != req.PublicKey {
@@ -869,17 +875,48 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 		c.logger.Info("Agent %s (Region: %s): sending %d ACL rules", pk, req.Region, len(aclRulesJSON))
 	}
 
+	desiredVersion, err := c.ensureRESTDesiredStateVersion(requestingNode)
+	if err != nil {
+		c.logger.Error("Failed to determine desired state version for node %s: %v", previewString(req.PublicKey, 8), err)
+		http.Error(w, "Failed to determine desired state version", http.StatusInternalServerError)
+		return
+	}
+
 	response := SyncResponse{
 		Peers:              peerInfos,
 		AssignedIP:         assignedIP,
 		LastUpdate:         time.Now().Unix(),
 		ACLRules:           aclRulesJSON,
 		MetricsPushGateway: c.metricsPushGateway,
+		SnapshotComplete:   true,
+		DomainVersions:     registrationDomainVersionsFromDesiredVersion(desiredVersion),
 	}
 	c.attachNodeCertificateToSyncResponse(req.PublicKey, &response)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+func (c *Controller) ensureRESTDesiredStateVersion(node *controllerstorage.Node) (string, error) {
+	if c == nil || c.store == nil || node == nil || node.ID == uuid.Nil || node.TenantID == uuid.Nil {
+		return "", nil
+	}
+
+	state, err := c.store.GetNodeControlState(node.TenantID, node.ID)
+	if err != nil {
+		return "", err
+	}
+	if state != nil && strings.TrimSpace(state.DesiredStateVersion) != "" {
+		return state.DesiredStateVersion, nil
+	}
+
+	created, err := c.store.UpsertNodeDesiredState(node.TenantID, node.ID, controllerstorage.NewDesiredStateVersion(), map[string]interface{}{
+		"source": "sync-baseline",
+	})
+	if err != nil {
+		return "", err
+	}
+	return created.DesiredStateVersion, nil
 }
 
 // handleVersion 返回版本信息
@@ -1334,6 +1371,22 @@ func (c *Controller) issueNodeCertificate(node *controllerstorage.Node, csrPEM s
 	}
 	if err := c.store.UpsertNodeCertificate(certMeta); err != nil {
 		return nil, err
+	}
+	if renewedFrom == nil {
+		nodeID := node.ID
+		if _, err := c.store.CreateAuditEvent(&controllerstorage.AuditEvent{
+			TenantID:  node.TenantID,
+			NodeID:    &nodeID,
+			EventType: controllerstorage.AuditCertIssued,
+			Actor:     "system",
+			Summary:   fmt.Sprintf("节点 %s 证书已签发", node.Hostname),
+			Detail: map[string]interface{}{
+				"serial_number": certMeta.SerialNumber,
+				"not_after":     certMeta.NotAfter.UTC().Format(time.RFC3339),
+			},
+		}); err != nil {
+			c.logger.Warn("Failed to create cert.issued audit event for node %s: %v", node.Hostname, err)
+		}
 	}
 	if renewedFrom != nil {
 		if err := c.store.ResolveCertificateExpiringAlert(node.TenantID, node.ID); err != nil {
@@ -1897,10 +1950,43 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 		}
 	}
 
+	c.recordNodeRegistrationAudit(node, isReRegistration)
+
 	c.logger.Info("Node registered successfully: %s (hostname=%s, IP=%s, region=%s)",
 		previewString(req.PublicKey, 8), req.Hostname, assignedIP, req.Region)
 
 	return assignedIP, nil
+}
+
+func (c *Controller) recordNodeRegistrationAudit(node *controllerstorage.Node, isReRegistration bool) {
+	if c == nil || c.store == nil || node == nil || node.ID == uuid.Nil || node.TenantID == uuid.Nil {
+		return
+	}
+
+	eventType := controllerstorage.AuditNodeRegistered
+	summary := "Node registered"
+	if isReRegistration {
+		eventType = controllerstorage.AuditNodeReregistered
+		summary = "Node re-registered"
+	}
+
+	nodeID := node.ID
+	if _, err := c.store.CreateAuditEvent(&controllerstorage.AuditEvent{
+		TenantID:  node.TenantID,
+		NodeID:    &nodeID,
+		EventType: eventType,
+		Actor:     "agent",
+		Summary:   summary,
+		Detail: map[string]interface{}{
+			"hostname":          node.Hostname,
+			"assigned_ip":       node.AssignedIP,
+			"public_key_prefix": previewString(node.PublicKey, 8),
+			"region":            node.Region,
+			"runtime_mode":      node.RuntimeMode,
+		},
+	}); err != nil && c.logger != nil {
+		c.logger.Warn("Failed to create %s audit event for node %s: %v", eventType, previewString(node.PublicKey, 8), err)
+	}
 }
 
 // processSync 处理同步逻辑（从 HandleSync 提取）
@@ -1983,6 +2069,22 @@ func nodeEligibleForSync(node *controllerstorage.Node) bool {
 		return false
 	default:
 		return true
+	}
+}
+
+func registrationDomainVersionsFromDesiredVersion(version string) map[string]string {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return map[string]string{}
+	}
+
+	return map[string]string{
+		"peer":        version,
+		"acl":         version,
+		"qos":         version,
+		"route":       version,
+		"blacklist":   version,
+		"certificate": version,
 	}
 }
 

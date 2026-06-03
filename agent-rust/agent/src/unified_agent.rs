@@ -1567,6 +1567,9 @@ impl UnifiedAgent {
             self.config.last_desired_version = Some(desired_state_version.clone());
             self.config.last_applied_version = Some(desired_state_version);
         }
+        if sync_result.snapshot_complete && !sync_result.domain_versions.is_empty() {
+            self.config.latest_domain_versions = sync_result.domain_versions.clone();
+        }
         self.set_sync_observation("applied", "sync applied successfully".to_string());
 
         if let Err(e) = self.persist_runtime_state() {
@@ -2445,6 +2448,8 @@ mod tests {
             blacklist_rules: Vec::new(),
             runtime_token: Some("rt.new-token".to_string()),
             runtime_token_expires_at: Some(1_700_000_000),
+            snapshot_complete: false,
+            domain_versions: Default::default(),
         };
 
         apply_runtime_token_from_sync(&mut config, &store, &sync_result).await;
@@ -2471,6 +2476,8 @@ mod tests {
             blacklist_rules: Vec::new(),
             runtime_token: Some("rt.new-token".to_string()),
             runtime_token_expires_at: None,
+            snapshot_complete: false,
+            domain_versions: Default::default(),
         };
 
         apply_runtime_token_from_sync(&mut config, &store, &sync_result).await;

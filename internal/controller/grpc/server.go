@@ -217,6 +217,8 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 		DesiredStateVersion:   desiredVersion,
 		RuntimeToken:          runtimeToken,
 		RuntimeTokenExpiresAt: runtimeTokenExpiresAt,
+		SnapshotComplete:      true,
+		DomainVersions:        domainVersionsFromDesiredVersion(desiredVersion),
 	}, nil
 }
 
@@ -393,6 +395,22 @@ func generateRuntimeTokenForNode(node *controllerstorage.Node) (string, int64, e
 		return "", 0, err
 	}
 	return token, expiresAt.Unix(), nil
+}
+
+func domainVersionsFromDesiredVersion(version string) map[string]string {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return map[string]string{}
+	}
+
+	return map[string]string{
+		"peer":        version,
+		"acl":         version,
+		"qos":         version,
+		"route":       version,
+		"blacklist":   version,
+		"certificate": version,
+	}
 }
 
 func (s *ControllerServer) reportRuntimeSyncState(node *controllerstorage.Node, req *agentpb.SyncRequest) error {

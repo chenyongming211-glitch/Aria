@@ -95,6 +95,8 @@ message SyncResponse {
   string desired_state_version = 8;          // Controller 当前期望配置版本
   string runtime_token = 9;                  // 刷新后的运行期凭据
   int64 runtime_token_expires_at = 10;       // 运行期凭据过期时间戳
+  bool snapshot_complete = 11;               // 本轮同步快照是否完整
+  map<string, string> domain_versions = 12;  // 各控制面 domain 的版本
 }
 
 message PeerInfo {
