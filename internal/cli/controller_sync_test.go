@@ -101,6 +101,9 @@ func TestSyncNodeFiltersACLRegionWithTenantNodesOnly(t *testing.T) {
 	if len(resp.ACLRules) != 1 {
 		t.Fatalf("expected one ACL rule from tenant node region lookup, got %#v", resp.ACLRules)
 	}
+	if !resp.SnapshotComplete {
+		t.Fatalf("expected REST sync snapshot_complete=true")
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}

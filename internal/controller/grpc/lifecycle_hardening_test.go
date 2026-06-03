@@ -106,6 +106,66 @@ func TestRegisterUsesHandlerIssuedRuntimeIdentity(t *testing.T) {
 	}
 }
 
+func TestSyncResponseIncludesSnapshotMetadata(t *testing.T) {
+	auth.SetRuntimeSecret("phase1-runtime-secret")
+	t.Cleanup(func() { auth.SetRuntimeSecret("") })
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.MatchExpectationsInOrder(false)
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+	publicKey := "phase1-node-key"
+
+	expectNodeByID(mock, nodeID, publicKey, tenantID, now)
+	expectNodeByPublicKey(mock, publicKey, nodeID, tenantID, now)
+	expectReportNodeControlState(mock, tenantID, nodeID, "applied-1", "applied", "", now)
+	expectNodeByPublicKey(mock, publicKey, nodeID, tenantID, now)
+	expectEmptyQoSRules(mock, tenantID, nodeID)
+	expectNodeByPublicKey(mock, publicKey, nodeID, tenantID, now)
+	expectEmptyBlacklistRules(mock, tenantID, nodeID)
+	expectGetNodeControlState(mock, tenantID, nodeID, "dsv-phase1", now)
+
+	ctx := context.WithValue(context.Background(), RuntimeNodeIDKey, nodeID.String())
+	ctx = context.WithValue(ctx, RuntimeTenantIDKey, tenantID.String())
+
+	server := NewControllerServer(
+		nil,
+		func(publicKey string) (interface{}, string, interface{}, string, error) {
+			return []map[string]interface{}{}, "100.64.0.2", []map[string]interface{}{}, "http://metrics", nil
+		},
+		controllerstorage.NewStorageWithDB(db),
+	)
+
+	resp, err := server.Sync(ctx, &agentpb.SyncRequest{
+		NodeId:              nodeID.String(),
+		PublicKey:           publicKey,
+		AppliedStateVersion: "applied-1",
+		ObservedState:       "applied",
+	})
+	if err != nil {
+		t.Fatalf("Sync failed: %v", err)
+	}
+	if !resp.GetSnapshotComplete() {
+		t.Fatalf("expected snapshot_complete=true")
+	}
+	if resp.GetDomainVersions()["acl"] != "dsv-phase1" {
+		t.Fatalf("expected acl domain version from desired state, got %#v", resp.GetDomainVersions())
+	}
+	if resp.GetDomainVersions()["peer"] != "dsv-phase1" {
+		t.Fatalf("expected peer domain version from desired state, got %#v", resp.GetDomainVersions())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestReportMetricsUsesHeartbeatOnlyUpdate(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -148,6 +208,49 @@ func TestReportMetricsUsesHeartbeatOnlyUpdate(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
+}
+
+func expectReportNodeControlState(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, appliedVersion, observedState, observedMessage string, now time.Time) {
+	mock.ExpectQuery(`(?s)INSERT INTO node_control_states .*RETURNING tenant_id, node_id`).
+		WithArgs(tenantID, nodeID, appliedVersion, observedState, observedMessage, sqlmock.AnyArg(), "").
+		WillReturnRows(nodeControlStateRowsFor(tenantID, nodeID, "dsv-phase1", now))
+}
+
+func expectGetNodeControlState(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, desiredVersion string, now time.Time) {
+	mock.ExpectQuery(`(?s)SELECT tenant_id, node_id, COALESCE\(desired_state_version, ''\).*FROM node_control_states.*WHERE tenant_id = \$1 AND node_id = \$2`).
+		WithArgs(tenantID, nodeID).
+		WillReturnRows(nodeControlStateRowsFor(tenantID, nodeID, desiredVersion, now))
+}
+
+func nodeControlStateRowsFor(tenantID, nodeID uuid.UUID, desiredVersion string, now time.Time) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"tenant_id", "node_id", "desired_state_version", "desired_state_metadata", "desired_state_updated_at",
+		"applied_state_version", "applied_state_updated_at", "observed_state",
+		"observed_message", "observed_at", "last_sync_at", "last_sync_error",
+		"created_at", "updated_at",
+	}).AddRow(
+		tenantID, nodeID, desiredVersion, []byte(`{}`), now,
+		"", nil, "",
+		"", nil, nil, "",
+		now, now,
+	)
+}
+
+func expectEmptyQoSRules(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
+	mock.ExpectQuery(`(?s)SELECT id, tenant_id, node_id, category.*FROM qos_rules.*WHERE tenant_id = \$1 AND node_id = \$2 AND enabled = true`).
+		WithArgs(tenantID, nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "category", "src_cidr", "dst_cidr",
+			"src_port", "dst_port", "protocol", "bandwidth_mbps", "enabled", "description", "created_at", "updated_at",
+		}))
+}
+
+func expectEmptyBlacklistRules(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
+	mock.ExpectQuery(`(?s)SELECT id, tenant_id, node_id, scope.*FROM blacklist_rules.*WHERE tenant_id = \$1 AND node_id = \$2 AND enabled = true`).
+		WithArgs(tenantID, nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "scope", "cidr", "port", "enabled", "description", "created_at", "updated_at",
+		}))
 }
 
 func TestSyncPolicyRuleLoadErrorsPropagate(t *testing.T) {

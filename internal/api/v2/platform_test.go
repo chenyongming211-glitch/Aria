@@ -57,6 +57,60 @@ func TestListTenantTokensRedactsTokenSecrets(t *testing.T) {
 	}
 }
 
+func TestControllerInfoIsPublicAndStable(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mux := http.NewServeMux()
+	SetupRoutes(mux, controllerstorage.NewStorageWithDB(db), nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/controller-info", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected public controller-info 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp apibase.APIResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success response: %#v", resp)
+	}
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected object data, got %#v", resp.Data)
+	}
+	if data["name"] != "aria-controller" {
+		t.Fatalf("unexpected controller name: %#v", data["name"])
+	}
+	if strings.TrimSpace(data["version"].(string)) == "" {
+		t.Fatalf("expected non-empty version: %#v", data)
+	}
+	features := data["supported_features"].([]interface{})
+	if !containsStringValue(features, "grpc_sync") || !containsStringValue(features, "runtime_token_refresh") || !containsStringValue(features, "cert_renew") {
+		t.Fatalf("missing supported features: %#v", features)
+	}
+	auth := data["auth"].(map[string]interface{})
+	if auth["enrollment"] != true || auth["challenge_auth"] != false {
+		t.Fatalf("unexpected auth contract: %#v", auth)
+	}
+}
+
+func containsStringValue(values []interface{}, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
 func TestListTenantTokensReturnsScanError(t *testing.T) {
 	tenantID := uuid.New()
 	now := time.Now().UTC()
