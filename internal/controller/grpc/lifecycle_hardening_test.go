@@ -52,6 +52,76 @@ func TestRegisterFailsWhenRuntimeTokenCannotBeIssued(t *testing.T) {
 	}
 }
 
+func TestRegisterUsesHandlerIssuedRuntimeIdentity(t *testing.T) {
+	nodeID := uuid.New().String()
+	var captured *RegistrationRequest
+
+	server := NewControllerServer(
+		func(req *RegistrationRequest) (*RegistrationResult, error) {
+			captured = req
+			return &RegistrationResult{
+				AssignedIP:            "100.64.0.2",
+				MetricsPushGateway:    "http://metrics",
+				NodeID:                nodeID,
+				RuntimeToken:          "runtime-token",
+				RuntimeTokenExpiresAt: 1893456000,
+			}, nil
+		},
+		nil,
+		nil,
+	)
+
+	resp, err := server.Register(context.Background(), &agentpb.RegisterRequest{
+		PublicKey:        "node-register-key",
+		Endpoint:         "203.0.113.10:51820",
+		PrivateIp:        "10.0.0.10",
+		PublicIp:         "203.0.113.10",
+		Hostname:         "node-register",
+		RegisteredAt:     1710000000,
+		Token:            "enroll-token",
+		AdvertisedRoutes: []string{"10.10.0.0/16"},
+		Region:           "cn-east",
+		CustomerId:       "tenant-a",
+		RuntimeMode:      "ebpf",
+		KernelVersion:    "6.8.0",
+		HasAesni:         true,
+		MachineId:        "machine-1",
+	})
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+	if resp.NodeId != nodeID {
+		t.Fatalf("expected node id from registration handler, got %q", resp.NodeId)
+	}
+	if resp.RuntimeToken != "runtime-token" {
+		t.Fatalf("expected runtime token from registration handler, got %q", resp.RuntimeToken)
+	}
+	if resp.RuntimeTokenExpiresAt != 1893456000 {
+		t.Fatalf("expected runtime token expiry from registration handler, got %d", resp.RuntimeTokenExpiresAt)
+	}
+	if captured == nil {
+		t.Fatalf("expected registration handler to receive request")
+	}
+	if captured.PublicKey != "node-register-key" ||
+		captured.Endpoint != "203.0.113.10:51820" ||
+		captured.PrivateIP != "10.0.0.10" ||
+		captured.PublicIP != "203.0.113.10" ||
+		captured.Hostname != "node-register" ||
+		captured.RegisteredAt != 1710000000 ||
+		captured.Token != "enroll-token" ||
+		captured.Region != "cn-east" ||
+		captured.CustomerID != "tenant-a" ||
+		captured.RuntimeMode != "ebpf" ||
+		captured.KernelVersion != "6.8.0" ||
+		!captured.HasAESNI ||
+		captured.MachineID != "machine-1" {
+		t.Fatalf("registration request was not preserved: %#v", captured)
+	}
+	if len(captured.AdvertisedRoutes) != 1 || captured.AdvertisedRoutes[0] != "10.10.0.0/16" {
+		t.Fatalf("advertised routes were not preserved: %#v", captured.AdvertisedRoutes)
+	}
+}
+
 func TestReportMetricsUsesHeartbeatOnlyUpdate(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
