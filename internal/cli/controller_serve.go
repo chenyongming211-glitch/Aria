@@ -1384,7 +1384,7 @@ func (c *Controller) issueNodeCertificate(node *controllerstorage.Node, csrPEM s
 				"serial_number": certMeta.SerialNumber,
 				"not_after":     certMeta.NotAfter.UTC().Format(time.RFC3339),
 			},
-		}); err != nil {
+		}); err != nil && c.logger != nil {
 			c.logger.Warn("Failed to create cert.issued audit event for node %s: %v", node.Hostname, err)
 		}
 	}
