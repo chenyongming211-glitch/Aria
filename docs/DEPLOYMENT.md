@@ -88,6 +88,33 @@ ARIA_GRPC_CA_CERT=/etc/aria/certs/ca.crt
 `disabled` is only for local or one-off plaintext testing. Do not use it on the
 production Controller while Agents are configured with `https://`.
 
+## Super Admin Bootstrap
+
+The Controller uses these environment variables for the initial platform admin:
+
+```bash
+ARIA_SUPER_ADMIN=sysadmin
+ARIA_SUPER_ADMIN_PASSWORD=<bootstrap-password>
+```
+
+`ARIA_SUPER_ADMIN_PASSWORD` is a bootstrap secret. On a fresh database it creates
+the initial `super_admin` user and marks the account for first-login password
+change.
+
+For an existing `super_admin`, the Controller does not overwrite the database
+password on normal restart. This prevents an operator's changed password from
+being silently reset back to the bootstrap value in `.env`.
+
+To intentionally force the configured username/password back into the database,
+set this only for the maintenance window where the reset is needed:
+
+```bash
+ARIA_SUPER_ADMIN_SYNC=true
+```
+
+Remove or unset `ARIA_SUPER_ADMIN_SYNC` after the reset so future restarts do not
+rewrite the admin password again.
+
 ## Controller Deploy
 
 Before deployment:

@@ -48,6 +48,7 @@ func SetupRoutes(mux *http.ServeMux, store *controllerstorage.Storage, vmClient 
 	}
 
 	withJWT := middleware.JWTAuthMiddleware
+	mux.HandleFunc("/api/v2/controller-info", router.HandleControllerInfo)
 	mux.HandleFunc("/api/v2/auth/login", router.authAPI.HandleLogin)
 	mux.HandleFunc("/api/v2/auth/refresh", router.authAPI.HandleRefresh)
 	mux.HandleFunc("/api/v2/auth/logout", router.authAPI.HandleLogout)
@@ -992,6 +993,7 @@ func (r *Router) writePolicyMutationSuccess(
 		data["last_delivery"] = policyDeliveryToMap(delivery)
 		data["delivery_history"] = []map[string]interface{}{policyDeliveryToMap(delivery)}
 	}
+	r.recordPolicyChangedAudit(node, domain, action, policyRef, policyName, dispatch)
 
 	if summary, err := r.buildNodeOperationsSummary(node); err == nil {
 		data["last_command"] = summary["last_command"]
@@ -1000,6 +1002,49 @@ func (r *Router) writePolicyMutationSuccess(
 	}
 
 	apibase.WriteSuccess(w, data, message)
+}
+
+func (r *Router) recordPolicyChangedAudit(
+	node *controllerstorage.Node,
+	domain string,
+	action string,
+	policyRef string,
+	policyName string,
+	dispatch map[string]interface{},
+) {
+	if r == nil || r.store == nil || node == nil || node.ID == uuid.Nil || node.TenantID == uuid.Nil {
+		return
+	}
+
+	detail := map[string]interface{}{
+		"policy_domain": strings.TrimSpace(domain),
+		"policy_ref":    strings.TrimSpace(policyRef),
+		"action":        strings.TrimSpace(action),
+		"source":        "api.v2",
+	}
+	if name := strings.TrimSpace(policyName); name != "" {
+		detail["policy_name"] = name
+	}
+	if dispatch != nil {
+		if value, ok := dispatch["desired_state_version"]; ok {
+			detail["desired_state_version"] = value
+		}
+		if value, ok := dispatch["command_id"]; ok {
+			detail["command_id"] = value
+		}
+	}
+
+	nodeID := node.ID
+	if _, err := r.store.CreateAuditEvent(&controllerstorage.AuditEvent{
+		TenantID:  node.TenantID,
+		NodeID:    &nodeID,
+		EventType: controllerstorage.AuditPolicyChanged,
+		Actor:     "user",
+		Summary:   "Policy changed",
+		Detail:    detail,
+	}); err != nil {
+		log.Printf("[api/v2] failed to create policy.changed audit event for node %s: %v", node.ID, err)
+	}
 }
 
 func (r *Router) authorizeTenant(w http.ResponseWriter, req *http.Request, targetTenantID uuid.UUID, requireAdmin bool) bool {

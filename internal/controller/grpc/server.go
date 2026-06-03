@@ -22,17 +22,44 @@ import (
 // 通过包装 REST API handler 来复用业务逻辑
 type ControllerServer struct {
 	agentpb.UnimplementedControllerServiceServer
-	registerHandler func(interface{}) (assignedIP, metricsGateway string, err error)
+	registerHandler RegisterHandler
 	syncHandler     func(publicKey string) (peers interface{}, assignedIP string, aclRules interface{}, metricsGateway string, err error)
 	store           *controllerstorage.Storage
 }
 
 var commandStreamPollInterval = 2 * time.Second
 
+type RegistrationRequest struct {
+	PublicKey        string
+	Endpoint         string
+	PrivateIP        string
+	PublicIP         string
+	Hostname         string
+	RegisteredAt     int64
+	Token            string
+	RuntimeToken     string
+	AdvertisedRoutes []string
+	Region           string
+	CustomerID       string
+	RuntimeMode      string
+	KernelVersion    string
+	HasAESNI         bool
+	MachineID        string
+}
+
+type RegistrationResult struct {
+	AssignedIP            string
+	MetricsPushGateway    string
+	NodeID                string
+	RuntimeToken          string
+	RuntimeTokenExpiresAt int64
+}
+
+type RegisterHandler func(*RegistrationRequest) (*RegistrationResult, error)
+
 // NewControllerServer 创建新的 gRPC 服务端
-// 参数是 REST API 的 handler 函数，用于复用逻辑
 func NewControllerServer(
-	registerHandler func(interface{}) (string, string, error),
+	registerHandler RegisterHandler,
 	syncHandler func(string) (interface{}, string, interface{}, string, error),
 	store *controllerstorage.Storage,
 ) *ControllerServer {
@@ -44,57 +71,55 @@ func NewControllerServer(
 }
 
 // Register 处理 Agent 注册请求
-// 复用 REST API 的 HandleRegister 逻辑
 func (s *ControllerServer) Register(ctx context.Context, req *agentpb.RegisterRequest) (*agentpb.RegisterResponse, error) {
-	// 将 protobuf 请求转换为 REST API 请求格式
-	restReq := map[string]interface{}{
-		"public_key":        req.PublicKey,
-		"endpoint":          req.Endpoint,
-		"private_ip":        req.PrivateIp,
-		"public_ip":         req.PublicIp,
-		"hostname":          req.Hostname,
-		"registered_at":     req.RegisteredAt,
-		"token":             req.Token,
-		"advertised_routes": req.AdvertisedRoutes,
-		"region":            req.Region,
-		"customer_id":       req.CustomerId,
-		"runtime_mode":      req.RuntimeMode,
-		"kernel_version":    req.KernelVersion,
-		"has_aesni":         req.HasAesni,
-		"machine_id":        req.MachineId,
+	if s.registerHandler == nil {
+		return nil, fmt.Errorf("registration failed: register handler is not configured")
 	}
 
-	// 调用 REST API handler
-	assignedIP, metricsGateway, err := s.registerHandler(restReq)
+	result, err := s.registerHandler(registrationRequestFromProto(req))
 	if err != nil {
 		return nil, fmt.Errorf("registration failed: %w", err)
 	}
-
-	nodeID := registeredNodeID(s.store, req.PublicKey)
-
-	// 生成运行期凭据
-	if nodeID == "" {
+	if result == nil {
+		return nil, fmt.Errorf("registration failed: register handler returned no result")
+	}
+	if strings.TrimSpace(result.NodeID) == "" {
 		return nil, fmt.Errorf("registration failed: registered node was not persisted")
 	}
-	node, nodeErr := s.store.GetNodeByID(parseUUIDOrZero(nodeID))
-	if nodeErr != nil {
-		return nil, fmt.Errorf("registration failed: failed to load registered node: %w", nodeErr)
-	}
-	if node == nil {
-		return nil, fmt.Errorf("registration failed: registered node was not found")
-	}
-	runtimeToken, runtimeTokenExpiresAt, err := generateRuntimeTokenForNode(node)
-	if err != nil {
-		return nil, fmt.Errorf("registration failed: failed to issue runtime token: %w", err)
+	if strings.TrimSpace(result.RuntimeToken) == "" {
+		return nil, fmt.Errorf("registration failed: runtime token was not issued")
 	}
 
 	return &agentpb.RegisterResponse{
-		AssignedIp:            assignedIP,
-		MetricsPushGateway:    metricsGateway,
-		NodeId:                nodeID,
-		RuntimeToken:          runtimeToken,
-		RuntimeTokenExpiresAt: runtimeTokenExpiresAt,
+		AssignedIp:            result.AssignedIP,
+		MetricsPushGateway:    result.MetricsPushGateway,
+		NodeId:                result.NodeID,
+		RuntimeToken:          result.RuntimeToken,
+		RuntimeTokenExpiresAt: result.RuntimeTokenExpiresAt,
 	}, nil
+}
+
+func registrationRequestFromProto(req *agentpb.RegisterRequest) *RegistrationRequest {
+	if req == nil {
+		return &RegistrationRequest{}
+	}
+
+	return &RegistrationRequest{
+		PublicKey:        req.PublicKey,
+		Endpoint:         req.Endpoint,
+		PrivateIP:        req.PrivateIp,
+		PublicIP:         req.PublicIp,
+		Hostname:         req.Hostname,
+		RegisteredAt:     req.RegisteredAt,
+		Token:            req.Token,
+		AdvertisedRoutes: append([]string(nil), req.AdvertisedRoutes...),
+		Region:           req.Region,
+		CustomerID:       req.CustomerId,
+		RuntimeMode:      req.RuntimeMode,
+		KernelVersion:    req.KernelVersion,
+		HasAESNI:         req.HasAesni,
+		MachineID:        req.MachineId,
+	}
 }
 
 // Sync 处理 Agent 定期同步请求
@@ -192,6 +217,8 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 		DesiredStateVersion:   desiredVersion,
 		RuntimeToken:          runtimeToken,
 		RuntimeTokenExpiresAt: runtimeTokenExpiresAt,
+		SnapshotComplete:      true,
+		DomainVersions:        domainVersionsFromDesiredVersion(desiredVersion),
 	}, nil
 }
 
@@ -359,27 +386,6 @@ func (s *ControllerServer) ReportMetrics(ctx context.Context, req *agentpb.Metri
 	}, nil
 }
 
-func registeredNodeID(store *controllerstorage.Storage, publicKey string) string {
-	if store == nil || publicKey == "" {
-		return ""
-	}
-
-	node, err := store.GetNode(publicKey)
-	if err != nil || node == nil {
-		return ""
-	}
-
-	return node.ID.String()
-}
-
-func parseUUIDOrZero(s string) uuid.UUID {
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return uuid.Nil
-	}
-	return id
-}
-
 func generateRuntimeTokenForNode(node *controllerstorage.Node) (string, int64, error) {
 	if node == nil {
 		return "", 0, fmt.Errorf("node is required")
@@ -389,6 +395,22 @@ func generateRuntimeTokenForNode(node *controllerstorage.Node) (string, int64, e
 		return "", 0, err
 	}
 	return token, expiresAt.Unix(), nil
+}
+
+func domainVersionsFromDesiredVersion(version string) map[string]string {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return map[string]string{}
+	}
+
+	return map[string]string{
+		"peer":        version,
+		"acl":         version,
+		"qos":         version,
+		"route":       version,
+		"blacklist":   version,
+		"certificate": version,
+	}
 }
 
 func (s *ControllerServer) reportRuntimeSyncState(node *controllerstorage.Node, req *agentpb.SyncRequest) error {

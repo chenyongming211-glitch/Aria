@@ -78,6 +78,7 @@ func TestSyncNodeFiltersACLRegionWithTenantNodesOnly(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "name", "src_node", "src_net", "dst_node", "dst_net", "protocol", "min_port", "max_port", "action", "enabled", "priority", "description", "created_at", "updated_at",
 		}).AddRow(ruleID, "allow-tenant-route", "", "10.10.0.0/24", "", "0.0.0.0/0", uint8(6), uint16(443), uint16(443), "allow", true, 100, "allow tenant route", now, now))
+	expectSyncNodeControlState(mock, tenantID, nodeID, "dsv-rest-phase1", now)
 
 	controller := &Controller{
 		store:  controllerstorage.NewStorageWithDB(db),
@@ -101,6 +102,12 @@ func TestSyncNodeFiltersACLRegionWithTenantNodesOnly(t *testing.T) {
 	if len(resp.ACLRules) != 1 {
 		t.Fatalf("expected one ACL rule from tenant node region lookup, got %#v", resp.ACLRules)
 	}
+	if !resp.SnapshotComplete {
+		t.Fatalf("expected REST sync snapshot_complete=true")
+	}
+	if resp.DomainVersions["acl"] != "dsv-rest-phase1" {
+		t.Fatalf("expected REST sync acl domain version, got %#v", resp.DomainVersions)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
@@ -117,4 +124,17 @@ func syncNodeColumns() []string {
 		"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
 		"created_at", "updated_at",
 	}
+}
+
+func expectSyncNodeControlState(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, desiredVersion string, now time.Time) {
+	mock.ExpectQuery(`(?s)SELECT tenant_id, node_id, COALESCE\(desired_state_version, ''\).*FROM node_control_states.*WHERE tenant_id = \$1 AND node_id = \$2`).
+		WithArgs(tenantID, nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"tenant_id", "node_id", "desired_state_version", "desired_state_metadata", "desired_state_updated_at",
+			"applied_state_version", "applied_state_updated_at", "observed_state", "observed_message", "observed_at",
+			"last_sync_at", "last_sync_error", "created_at", "updated_at",
+		}).AddRow(
+			tenantID, nodeID, desiredVersion, []byte(`{"source":"test"}`), now,
+			"", nil, "", "", nil, nil, "", now, now,
+		))
 }

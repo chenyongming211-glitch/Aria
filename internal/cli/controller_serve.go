@@ -175,14 +175,16 @@ type NodeInfo struct {
 
 // SyncResponse is the response for sync and register endpoints
 type SyncResponse struct {
-	Peers               []NodeInfo    `json:"peers"`
-	AssignedIP          string        `json:"assigned_ip"`
-	LastUpdate          int64         `json:"last_update"`
-	ACLRules            []ACLRuleJSON `json:"acl_rules,omitempty"`            // Firewall ACL rules
-	MetricsPushGateway  string        `json:"metrics_push_gateway,omitempty"` // VictoriaMetrics push gateway URL
-	CertificatePEM      string        `json:"certificate_pem,omitempty"`
-	CertificateCA       string        `json:"certificate_ca,omitempty"`
-	CertificateNotAfter int64         `json:"certificate_not_after,omitempty"`
+	Peers               []NodeInfo        `json:"peers"`
+	AssignedIP          string            `json:"assigned_ip"`
+	LastUpdate          int64             `json:"last_update"`
+	ACLRules            []ACLRuleJSON     `json:"acl_rules,omitempty"`            // Firewall ACL rules
+	MetricsPushGateway  string            `json:"metrics_push_gateway,omitempty"` // VictoriaMetrics push gateway URL
+	SnapshotComplete    bool              `json:"snapshot_complete"`
+	DomainVersions      map[string]string `json:"domain_versions,omitempty"`
+	CertificatePEM      string            `json:"certificate_pem,omitempty"`
+	CertificateCA       string            `json:"certificate_ca,omitempty"`
+	CertificateNotAfter int64             `json:"certificate_not_after,omitempty"`
 }
 
 type registrationAuthResult struct {
@@ -822,6 +824,7 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 
 	var peerInfos []NodeInfo
 	var tenantNodes []*controllerstorage.Node
+	var requestingNode *controllerstorage.Node
 	for rows.Next() {
 		peer, err := c.store.ScanNodeRows(rows)
 		if err != nil {
@@ -829,6 +832,9 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 			continue
 		}
 		tenantNodes = append(tenantNodes, peer)
+		if peer.PublicKey == req.PublicKey {
+			requestingNode = peer
+		}
 
 		// Skip the requesting node itself
 		if peer.PublicKey != req.PublicKey {
@@ -869,17 +875,48 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 		c.logger.Info("Agent %s (Region: %s): sending %d ACL rules", pk, req.Region, len(aclRulesJSON))
 	}
 
+	desiredVersion, err := c.ensureRESTDesiredStateVersion(requestingNode)
+	if err != nil {
+		c.logger.Error("Failed to determine desired state version for node %s: %v", previewString(req.PublicKey, 8), err)
+		http.Error(w, "Failed to determine desired state version", http.StatusInternalServerError)
+		return
+	}
+
 	response := SyncResponse{
 		Peers:              peerInfos,
 		AssignedIP:         assignedIP,
 		LastUpdate:         time.Now().Unix(),
 		ACLRules:           aclRulesJSON,
 		MetricsPushGateway: c.metricsPushGateway,
+		SnapshotComplete:   true,
+		DomainVersions:     registrationDomainVersionsFromDesiredVersion(desiredVersion),
 	}
 	c.attachNodeCertificateToSyncResponse(req.PublicKey, &response)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+func (c *Controller) ensureRESTDesiredStateVersion(node *controllerstorage.Node) (string, error) {
+	if c == nil || c.store == nil || node == nil || node.ID == uuid.Nil || node.TenantID == uuid.Nil {
+		return "", nil
+	}
+
+	state, err := c.store.GetNodeControlState(node.TenantID, node.ID)
+	if err != nil {
+		return "", err
+	}
+	if state != nil && strings.TrimSpace(state.DesiredStateVersion) != "" {
+		return state.DesiredStateVersion, nil
+	}
+
+	created, err := c.store.UpsertNodeDesiredState(node.TenantID, node.ID, controllerstorage.NewDesiredStateVersion(), map[string]interface{}{
+		"source": "sync-baseline",
+	})
+	if err != nil {
+		return "", err
+	}
+	return created.DesiredStateVersion, nil
 }
 
 // handleVersion 返回版本信息
@@ -1335,6 +1372,22 @@ func (c *Controller) issueNodeCertificate(node *controllerstorage.Node, csrPEM s
 	if err := c.store.UpsertNodeCertificate(certMeta); err != nil {
 		return nil, err
 	}
+	if renewedFrom == nil {
+		nodeID := node.ID
+		if _, err := c.store.CreateAuditEvent(&controllerstorage.AuditEvent{
+			TenantID:  node.TenantID,
+			NodeID:    &nodeID,
+			EventType: controllerstorage.AuditCertIssued,
+			Actor:     "system",
+			Summary:   fmt.Sprintf("节点 %s 证书已签发", node.Hostname),
+			Detail: map[string]interface{}{
+				"serial_number": certMeta.SerialNumber,
+				"not_after":     certMeta.NotAfter.UTC().Format(time.RFC3339),
+			},
+		}); err != nil && c.logger != nil {
+			c.logger.Warn("Failed to create cert.issued audit event for node %s: %v", node.Hostname, err)
+		}
+	}
 	if renewedFrom != nil {
 		if err := c.store.ResolveCertificateExpiringAlert(node.TenantID, node.ID); err != nil {
 			c.logger.Warn("Failed to resolve certificate_expiring alert for node %s after renewal: %v", node.Hostname, err)
@@ -1685,52 +1738,55 @@ func (c *Controller) getACLRulesForRegionInNodes(region string, allRules []*cont
 // 以下两个方法将 REST API handler 适配为 gRPC 所需的格式
 
 // createRegisterAdapter 创建注册适配器
-// 将 REST API 的 HandleRegister 逻辑包装成 gRPC 可调用的函数
-func (c *Controller) createRegisterAdapter() func(interface{}) (string, string, error) {
-	return func(reqInterface interface{}) (string, string, error) {
-		reqMap, ok := reqInterface.(map[string]interface{})
-		if !ok {
-			return "", "", fmt.Errorf("invalid request format")
+// 将 Controller 的注册核心逻辑包装成 gRPC 可调用的 typed handler。
+func (c *Controller) createRegisterAdapter() grpcserver.RegisterHandler {
+	return func(regReq *grpcserver.RegistrationRequest) (*grpcserver.RegistrationResult, error) {
+		if regReq == nil {
+			return nil, fmt.Errorf("registration request is required")
 		}
 
-		// 从 map 中提取字段
 		req := &RegisterRequest{
-			PublicKey:     getStringFromMap(reqMap, "public_key"),
-			Endpoint:      getStringFromMap(reqMap, "endpoint"),
-			PrivateIP:     getStringFromMap(reqMap, "private_ip"),
-			PublicIP:      getStringFromMap(reqMap, "public_ip"),
-			Region:        getStringFromMap(reqMap, "region"),
-			VPCID:         getStringFromMap(reqMap, "vpc_id"),
-			Hostname:      getStringFromMap(reqMap, "hostname"),
-			MachineID:     getStringFromMap(reqMap, "machine_id"),
-			RegisteredAt:  getInt64FromMap(reqMap, "registered_at"),
-			Token:         getStringFromMap(reqMap, "token"),
-			RuntimeMode:   getStringFromMap(reqMap, "runtime_mode"),
-			KernelVersion: getStringFromMap(reqMap, "kernel_version"),
-			HasAESNI:      getBoolFromMap(reqMap, "has_aesni"),
+			PublicKey:        regReq.PublicKey,
+			Endpoint:         regReq.Endpoint,
+			PrivateIP:        regReq.PrivateIP,
+			PublicIP:         regReq.PublicIP,
+			Region:           regReq.Region,
+			Hostname:         regReq.Hostname,
+			MachineID:        regReq.MachineID,
+			RegisteredAt:     regReq.RegisteredAt,
+			Token:            regReq.Token,
+			RuntimeToken:     regReq.RuntimeToken,
+			AdvertisedRoutes: append([]string(nil), regReq.AdvertisedRoutes...),
+			RuntimeMode:      regReq.RuntimeMode,
+			KernelVersion:    regReq.KernelVersion,
+			HasAESNI:         regReq.HasAESNI,
 		}
 
-		// 处理数组字段
-		if routes, ok := reqMap["advertised_routes"].([]interface{}); ok {
-			req.AdvertisedRoutes = make([]string, 0, len(routes))
-			for _, r := range routes {
-				if str, ok := r.(string); ok {
-					req.AdvertisedRoutes = append(req.AdvertisedRoutes, str)
-				}
-			}
-		}
-
-		// 调用现有的注册逻辑
 		assignedIP, err := c.processRegistration(req, "")
 		if err != nil {
-			return "", "", err
+			return nil, err
 		}
 
-		// 生成 Metrics Push Gateway URL
-		// 注意：req 中没有 TenantID，需要从 token 中提取（已在 processRegistration 中处理）
-		metricsGateway := c.metricsPushGateway
+		node, err := c.store.GetNode(req.PublicKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load registered node: %w", err)
+		}
+		if node == nil {
+			return nil, fmt.Errorf("registered node was not found")
+		}
 
-		return assignedIP, metricsGateway, nil
+		runtimeToken, runtimeTokenExpiresAt, err := auth.GenerateRuntimeToken(node.ID.String(), node.TenantID.String())
+		if err != nil {
+			return nil, fmt.Errorf("failed to issue runtime token: %w", err)
+		}
+
+		return &grpcserver.RegistrationResult{
+			AssignedIP:            assignedIP,
+			MetricsPushGateway:    c.metricsPushGateway,
+			NodeID:                node.ID.String(),
+			RuntimeToken:          runtimeToken,
+			RuntimeTokenExpiresAt: runtimeTokenExpiresAt.Unix(),
+		}, nil
 	}
 }
 
@@ -1894,10 +1950,43 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 		}
 	}
 
+	c.recordNodeRegistrationAudit(node, isReRegistration)
+
 	c.logger.Info("Node registered successfully: %s (hostname=%s, IP=%s, region=%s)",
 		previewString(req.PublicKey, 8), req.Hostname, assignedIP, req.Region)
 
 	return assignedIP, nil
+}
+
+func (c *Controller) recordNodeRegistrationAudit(node *controllerstorage.Node, isReRegistration bool) {
+	if c == nil || c.store == nil || node == nil || node.ID == uuid.Nil || node.TenantID == uuid.Nil {
+		return
+	}
+
+	eventType := controllerstorage.AuditNodeRegistered
+	summary := "Node registered"
+	if isReRegistration {
+		eventType = controllerstorage.AuditNodeReregistered
+		summary = "Node re-registered"
+	}
+
+	nodeID := node.ID
+	if _, err := c.store.CreateAuditEvent(&controllerstorage.AuditEvent{
+		TenantID:  node.TenantID,
+		NodeID:    &nodeID,
+		EventType: eventType,
+		Actor:     "agent",
+		Summary:   summary,
+		Detail: map[string]interface{}{
+			"hostname":          node.Hostname,
+			"assigned_ip":       node.AssignedIP,
+			"public_key_prefix": previewString(node.PublicKey, 8),
+			"region":            node.Region,
+			"runtime_mode":      node.RuntimeMode,
+		},
+	}); err != nil && c.logger != nil {
+		c.logger.Warn("Failed to create %s audit event for node %s: %v", eventType, previewString(node.PublicKey, 8), err)
+	}
 }
 
 // processSync 处理同步逻辑（从 HandleSync 提取）
@@ -1983,39 +2072,20 @@ func nodeEligibleForSync(node *controllerstorage.Node) bool {
 	}
 }
 
-// 辅助函数：从 map 中安全获取字符串
-func getStringFromMap(m map[string]interface{}, key string) string {
-	if val, ok := m[key]; ok {
-		if str, ok := val.(string); ok {
-			return str
-		}
+func registrationDomainVersionsFromDesiredVersion(version string) map[string]string {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return map[string]string{}
 	}
-	return ""
-}
 
-// 辅助函数：从 map 中安全获取 int64
-func getInt64FromMap(m map[string]interface{}, key string) int64 {
-	if val, ok := m[key]; ok {
-		switch v := val.(type) {
-		case int64:
-			return v
-		case int:
-			return int64(v)
-		case float64:
-			return int64(v)
-		}
+	return map[string]string{
+		"peer":        version,
+		"acl":         version,
+		"qos":         version,
+		"route":       version,
+		"blacklist":   version,
+		"certificate": version,
 	}
-	return 0
-}
-
-// 辅助函数：从 map 中安全获取 bool
-func getBoolFromMap(m map[string]interface{}, key string) bool {
-	if val, ok := m[key]; ok {
-		if b, ok := val.(bool); ok {
-			return b
-		}
-	}
-	return false
 }
 
 // getEnvOrDefault gets environment variable or returns default value
@@ -2103,6 +2173,7 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 	rawPassword, passwordOverride := os.LookupEnv("ARIA_SUPER_ADMIN_PASSWORD")
 	password := strings.TrimSpace(rawPassword)
 	passwordConfigured := passwordOverride && password != ""
+	syncConfigured := envBool("ARIA_SUPER_ADMIN_SYNC")
 
 	if username == "" {
 		username = "sysadmin"
@@ -2117,6 +2188,10 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 		}
 		if bcrypt.CompareHashAndPassword([]byte(existingPasswordHash), []byte(password)) == nil {
 			logger.Info("Super admin password already synchronized: %s", username)
+			return nil
+		}
+		if !syncConfigured {
+			logger.Warn("Configured super admin password differs for %s; keeping existing database password. Set ARIA_SUPER_ADMIN_SYNC=true to force synchronization.", username)
 			return nil
 		}
 
@@ -2161,6 +2236,11 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 	}
 
 	if count == 1 {
+		if !syncConfigured {
+			logger.Warn("Configured super admin username %s does not match existing super admin; keeping existing database username. Set ARIA_SUPER_ADMIN_SYNC=true to force migration.", username)
+			return nil
+		}
+
 		var migrateUserID, migrateUsername string
 		err := db.QueryRow(`SELECT id, username FROM users WHERE role = 'super_admin' ORDER BY created_at ASC LIMIT 1`).Scan(&migrateUserID, &migrateUsername)
 		if err != nil {
@@ -2186,6 +2266,16 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 
 	logger.Info("Configured super admin created: %s (password must be changed on first login)", username)
 	return nil
+}
+
+func envBool(name string) bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	switch value {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func ensureDefaultTenant(store *controllerstorage.Storage, logger *logging.Logger) error {

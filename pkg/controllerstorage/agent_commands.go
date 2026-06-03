@@ -394,10 +394,10 @@ func (s *Storage) emitCommandAlertAndAudit(commandID, status, errorMsg string) {
 		if _, err := s.CreateAuditEvent(&AuditEvent{
 			TenantID:  tenantID,
 			NodeID:    &nodeID,
-			EventType: "command_failed",
+			EventType: AuditCommandResult,
 			Actor:     "system",
 			Summary:   fmt.Sprintf("命令执行失败: %s", commandType),
-			Detail:    map[string]interface{}{"command_id": commandID, "error": errorMsg},
+			Detail:    map[string]interface{}{"command_id": commandID, "status": status, "error": errorMsg},
 		}); err != nil {
 			log.Printf("[agent_commands] failed to create command_failed audit event for command %s: %v", commandID, err)
 		}
@@ -406,10 +406,10 @@ func (s *Storage) emitCommandAlertAndAudit(commandID, status, errorMsg string) {
 		if _, err := s.CreateAuditEvent(&AuditEvent{
 			TenantID:  tenantID,
 			NodeID:    &nodeID,
-			EventType: "command_completed",
+			EventType: AuditCommandResult,
 			Actor:     "system",
 			Summary:   fmt.Sprintf("命令执行成功: %s", commandType),
-			Detail:    map[string]interface{}{"command_id": commandID},
+			Detail:    map[string]interface{}{"command_id": commandID, "status": status},
 		}); err != nil {
 			log.Printf("[agent_commands] failed to create command_completed audit event for command %s: %v", commandID, err)
 		}

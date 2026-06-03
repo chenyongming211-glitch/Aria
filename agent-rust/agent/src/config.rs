@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -68,6 +69,8 @@ pub struct AgentState {
     #[serde(default)]
     pub last_applied_version: Option<String>,
     #[serde(default)]
+    pub latest_domain_versions: HashMap<String, String>,
+    #[serde(default)]
     pub last_sync_status: Option<String>,
     #[serde(default)]
     pub last_sync_message: Option<String>,
@@ -131,6 +134,8 @@ pub struct AgentConfig {
     pub last_desired_version: Option<String>,
     #[serde(default)]
     pub last_applied_version: Option<String>,
+    #[serde(default)]
+    pub latest_domain_versions: HashMap<String, String>,
     #[serde(default)]
     pub last_sync_status: Option<String>,
     #[serde(default)]
@@ -225,6 +230,7 @@ impl AgentState {
             || self.current_credential_expires_at.is_some()
             || self.last_desired_version.is_some()
             || self.last_applied_version.is_some()
+            || !self.latest_domain_versions.is_empty()
             || self.last_sync_status.is_some()
             || self.last_sync_message.is_some()
             || self.last_sync_at.is_some()
@@ -261,6 +267,7 @@ impl AgentConfig {
             current_credential_expires_at: state.current_credential_expires_at,
             last_desired_version: state.last_desired_version,
             last_applied_version: state.last_applied_version,
+            latest_domain_versions: state.latest_domain_versions,
             last_sync_status: state.last_sync_status,
             last_sync_message: state.last_sync_message,
             last_sync_at: state.last_sync_at,
@@ -301,6 +308,7 @@ impl AgentConfig {
             current_credential_expires_at: self.current_credential_expires_at,
             last_desired_version: self.last_desired_version.clone(),
             last_applied_version: self.last_applied_version.clone(),
+            latest_domain_versions: self.latest_domain_versions.clone(),
             last_sync_status: self.last_sync_status.clone(),
             last_sync_message: self.last_sync_message.clone(),
             last_sync_at: self.last_sync_at,

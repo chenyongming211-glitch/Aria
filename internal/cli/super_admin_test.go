@@ -25,9 +25,42 @@ func (m bcryptHashForPassword) Match(value driver.Value) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(m.password)) == nil
 }
 
-func TestEnsureSuperAdminSyncsConfiguredPasswordForExistingUser(t *testing.T) {
+func TestEnsureSuperAdminDoesNotOverwriteExistingPasswordByDefault(t *testing.T) {
 	t.Setenv("ARIA_SUPER_ADMIN", "sysadmin")
 	t.Setenv("ARIA_SUPER_ADMIN_PASSWORD", "NewSecret@123")
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	userID := uuid.New().String()
+	oldHash, err := bcrypt.GenerateFromPassword([]byte("OldSecret@123"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword failed: %v", err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, password_hash FROM users WHERE username = $1 AND role = 'super_admin'`)).
+		WithArgs("sysadmin").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "password_hash"}).AddRow(userID, string(oldHash)))
+
+	logger, err := logging.NewLogger(&logging.Config{LogDir: t.TempDir(), Component: "test"})
+	if err != nil {
+		t.Fatalf("NewLogger failed: %v", err)
+	}
+
+	if err := ensureSuperAdmin(db, logger); err != nil {
+		t.Fatalf("ensureSuperAdmin returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestEnsureSuperAdminSyncsConfiguredPasswordWhenExplicitlyEnabled(t *testing.T) {
+	t.Setenv("ARIA_SUPER_ADMIN", "sysadmin")
+	t.Setenv("ARIA_SUPER_ADMIN_PASSWORD", "NewSecret@123")
+	t.Setenv("ARIA_SUPER_ADMIN_SYNC", "true")
 
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -160,6 +193,7 @@ func TestEnsureSuperAdminRequiresConfiguredPasswordForFreshInstall(t *testing.T)
 func TestEnsureSuperAdminMigratesConfiguredUsernameWhenSingleSuperAdminExists(t *testing.T) {
 	t.Setenv("ARIA_SUPER_ADMIN", "ops-admin")
 	t.Setenv("ARIA_SUPER_ADMIN_PASSWORD", "OpsSecret@123")
+	t.Setenv("ARIA_SUPER_ADMIN_SYNC", "true")
 
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -178,6 +212,35 @@ func TestEnsureSuperAdminMigratesConfiguredUsernameWhenSingleSuperAdminExists(t 
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET username = $1, password_hash = $2, must_change_password = TRUE WHERE id = $3`)).
 		WithArgs("ops-admin", bcryptHashForPassword{password: "OpsSecret@123"}, userID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	logger, err := logging.NewLogger(&logging.Config{LogDir: t.TempDir(), Component: "test"})
+	if err != nil {
+		t.Fatalf("NewLogger failed: %v", err)
+	}
+
+	if err := ensureSuperAdmin(db, logger); err != nil {
+		t.Fatalf("ensureSuperAdmin returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestEnsureSuperAdminDoesNotMigrateUsernameWithoutExplicitSync(t *testing.T) {
+	t.Setenv("ARIA_SUPER_ADMIN", "ops-admin")
+	t.Setenv("ARIA_SUPER_ADMIN_PASSWORD", "OpsSecret@123")
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, password_hash FROM users WHERE username = $1 AND role = 'super_admin'`)).
+		WithArgs("ops-admin").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "password_hash"}))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM users WHERE role = 'super_admin'")).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 
 	logger, err := logging.NewLogger(&logging.Config{LogDir: t.TempDir(), Component: "test"})
 	if err != nil {

@@ -2,6 +2,8 @@ package controllerstorage
 
 import (
 	"errors"
+	"fmt"
+	"log"
 	"strings"
 
 	"github.com/google/uuid"
@@ -110,10 +112,34 @@ func (s *Storage) QueuePolicySync(req PolicySyncRequest) (*PolicySyncResult, err
 	}
 	committed = true
 
+	s.recordCommandQueuedAudit(req, cmd)
+
 	return &PolicySyncResult{
 		DesiredStateVersion: req.DesiredStateVersion,
 		ControlState:        state,
 		Command:             cmd,
 		Delivery:            delivery,
 	}, nil
+}
+
+func (s *Storage) recordCommandQueuedAudit(req PolicySyncRequest, cmd *AgentCommand) {
+	if s == nil || cmd == nil {
+		return
+	}
+	if _, err := s.CreateAuditEvent(&AuditEvent{
+		TenantID:  req.TenantID,
+		NodeID:    &req.NodeID,
+		EventType: AuditCommandQueued,
+		Actor:     "controller",
+		Summary:   fmt.Sprintf("Command queued: %s", cmd.Command),
+		Detail: map[string]interface{}{
+			"command_id":            cmd.ID,
+			"command":               cmd.Command,
+			"policy_domain":         req.Domain,
+			"policy_ref":            req.PolicyRef,
+			"desired_state_version": req.DesiredStateVersion,
+		},
+	}); err != nil {
+		log.Printf("[policy_sync] failed to create command.queued audit event for command %s: %v", cmd.ID, err)
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -13,6 +14,44 @@ import (
 
 	"github.com/google/uuid"
 )
+
+func (r *Router) HandleControllerInfo(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+		return
+	}
+
+	apibase.WriteSuccess(w, map[string]interface{}{
+		"name":    "aria-controller",
+		"version": currentControllerVersion(),
+		"supported_features": []string{
+			"grpc_sync",
+			"runtime_token_refresh",
+			"cert_renew",
+			"snapshot_eose",
+			"domain_version_sync",
+		},
+		"limits": map[string]int{
+			"max_peers_per_sync": 500,
+			"max_acl_rules":      1000,
+		},
+		"auth": map[string]interface{}{
+			"enrollment":            true,
+			"runtime_token_ttl_sec": 86400,
+			"challenge_auth":        false,
+		},
+	}, "Controller capabilities retrieved")
+}
+
+func currentControllerVersion() string {
+	if version := strings.TrimSpace(os.Getenv("ARIA_CONTROLLER_VERSION")); version != "" {
+		return version
+	}
+	if version := strings.TrimSpace(os.Getenv("ARIA_VERSION")); version != "" {
+		return version
+	}
+	return "0.2.x"
+}
 
 // handleTenantTokens 处理租户级别的注册令牌
 func (r *Router) handleTenantTokens(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, role string) {
