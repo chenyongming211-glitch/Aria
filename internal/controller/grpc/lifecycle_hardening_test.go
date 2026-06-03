@@ -27,7 +27,7 @@ func TestRegisterFailsWhenRuntimeTokenCannotBeIssued(t *testing.T) {
 		nil,
 	)
 
-	_, err = server.Register(context.Background(), &agentpb.RegisterRequest{
+	_, err := server.Register(context.Background(), &agentpb.RegisterRequest{
 		PublicKey: "node-runtime-key",
 		Hostname:  "node-1",
 	})
