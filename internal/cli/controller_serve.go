@@ -2103,6 +2103,7 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 	rawPassword, passwordOverride := os.LookupEnv("ARIA_SUPER_ADMIN_PASSWORD")
 	password := strings.TrimSpace(rawPassword)
 	passwordConfigured := passwordOverride && password != ""
+	syncConfigured := envBool("ARIA_SUPER_ADMIN_SYNC")
 
 	if username == "" {
 		username = "sysadmin"
@@ -2117,6 +2118,10 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 		}
 		if bcrypt.CompareHashAndPassword([]byte(existingPasswordHash), []byte(password)) == nil {
 			logger.Info("Super admin password already synchronized: %s", username)
+			return nil
+		}
+		if !syncConfigured {
+			logger.Warn("Configured super admin password differs for %s; keeping existing database password. Set ARIA_SUPER_ADMIN_SYNC=true to force synchronization.", username)
 			return nil
 		}
 
@@ -2161,6 +2166,11 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 	}
 
 	if count == 1 {
+		if !syncConfigured {
+			logger.Warn("Configured super admin username %s does not match existing super admin; keeping existing database username. Set ARIA_SUPER_ADMIN_SYNC=true to force migration.", username)
+			return nil
+		}
+
 		var migrateUserID, migrateUsername string
 		err := db.QueryRow(`SELECT id, username FROM users WHERE role = 'super_admin' ORDER BY created_at ASC LIMIT 1`).Scan(&migrateUserID, &migrateUsername)
 		if err != nil {
@@ -2186,6 +2196,16 @@ func ensureSuperAdmin(db *sql.DB, logger *logging.Logger) error {
 
 	logger.Info("Configured super admin created: %s (password must be changed on first login)", username)
 	return nil
+}
+
+func envBool(name string) bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	switch value {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func ensureDefaultTenant(store *controllerstorage.Storage, logger *logging.Logger) error {
