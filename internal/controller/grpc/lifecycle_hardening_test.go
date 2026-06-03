@@ -19,24 +19,12 @@ import (
 func TestRegisterFailsWhenRuntimeTokenCannotBeIssued(t *testing.T) {
 	auth.SetRuntimeSecret("")
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New failed: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	tenantID := uuid.New()
-	nodeID := uuid.New()
-	now := time.Now()
-	expectNodeByPublicKey(mock, "node-runtime-key", nodeID, tenantID, now)
-	expectNodeByID(mock, nodeID, "node-runtime-key", tenantID, now)
-
 	server := NewControllerServer(
-		func(interface{}) (string, string, error) {
-			return "100.64.0.2", "http://metrics", nil
+		func(*RegistrationRequest) (*RegistrationResult, error) {
+			return nil, auth.ErrRuntimeTokenSecretNotConfigured
 		},
 		nil,
-		controllerstorage.NewStorageWithDB(db),
+		nil,
 	)
 
 	_, err = server.Register(context.Background(), &agentpb.RegisterRequest{
@@ -45,10 +33,6 @@ func TestRegisterFailsWhenRuntimeTokenCannotBeIssued(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected Register to fail when runtime token cannot be issued")
-	}
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
 

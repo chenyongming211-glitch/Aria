@@ -2,7 +2,7 @@
 
 > Living document from pre-landing reviews.  
 > Last updated: 2026-06-03.  
-> Reviewed tree: `codex/control-plane-phase1-prep` at `95b3a1a` plus prior `master` fixes through `7736374`.
+> Reviewed tree: `codex/control-plane-phase1-prep` through the GRPC-003 typed registration fix plus prior `master` fixes through `7736374`.
 
 Status legend: `open` | `fixed` | `partial` | `wontfix` | `deferred`
 
@@ -16,9 +16,9 @@ bugfix batches and the 2026-06-03 super-admin bootstrap hardening.
 
 | Outcome | Count |
 |---------|-------|
-| fixed | 57 |
+| fixed | 58 |
 | partial | 2 |
-| open | 2 |
+| open | 1 |
 | wontfix | 1 |
 | total | 62 |
 
@@ -26,7 +26,6 @@ bugfix batches and the 2026-06-03 super-admin bootstrap hardening.
 
 | ID | Severity | Status | Current finding | Recommended next step |
 |----|----------|--------|-----------------|-----------------------|
-| GRPC-003 | P1 | open | gRPC registration still adapts proto requests through a map-shaped REST adapter and then separately loads the node and issues the runtime token. It now reuses `processRegistration`, but the typed REST/gRPC registration contract is still split. | Replace the map adapter with a shared typed registration service/result used by both HTTP and gRPC. |
 | AUTH-019 | P3 | open | `RequirePermission` middleware exists, but v2 routes use `authorizeTenantPermission` directly. This is not currently a security bypass, but it is duplicated RBAC plumbing. | Either remove/deprecate `RequirePermission` or wire routes through it consistently. |
 
 ## Partial
@@ -43,6 +42,7 @@ reviewed tree.
 
 | ID | Previous stale status | Current status | Evidence |
 |----|-----------------------|----------------|----------|
+| GRPC-003 | open | fixed | gRPC Register now accepts a typed `RegistrationRequest` and returns handler-issued `RegistrationResult` values; the gRPC server no longer adapts through a map or independently reloads nodes/signs runtime tokens. |
 | GRPC-001 / GRPC-002 | open | fixed | `resolveLegacyAgentIdentity` rejects deleted, suspended, and banned nodes; command stream and metrics bind runtime-token claims to node/tenant identity. |
 | ENROLL-002 | open | fixed | Fresh registration saves the node before consuming the enrollment token, so a failed `SaveNode` does not burn the token. |
 | POLICY-003 | open | fixed | ACL/QoS PUT handlers load the existing row and preserve omitted fields. |
@@ -59,9 +59,7 @@ reviewed tree.
 
 Before starting the Phase 1 control-plane work, close or explicitly defer:
 
-1. `GRPC-003`: required before capability/audit/sync contracts can be trusted to
-   behave the same for HTTP and gRPC registration.
-2. `AUTH-019`: not blocking Phase 1 if treated as an RBAC architecture cleanup,
+1. `AUTH-019`: not blocking Phase 1 if treated as an RBAC architecture cleanup,
    but it should be marked `deferred` if not implemented.
 
 `AUTH-002` and `HOST-001` are useful follow-ups, but they do not block Phase 1

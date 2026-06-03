@@ -1685,52 +1685,55 @@ func (c *Controller) getACLRulesForRegionInNodes(region string, allRules []*cont
 // 以下两个方法将 REST API handler 适配为 gRPC 所需的格式
 
 // createRegisterAdapter 创建注册适配器
-// 将 REST API 的 HandleRegister 逻辑包装成 gRPC 可调用的函数
-func (c *Controller) createRegisterAdapter() func(interface{}) (string, string, error) {
-	return func(reqInterface interface{}) (string, string, error) {
-		reqMap, ok := reqInterface.(map[string]interface{})
-		if !ok {
-			return "", "", fmt.Errorf("invalid request format")
+// 将 Controller 的注册核心逻辑包装成 gRPC 可调用的 typed handler。
+func (c *Controller) createRegisterAdapter() grpcserver.RegisterHandler {
+	return func(regReq *grpcserver.RegistrationRequest) (*grpcserver.RegistrationResult, error) {
+		if regReq == nil {
+			return nil, fmt.Errorf("registration request is required")
 		}
 
-		// 从 map 中提取字段
 		req := &RegisterRequest{
-			PublicKey:     getStringFromMap(reqMap, "public_key"),
-			Endpoint:      getStringFromMap(reqMap, "endpoint"),
-			PrivateIP:     getStringFromMap(reqMap, "private_ip"),
-			PublicIP:      getStringFromMap(reqMap, "public_ip"),
-			Region:        getStringFromMap(reqMap, "region"),
-			VPCID:         getStringFromMap(reqMap, "vpc_id"),
-			Hostname:      getStringFromMap(reqMap, "hostname"),
-			MachineID:     getStringFromMap(reqMap, "machine_id"),
-			RegisteredAt:  getInt64FromMap(reqMap, "registered_at"),
-			Token:         getStringFromMap(reqMap, "token"),
-			RuntimeMode:   getStringFromMap(reqMap, "runtime_mode"),
-			KernelVersion: getStringFromMap(reqMap, "kernel_version"),
-			HasAESNI:      getBoolFromMap(reqMap, "has_aesni"),
+			PublicKey:        regReq.PublicKey,
+			Endpoint:         regReq.Endpoint,
+			PrivateIP:        regReq.PrivateIP,
+			PublicIP:         regReq.PublicIP,
+			Region:           regReq.Region,
+			Hostname:         regReq.Hostname,
+			MachineID:        regReq.MachineID,
+			RegisteredAt:     regReq.RegisteredAt,
+			Token:            regReq.Token,
+			RuntimeToken:     regReq.RuntimeToken,
+			AdvertisedRoutes: append([]string(nil), regReq.AdvertisedRoutes...),
+			RuntimeMode:      regReq.RuntimeMode,
+			KernelVersion:    regReq.KernelVersion,
+			HasAESNI:         regReq.HasAESNI,
 		}
 
-		// 处理数组字段
-		if routes, ok := reqMap["advertised_routes"].([]interface{}); ok {
-			req.AdvertisedRoutes = make([]string, 0, len(routes))
-			for _, r := range routes {
-				if str, ok := r.(string); ok {
-					req.AdvertisedRoutes = append(req.AdvertisedRoutes, str)
-				}
-			}
-		}
-
-		// 调用现有的注册逻辑
 		assignedIP, err := c.processRegistration(req, "")
 		if err != nil {
-			return "", "", err
+			return nil, err
 		}
 
-		// 生成 Metrics Push Gateway URL
-		// 注意：req 中没有 TenantID，需要从 token 中提取（已在 processRegistration 中处理）
-		metricsGateway := c.metricsPushGateway
+		node, err := c.store.GetNode(req.PublicKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load registered node: %w", err)
+		}
+		if node == nil {
+			return nil, fmt.Errorf("registered node was not found")
+		}
 
-		return assignedIP, metricsGateway, nil
+		runtimeToken, runtimeTokenExpiresAt, err := auth.GenerateRuntimeToken(node.ID.String(), node.TenantID.String())
+		if err != nil {
+			return nil, fmt.Errorf("failed to issue runtime token: %w", err)
+		}
+
+		return &grpcserver.RegistrationResult{
+			AssignedIP:            assignedIP,
+			MetricsPushGateway:    c.metricsPushGateway,
+			NodeID:                node.ID.String(),
+			RuntimeToken:          runtimeToken,
+			RuntimeTokenExpiresAt: runtimeTokenExpiresAt.Unix(),
+		}, nil
 	}
 }
 
@@ -1981,41 +1984,6 @@ func nodeEligibleForSync(node *controllerstorage.Node) bool {
 	default:
 		return true
 	}
-}
-
-// 辅助函数：从 map 中安全获取字符串
-func getStringFromMap(m map[string]interface{}, key string) string {
-	if val, ok := m[key]; ok {
-		if str, ok := val.(string); ok {
-			return str
-		}
-	}
-	return ""
-}
-
-// 辅助函数：从 map 中安全获取 int64
-func getInt64FromMap(m map[string]interface{}, key string) int64 {
-	if val, ok := m[key]; ok {
-		switch v := val.(type) {
-		case int64:
-			return v
-		case int:
-			return int64(v)
-		case float64:
-			return int64(v)
-		}
-	}
-	return 0
-}
-
-// 辅助函数：从 map 中安全获取 bool
-func getBoolFromMap(m map[string]interface{}, key string) bool {
-	if val, ok := m[key]; ok {
-		if b, ok := val.(bool); ok {
-			return b
-		}
-	}
-	return false
 }
 
 // getEnvOrDefault gets environment variable or returns default value
