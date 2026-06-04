@@ -167,13 +167,17 @@ func NewListNodesToolWithStore(store *controllerstorage.Storage) Tool {
 func NewGetNodeDetailTool(store *controllerstorage.Storage) Tool {
 	return Tool{
 		Name:        "get_node_detail",
-		Description: "根据节点名称查询节点的详细信息，包括 IP、地区、状态、配置路由等。如果用户询问某个区域（如北京、上海）的节点，请先调用 list_nodes 找到该区域的节点名称，再调用此工具。",
+		Description: "根据节点名称查询节点的详细信息，包括 IP、地区、状态、配置路由等。hostname 在多个租户中重复时需提供 tenant_id。",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"node_name": map[string]interface{}{
 					"type":        "string",
 					"description": "节点的主机名",
+				},
+				"tenant_id": map[string]interface{}{
+					"type":        "string",
+					"description": "租户 ID。hostname 在多个租户中重复时必须提供。",
 				},
 			},
 			"required": []string{"node_name"},
@@ -189,14 +193,18 @@ func NewGetNodeDetailTool(store *controllerstorage.Storage) Tool {
 			if !ok || nodeName == "" {
 				return "", fmt.Errorf("缺少必需参数: node_name")
 			}
+			tenantID, tenantScoped, err := parseOptionalTenantID(req)
+			if err != nil {
+				return "", err
+			}
 
 			// 查询节点
-			node, matchCount, err := findUniqueNodeByHostname(store, nodeName)
+			node, matchCount, err := findUniqueNodeByHostnameForScope(store, nodeName, tenantID, tenantScoped)
 			if err != nil {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
 			if matchCount > 1 {
-				return "", fmt.Errorf("节点名称 [%s] 在多个租户中重复，请使用更明确的节点标识", nodeName)
+				return "", fmt.Errorf("节点名称 [%s] 在多个租户中重复，请提供 tenant_id", nodeName)
 			}
 			if node == nil {
 				return fmt.Sprintf("节点 [%s] 不存在", nodeName), nil
@@ -205,6 +213,7 @@ func NewGetNodeDetailTool(store *controllerstorage.Storage) Tool {
 			// 转换为易读格式
 			nodeInfo := map[string]interface{}{
 				"name":              node.Hostname,
+				"tenant_id":         node.TenantID.String(),
 				"public_key":        node.PublicKey,
 				"endpoint":          node.Endpoint,
 				"assigned_ip":       node.AssignedIP,

@@ -142,6 +142,12 @@ const routes = [
     name: 'Login',
     component: () => import('@/views/Login.vue'),
     meta: { title: 'Login', requiresAuth: false }
+  },
+  {
+    path: '/change-password',
+    name: 'ChangePassword',
+    component: () => import('@/views/ChangePassword.vue'),
+    meta: { title: 'Change Password', requiresAuth: true, allowPasswordChange: true }
   }
 ]
 
@@ -304,9 +310,9 @@ router.beforeEach(async (to, from, next) => {
     return
   }
 
-  if (hasForcedPasswordChange && to.path !== '/login') {
-    console.warn('Password change required, redirecting to login')
-    next('/login')
+  if (hasForcedPasswordChange && !to.meta?.allowPasswordChange) {
+    console.warn('Password change required, redirecting to change-password')
+    next('/change-password')
     return
   }
   
@@ -316,6 +322,10 @@ router.beforeEach(async (to, from, next) => {
       clearCachedSession()
     }
     next('/login')
+  } else if (to.path === '/login' && token && !isExpired && hasForcedPasswordChange) {
+    next('/change-password')
+  } else if (to.path === '/change-password' && token && !isExpired && !hasForcedPasswordChange) {
+    next('/dashboard')
   } else if (to.path === '/login' && token && !isExpired && !hasForcedPasswordChange) {
     next('/dashboard')
   } else if (to.meta.requiresAuth && !(await hasRoutePermission(to))) {

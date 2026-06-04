@@ -107,79 +107,13 @@
         </div>
       </div>
     </div>
-
-    <!-- 强制修改密码弹窗 -->
-    <el-dialog
-      v-model="showPasswordDialog"
-      width="380px"
-      :close-on-click-modal="false"
-      :close-on-press-escape="false"
-      :show-close="false"
-      :header="false"
-      class="password-dialog"
-    >
-      <div class="password-dialog-content">
-        <el-icon class="warning-icon"><WarningFilled /></el-icon>
-        <h3 class="dialog-title">首次登录必须修改密码</h3>
-        <p class="dialog-message">为了保障您的账号安全，请设置新的登录密码</p>
-        
-        <el-form
-          ref="passwordFormRef"
-          :model="passwordForm"
-          :rules="passwordRules"
-          label-position="top"
-        >
-          <el-form-item label="当前密码" prop="oldPassword">
-            <el-input
-              v-model="passwordForm.oldPassword"
-              type="password"
-              placeholder="请输入当前密码"
-              show-password
-              size="large"
-            />
-          </el-form-item>
-          
-          <el-form-item label="新密码" prop="newPassword">
-            <el-input
-              v-model="passwordForm.newPassword"
-              type="password"
-              placeholder="请输入新密码（至少6位）"
-              show-password
-              size="large"
-            />
-          </el-form-item>
-          
-          <el-form-item label="确认新密码" prop="confirmPassword">
-            <el-input
-              v-model="passwordForm.confirmPassword"
-              type="password"
-              placeholder="请再次输入新密码"
-              show-password
-              size="large"
-            />
-          </el-form-item>
-        </el-form>
-      </div>
-      
-      <template #footer>
-        <el-button
-          type="primary"
-          size="large"
-          class="change-password-btn"
-          :loading="passwordLoading"
-          @click="handleChangePassword"
-        >
-          确认修改
-        </el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { User, Lock, WarningFilled } from '@element-plus/icons-vue'
+import { User, Lock } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useUserStore, useAppStore } from '@/stores'
 
@@ -188,78 +122,6 @@ const userStore = useUserStore()
 const appStore = useAppStore()
 
 const appVersion = computed(() => appStore.version)
-
-// 强制修改密码弹窗
-const showPasswordDialog = ref(false)
-const passwordLoading = ref(false)
-const passwordFormRef = ref(null)
-const passwordForm = ref({
-  oldPassword: '',
-  newPassword: '',
-  confirmPassword: ''
-})
-
-const validateConfirmPassword = (rule, value, callback) => {
-  if (value !== passwordForm.value.newPassword) {
-    callback(new Error('两次输入的密码不一致'))
-  } else {
-    callback()
-  }
-}
-
-const passwordRules = reactive({
-  oldPassword: [
-    { required: true, message: '请输入当前密码', trigger: 'blur' }
-  ],
-  newPassword: [
-    { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 6, message: '密码至少6位', trigger: 'blur' }
-  ],
-  confirmPassword: [
-    { required: true, message: '请再次输入新密码', trigger: 'blur' },
-    { validator: validateConfirmPassword, trigger: 'blur' }
-  ]
-})
-
-const handleChangePassword = async () => {
-  if (!passwordFormRef.value) {
-    console.error('passwordFormRef is null')
-    return
-  }
-  
-  try {
-    await passwordFormRef.value.validate()
-  } catch (validationError) {
-    console.error('Validation error:', validationError)
-    return
-  }
-  
-  passwordLoading.value = true
-  
-  try {
-    const result = await userStore.changePassword(
-      passwordForm.value.oldPassword,
-      passwordForm.value.newPassword
-    )
-    
-    console.log('Change password result:', result)
-    
-    if (result.success) {
-      ElMessage.success('密码修改成功，请重新登录')
-      showPasswordDialog.value = false
-      
-      userStore.logout()
-      loginForm.value.password = ''
-    } else {
-      ElMessage.error(result.message || '密码修改失败')
-    }
-  } catch (error) {
-    console.error('Change password error:', error)
-    ElMessage.error('密码修改失败: ' + (error.message || '未知错误'))
-  } finally {
-    passwordLoading.value = false
-  }
-}
 
 const loadRememberedCredentials = () => {
   const remembered = localStorage.getItem('aria_remembered_login')
@@ -333,8 +195,7 @@ const handleLogin = async () => {
     if (result.success) {
       // 检查是否需要强制修改密码
       if (result.requirePasswordChange) {
-        showPasswordDialog.value = true
-        ElMessage.warning('首次登录必须修改密码')
+        router.push('/change-password')
         return
       }
 
@@ -710,111 +571,5 @@ const handleLogin = async () => {
   .login-card {
     padding: 36px 28px;
   }
-}
-
-.password-dialog-content {
-  text-align: center;
-  padding: 20px 0;
-}
-
-.warning-icon {
-  font-size: 56px;
-  color: #f59e0b;
-  margin-bottom: 20px;
-  display: block;
-  animation: pulse 2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.1); opacity: 0.8; }
-}
-
-.dialog-title {
-  color: #fff;
-  font-size: 22px;
-  font-weight: 600;
-  margin-bottom: 12px;
-}
-
-.dialog-message {
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 14px;
-  margin-bottom: 28px;
-  line-height: 1.6;
-}
-
-:deep(.el-dialog.password-dialog) {
-  background: linear-gradient(145deg, rgba(15, 23, 42, 0.98) 0%, rgba(30, 41, 59, 0.98) 100%) !important;
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  border-radius: 20px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6), 0 0 40px rgba(59, 130, 246, 0.15) !important;
-  max-width: 400px !important;
-  width: 90% !important;
-  overflow: hidden;
-}
-
-:deep(.el-dialog.password-dialog .el-dialog__header) {
-  display: none;
-}
-
-:deep(.el-dialog.password-dialog .el-dialog__body) {
-  background: transparent !important;
-  color: #fff;
-  padding: 16px 32px 32px;
-}
-
-:deep(.el-dialog.password-dialog .el-dialog__footer) {
-  background: transparent !important;
-  border: none;
-  padding: 0 32px 28px;
-}
-
-:deep(.el-dialog.password-dialog .el-form-item__label) {
-  color: rgba(255, 255, 255, 0.85);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-:deep(.el-dialog.password-dialog .el-form-item) {
-  margin-bottom: 20px;
-}
-
-:deep(.el-dialog.password-dialog .el-input__wrapper) {
-  background: rgba(0, 0, 0, 0.5) !important;
-  border: 1px solid rgba(59, 130, 246, 0.2) !important;
-  border-radius: 10px;
-  box-shadow: none !important;
-}
-
-:deep(.el-dialog.password-dialog .el-input__wrapper:hover) {
-  border-color: rgba(59, 130, 246, 0.5) !important;
-}
-
-:deep(.el-dialog.password-dialog .el-input__wrapper.is-focus) {
-  border-color: var(--aria-primary) !important;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
-}
-
-:deep(.el-dialog.password-dialog .el-input__inner) {
-  color: #fff !important;
-}
-
-:deep(.el-dialog.password-dialog .el-input__inner::placeholder) {
-  color: rgba(255, 255, 255, 0.4) !important;
-}
-
-:deep(.el-dialog.password-dialog .el-button--primary) {
-  background: linear-gradient(135deg, var(--aria-primary) 0%, #2563eb 100%);
-  border: none;
-  border-radius: 10px;
-  height: 44px;
-  font-size: 15px;
-  font-weight: 600;
-}
-
-:deep(.el-dialog.password-dialog .el-button--primary:hover) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
 }
 </style>
