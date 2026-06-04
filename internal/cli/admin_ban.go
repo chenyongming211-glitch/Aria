@@ -7,6 +7,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"aria/pkg/controllerstorage"
+
+	"github.com/google/uuid"
 )
 
 var adminBanCmd = &cobra.Command{
@@ -28,10 +30,12 @@ Examples:
 }
 
 var banHostname string
+var banTenantID string
 
 func init() {
 	adminCmd.AddCommand(adminBanCmd)
 	adminBanCmd.Flags().StringVar(&banHostname, "hostname", "", "Ban by hostname instead of device ID")
+	adminBanCmd.Flags().StringVar(&banTenantID, "tenant-id", "", "Tenant ID for hostname lookup")
 }
 
 func runAdminBan(cmd *cobra.Command, args []string) error {
@@ -58,8 +62,18 @@ func runAdminBan(cmd *cobra.Command, args []string) error {
 
 	if banHostname != "" {
 		// Find by hostname. Hostnames are not globally unique across tenants, so
-		// refuse ambiguous matches instead of banning an arbitrary first row.
-		nodes, err := store.GetAllNodes()
+		// refuse ambiguous matches unless a tenant scope is provided.
+		var nodes []*controllerstorage.Node
+		var err error
+		if strings.TrimSpace(banTenantID) != "" {
+			tenantID, parseErr := uuid.Parse(strings.TrimSpace(banTenantID))
+			if parseErr != nil {
+				return fmt.Errorf("invalid --tenant-id: %w", parseErr)
+			}
+			nodes, err = store.GetNodesByTenant(tenantID)
+		} else {
+			nodes, err = store.GetAllNodes()
+		}
 		if err != nil {
 			return fmt.Errorf("failed to get nodes: %w", err)
 		}
@@ -74,7 +88,7 @@ func runAdminBan(cmd *cobra.Command, args []string) error {
 			}
 		}
 		if matchCount > 1 {
-			return fmt.Errorf("multiple devices use hostname %q, please ban by public key prefix", banHostname)
+			return fmt.Errorf("multiple devices use hostname %q, please provide --tenant-id or ban by public key prefix", banHostname)
 		}
 		if matchedNode == nil {
 			return fmt.Errorf("device not found with hostname: %s", banHostname)

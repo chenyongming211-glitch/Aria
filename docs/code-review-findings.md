@@ -1,8 +1,8 @@
 # Code Review Findings
 
-> Living document from pre-landing reviews.  
-> Last updated: 2026-06-03.  
-> Reviewed tree: `codex/control-plane-phase1-prep` through the Phase 1 control-plane foundation work plus prior `master` fixes through `7736374`.
+> Living document from pre-landing reviews.
+> Last updated: 2026-06-04.
+> Reviewed tree: `codex/close-review-followups` on top of `master` `ae16de2`.
 
 Status legend: `open` | `fixed` | `partial` | `wontfix` | `deferred`
 
@@ -16,24 +16,19 @@ bugfix batches and the 2026-06-03 super-admin bootstrap hardening.
 
 | Outcome | Count |
 |---------|-------|
-| fixed | 58 |
-| partial | 2 |
-| open | 1 |
+| fixed | 61 |
+| partial | 0 |
+| open | 0 |
 | wontfix | 1 |
 | total | 62 |
 
 ## Still Open
 
-| ID | Severity | Status | Current finding | Recommended next step |
-|----|----------|--------|-----------------|-----------------------|
-| AUTH-019 | P3 | open | `RequirePermission` middleware exists, but v2 routes use `authorizeTenantPermission` directly. This is not currently a security bypass, but it is duplicated RBAC plumbing. | Either remove/deprecate `RequirePermission` or wire routes through it consistently. |
+No tracked open findings remain from this review set.
 
 ## Partial
 
-| ID | Severity | Status | Current finding | Recommended next step |
-|----|----------|--------|-----------------|-----------------------|
-| AUTH-002 | P0 | partial | Forced password change is enforced by the router and persisted `aria_must_change_password`, but the UX still redirects to `/login` rather than a dedicated change-password route. | Add a dedicated first-login change-password screen or explicitly document login-page handling as accepted. |
-| HOST-001 | P3 | partial | Tenant-scoped hostname lookup exists for core API paths. Agent tools and `admin ban --hostname` now refuse ambiguous global hostname matches instead of picking the first row, but they are not tenant-scoped workflows. | Keep fail-on-ambiguous behavior or add tenant selector/tenant argument for admin tools. |
+No tracked partial findings remain from this review set.
 
 ## Recently Fixed Stale Entries
 
@@ -54,6 +49,9 @@ reviewed tree.
 | ACL-001 | partial | fixed | ACL create/update writes legacy sync columns and sync queries use `COALESCE(src_net, src_cidr)` / `COALESCE(dst_net, dst_cidr)`. |
 | ACL-002 | open | fixed | ACL region filtering uses tenant-scoped node lists rather than global `GetAllNodes()`. |
 | MON-002 | partial | fixed | Monitoring query failures return errors, and tenant/node metric endpoints return service-unavailable when VictoriaMetrics is required but unavailable. |
+| AUTH-019 | open | fixed | Removed the unused `RequirePermission` middleware duplicate; v2 direct `authorizeTenantPermission` remains the canonical RBAC enforcement path. |
+| AUTH-002 | partial | fixed | Forced-password sessions now route to a dedicated `/change-password` page instead of being sent back to `/login`. |
+| HOST-001 | partial | fixed | Agent hostname tools and `aria admin ban --hostname` accept tenant scope while preserving fail-closed behavior for ambiguous hostnames. |
 
 ## Phase 1 Control-Plane Preconditions
 
@@ -66,6 +64,6 @@ Closed before starting the Phase 1 control-plane work:
 3. `GRPC-003`: fixed; gRPC Register now shares the typed registration result
    contract with the REST registration path.
 
-`AUTH-019` remains open, but it is an RBAC architecture cleanup rather than a
-current permission bypass. `AUTH-002` and `HOST-001` are useful follow-ups, but
-they do not block Phase 1 if their current behavior is accepted and documented.
+The follow-up cleanup items `AUTH-019`, `AUTH-002`, and `HOST-001` were closed
+after Phase 1, leaving only the separately accepted `wontfix` item in this
+review set.

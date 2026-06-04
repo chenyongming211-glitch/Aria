@@ -12,7 +12,7 @@ import (
 func NewAddRouteTool(store *controllerstorage.Storage) Tool {
 	return Tool{
 		Name:        "add_route",
-		Description: "为指定节点添加路由（Site-to-Site VPN）。参数：hostname（节点名称）、cidr（网段，如 192.168.1.0/24）",
+		Description: "为指定节点添加路由（Site-to-Site VPN）。参数：hostname（节点名称）、cidr（网段，如 192.168.1.0/24）、tenant_id（可选，租户 ID）",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -23,6 +23,10 @@ func NewAddRouteTool(store *controllerstorage.Storage) Tool {
 				"cidr": map[string]interface{}{
 					"type":        "string",
 					"description": "要添加的网段 CIDR（如 192.168.1.0/24）",
+				},
+				"tenant_id": map[string]interface{}{
+					"type":        "string",
+					"description": "租户 ID。hostname 在多个租户中重复时必须提供。",
 				},
 			},
 			"required": []string{"hostname", "cidr"},
@@ -50,19 +54,25 @@ func NewAddRouteTool(store *controllerstorage.Storage) Tool {
 				return "", fmt.Errorf("无效的 CIDR 格式: %s", cidr)
 			}
 
+			tenantID, tenantScoped, err := parseOptionalTenantID(req)
+			if err != nil {
+				return "", err
+			}
+
 			// 查找节点
 			allNodes, err := store.GetAllNodes()
 			if err != nil {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
 
-			targetNode, matchCount := findUniqueNodeByHostnameInNodes(allNodes, hostname)
+			targetNode, matchCount := findUniqueNodeByHostnameInNodesForScope(allNodes, hostname, tenantID, tenantScoped)
 			if matchCount > 1 {
-				return "", fmt.Errorf("节点名称 [%s] 在多个租户中重复，请使用更明确的节点标识", hostname)
+				return "", fmt.Errorf("节点名称 [%s] 在多个租户中重复，请提供 tenant_id", hostname)
 			}
 			if targetNode == nil {
 				return fmt.Sprintf("节点 [%s] 不存在", hostname), nil
 			}
+			scopedNodes := filterNodesByTenant(allNodes, tenantID, tenantScoped)
 
 			// 检查是否已存在
 			for _, route := range targetNode.AdvertisedRoutes {
@@ -72,7 +82,7 @@ func NewAddRouteTool(store *controllerstorage.Storage) Tool {
 			}
 
 			// 检查跨 Region 冲突
-			for _, node := range allNodes {
+			for _, node := range scopedNodes {
 				if node.Region == targetNode.Region || node.PublicKey == targetNode.PublicKey {
 					continue
 				}
@@ -98,11 +108,12 @@ func NewAddRouteTool(store *controllerstorage.Storage) Tool {
 			}
 
 			result := map[string]interface{}{
-				"hostname": hostname,
-				"cidr":     cidr,
-				"region":   targetNode.Region,
-				"added":    true,
-				"routes":   targetNode.AdvertisedRoutes,
+				"hostname":  hostname,
+				"tenant_id": targetNode.TenantID.String(),
+				"cidr":      cidr,
+				"region":    targetNode.Region,
+				"added":     true,
+				"routes":    targetNode.AdvertisedRoutes,
 			}
 
 			data, err := json.MarshalIndent(result, "", "  ")
@@ -119,7 +130,7 @@ func NewAddRouteTool(store *controllerstorage.Storage) Tool {
 func NewRemoveRouteTool(store *controllerstorage.Storage) Tool {
 	return Tool{
 		Name:        "remove_route",
-		Description: "从指定节点删除路由。参数：hostname（节点名称）、cidr（网段）",
+		Description: "从指定节点删除路由。参数：hostname（节点名称）、cidr（网段）、tenant_id（可选，租户 ID）",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -130,6 +141,10 @@ func NewRemoveRouteTool(store *controllerstorage.Storage) Tool {
 				"cidr": map[string]interface{}{
 					"type":        "string",
 					"description": "要删除的网段 CIDR",
+				},
+				"tenant_id": map[string]interface{}{
+					"type":        "string",
+					"description": "租户 ID。hostname 在多个租户中重复时必须提供。",
 				},
 			},
 			"required": []string{"hostname", "cidr"},
@@ -151,15 +166,20 @@ func NewRemoveRouteTool(store *controllerstorage.Storage) Tool {
 				return "", fmt.Errorf("缺少必需参数: cidr")
 			}
 
+			tenantID, tenantScoped, err := parseOptionalTenantID(req)
+			if err != nil {
+				return "", err
+			}
+
 			// 查找节点
 			allNodes, err := store.GetAllNodes()
 			if err != nil {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
 
-			targetNode, matchCount := findUniqueNodeByHostnameInNodes(allNodes, hostname)
+			targetNode, matchCount := findUniqueNodeByHostnameInNodesForScope(allNodes, hostname, tenantID, tenantScoped)
 			if matchCount > 1 {
-				return "", fmt.Errorf("节点名称 [%s] 在多个租户中重复，请使用更明确的节点标识", hostname)
+				return "", fmt.Errorf("节点名称 [%s] 在多个租户中重复，请提供 tenant_id", hostname)
 			}
 			if targetNode == nil {
 				return fmt.Sprintf("节点 [%s] 不存在", hostname), nil
@@ -186,10 +206,11 @@ func NewRemoveRouteTool(store *controllerstorage.Storage) Tool {
 			}
 
 			result := map[string]interface{}{
-				"hostname": hostname,
-				"cidr":     cidr,
-				"removed":  true,
-				"routes":   targetNode.AdvertisedRoutes,
+				"hostname":  hostname,
+				"tenant_id": targetNode.TenantID.String(),
+				"cidr":      cidr,
+				"removed":   true,
+				"routes":    targetNode.AdvertisedRoutes,
 			}
 
 			data, err := json.MarshalIndent(result, "", "  ")
@@ -205,13 +226,17 @@ func NewRemoveRouteTool(store *controllerstorage.Storage) Tool {
 func NewGetNodeRoutesTool(store *controllerstorage.Storage) Tool {
 	return Tool{
 		Name:        "get_node_routes",
-		Description: "查询指定节点的所有路由（Site-to-Site VPN）。参数：hostname（节点名称）",
+		Description: "查询指定节点的所有路由（Site-to-Site VPN）。参数：hostname（节点名称）、tenant_id（可选，租户 ID）",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"hostname": map[string]interface{}{
 					"type":        "string",
 					"description": "节点名称",
+				},
+				"tenant_id": map[string]interface{}{
+					"type":        "string",
+					"description": "租户 ID。hostname 在多个租户中重复时必须提供。",
 				},
 			},
 			"required": []string{"hostname"},
@@ -227,14 +252,18 @@ func NewGetNodeRoutesTool(store *controllerstorage.Storage) Tool {
 			if !ok || hostname == "" {
 				return "", fmt.Errorf("缺少必需参数: hostname")
 			}
+			tenantID, tenantScoped, err := parseOptionalTenantID(req)
+			if err != nil {
+				return "", err
+			}
 
 			// 查找节点
-			node, matchCount, err := findUniqueNodeByHostname(store, hostname)
+			node, matchCount, err := findUniqueNodeByHostnameForScope(store, hostname, tenantID, tenantScoped)
 			if err != nil {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
 			if matchCount > 1 {
-				return "", fmt.Errorf("节点名称 [%s] 在多个租户中重复，请使用更明确的节点标识", hostname)
+				return "", fmt.Errorf("节点名称 [%s] 在多个租户中重复，请提供 tenant_id", hostname)
 			}
 			if node == nil {
 				return fmt.Sprintf("节点 [%s] 不存在", hostname), nil
@@ -242,6 +271,7 @@ func NewGetNodeRoutesTool(store *controllerstorage.Storage) Tool {
 
 			result := map[string]interface{}{
 				"hostname":    hostname,
+				"tenant_id":   node.TenantID.String(),
 				"region":      node.Region,
 				"routes":      node.AdvertisedRoutes,
 				"route_count": len(node.AdvertisedRoutes),

@@ -74,7 +74,7 @@ describe('router RBAC metadata', () => {
     expect(router.currentRoute.value.path).toBe('/nodes')
   })
 
-  it('redirects must-change-password sessions to login before protected pages', async () => {
+  it('redirects must-change-password sessions to the dedicated change-password page before protected pages', async () => {
     await router.replace('/login')
     await router.isReady()
 
@@ -87,7 +87,41 @@ describe('router RBAC metadata', () => {
 
     await router.push('/dashboard')
 
-    expect(router.currentRoute.value.path).toBe('/login')
+    expect(router.currentRoute.value.path).toBe('/change-password')
+  })
+
+  it('allows must-change-password sessions to stay on the dedicated change-password page', async () => {
+    await router.replace('/login')
+    await router.isReady()
+
+    localStorage.setItem('aria_token', 'dummy-token')
+    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_last_activity', `${Date.now()}`)
+    localStorage.setItem('aria_user', JSON.stringify({ role: 'admin' }))
+    localStorage.setItem('aria_permissions', JSON.stringify(['monitoring:read']))
+    localStorage.setItem('aria_must_change_password', 'true')
+
+    await router.push('/change-password')
+
+    expect(router.currentRoute.value.path).toBe('/change-password')
+  })
+
+  it('redirects logged-in must-change-password sessions from login to change-password', async () => {
+    localStorage.setItem('aria_token', 'dummy-token')
+    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_last_activity', `${Date.now()}`)
+    localStorage.setItem('aria_user', JSON.stringify({ role: 'admin' }))
+    localStorage.setItem('aria_permissions', JSON.stringify(['monitoring:read']))
+
+    await router.replace('/dashboard')
+    await router.isReady()
+    expect(router.currentRoute.value.path).toBe('/dashboard')
+
+    localStorage.setItem('aria_must_change_password', 'true')
+
+    await router.push('/login')
+
+    expect(router.currentRoute.value.path).toBe('/change-password')
   })
 
   it('redirects token-only sessions to login before protected pages', async () => {
