@@ -1,7 +1,7 @@
 # Aria 控制面事件化与 Nostr 借鉴方案
 
 > 统一整理：身份分层、Nostr 借鉴边界、ACE 事件模型、Sync 语义、工程前置、落地路线图、审查状态。  
-> 最后更新：2026-06-03  
+> 最后更新：2026-06-06
 > 相关：[V0.1.0-PRODUCT-BLUEPRINT.md](./V0.1.0-PRODUCT-BLUEPRINT.md)、[code-review-findings.md](./code-review-findings.md)、[Phase 1 implementation plan](./superpowers/plans/2026-06-03-control-plane-phase1.md)
 
 ---
@@ -16,7 +16,7 @@
 | 中期重点 | ACE（Aria Control Event）信封、replaceable desired state、按 domain version 的 diff/domain snapshot。 |
 | 长期重点 | Edge Relay、签名审批、高安全 challenge auth、企业合规回放。 |
 | 产品收益 | 让网络变更可证明、可审计、可同步、可回滚、可扩展；提升 Agent/Controller 兼容性和企业信任。 |
-| 审查统计 | 62 项：58 fixed / 2 partial / 1 open / 1 wontfix，详见 [§9](#9-审查摘要)。 |
+| 审查统计 | 62 项：61 fixed / 0 partial / 0 open / 1 wontfix，详见 [§9](#9-审查摘要)。 |
 
 一句话：**Aria 不兼容公网 Nostr，但借鉴 Nostr 的签名事件、可替换状态、能力声明和 relay 思想，把 SD-WAN 控制面升级为可验证、可追溯、可渐进分发的企业控制系统。**
 
@@ -384,7 +384,7 @@ map<string, string> domain_versions = 12;
 | GRPC-003 | 已修复：gRPC Register 通过 typed registration handler 复用 REST 注册语义和 token 签发结果。 |
 | GRPC-001 / GRPC-002 | 已修复：legacy identity fallback 也校验 deleted/suspended/banned，runtime token 与请求节点身份绑定。 |
 
-剩余 `AUTH-019` 是 RBAC 中间件架构清理，不阻塞 Phase 1。`AUTH-002` 与 `HOST-001` 是产品体验/运维工具跟进项，不影响本阶段控制面契约。
+`AUTH-019`、`AUTH-002`、`HOST-001` 已在后续收口批次关闭；当前 review set 不再有阻塞 Phase 1 的 open 或 partial 项。
 
 ### 6.3 Phase 2：ACE 双写 + replaceable desired（设计级）
 
@@ -576,9 +576,9 @@ ai.proposal -> admin.approval -> controller.execute -> command.queued -> command
 
 | 状态 | 数量 |
 |------|------|
-| fixed | 58 |
-| partial | 2 |
-| open | 1 |
+| fixed | 61 |
+| partial | 0 |
+| open | 0 |
 | wontfix | 1 |
 | total | 62 |
 
@@ -593,7 +593,7 @@ ai.proposal -> admin.approval -> controller.execute -> command.queued -> command
 | ACL-001 / ACL-002 | 已修复；ACL 同步字段和租户过滤已收口。 |
 | MON-002 | 已修复；监控查询失败不再静默返回成功空数据。 |
 
-当前仍需跟进的项是 `AUTH-019`、`AUTH-002`、`HOST-001`。其中 `AUTH-019` 是 RBAC plumbing 清理，`AUTH-002` 是强制改密 UX，`HOST-001` 是 admin/agent 工具的 hostname 工作流选择；三者不阻塞 Phase 1。
+`AUTH-019`、`AUTH-002`、`HOST-001` 已在后续收口批次关闭；当前 review set 只保留 1 个已接受的 `wontfix` 项，不再有阻塞 Phase 1 的 open/partial 项。
 
 ---
 
