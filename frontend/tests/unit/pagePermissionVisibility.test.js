@@ -6,7 +6,8 @@ import useActualUserStore from '@/stores/user'
 const {
   permissionSet,
   mockNodeStore,
-  mockUserStore
+  mockUserStore,
+  mockRoute
 } = vi.hoisted(() => ({
   permissionSet: new Set(),
   mockNodeStore: {
@@ -20,32 +21,41 @@ const {
   mockUserStore: {
     user: { role: 'admin' },
     permissions: []
+  },
+  mockRoute: {
+    name: 'Dashboard',
+    path: '/dashboard'
   }
 }))
 
 const hasPermission = (permission) => permissionSet.has('*') || permissionSet.has(permission)
+const hasAnyPermission = (permissions) => permissions.some((permission) => hasPermission(permission))
 
 vi.mock('@/composables/usePermission', () => ({
   usePermission: () => ({
-    hasPermission
+    hasPermission,
+    hasAnyPermission
   })
 }))
 
 vi.mock('/src/composables/usePermission', () => ({
   usePermission: () => ({
-    hasPermission
+    hasPermission,
+    hasAnyPermission
   })
 }))
 
 vi.mock('@/composables/usePermission.js', () => ({
   usePermission: () => ({
-    hasPermission
+    hasPermission,
+    hasAnyPermission
   })
 }))
 
 vi.mock('/src/composables/usePermission.js', () => ({
   usePermission: () => ({
-    hasPermission
+    hasPermission,
+    hasAnyPermission
   })
 }))
 
@@ -83,6 +93,7 @@ vi.mock('/src/composables/useMonitorApi', () => ({
 }))
 
 vi.mock('vue-router', () => ({
+  useRoute: () => mockRoute,
   useRouter: () => ({
     push: vi.fn()
   })
@@ -144,26 +155,38 @@ vi.mock('@/composables/useSettingsApi', () => ({
 
 vi.mock('@/stores', () => ({
   useAppStore: () => ({
+    sidebarCollapsed: false,
+    version: 'test',
     lang: 'zh',
+    toggleSidebar: vi.fn(),
     setLang: vi.fn()
   }),
-  useUserStore: () => mockUserStore
+  useUserStore: () => mockUserStore,
+  useTenantStore: () => ({})
 }))
 
 vi.mock('/src/stores', () => ({
   useAppStore: () => ({
+    sidebarCollapsed: false,
+    version: 'test',
     lang: 'zh',
+    toggleSidebar: vi.fn(),
     setLang: vi.fn()
   }),
-  useUserStore: () => mockUserStore
+  useUserStore: () => mockUserStore,
+  useTenantStore: () => ({})
 }))
 
 vi.mock('/src/stores/index.js', () => ({
   useAppStore: () => ({
+    sidebarCollapsed: false,
+    version: 'test',
     lang: 'zh',
+    toggleSidebar: vi.fn(),
     setLang: vi.fn()
   }),
-  useUserStore: () => mockUserStore
+  useUserStore: () => mockUserStore,
+  useTenantStore: () => ({})
 }))
 
 vi.mock('@/i18n', () => ({
@@ -191,15 +214,39 @@ import Nodes from '@/views/Nodes.vue'
 import Routing from '@/views/Routing.vue'
 import BandwidthControl from '@/views/BandwidthControl.vue'
 import Monitoring from '@/views/Monitoring.vue'
+import Layout from '@/components/Layout/Layout.vue'
 
 const elementStubs = {
+  'router-view': { template: '<div></div>' },
+  transition: { template: '<div><slot /></div>' },
+  TenantSelector: { template: '<div></div>' },
+  'el-container': { template: '<div><slot /></div>' },
+  'el-aside': { template: '<aside><slot /></aside>' },
+  'el-header': { template: '<header><slot /></header>' },
+  'el-main': { template: '<main><slot /></main>' },
+  'el-divider': { template: '<span></span>' },
+  'el-menu': {
+    props: ['defaultActive'],
+    template: '<nav class="sidebar-menu" :data-active="defaultActive"><slot /></nav>'
+  },
+  'el-menu-item': {
+    props: ['index'],
+    template: '<div class="el-menu-item" :data-index="index"><slot name="title" /><slot /></div>'
+  },
+  'el-sub-menu': {
+    props: ['index'],
+    template: '<div class="el-sub-menu" :data-index="index"><slot name="title" /><slot /></div>'
+  },
+  'el-dropdown': { template: '<div><slot /><slot name="dropdown" /></div>' },
+  'el-dropdown-menu': { template: '<div><slot /></div>' },
+  'el-dropdown-item': { template: '<div><slot /></div>' },
+  'el-avatar': { template: '<span><slot /></span>' },
   'el-card': { template: '<div><slot name="header" /><slot /></div>' },
   'el-input': { template: '<div><slot name="prefix" /><slot name="append" /></div>' },
   'el-icon': { template: '<i><slot /></i>' },
   'el-tag': { template: '<span><slot /></span>' },
   'el-select': { template: '<div><slot /></div>' },
   'el-option': { template: '<div></div>' },
-  'el-divider': { template: '<div></div>' },
   'el-tooltip': { template: '<div><slot /></div>' },
   'el-switch': { template: '<div></div>' },
   'el-pagination': { template: '<div></div>' },
@@ -279,6 +326,8 @@ describe('page-level RBAC button visibility', () => {
     mockNodeStore.loadNodes.mockClear()
     mockUserStore.user = { role: 'admin' }
     mockUserStore.permissions = []
+    mockRoute.name = 'Dashboard'
+    mockRoute.path = '/dashboard'
 
     const storage = new Map()
     globalThis.localStorage = {
@@ -375,6 +424,35 @@ describe('page-level RBAC button visibility', () => {
     await denied.vm.$nextTick()
     expect(denied.text()).not.toContain('Force Sync')
     expect(denied.text()).not.toContain('Health Check')
+  })
+
+  it('renders the Nodes detail basic information heading once', async () => {
+    permissionSet.add('commands:write')
+    const wrapper = mountWithStubs(Nodes)
+    wrapper.vm.selectedNode = {
+      id: 'node-1',
+      hostname: 'node-1',
+      region: 'sh',
+      status: 'online',
+      routes: [],
+      recentCommands: []
+    }
+    await wrapper.vm.$nextTick()
+
+    const matches = wrapper.text().match(/Basic Information/g) || []
+    expect(matches).toHaveLength(1)
+  })
+
+  it('labels monitoring node detail routes as monitoring and keeps the monitoring menu active', () => {
+    mockUserStore.user = { role: 'super_admin' }
+    permissionSet.add('*')
+    mockRoute.name = 'NodeMonitorDetail'
+    mockRoute.path = '/monitoring/nodes/node-1'
+
+    const wrapper = mountWithStubs(Layout)
+
+    expect(wrapper.find('.page-title').text()).toBe('nav.monitoringCenter')
+    expect(wrapper.find('.sidebar-menu').attributes('data-active')).toBe('/monitoring')
   })
 
   it('shows/hides Routing write actions based on routes:write', async () => {

@@ -16,7 +16,7 @@
 
       <!-- 导航菜单 -->
       <el-menu
-        :default-active="$route.path"
+        :default-active="activeMenu"
         :collapse="isCollapsed"
         :default-openeds="defaultOpeneds"
         :unique-opened="true"
@@ -239,6 +239,14 @@ const isSuperAdmin = computed(() => currentUser.value?.role === 'super_admin')
 const canAccess = hasPermission
 const canAnyAccess = hasAnyPermission
 
+const activeMenu = computed(() => {
+  if (route.name === 'NodeMonitorDetail' || route.path.startsWith('/monitoring/nodes/')) {
+    return '/monitoring'
+  }
+
+  return route.path
+})
+
 const getPageTitle = computed(() => {
   const routeMap = {
     Dashboard: t('nav.dashboard'),
@@ -252,6 +260,7 @@ const getPageTitle = computed(() => {
     TenantManagement: t('nav.tenantManagement'),
     Roles: t('nav.roleManagement'),
     Monitoring: t('nav.monitoringCenter'),
+    NodeMonitorDetail: t('nav.monitoringCenter'),
     AiAssistant: t('nav.aiCopilot'),
     Settings: t('nav.settings')
   }
