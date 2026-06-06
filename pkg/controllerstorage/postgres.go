@@ -839,16 +839,101 @@ func (s *Storage) MarkNodeDeleted(publicKey string) error {
 
 // CleanupDeletedNodes 清理已标记为 deleted 超过指定时间的节点
 func (s *Storage) CleanupDeletedNodes(thresholdTimestamp int64) (int, error) {
-	query := `
-		DELETE FROM nodes
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	rows, err := tx.Query(`
+		SELECT id
+		FROM nodes
 		WHERE status = 'deleted' AND updated_at < to_timestamp($1)
-	`
-	result, err := s.db.Exec(query, thresholdTimestamp)
+		FOR UPDATE
+	`, thresholdTimestamp)
+	if err != nil {
+		return 0, err
+	}
+
+	nodeIDs := make([]uuid.UUID, 0)
+	for rows.Next() {
+		var nodeID uuid.UUID
+		if err := rows.Scan(&nodeID); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+
+	if len(nodeIDs) == 0 {
+		if err := tx.Commit(); err != nil {
+			return 0, err
+		}
+		committed = true
+		return 0, nil
+	}
+
+	if err := detachDeletedNodeHistoryTx(tx, nodeIDs); err != nil {
+		return 0, err
+	}
+	if err := purgeDeletedNodeDependentsTx(tx, nodeIDs); err != nil {
+		return 0, err
+	}
+
+	result, err := tx.Exec(`
+		DELETE FROM nodes
+		WHERE id = ANY($1)
+	`, pq.Array(nodeIDs))
 	if err != nil {
 		return 0, err
 	}
 	count, _ := result.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	committed = true
 	return int(count), nil
+}
+
+func detachDeletedNodeHistoryTx(tx roleExec, nodeIDs []uuid.UUID) error {
+	for _, query := range []string{
+		`UPDATE audit_events SET node_id = NULL WHERE node_id = ANY($1)`,
+		`UPDATE alerts SET node_id = NULL WHERE node_id = ANY($1)`,
+	} {
+		if _, err := tx.Exec(query, pq.Array(nodeIDs)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func purgeDeletedNodeDependentsTx(tx roleExec, nodeIDs []uuid.UUID) error {
+	for _, query := range []string{
+		`DELETE FROM policy_deliveries WHERE node_id = ANY($1)`,
+		`DELETE FROM acl_rules WHERE node_id = ANY($1)`,
+		`DELETE FROM qos_rules WHERE node_id = ANY($1)`,
+		`DELETE FROM blacklist_rules WHERE node_id = ANY($1)`,
+		`DELETE FROM device_configs WHERE node_id = ANY($1)`,
+		`DELETE FROM tunnel_links WHERE src_node_id = ANY($1) OR dst_node_id = ANY($1)`,
+		`DELETE FROM ip_allocations WHERE node_id = ANY($1)`,
+	} {
+		if _, err := tx.Exec(query, pq.Array(nodeIDs)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // GetNodesGoingOffline returns nodes that are about to be marked offline:
