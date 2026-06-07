@@ -57,6 +57,43 @@ func TestListTenantTokensRedactsTokenSecrets(t *testing.T) {
 	}
 }
 
+func TestListTenantTokensAllowsNullTag(t *testing.T) {
+	tenantID := uuid.New()
+	tokenID := uuid.New()
+	now := time.Now().UTC()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, token, tag, max_uses, used_count, expires_at, created_at, status 
+		 FROM tokens WHERE tenant_id = $1 ORDER BY created_at DESC`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "token", "tag", "max_uses", "used_count", "expires_at", "created_at", "status"}).
+			AddRow(tokenID, "tk_1234567890abcdef", nil, 1, 0, now.Add(time.Hour), now, "active"))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	rr := httptest.NewRecorder()
+	router.listTenantTokens(rr, tenantID)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp apibase.APIResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	items := resp.Data.([]interface{})
+	item := items[0].(map[string]interface{})
+	if item["tag"] != "" {
+		t.Fatalf("expected empty tag for NULL token tag, got %#v", item["tag"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestControllerInfoIsPublicAndStable(t *testing.T) {
 	db, _, err := sqlmock.New()
 	if err != nil {

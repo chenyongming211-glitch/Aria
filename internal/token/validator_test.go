@@ -43,6 +43,59 @@ func TestValidateAllowsMaxUsesZeroAsUnlimited(t *testing.T) {
 	}
 }
 
+func TestStoreGetByTokenAllowsNullTag(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	now := time.Now().UTC()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, token, tag, COALESCE(tenant_id::text, ''), max_uses, used_count, expires_at, created_at,
+		       COALESCE(created_by::text, ''), status, last_used_at, COALESCE(last_used_by::text, '')
+		FROM tokens
+		WHERE token = $1`)).
+		WithArgs("tk_null_tag").
+		WillReturnRows(tokenRows().AddRow(uuid.New(), "tk_null_tag", nil, uuid.New().String(), 1, 0, now.Add(time.Hour), now, "", StatusActive, nil, ""))
+
+	tkn, err := NewStore(db).GetByToken("tk_null_tag")
+	if err != nil {
+		t.Fatalf("GetByToken returned error: %v", err)
+	}
+	if tkn == nil || tkn.Tag != "" {
+		t.Fatalf("expected empty tag for NULL token tag, got %#v", tkn)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestStoreListAllowsNullTag(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	now := time.Now().UTC()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, token, tag, COALESCE(tenant_id::text, ''), max_uses, used_count, expires_at, created_at,
+			       COALESCE(created_by::text, ''), status, last_used_at, COALESCE(last_used_by::text, '')
+			FROM tokens
+			ORDER BY created_at DESC`)).
+		WillReturnRows(tokenRows().AddRow(uuid.New(), "tk_null_tag", nil, uuid.New().String(), 1, 0, now.Add(time.Hour), now, "", StatusActive, nil, ""))
+
+	tokens, err := NewStore(db).List("all")
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if len(tokens) != 1 || tokens[0].Tag != "" {
+		t.Fatalf("expected empty tag for NULL token tag, got %#v", tokens)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestIncrementUsageDoesNotExhaustUnlimitedToken(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

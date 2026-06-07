@@ -2,6 +2,7 @@ package v2
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 func TestTenantRolesRealPathListsRoles(t *testing.T) {
@@ -162,6 +164,68 @@ func TestTenantUpdateRejectsDeletedStatusViaPut(t *testing.T) {
 	}
 }
 
+func TestTenantScopedRejectsSuspendedTenantForTenantUser(t *testing.T) {
+	t.Setenv("RBAC_ENFORCEMENT", "off")
+
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT status FROM tenants WHERE id = $1`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("suspended"))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withAuthContext(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/nodes", nil), "admin", tenantID)
+	rr := httptest.NewRecorder()
+	router.HandleTenantScoped(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestGetTenantAllowsNullCode(t *testing.T) {
+	tenantID := uuid.New()
+	now := time.Now()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, code, status, resource_quota, created_at, updated_at FROM tenants WHERE id = $1`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "code", "status", "resource_quota", "created_at", "updated_at"}).
+			AddRow(tenantID, "Default", nil, "active", "{}", now, now))
+
+	api := handlers.NewTenantAPI(controllerstorage.NewStorageWithDB(db))
+	req := withAuthContext(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String(), nil), "admin", tenantID)
+	rr := httptest.NewRecorder()
+	api.GetTenant(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp apibase.APIResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	data := resp.Data.(map[string]interface{})
+	if data["code"] != "" {
+		t.Fatalf("expected empty code for NULL tenant code, got %#v", data["code"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func expectSingleTenantSuccess(mock sqlmock.Sqlmock, tenantID uuid.UUID) {
 	now := time.Now()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, code, status, resource_quota, created_at, updated_at FROM tenants WHERE id = $1`)).
@@ -301,6 +365,52 @@ func TestCreateTenantCreatesSystemRoles(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestCreateTenantRejectsInvalidNameAndCodeBeforeDB(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	api := handlers.NewTenantAPI(controllerstorage.NewStorageWithDB(db))
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/tenants", bytes.NewReader([]byte(`{"name":" ","code":""}`)))
+	rr := httptest.NewRecorder()
+	api.CreateTenant(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestCreateTenantReturnsConflictOnDuplicateCode(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO tenants (id, name, code, email, phone, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`)).
+		WithArgs(sqlmock.AnyArg(), "Acme", "acme", "", "").
+		WillReturnError(&pq.Error{Code: "23505", Constraint: "tenants_code_key"})
+	mock.ExpectRollback()
+
+	api := handlers.NewTenantAPI(controllerstorage.NewStorageWithDB(db))
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/tenants", bytes.NewReader([]byte(`{"name":"Acme","code":"acme"}`)))
+	rr := httptest.NewRecorder()
+	api.CreateTenant(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
