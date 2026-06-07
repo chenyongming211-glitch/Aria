@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
 const {
@@ -199,6 +199,10 @@ describe('Nodes workbench detail', () => {
     mockNodeStore.loadNodeDetail.mockClear()
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('renders certificate and operations context in the node detail dialog', async () => {
     const wrapper = mountNodes()
     await wrapper.vm.viewNodeDetails(mockNodeStore.nodes[0])
@@ -228,6 +232,48 @@ describe('Nodes workbench detail', () => {
       command: 'sync',
       status: 'pending'
     })
+  })
+
+  it('polls command status until the queued quick command reaches a terminal state', async () => {
+    vi.useFakeTimers()
+
+    const baseDetail = await mockNodeStore.loadNodeDetail()
+    mockNodeStore.loadNodeDetail.mockReset()
+    mockNodeStore.loadNodeDetail
+      .mockResolvedValueOnce(baseDetail)
+      .mockResolvedValueOnce({
+        ...baseDetail,
+        recentCommands: [
+          { id: 'cmd-queued', command: 'sync', status: 'sent', message: 'sent to agent' }
+        ]
+      })
+      .mockResolvedValueOnce({
+        ...baseDetail,
+        recentCommands: [
+          { id: 'cmd-queued', command: 'sync', status: 'acknowledged', message: 'agent acknowledged' }
+        ]
+      })
+      .mockResolvedValueOnce({
+        ...baseDetail,
+        recentCommands: [
+          { id: 'cmd-queued', command: 'sync', status: 'completed', message: 'sync completed' }
+        ]
+      })
+
+    const wrapper = mountNodes()
+    await wrapper.vm.viewNodeDetails(mockNodeStore.nodes[0])
+    await wrapper.vm.runQuickCommand('sync')
+    await flushPromises()
+
+    expect(wrapper.vm.selectedNode.recentCommands[0].status).toBe('sent')
+
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(wrapper.vm.selectedNode.recentCommands[0].status).toBe('acknowledged')
+
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(wrapper.vm.selectedNode.recentCommands[0].status).toBe('completed')
   })
 
   it('preserves node context when opening monitoring and policy center', async () => {
