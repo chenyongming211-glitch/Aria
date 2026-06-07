@@ -281,6 +281,32 @@ Purpose:
 | Agent artifact | Not changed; Agent remained from workflow run `27079625892`. |
 | Verification | `aria-frontend` container healthy; `http://127.0.0.1:18080/` returned 200 with `Cache-Control: no-store`; deployed bundle includes `assets/Nodes-c28a4f4a.js`; the Nodes bundle contains the `Endpoint` detail label. |
 
+### 2026-06-07 Monitoring Node Network Identity Deployment
+
+Status: deployed.
+
+Purpose:
+
+- Align Monitoring node detail with the Nodes workbench network identity model.
+- Return `region`, `public_ip`, `assigned_ip`, and `endpoint` from
+  `/api/v2/tenants/{tenant_id}/monitoring/nodes/{node_id}`.
+- Show the same network identity fields on the Monitoring node detail page so
+  operators can verify public IP, VPN IP, and WireGuard endpoint from either
+  workflow.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-07T03:18Z |
+| Git commit | `98cd438ddeb60bf7df5ff767b87666918374ac83` |
+| Push CI run | `27081201040` |
+| Publish run | `27081255342` |
+| Controller image | `ghcr.io/chenyongming211-glitch/aria-controller:0.2.35-test@sha256:12134a1682b6197f68db0609fe24771ed094bd739ff9037c7c7b0945fdf5be03` |
+| Frontend backup | `/root/aria-controller/frontend/dist.prev-20260607T031755Z` |
+| Config backup | `/root/aria-controller/backups/pre-monitor-network-identity-config-20260607T031755Z.tar.gz` |
+| DB backup | `/root/aria-controller/backups/pre-monitor-network-identity-20260607T031755Z.sql` |
+| Agent artifact | Not changed; Agent remained from workflow run `27079625892`. |
+| Verification | `aria-controller` and `aria-frontend` containers healthy; Controller container image id is `sha256:12134a1682b6197`; frontend bundle includes `assets/NodeMonitorDetail-12051133.js` and `assets/Nodes-aed6c53e.js`; `sysadmin` login through `http://127.0.0.1:18080/api/v2/auth/login` succeeded; tenant node list returned `public_ip=82.156.48.111`, `assigned_ip=100.64.0.2`, `endpoint=82.156.48.111:51820`; Monitoring node detail returned matching `monitor_public_ip=82.156.48.111`, `monitor_assigned_ip=100.64.0.2`, `monitor_endpoint=82.156.48.111:51820`, `monitor_region=tencent-cloud`, `recent_commands=10`, `policy_deliveries=2`, and `active_alerts=0`. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
