@@ -56,6 +56,11 @@ describe('useQosApi', () => {
       dst_port: 443,
       protocol: 6,
       bandwidth_mbps: 200,
+      direction: 'egress',
+      rate_bps: 200000000,
+      burst_bytes: 2500000,
+      priority: 0,
+      mode: 'policing',
       description: 'https limit',
       enabled: true
     })

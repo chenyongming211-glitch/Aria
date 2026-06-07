@@ -1702,12 +1702,14 @@ func (c *Controller) getACLRulesForRegionInNodes(region string, allRules []*cont
 		result := make([]ACLRuleJSON, 0, len(allRules))
 		for _, rule := range allRules {
 			result = append(result, ACLRuleJSON{
-				SrcNet:   rule.SrcNet,
-				DstNet:   rule.DstNet,
-				Protocol: rule.Protocol,
-				MinPort:  rule.MinPort,
-				MaxPort:  rule.MaxPort,
-				Action:   defaultRegistrationACLAction(rule.Action),
+				SrcNet:    rule.SrcNet,
+				DstNet:    rule.DstNet,
+				Protocol:  rule.Protocol,
+				MinPort:   rule.MinPort,
+				MaxPort:   rule.MaxPort,
+				Action:    defaultRegistrationACLAction(rule.Action),
+				Direction: rule.Direction,
+				Ports:     rule.Ports,
 			})
 		}
 		return result
@@ -1723,12 +1725,14 @@ func (c *Controller) getACLRulesForRegionInNodes(region string, allRules []*cont
 		// This ensures both outbound and inbound traffic are allowed
 		if srcRegion == region || dstRegion == region {
 			result = append(result, ACLRuleJSON{
-				SrcNet:   rule.SrcNet,
-				DstNet:   rule.DstNet,
-				Protocol: rule.Protocol,
-				MinPort:  rule.MinPort,
-				MaxPort:  rule.MaxPort,
-				Action:   defaultRegistrationACLAction(rule.Action),
+				SrcNet:    rule.SrcNet,
+				DstNet:    rule.DstNet,
+				Protocol:  rule.Protocol,
+				MinPort:   rule.MinPort,
+				MaxPort:   rule.MaxPort,
+				Action:    defaultRegistrationACLAction(rule.Action),
+				Direction: rule.Direction,
+				Ports:     rule.Ports,
 			})
 		}
 	}
