@@ -294,6 +294,8 @@ impl GrpcClient {
                 min_port: r.min_port,
                 max_port: r.max_port,
                 action: r.action,
+                direction: String::new(),
+                ports: String::new(),
             }).collect(),
             qos_rules: resp.qos_rules.into_iter().map(|r| QoSRule {
                 src_ip: r.src_ip,
@@ -302,6 +304,11 @@ impl GrpcClient {
                 dst_port: r.dst_port,
                 protocol: r.protocol,
                 bandwidth_mbps: r.bandwidth_mbps,
+                direction: String::new(),
+                rate_bps: 0,
+                burst_bytes: 0,
+                priority: 0,
+                mode: String::new(),
             }).collect(),
             blacklist_rules: resp.blacklist_rules.into_iter().map(|r| BlacklistRule {
                 scope: r.scope,
@@ -439,9 +446,10 @@ pub struct AclRule {
     pub dst_net: String,
     pub protocol: u32,
     pub min_port: u32,
-    #[allow(dead_code)]
     pub max_port: u32,
     pub action: String,
+    pub direction: String,
+    pub ports: String,
 }
 
 #[allow(dead_code)]
@@ -454,6 +462,11 @@ pub struct QoSRule {
     pub dst_port: u32,
     pub protocol: u32,
     pub bandwidth_mbps: u64,
+    pub direction: String,
+    pub rate_bps: u64,
+    pub burst_bytes: u64,
+    pub priority: u32,
+    pub mode: String,
 }
 
 #[derive(Debug, Clone)]
@@ -461,6 +474,202 @@ pub struct BlacklistRule {
     pub scope: String,
     pub cidr: String,
     pub port: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentAclPolicy {
+    pub src_group: String,
+    pub dst_group: String,
+    pub proto: u8,
+    pub action: u8,
+    pub direction: u8,
+    pub ports: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentQosPolicy {
+    pub group: String,
+    pub direction: u8,
+    pub rate_bps: u64,
+    pub burst_bytes: u64,
+    pub priority: u8,
+    pub mode: u8,
+}
+
+pub fn acl_policy_from_sync_rule(rule: &AclRule) -> Result<AgentAclPolicy> {
+    let proto = protocol_to_u8(rule.protocol)?;
+    let action = acl_action_from_string(&rule.action)?;
+    let direction = direction_from_string_or_default(&rule.direction, 0)?;
+    let ports = acl_ports_from_rule(rule)?;
+    validate_acl_ports(proto, ports.as_deref())?;
+
+    Ok(AgentAclPolicy {
+        src_group: cidr_or_any(&rule.src_net),
+        dst_group: cidr_or_any(&rule.dst_net),
+        proto,
+        action,
+        direction,
+        ports,
+    })
+}
+
+pub fn qos_policy_from_sync_rule(rule: &QoSRule) -> Result<AgentQosPolicy> {
+    let direction = direction_from_string_or_default(&rule.direction, inferred_qos_direction(rule))?;
+    let group = qos_group_for_direction(rule, direction);
+    let rate_bps = if rule.rate_bps > 0 {
+        rule.rate_bps
+    } else {
+        mbps_to_bps(rule.bandwidth_mbps)
+    };
+    let burst_bytes = if rule.burst_bytes > 0 {
+        rule.burst_bytes
+    } else {
+        default_qos_burst(rate_bps)
+    };
+    let priority = u8::try_from(rule.priority).context("qos priority must fit in u8")?;
+    let mode = qos_mode_from_string(&rule.mode)?;
+
+    Ok(AgentQosPolicy {
+        group,
+        direction,
+        rate_bps,
+        burst_bytes,
+        priority,
+        mode,
+    })
+}
+
+fn protocol_to_u8(protocol: u32) -> Result<u8> {
+    u8::try_from(protocol).context("protocol must fit in u8")
+}
+
+fn cidr_or_any(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed == "0" || trimmed == "0.0.0.0/0" || trimmed == "::/0" {
+        "any".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn acl_action_from_string(action: &str) -> Result<u8> {
+    match action.trim().to_ascii_lowercase().as_str() {
+        "" | "accept" | "pass" | "allow" => Ok(0),
+        "drop" | "deny" => Ok(1),
+        other => Err(anyhow::anyhow!("invalid ACL action '{}'", other)),
+    }
+}
+
+fn direction_from_string_or_default(direction: &str, default: u8) -> Result<u8> {
+    match direction.trim().to_ascii_lowercase().as_str() {
+        "" => Ok(default),
+        "ingress" | "in" => Ok(0),
+        "egress" | "out" => Ok(1),
+        "both" | "all" => Ok(2),
+        other => Err(anyhow::anyhow!(
+            "invalid direction '{}': must be ingress, egress, or both",
+            other
+        )),
+    }
+}
+
+fn acl_ports_from_rule(rule: &AclRule) -> Result<Option<String>> {
+    let explicit = rule.ports.trim();
+    if !explicit.is_empty() {
+        if explicit.eq_ignore_ascii_case("all") {
+            return Ok(None);
+        }
+        return Ok(Some(explicit.to_string()));
+    }
+
+    let min = rule.min_port;
+    let max = rule.max_port;
+    if min == 0 && (max == 0 || max == 65535) {
+        return Ok(None);
+    }
+    if min > 65535 || max > 65535 {
+        return Err(anyhow::anyhow!("ACL ports must be in 0..65535"));
+    }
+    if min == max {
+        return Ok(Some(min.to_string()));
+    }
+    if min > max {
+        return Err(anyhow::anyhow!(
+            "invalid ACL port range: {}-{}",
+            min,
+            max
+        ));
+    }
+    Ok(Some(format!("{}-{}", min, max)))
+}
+
+fn validate_acl_ports(proto: u8, ports: Option<&str>) -> Result<()> {
+    let Some(ports) = ports else {
+        return Ok(());
+    };
+    if ports.trim().is_empty() {
+        return Ok(());
+    }
+
+    match proto {
+        6 | 17 => Ok(()),
+        0 => Err(anyhow::anyhow!(
+            "port filters require a concrete protocol; use tcp or udp instead of any"
+        )),
+        other => Err(anyhow::anyhow!(
+            "protocol {} does not support ACL port filters",
+            other
+        )),
+    }
+}
+
+fn inferred_qos_direction(rule: &QoSRule) -> u8 {
+    if !rule.src_ip.trim().is_empty() && rule.dst_ip.trim().is_empty() {
+        0
+    } else {
+        1
+    }
+}
+
+fn qos_group_for_direction(rule: &QoSRule, direction: u8) -> String {
+    match direction {
+        0 => cidr_or_any(&rule.src_ip),
+        1 => {
+            let dst = cidr_or_any(&rule.dst_ip);
+            if dst == "any" {
+                cidr_or_any(&rule.src_ip)
+            } else {
+                dst
+            }
+        }
+        _ => {
+            let dst = cidr_or_any(&rule.dst_ip);
+            if dst == "any" {
+                cidr_or_any(&rule.src_ip)
+            } else {
+                dst
+            }
+        }
+    }
+}
+
+fn mbps_to_bps(mbps: u64) -> u64 {
+    mbps.saturating_mul(1_000_000)
+}
+
+fn default_qos_burst(rate_bps: u64) -> u64 {
+    (rate_bps / 8 / 10).max(1500)
+}
+
+fn qos_mode_from_string(mode: &str) -> Result<u8> {
+    match mode.trim().to_ascii_lowercase().as_str() {
+        "" | "policing" => Ok(0),
+        "shaping" => Ok(1),
+        other => Err(anyhow::anyhow!(
+            "invalid QoS mode '{}': must be policing or shaping",
+            other
+        )),
+    }
 }
 
 #[cfg(test)]
