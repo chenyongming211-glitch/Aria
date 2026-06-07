@@ -255,6 +255,32 @@ Purpose:
 | Agent artifact | Not changed; Agent remained from workflow run `27079625892`. |
 | Verification | Controller container healthy on image `sha256:c1e38f42d144`; `/api/version` returned `0.2.35-test`; `sysadmin` login returned 200; tenant node list and detail both returned `public_ip=82.156.48.111`, empty `private_ip`, `assigned_ip=100.64.0.2`, and `endpoint=82.156.48.111:51820`; browser confirmed the Public IP column is visible. |
 
+### 2026-06-07 Nodes Workbench Endpoint Frontend Hotfix
+
+Status: deployed.
+
+Purpose:
+
+- Keep the Nodes workbench network identity view aligned with the API hotfix by
+  preserving `endpoint` in the frontend node store and showing it in the node
+  detail dialog.
+- This was a frontend-only deployment from the push-triggered GitHub Actions
+  `frontend-dist` artifact. The Controller image and Agent binary were not
+  changed for this deployment.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-07T03:00Z |
+| Git commit | `deccfd8a4e85f13687d3372a07c52b42e3fd80b1` |
+| Push CI run | `27080906919` |
+| Publish run | Not used; deployed `frontend-dist` from the push CI run. |
+| Controller image | Unchanged from the previous deployment: `ghcr.io/chenyongming211-glitch/aria-controller:0.2.35-test@sha256:c1e38f42d144bb5ec8f354f2a7c39de996e801c32963ef8b069fb658691b14f5` |
+| Frontend backup | `/root/aria-controller/frontend/dist.prev-20260607110004` |
+| Config backup | Not changed; no Controller config update in this frontend hotfix. |
+| DB backup | Not taken; no schema or data migration in this frontend hotfix. |
+| Agent artifact | Not changed; Agent remained from workflow run `27079625892`. |
+| Verification | `aria-frontend` container healthy; `http://127.0.0.1:18080/` returned 200 with `Cache-Control: no-store`; deployed bundle includes `assets/Nodes-c28a4f4a.js`; the Nodes bundle contains the `Endpoint` detail label. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
