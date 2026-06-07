@@ -465,12 +465,81 @@ pub struct BlacklistRule {
 
 #[cfg(test)]
 mod tests {
-    use super::authorization_metadata_value;
+    use super::{
+        acl_policy_from_sync_rule,
+        authorization_metadata_value,
+        qos_policy_from_sync_rule,
+        AclRule,
+        QoSRule,
+    };
 
     #[test]
     fn authorization_metadata_rejects_invalid_token_without_panic() {
         let value = authorization_metadata_value("bad\nruntime-token");
 
         assert!(value.is_err());
+    }
+
+    #[test]
+    fn acl_sync_rule_keeps_port_range_as_policy_ports() {
+        let policy = acl_policy_from_sync_rule(&AclRule {
+            src_net: "10.0.0.0/24".to_string(),
+            dst_net: "192.0.2.0/24".to_string(),
+            protocol: 6,
+            min_port: 80,
+            max_port: 82,
+            action: "deny".to_string(),
+            direction: "egress".to_string(),
+            ports: String::new(),
+        })
+        .expect("valid ACL sync rule");
+
+        assert_eq!(policy.src_group, "10.0.0.0/24");
+        assert_eq!(policy.dst_group, "192.0.2.0/24");
+        assert_eq!(policy.proto, 6);
+        assert_eq!(policy.action, 1);
+        assert_eq!(policy.direction, 1);
+        assert_eq!(policy.ports.as_deref(), Some("80-82"));
+    }
+
+    #[test]
+    fn acl_sync_rule_rejects_port_filter_with_any_protocol() {
+        let result = acl_policy_from_sync_rule(&AclRule {
+            src_net: "10.0.0.0/24".to_string(),
+            dst_net: "192.0.2.0/24".to_string(),
+            protocol: 0,
+            min_port: 443,
+            max_port: 443,
+            action: "allow".to_string(),
+            direction: "ingress".to_string(),
+            ports: String::new(),
+        });
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn qos_sync_rule_prefers_explicit_runtime_fields() {
+        let policy = qos_policy_from_sync_rule(&QoSRule {
+            src_ip: "10.0.0.0/24".to_string(),
+            dst_ip: "192.0.2.0/24".to_string(),
+            src_port: 0,
+            dst_port: 0,
+            protocol: 0,
+            bandwidth_mbps: 100,
+            direction: "ingress".to_string(),
+            rate_bps: 250_000_000,
+            burst_bytes: 4_000_000,
+            priority: 7,
+            mode: "shaping".to_string(),
+        })
+        .expect("valid QoS sync rule");
+
+        assert_eq!(policy.group, "10.0.0.0/24");
+        assert_eq!(policy.direction, 0);
+        assert_eq!(policy.rate_bps, 250_000_000);
+        assert_eq!(policy.burst_bytes, 4_000_000);
+        assert_eq!(policy.priority, 7);
+        assert_eq!(policy.mode, 1);
     }
 }
