@@ -262,29 +262,35 @@ func expectNodeLifecycleTransitionByPublicKey(
 func expectACLListSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 	now := time.Now()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
-			        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
+			        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
+			        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+			        priority, enabled, COALESCE(description, ''),
 			        created_at, updated_at
 			   FROM acl_rules
 			  WHERE tenant_id = $1 AND node_id = $2
 		  ORDER BY priority DESC, created_at DESC`)).
 		WithArgs(tenantID, nodeID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "priority", "enabled", "description", "created_at", "updated_at",
-		}).AddRow(uuid.New(), tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, 100, true, "allow web", now, now))
+			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(uuid.New(), tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, "ingress", "443", 100, true, "allow web", now, now))
 }
 
 func expectQoSListSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 	now := time.Now()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, category, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
-		        bandwidth_mbps, enabled, COALESCE(description, ''), created_at, updated_at
+		        bandwidth_mbps, COALESCE(direction, 'egress'),
+		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
+		        COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
+		        COALESCE(priority, 0), COALESCE(mode, 'policing'),
+		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE tenant_id = $1 AND node_id = $2 AND category = $3
 		  ORDER BY created_at DESC`)).
 		WithArgs(tenantID, nodeID, "service").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "category", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "enabled", "description", "created_at", "updated_at",
-		}).AddRow(uuid.New(), tenantID, nodeID, "service", "", "", 0, 443, 6, 200, true, "https limit", now, now))
+			"id", "tenant_id", "node_id", "category", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(uuid.New(), tenantID, nodeID, "service", "", "", 0, 443, 6, 200, "egress", uint64(200000000), uint64(2500000), 0, "policing", true, "https limit", now, now))
 }
 
 func expectRolesCreateSuccess(mock sqlmock.Sqlmock, tenantID uuid.UUID) {
@@ -307,50 +313,58 @@ func expectUsersCreateSuccess(mock sqlmock.Sqlmock, tenantID uuid.UUID) {
 
 func expectACLCreateSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 	now := time.Now()
-	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO acl_rules (tenant_id, node_id, name, action, src_cidr, dst_cidr, dst_port, protocol, priority, enabled, description, src_net, dst_net, min_port, max_port)
-			 VALUES ($1, $2, $3, $4, NULLIF($5, '')::cidr, NULLIF($6, '')::cidr, $7, $8, $9, $10, $11, $12::cidr, $13::cidr, $14, $15)
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO acl_rules (tenant_id, node_id, name, action, src_cidr, dst_cidr, dst_port, protocol, direction, ports, priority, enabled, description, src_net, dst_net, min_port, max_port)
+			 VALUES ($1, $2, $3, $4, NULLIF($5, '')::cidr, NULLIF($6, '')::cidr, $7, $8, $9, $10, $11, $12, $13, $14::cidr, $15::cidr, $16, $17)
 			 RETURNING id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
-			           COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
+			           COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
+			           COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+			           priority, enabled, COALESCE(description, ''),
 			           created_at, updated_at`)).
-		WithArgs(tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, 100, true, "allow web", "10.0.0.0/24", "0.0.0.0/0", 443, 443).
+		WithArgs(tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, "ingress", "443", 100, true, "allow web", "10.0.0.0/24", "0.0.0.0/0", 443, 443).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "priority", "enabled", "description", "created_at", "updated_at",
-		}).AddRow(uuid.New(), tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, 100, true, "allow web", now, now))
+			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(uuid.New(), tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, "ingress", "443", 100, true, "allow web", now, now))
 }
 
 func expectQoSCreateSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 	now := time.Now()
-	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO qos_rules (tenant_id, node_id, category, src_cidr, dst_cidr, src_port, dst_port, protocol, bandwidth_mbps, enabled, description)
-		 VALUES ($1, $2, $3, NULLIF($4, '')::cidr, NULLIF($5, '')::cidr, $6, $7, $8, $9, $10, $11)
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO qos_rules (tenant_id, node_id, category, src_cidr, dst_cidr, src_port, dst_port, protocol, bandwidth_mbps, direction, rate_bps, burst_bytes, priority, mode, enabled, description)
+		 VALUES ($1, $2, $3, NULLIF($4, '')::cidr, NULLIF($5, '')::cidr, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		 RETURNING id, tenant_id, node_id, category, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		           COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
-		           bandwidth_mbps, enabled, COALESCE(description, ''), created_at, updated_at`)).
-		WithArgs(tenantID, nodeID, "service", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), 200, true, "qos web").
+		           bandwidth_mbps, COALESCE(direction, 'egress'),
+		           COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
+		           COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
+		           COALESCE(priority, 0), COALESCE(mode, 'policing'),
+		           enabled, COALESCE(description, ''), created_at, updated_at`)).
+		WithArgs(tenantID, nodeID, "service", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), 200, "egress", uint64(200000000), uint64(2500000), 0, "policing", true, "qos web").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "category", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "enabled", "description", "created_at", "updated_at",
-		}).AddRow(uuid.New(), tenantID, nodeID, "service", "", "", 0, 443, 6, 200, true, "qos web", now, now))
+			"id", "tenant_id", "node_id", "category", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(uuid.New(), tenantID, nodeID, "service", "", "", 0, 443, 6, 200, "egress", uint64(200000000), uint64(2500000), 0, "policing", true, "qos web", now, now))
 }
 
 func expectACLGetForUpdate(mock sqlmock.Sqlmock, tenantID, nodeID, ruleID uuid.UUID) {
 	now := time.Now()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
-		        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
+		        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
+		        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+		        priority, enabled, COALESCE(description, ''),
 		        created_at, updated_at
 		   FROM acl_rules
 		  WHERE id = $1 AND tenant_id = $2 AND node_id = $3`)).
 		WithArgs(ruleID, tenantID, nodeID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "priority", "enabled", "description", "created_at", "updated_at",
-		}).AddRow(ruleID, tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, 100, true, "allow web", now, now))
+			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(ruleID, tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, "ingress", "443", 100, true, "allow web", now, now))
 }
 
 func expectACLUpdatePreservingExistingFields(mock sqlmock.Sqlmock, tenantID, nodeID, ruleID uuid.UUID) {
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE acl_rules SET
 			name = $4, action = $5, src_cidr = NULLIF($6, '')::cidr, dst_cidr = NULLIF($7, '')::cidr,
-			dst_port = $8, protocol = $9, priority = $10, description = $11,
-			enabled = $12, src_net = $13::cidr, dst_net = $14::cidr, min_port = $15, max_port = $16, updated_at = NOW()
+			dst_port = $8, protocol = $9, direction = $10, ports = $11, priority = $12, description = $13,
+			enabled = $14, src_net = $15::cidr, dst_net = $16::cidr, min_port = $17, max_port = $18, updated_at = NOW()
 		 WHERE id = $1 AND tenant_id = $2 AND node_id = $3`)).
-		WithArgs(ruleID, tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, 100, "allow web", false, "10.0.0.0/24", "0.0.0.0/0", 443, 443).
+		WithArgs(ruleID, tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, "ingress", "443", 100, "allow web", false, "10.0.0.0/24", "0.0.0.0/0", 443, 443).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
@@ -358,23 +372,28 @@ func expectQoSGetForUpdate(mock sqlmock.Sqlmock, tenantID, nodeID, ruleID uuid.U
 	now := time.Now()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, category, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
-		        bandwidth_mbps, enabled, COALESCE(description, ''), created_at, updated_at
+		        bandwidth_mbps, COALESCE(direction, 'egress'),
+		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
+		        COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
+		        COALESCE(priority, 0), COALESCE(mode, 'policing'),
+		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE id = $1 AND tenant_id = $2 AND node_id = $3 AND category = $4`)).
 		WithArgs(ruleID, tenantID, nodeID, "service").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "category", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "enabled", "description", "created_at", "updated_at",
-		}).AddRow(ruleID, tenantID, nodeID, "service", "10.0.0.0/24", "0.0.0.0/0", 1000, 443, 6, 200, true, "qos web", now, now))
+			"id", "tenant_id", "node_id", "category", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(ruleID, tenantID, nodeID, "service", "10.0.0.0/24", "0.0.0.0/0", 1000, 443, 6, 200, "egress", uint64(200000000), uint64(2500000), 0, "policing", true, "qos web", now, now))
 }
 
 func expectQoSUpdatePreservingExistingFields(mock sqlmock.Sqlmock, tenantID, nodeID, ruleID uuid.UUID) {
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE qos_rules SET
 			src_cidr = NULLIF($5, ''), dst_cidr = NULLIF($6, ''),
 			src_port = $7, dst_port = $8, protocol = $9,
-			bandwidth_mbps = $10, description = $11,
-			enabled = $12, updated_at = NOW()
+			bandwidth_mbps = $10, direction = $11, rate_bps = $12, burst_bytes = $13,
+			priority = $14, mode = $15, description = $16,
+			enabled = $17, updated_at = NOW()
 		 WHERE id = $1 AND tenant_id = $2 AND node_id = $3 AND category = $4`)).
-		WithArgs(ruleID, tenantID, nodeID, "service", "10.0.0.0/24", "0.0.0.0/0", 1000, 443, 6, 200, "qos web", false).
+		WithArgs(ruleID, tenantID, nodeID, "service", "10.0.0.0/24", "0.0.0.0/0", 1000, 443, 6, 200, "egress", uint64(200000000), uint64(2500000), 0, "policing", "qos web", false).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 

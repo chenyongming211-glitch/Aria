@@ -214,12 +214,14 @@ func newRegistrationAuthError(status int, message string, err error) *registrati
 
 // ACLRuleJSON represents an ACL rule in API responses.
 type ACLRuleJSON struct {
-	SrcNet   string `json:"src_net"`  // Source CIDR
-	DstNet   string `json:"dst_net"`  // Destination CIDR
-	Protocol uint8  `json:"protocol"` // IP protocol (6=TCP, 17=UDP, 0=any)
-	MinPort  uint16 `json:"min_port"` // Min port (0=any)
-	MaxPort  uint16 `json:"max_port"` // Max port (65535=any)
-	Action   string `json:"action"`   // allow or deny
+	SrcNet    string `json:"src_net"`   // Source CIDR
+	DstNet    string `json:"dst_net"`   // Destination CIDR
+	Protocol  uint8  `json:"protocol"`  // IP protocol (6=TCP, 17=UDP, 0=any)
+	MinPort   uint16 `json:"min_port"`  // Min port (0=any)
+	MaxPort   uint16 `json:"max_port"`  // Max port (65535=any)
+	Action    string `json:"action"`    // allow or deny
+	Direction string `json:"direction"` // ingress, egress, or both
+	Ports     string `json:"ports"`     // port bitmap rule string
 }
 
 func runControllerServe(cmd *cobra.Command, args []string) error {
@@ -2058,12 +2060,14 @@ func (c *Controller) processSync(publicKey string) (interface{}, string, interfa
 	var aclRules []map[string]interface{}
 	for _, rule := range regionACLs {
 		aclRules = append(aclRules, map[string]interface{}{
-			"src_net":  rule.SrcNet,
-			"dst_net":  rule.DstNet,
-			"protocol": rule.Protocol,
-			"min_port": rule.MinPort,
-			"max_port": rule.MaxPort,
-			"action":   defaultRegistrationACLAction(rule.Action),
+			"src_net":   rule.SrcNet,
+			"dst_net":   rule.DstNet,
+			"protocol":  rule.Protocol,
+			"min_port":  rule.MinPort,
+			"max_port":  rule.MaxPort,
+			"action":    defaultRegistrationACLAction(rule.Action),
+			"direction": rule.Direction,
+			"ports":     rule.Ports,
 		})
 	}
 

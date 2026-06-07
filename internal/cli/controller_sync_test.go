@@ -69,15 +69,16 @@ func TestSyncNodeFiltersACLRegionWithTenantNodesOnly(t *testing.T) {
 	))
 	mock.ExpectQuery(regexp.QuoteMeta(`
 			SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
-			       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
+			       COALESCE(action, 'allow'), COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+			       enabled, priority, COALESCE(description, ''), created_at, updated_at
 			FROM acl_rules
 			WHERE tenant_id = $1 AND enabled = true
 			ORDER BY priority ASC, id ASC
 		`)).
 		WithArgs(tenantID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "src_node", "src_net", "dst_node", "dst_net", "protocol", "min_port", "max_port", "action", "enabled", "priority", "description", "created_at", "updated_at",
-		}).AddRow(ruleID, "allow-tenant-route", "", "10.10.0.0/24", "", "0.0.0.0/0", uint8(6), uint16(443), uint16(443), "allow", true, 100, "allow tenant route", now, now))
+			"id", "name", "src_node", "src_net", "dst_node", "dst_net", "protocol", "min_port", "max_port", "action", "direction", "ports", "enabled", "priority", "description", "created_at", "updated_at",
+		}).AddRow(ruleID, "allow-tenant-route", "", "10.10.0.0/24", "", "0.0.0.0/0", uint8(6), uint16(443), uint16(443), "allow", "ingress", "443", true, 100, "allow tenant route", now, now))
 	expectSyncNodeControlState(mock, tenantID, nodeID, "dsv-rest-phase1", now)
 
 	controller := &Controller{
@@ -104,6 +105,9 @@ func TestSyncNodeFiltersACLRegionWithTenantNodesOnly(t *testing.T) {
 	}
 	if !resp.SnapshotComplete {
 		t.Fatalf("expected REST sync snapshot_complete=true")
+	}
+	if resp.ACLRules[0].Direction != "ingress" || resp.ACLRules[0].Ports != "443" {
+		t.Fatalf("expected REST sync ACL runtime fields, got %#v", resp.ACLRules[0])
 	}
 	if resp.DomainVersions["acl"] != "dsv-rest-phase1" {
 		t.Fatalf("expected REST sync acl domain version, got %#v", resp.DomainVersions)

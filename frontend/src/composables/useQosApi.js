@@ -9,6 +9,50 @@ function normalizeBandwidthMbps(rule) {
   return value
 }
 
+function normalizeDirection(rule) {
+  const value = String(rule.direction || '').trim().toLowerCase()
+  if (['ingress', 'egress'].includes(value)) return value
+  if ((rule.src_cidr || rule.src_net) && !(rule.dst_cidr || rule.dst_net)) return 'ingress'
+  return 'egress'
+}
+
+function normalizeMode(rule) {
+  const value = String(rule.mode || '').trim().toLowerCase()
+  return value === 'shaping' ? 'shaping' : 'policing'
+}
+
+function normalizeRateBps(rule, bandwidthMbps) {
+  const value = Number(rule.rate_bps || 0)
+  if (Number.isFinite(value) && value > 0) return value
+  return bandwidthMbps * 1000000
+}
+
+function normalizeBurstBytes(rule, rateBps) {
+  const value = Number(rule.burst_bytes || 0)
+  if (Number.isFinite(value) && value > 0) return value
+  return Math.max(Math.floor(rateBps / 8 / 10), 1500)
+}
+
+function normalizeRulePayload(rule) {
+  const bandwidthMbps = normalizeBandwidthMbps(rule)
+  const rateBps = normalizeRateBps(rule, bandwidthMbps)
+  return {
+    src_cidr: rule.src_cidr || rule.src_net || '',
+    dst_cidr: rule.dst_cidr || rule.dst_net || '',
+    src_port: Number(rule.src_port || 0),
+    dst_port: Number(rule.dst_port || 0),
+    protocol: Number(rule.protocol || 0),
+    bandwidth_mbps: bandwidthMbps,
+    direction: normalizeDirection(rule),
+    rate_bps: rateBps,
+    burst_bytes: normalizeBurstBytes(rule, rateBps),
+    priority: Number(rule.priority || 0),
+    mode: normalizeMode(rule),
+    description: rule.description || '',
+    enabled: rule.enabled !== false
+  }
+}
+
 function normalizeListResponse(response) {
   const body = response?.data
   if (Array.isArray(body)) return body
@@ -52,6 +96,11 @@ export const useQosApi = {
         ...rule,
         node_id: nodeId,
         category: category,
+        direction: normalizeDirection(rule),
+        mode: normalizeMode(rule),
+        rate_bps: Number(rule.rate_bps || 0),
+        burst_bytes: Number(rule.burst_bytes || 0),
+        priority: Number(rule.priority || 0),
         // 兼容旧 UI 字段名
         bandwidth: rule.bandwidth_mbps,
         status: rule.enabled ? 'active' : 'inactive',
@@ -69,17 +118,7 @@ export const useQosApi = {
   createQoSRule: async (nodeId, category, rule) => {
     try {
       const tenantId = requireCurrentTenantId()
-      
-      const payload = {
-        src_cidr: rule.src_cidr || '',
-        dst_cidr: rule.dst_cidr || '',
-        src_port: Number(rule.src_port || 0),
-        dst_port: Number(rule.dst_port || 0),
-        protocol: Number(rule.protocol || 0),
-        bandwidth_mbps: normalizeBandwidthMbps(rule),
-        description: rule.description || '',
-        enabled: rule.enabled !== false
-      }
+      const payload = normalizeRulePayload(rule)
 
       const response = await api.post(
         API_ENDPOINTS.TENANT.NODE_QOS(tenantId, nodeId, category),
@@ -111,16 +150,7 @@ export const useQosApi = {
   updateQoSRule: async (nodeId, category, ruleId, rule) => {
     try {
       const tenantId = requireCurrentTenantId()
-      const payload = {
-        src_cidr: rule.src_cidr || '',
-        dst_cidr: rule.dst_cidr || '',
-        src_port: Number(rule.src_port || 0),
-        dst_port: Number(rule.dst_port || 0),
-        protocol: Number(rule.protocol || 0),
-        bandwidth_mbps: normalizeBandwidthMbps(rule),
-        description: rule.description || '',
-        enabled: rule.enabled !== false
-      }
+      const payload = normalizeRulePayload(rule)
 
       const response = await api.put(
         API_ENDPOINTS.TENANT.NODE_QOS_RULE(tenantId, nodeId, category, ruleId),

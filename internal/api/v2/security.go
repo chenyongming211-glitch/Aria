@@ -88,6 +88,8 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		DstPort     int    `json:"dst_port"`
 		MaxPort     int    `json:"max_port"` // 兼容前端
 		Protocol    int    `json:"protocol"`
+		Direction   string `json:"direction"`
+		Ports       string `json:"ports"`
 		Priority    int    `json:"priority"`
 		Description string `json:"description"`
 	}
@@ -126,6 +128,8 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		DstCIDR:     dst,
 		DstPort:     port,
 		Protocol:    body.Protocol,
+		Direction:   body.Direction,
+		Ports:       body.Ports,
 		Priority:    body.Priority,
 		Enabled:     true,
 		Description: body.Description,
@@ -146,6 +150,8 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		"dst_cidr":    created.DstCIDR,
 		"dst_port":    created.DstPort,
 		"protocol":    created.Protocol,
+		"direction":   created.Direction,
+		"ports":       created.Ports,
 		"priority":    created.Priority,
 		"enabled":     created.Enabled,
 		"description": created.Description,
@@ -175,6 +181,8 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		DstPort     *int    `json:"dst_port"`
 		MaxPort     *int    `json:"max_port"`
 		Protocol    *int    `json:"protocol"`
+		Direction   *string `json:"direction"`
+		Ports       *string `json:"ports"`
 		Priority    *int    `json:"priority"`
 		Description *string `json:"description"`
 		Enabled     *bool   `json:"enabled"`
@@ -224,6 +232,12 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 	if body.Protocol != nil {
 		rule.Protocol = *body.Protocol
 	}
+	if body.Direction != nil {
+		rule.Direction = *body.Direction
+	}
+	if body.Ports != nil {
+		rule.Ports = *body.Ports
+	}
 	if body.Priority != nil {
 		rule.Priority = *body.Priority
 	}
@@ -249,6 +263,8 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		"dst_cidr":    updated.DstCIDR,
 		"dst_port":    updated.DstPort,
 		"protocol":    updated.Protocol,
+		"direction":   updated.Direction,
+		"ports":       updated.Ports,
 		"priority":    updated.Priority,
 		"enabled":     updated.Enabled,
 		"description": updated.Description,
@@ -476,6 +492,11 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		DstPort       int    `json:"dst_port"`
 		Protocol      int    `json:"protocol"`
 		BandwidthMbps int    `json:"bandwidth_mbps"`
+		Direction     string `json:"direction"`
+		RateBps       uint64 `json:"rate_bps"`
+		BurstBytes    uint64 `json:"burst_bytes"`
+		Priority      int    `json:"priority"`
+		Mode          string `json:"mode"`
 		Description   string `json:"description"`
 	}
 
@@ -498,6 +519,11 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		DstPort:       body.DstPort,
 		Protocol:      body.Protocol,
 		BandwidthMbps: body.BandwidthMbps,
+		Direction:     body.Direction,
+		RateBps:       body.RateBps,
+		BurstBytes:    body.BurstBytes,
+		Priority:      body.Priority,
+		Mode:          body.Mode,
 		Enabled:       true,
 		Description:   body.Description,
 	}
@@ -518,6 +544,11 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		"dst_port":       created.DstPort,
 		"protocol":       created.Protocol,
 		"bandwidth_mbps": created.BandwidthMbps,
+		"direction":      created.Direction,
+		"rate_bps":       created.RateBps,
+		"burst_bytes":    created.BurstBytes,
+		"priority":       created.Priority,
+		"mode":           created.Mode,
 		"enabled":        created.Enabled,
 		"description":    created.Description,
 		"created_at":     created.CreatedAt,
@@ -543,6 +574,11 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		DstPort       *int    `json:"dst_port"`
 		Protocol      *int    `json:"protocol"`
 		BandwidthMbps *int    `json:"bandwidth_mbps"`
+		Direction     *string `json:"direction"`
+		RateBps       *uint64 `json:"rate_bps"`
+		BurstBytes    *uint64 `json:"burst_bytes"`
+		Priority      *int    `json:"priority"`
+		Mode          *string `json:"mode"`
 		Description   *string `json:"description"`
 		Enabled       *bool   `json:"enabled"`
 	}
@@ -585,6 +621,21 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		}
 		rule.BandwidthMbps = *body.BandwidthMbps
 	}
+	if body.Direction != nil {
+		rule.Direction = *body.Direction
+	}
+	if body.RateBps != nil {
+		rule.RateBps = *body.RateBps
+	}
+	if body.BurstBytes != nil {
+		rule.BurstBytes = *body.BurstBytes
+	}
+	if body.Priority != nil {
+		rule.Priority = *body.Priority
+	}
+	if body.Mode != nil {
+		rule.Mode = *body.Mode
+	}
 	if body.Description != nil {
 		rule.Description = *body.Description
 	}
@@ -608,6 +659,11 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		"dst_port":       updated.DstPort,
 		"protocol":       updated.Protocol,
 		"bandwidth_mbps": updated.BandwidthMbps,
+		"direction":      updated.Direction,
+		"rate_bps":       updated.RateBps,
+		"burst_bytes":    updated.BurstBytes,
+		"priority":       updated.Priority,
+		"mode":           updated.Mode,
 		"enabled":        updated.Enabled,
 		"description":    updated.Description,
 		"updated_at":     updated.UpdatedAt,

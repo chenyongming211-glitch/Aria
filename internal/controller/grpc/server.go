@@ -173,12 +173,14 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 			if err := json.Unmarshal(aclBytes, &ruleList); err == nil {
 				for _, r := range ruleList {
 					aclRules = append(aclRules, &agentpb.ACLRule{
-						SrcNet:   getString(r, "src_net"),
-						DstNet:   getString(r, "dst_net"),
-						Protocol: getUint32(r, "protocol"),
-						MinPort:  getUint32(r, "min_port"),
-						MaxPort:  getUint32(r, "max_port"),
-						Action:   defaultACLAction(getString(r, "action")),
+						SrcNet:    getString(r, "src_net"),
+						DstNet:    getString(r, "dst_net"),
+						Protocol:  getUint32(r, "protocol"),
+						MinPort:   getUint32(r, "min_port"),
+						MaxPort:   getUint32(r, "max_port"),
+						Action:    defaultACLAction(getString(r, "action")),
+						Direction: getString(r, "direction"),
+						Ports:     getString(r, "ports"),
 					})
 				}
 			}
@@ -737,6 +739,11 @@ func (s *ControllerServer) getQoSRules(ctx context.Context, publicKey string) ([
 			DstPort:       uint32(rule.DstPort),
 			Protocol:      uint32(rule.Protocol),
 			BandwidthMbps: uint64(rule.BandwidthMbps),
+			Direction:     rule.Direction,
+			RateBps:       rule.RateBps,
+			BurstBytes:    rule.BurstBytes,
+			Priority:      uint32(rule.Priority),
+			Mode:          rule.Mode,
 		})
 	}
 

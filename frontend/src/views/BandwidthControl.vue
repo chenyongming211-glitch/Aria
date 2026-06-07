@@ -68,6 +68,22 @@
                   <el-tag type="danger" effect="plain">{{ row.bandwidth_mbps }} Mbps</el-tag>
                 </template>
               </el-table-column>
+              <el-table-column label="方向/模式" width="150">
+                <template #default="{ row }">
+                  <div class="qos-runtime-cell">
+                    <el-tag size="small" effect="plain">{{ formatDirection(row.direction) }}</el-tag>
+                    <span>{{ formatMode(row.mode) }}</span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="Runtime" width="160">
+                <template #default="{ row }">
+                  <div class="qos-runtime-cell">
+                    <span>{{ formatRate(row.rate_bps) }}</span>
+                    <small>burst {{ formatBytes(row.burst_bytes) }}</small>
+                  </div>
+                </template>
+              </el-table-column>
               <el-table-column label="同步状态" width="120">
                 <template #default="{ row }">
                   <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">{{ formatPolicyStatus(row.policyStatus) }}</el-tag>
@@ -100,6 +116,15 @@
                   <el-tag type="danger" effect="plain">{{ row.bandwidth_mbps }} Mbps</el-tag>
                 </template>
               </el-table-column>
+              <el-table-column label="方向/模式" width="150">
+                <template #default="{ row }">
+                  <div class="qos-runtime-cell">
+                    <el-tag size="small" effect="plain">{{ formatDirection(row.direction) }}</el-tag>
+                    <span>{{ formatMode(row.mode) }}</span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column prop="priority" label="优先级" width="90" />
               <el-table-column label="同步状态" width="120">
                 <template #default="{ row }">
                   <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">{{ formatPolicyStatus(row.policyStatus) }}</el-tag>
@@ -132,6 +157,15 @@
                   <el-tag type="danger" effect="plain">{{ row.bandwidth_mbps }} Mbps</el-tag>
                 </template>
               </el-table-column>
+              <el-table-column label="方向/模式" width="150">
+                <template #default="{ row }">
+                  <div class="qos-runtime-cell">
+                    <el-tag size="small" effect="plain">{{ formatDirection(row.direction) }}</el-tag>
+                    <span>{{ formatMode(row.mode) }}</span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column prop="priority" label="优先级" width="90" />
               <el-table-column label="同步状态" width="120">
                 <template #default="{ row }">
                   <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">{{ formatPolicyStatus(row.policyStatus) }}</el-tag>
@@ -187,6 +221,42 @@
           <el-input-number v-model="form.bandwidth_mbps" :min="1" :max="10000" style="width: 100%" />
           <span class="unit-text">Mbps</span>
         </el-form-item>
+
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="方向" prop="direction">
+              <el-select v-model="form.direction" style="width: 100%">
+                <el-option label="入站 ingress" value="ingress" />
+                <el-option label="出站 egress" value="egress" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="模式" prop="mode">
+              <el-select v-model="form.mode" style="width: 100%">
+                <el-option label="Policing" value="policing" />
+                <el-option label="Shaping" value="shaping" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-form-item label="优先级" prop="priority">
+          <el-input-number v-model="form.priority" :min="0" :max="255" style="width: 100%" />
+        </el-form-item>
+
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="Rate bps">
+              <el-input-number v-model="form.rate_bps" :min="0" :step="1000000" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="Burst bytes">
+              <el-input-number v-model="form.burst_bytes" :min="0" :step="1500" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -234,7 +304,12 @@ const form = reactive({
   dst_cidr: '',
   dst_port: 80,
   protocol: 6,
-  bandwidth_mbps: 100
+  bandwidth_mbps: 100,
+  direction: 'egress',
+  rate_bps: 0,
+  burst_bytes: 0,
+  priority: 0,
+  mode: 'policing'
 })
 
 const formRules = {
@@ -302,6 +377,31 @@ const formatPolicyStatus = (status) => {
   return map[status] || '待同步'
 }
 
+const formatDirection = (direction) => {
+  const map = { ingress: '入站', egress: '出站', both: '双向' }
+  return map[direction] || direction || '出站'
+}
+
+const formatMode = (mode) => {
+  const map = { policing: 'Policing', shaping: 'Shaping' }
+  return map[mode] || mode || 'Policing'
+}
+
+const formatRate = (rateBps) => {
+  const value = Number(rateBps || 0)
+  if (value >= 1000000000) return `${(value / 1000000000).toFixed(2)} Gbps`
+  if (value >= 1000000) return `${(value / 1000000).toFixed(1)} Mbps`
+  if (value >= 1000) return `${(value / 1000).toFixed(1)} Kbps`
+  return `${value} bps`
+}
+
+const formatBytes = (bytes) => {
+  const value = Number(bytes || 0)
+  if (value >= 1048576) return `${(value / 1048576).toFixed(1)} MB`
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${value} B`
+}
+
 const showAddDialog = () => {
   dialogVisible.value = true
 }
@@ -313,7 +413,12 @@ const resetForm = () => {
     dst_cidr: '',
     dst_port: 80,
     protocol: 6,
-    bandwidth_mbps: 100
+    bandwidth_mbps: 100,
+    direction: activeCategory.value === 'ip' ? 'ingress' : 'egress',
+    rate_bps: 0,
+    burst_bytes: 0,
+    priority: activeCategory.value === 'service' ? 10 : activeCategory.value === 'peers' ? 50 : 100,
+    mode: 'policing'
   })
   if (formRef.value) formRef.value.resetFields()
 }
@@ -387,5 +492,7 @@ useTenantChangeReload(reloadTenantScopedData)
 .tab-content { padding: 10px 0; }
 .tab-desc { color: #909399; font-size: 13px; margin-bottom: 20px; }
 .unit-text { margin-left: 10px; color: #606266; }
+.qos-runtime-cell { display: flex; flex-direction: column; gap: 4px; line-height: 1.25; }
+.qos-runtime-cell small { color: var(--aria-text-muted, #8a93a6); }
 code { background: #f4f4f5; padding: 2px 4px; border-radius: 4px; color: #cf9236; font-family: monospace; }
 </style>

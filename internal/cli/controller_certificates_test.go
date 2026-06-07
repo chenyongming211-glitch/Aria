@@ -794,14 +794,15 @@ func TestHandleRegister_CSRSuccessIncludesCertificateInSyncResponse(t *testing.T
 	// tenant ACL query returns empty rule list
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
-		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
+		       COALESCE(action, 'allow'), COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+		       enabled, priority, COALESCE(description, ''), created_at, updated_at
 		FROM acl_rules
 		WHERE tenant_id = $1 AND enabled = true
 		ORDER BY priority ASC, id ASC
 	`)).
 		WithArgs(tenantID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "src_node", "src_net", "dst_node", "dst_net", "protocol", "min_port", "max_port", "action", "enabled", "priority", "description", "created_at", "updated_at",
+			"id", "name", "src_node", "src_net", "dst_node", "dst_net", "protocol", "min_port", "max_port", "action", "direction", "ports", "enabled", "priority", "description", "created_at", "updated_at",
 		}))
 
 	// attachNodeCertificateToSyncResponse

@@ -276,6 +276,8 @@ func (s *Storage) Migrate() error {
 			protocol SMALLINT NOT NULL DEFAULT 0,
 			min_port INTEGER NOT NULL DEFAULT 0,
 			max_port INTEGER NOT NULL DEFAULT 65535,
+			direction VARCHAR(16) DEFAULT 'ingress',
+			ports TEXT,
 			enabled BOOLEAN DEFAULT true,
 			priority INTEGER DEFAULT 100,
 			description TEXT,
@@ -343,6 +345,8 @@ func (s *Storage) Migrate() error {
 		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS src_node VARCHAR(100)`,
 		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS dst_node VARCHAR(100)`,
 		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS action VARCHAR(10) DEFAULT 'allow'`,
+		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS direction VARCHAR(16) DEFAULT 'ingress'`,
+		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS ports TEXT`,
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_enabled ON acl_rules(enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_priority ON acl_rules(priority)`,
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_src_node ON acl_rules(src_node)`,
@@ -354,6 +358,11 @@ func (s *Storage) Migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_tenant_id ON acl_rules(tenant_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_qos_rules_tenant_node_category ON qos_rules(tenant_id, node_id, category)`,
 		`CREATE INDEX IF NOT EXISTS idx_qos_rules_enabled ON qos_rules(enabled)`,
+		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS direction VARCHAR(16) DEFAULT 'egress'`,
+		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS rate_bps BIGINT`,
+		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS burst_bytes BIGINT`,
+		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 0`,
+		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS mode VARCHAR(16) DEFAULT 'policing'`,
 		`CREATE INDEX IF NOT EXISTS idx_blacklist_rules_tenant_node_scope ON blacklist_rules(tenant_id, node_id, scope)`,
 		`CREATE INDEX IF NOT EXISTS idx_blacklist_rules_enabled ON blacklist_rules(enabled)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_unique ON users(username)`,
@@ -1445,6 +1454,8 @@ type ACLRule struct {
 	MinPort     uint16    `json:"min_port"`
 	MaxPort     uint16    `json:"max_port"`
 	Action      string    `json:"action"`
+	Direction   string    `json:"direction"`
+	Ports       string    `json:"ports"`
 	Enabled     bool      `json:"enabled"`
 	Priority    int       `json:"priority"`
 	Description string    `json:"description,omitempty"`
@@ -1452,18 +1463,39 @@ type ACLRule struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+func aclDirectionOrDefault(direction string) string {
+	if strings.TrimSpace(direction) == "" {
+		return "ingress"
+	}
+	return strings.TrimSpace(direction)
+}
+
+func aclPortsOrDefault(ports string, minPort, maxPort uint16) string {
+	if strings.TrimSpace(ports) != "" {
+		return strings.TrimSpace(ports)
+	}
+	if minPort == 0 && (maxPort == 0 || maxPort == 65535) {
+		return ""
+	}
+	if minPort == maxPort {
+		return fmt.Sprintf("%d", minPort)
+	}
+	return fmt.Sprintf("%d-%d", minPort, maxPort)
+}
+
 // SaveACLRule creates or updates an ACL rule.
 func (s *Storage) SaveACLRule(rule *ACLRule) error {
 	if rule.ID == uuid.Nil {
 		// Insert new rule
 		query := `
-			INSERT INTO acl_rules (name, src_node, src_net, dst_node, dst_net, protocol, min_port, max_port, action, enabled, priority, description)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			INSERT INTO acl_rules (name, src_node, src_net, dst_node, dst_net, protocol, min_port, max_port, action, direction, ports, enabled, priority, description)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			RETURNING id, created_at, updated_at
 		`
 		return s.db.QueryRow(query,
 			rule.Name, rule.SrcNode, rule.SrcNet, rule.DstNode, rule.DstNet, rule.Protocol,
-			rule.MinPort, rule.MaxPort, rule.Action, rule.Enabled, rule.Priority, rule.Description,
+			rule.MinPort, rule.MaxPort, rule.Action, aclDirectionOrDefault(rule.Direction), aclPortsOrDefault(rule.Ports, rule.MinPort, rule.MaxPort),
+			rule.Enabled, rule.Priority, rule.Description,
 		).Scan(&rule.ID, &rule.CreatedAt, &rule.UpdatedAt)
 	}
 
@@ -1472,13 +1504,14 @@ func (s *Storage) SaveACLRule(rule *ACLRule) error {
 		UPDATE acl_rules SET
 			name = $2, src_node = $3, src_net = $4, dst_node = $5, dst_net = $6, protocol = $7,
 			min_port = $8, max_port = $9, action = $10, enabled = $11, priority = $12,
-			description = $13, updated_at = NOW()
+			description = $13, direction = $14, ports = $15, updated_at = NOW()
 		WHERE id = $1
 		RETURNING updated_at
 	`
 	return s.db.QueryRow(query,
 		rule.ID, rule.Name, rule.SrcNode, rule.SrcNet, rule.DstNode, rule.DstNet, rule.Protocol,
 		rule.MinPort, rule.MaxPort, rule.Action, rule.Enabled, rule.Priority, rule.Description,
+		aclDirectionOrDefault(rule.Direction), aclPortsOrDefault(rule.Ports, rule.MinPort, rule.MaxPort),
 	).Scan(&rule.UpdatedAt)
 }
 
@@ -1486,13 +1519,14 @@ func (s *Storage) SaveACLRule(rule *ACLRule) error {
 func (s *Storage) GetACLRule(id uuid.UUID) (*ACLRule, error) {
 	query := `
 		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
-		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
+		       COALESCE(action, 'allow'), COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+		       enabled, priority, COALESCE(description, ''), created_at, updated_at
 		FROM acl_rules WHERE id = $1
 	`
 	rule := &ACLRule{}
 	err := s.db.QueryRow(query, id).Scan(
 		&rule.ID, &rule.Name, &rule.SrcNode, &rule.SrcNet, &rule.DstNode, &rule.DstNet, &rule.Protocol,
-		&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Enabled, &rule.Priority,
+		&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Direction, &rule.Ports, &rule.Enabled, &rule.Priority,
 		&rule.Description, &rule.CreatedAt, &rule.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -1505,13 +1539,14 @@ func (s *Storage) GetACLRule(id uuid.UUID) (*ACLRule, error) {
 func (s *Storage) GetACLRuleByTenant(id uuid.UUID, tenantID uuid.UUID) (*ACLRule, error) {
 	query := `
 		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
-		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
+		       COALESCE(action, 'allow'), COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+		       enabled, priority, COALESCE(description, ''), created_at, updated_at
 		FROM acl_rules WHERE id = $1 AND tenant_id = $2
 	`
 	rule := &ACLRule{}
 	err := s.db.QueryRow(query, id, tenantID).Scan(
 		&rule.ID, &rule.Name, &rule.SrcNode, &rule.SrcNet, &rule.DstNode, &rule.DstNet, &rule.Protocol,
-		&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Enabled, &rule.Priority,
+		&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Direction, &rule.Ports, &rule.Enabled, &rule.Priority,
 		&rule.Description, &rule.CreatedAt, &rule.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -1524,7 +1559,8 @@ func (s *Storage) GetACLRuleByTenant(id uuid.UUID, tenantID uuid.UUID) (*ACLRule
 func (s *Storage) GetAllACLRules() ([]*ACLRule, error) {
 	query := `
 		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
-		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
+		       COALESCE(action, 'allow'), COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+		       enabled, priority, COALESCE(description, ''), created_at, updated_at
 		FROM acl_rules
 		ORDER BY priority ASC, id ASC
 	`
@@ -1539,7 +1575,7 @@ func (s *Storage) GetAllACLRules() ([]*ACLRule, error) {
 		rule := &ACLRule{}
 		err := rows.Scan(
 			&rule.ID, &rule.Name, &rule.SrcNode, &rule.SrcNet, &rule.DstNode, &rule.DstNet, &rule.Protocol,
-			&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Enabled, &rule.Priority,
+			&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Direction, &rule.Ports, &rule.Enabled, &rule.Priority,
 			&rule.Description, &rule.CreatedAt, &rule.UpdatedAt,
 		)
 		if err != nil {
@@ -1554,7 +1590,7 @@ func (s *Storage) ScanACLRuleRows(rows *sql.Rows) (*ACLRule, error) {
 	rule := &ACLRule{}
 	err := rows.Scan(
 		&rule.ID, &rule.Name, &rule.SrcNode, &rule.SrcNet, &rule.DstNode, &rule.DstNet, &rule.Protocol,
-		&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Enabled, &rule.Priority,
+		&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Direction, &rule.Ports, &rule.Enabled, &rule.Priority,
 		&rule.Description, &rule.CreatedAt, &rule.UpdatedAt,
 	)
 	return rule, err
@@ -1564,7 +1600,8 @@ func (s *Storage) ScanACLRuleRows(rows *sql.Rows) (*ACLRule, error) {
 func (s *Storage) GetEnabledACLRulesByTenant(tenantID uuid.UUID) ([]*ACLRule, error) {
 	query := `
 		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
-		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
+		       COALESCE(action, 'allow'), COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+		       enabled, priority, COALESCE(description, ''), created_at, updated_at
 		FROM acl_rules
 		WHERE tenant_id = $1 AND enabled = true
 		ORDER BY priority ASC, id ASC
@@ -1590,7 +1627,8 @@ func (s *Storage) GetEnabledACLRulesByTenant(tenantID uuid.UUID) ([]*ACLRule, er
 func (s *Storage) GetEnabledACLRules() ([]*ACLRule, error) {
 	query := `
 		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
-		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
+		       COALESCE(action, 'allow'), COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+		       enabled, priority, COALESCE(description, ''), created_at, updated_at
 		FROM acl_rules
 		WHERE enabled = true
 		ORDER BY priority ASC, id ASC
@@ -1606,7 +1644,7 @@ func (s *Storage) GetEnabledACLRules() ([]*ACLRule, error) {
 		rule := &ACLRule{}
 		err := rows.Scan(
 			&rule.ID, &rule.Name, &rule.SrcNode, &rule.SrcNet, &rule.DstNode, &rule.DstNet, &rule.Protocol,
-			&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Enabled, &rule.Priority,
+			&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Direction, &rule.Ports, &rule.Enabled, &rule.Priority,
 			&rule.Description, &rule.CreatedAt, &rule.UpdatedAt,
 		)
 		if err != nil {
@@ -1621,7 +1659,8 @@ func (s *Storage) GetEnabledACLRules() ([]*ACLRule, error) {
 func (s *Storage) GetACLRulesByTenant(tenantID uuid.UUID) ([]*ACLRule, error) {
 	query := `
 		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
-		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
+		       COALESCE(action, 'allow'), COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+		       enabled, priority, COALESCE(description, ''), created_at, updated_at
 		FROM acl_rules
 		WHERE tenant_id = $1
 		ORDER BY priority ASC, id ASC
@@ -1637,7 +1676,7 @@ func (s *Storage) GetACLRulesByTenant(tenantID uuid.UUID) ([]*ACLRule, error) {
 		rule := &ACLRule{}
 		err := rows.Scan(
 			&rule.ID, &rule.Name, &rule.SrcNode, &rule.SrcNet, &rule.DstNode, &rule.DstNet, &rule.Protocol,
-			&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Enabled, &rule.Priority,
+			&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Direction, &rule.Ports, &rule.Enabled, &rule.Priority,
 			&rule.Description, &rule.CreatedAt, &rule.UpdatedAt,
 		)
 		if err != nil {
@@ -1692,12 +1731,13 @@ func (s *Storage) BulkSaveACLRulesByTenant(tenantID uuid.UUID, rules []*ACLRule)
 	// Insert new rules for this tenant
 	for _, rule := range rules {
 		query := `
-			INSERT INTO acl_rules (tenant_id, name, src_node, src_net, dst_node, dst_net, protocol, min_port, max_port, action, enabled, priority, description)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			INSERT INTO acl_rules (tenant_id, name, src_node, src_net, dst_node, dst_net, protocol, min_port, max_port, action, direction, ports, enabled, priority, description)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		`
 		if _, err := tx.Exec(query,
 			tenantID, rule.Name, rule.SrcNode, rule.SrcNet, rule.DstNode, rule.DstNet, rule.Protocol,
-			rule.MinPort, rule.MaxPort, rule.Action, rule.Enabled, rule.Priority, rule.Description,
+			rule.MinPort, rule.MaxPort, rule.Action, aclDirectionOrDefault(rule.Direction), aclPortsOrDefault(rule.Ports, rule.MinPort, rule.MaxPort),
+			rule.Enabled, rule.Priority, rule.Description,
 		); err != nil {
 			return err
 		}

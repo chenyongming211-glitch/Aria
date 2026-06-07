@@ -121,6 +121,8 @@ message ACLRule {
   uint32 min_port = 4;                // 最小端口（0=any）
   uint32 max_port = 5;                // 最大端口（65535=any）
   string action = 6;                  // 动作：allow 或 deny
+  string direction = 7;               // 方向：ingress、egress、both
+  string ports = 8;                   // 端口 bitmap 规则（如 "80-82,443:0"）
 }
 
 message QoSRule {
@@ -130,6 +132,11 @@ message QoSRule {
   uint32 dst_port = 4;                // 目标端口
   uint32 protocol = 5;                // 协议
   uint64 bandwidth_mbps = 6;          // 带宽限制
+  string direction = 7;               // 方向：ingress 或 egress
+  uint64 rate_bps = 8;                // 精确速率（bps）
+  uint64 burst_bytes = 9;             // 突发字节数
+  uint32 priority = 10;               // 优先级
+  string mode = 11;                   // policing 或 shaping
 }
 
 message BlacklistRule {

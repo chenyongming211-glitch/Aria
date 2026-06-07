@@ -58,6 +58,14 @@
           {{ row.dst_port || 0 }}
         </template>
       </el-table-column>
+      <el-table-column label="方向/端口规则" width="150">
+        <template #default="{ row }">
+          <div class="acl-runtime-cell">
+            <el-tag size="small" effect="plain">{{ formatDirection(row.direction) }}</el-tag>
+            <span>{{ row.ports || '-' }}</span>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column prop="protocol" label="协议" width="80">
         <template #default="{ row }">
           {{ getProtocolName(row.protocol) }}
@@ -159,7 +167,20 @@
               <el-input-number v-model="form.dst_port" :min="0" :max="65535" style="width: 100%" />
             </el-form-item>
           </el-col>
+          <el-col :span="12">
+            <el-form-item label="方向" prop="direction">
+              <el-select v-model="form.direction" style="width: 100%">
+                <el-option label="入站 ingress" value="ingress" />
+                <el-option label="出站 egress" value="egress" />
+                <el-option label="双向 both" value="both" />
+              </el-select>
+            </el-form-item>
+          </el-col>
         </el-row>
+
+        <el-form-item label="端口规则">
+          <el-input v-model="form.ports" placeholder="例如: 80-82,443；留空则使用目标端口" />
+        </el-form-item>
         
         <el-form-item label="动作" prop="action">
           <el-select v-model="form.action">
@@ -237,6 +258,8 @@ const form = reactive({
   dst_cidr: '',
   protocol: 6,
   dst_port: 0,
+  direction: 'ingress',
+  ports: '',
   action: 'allow',
   enabled: true,
   priority: 100,
@@ -344,7 +367,9 @@ const handleEdit = (row) => {
     node_id: row.node_id,
     src_cidr: row.src_cidr || row.src_net || '',
     dst_cidr: row.dst_cidr || row.dst_net || '',
-    dst_port: row.dst_port ?? row.max_port ?? 0
+    dst_port: row.dst_port ?? row.max_port ?? 0,
+    direction: row.direction || 'ingress',
+    ports: row.ports || ''
   })
   dialogVisible.value = true
 }
@@ -415,7 +440,7 @@ const resetForm = () => {
     node_id: tenantNodes.value[0]?.id || '',
     node_name: '',
     id: null, name: '', src_cidr: '', dst_cidr: '',
-    protocol: 6, dst_port: 0,
+    protocol: 6, dst_port: 0, direction: 'ingress', ports: '',
     action: 'allow', enabled: true, priority: 100, description: ''
   })
   if (formRef.value) formRef.value.resetFields()
@@ -434,6 +459,11 @@ const getActionName = (action) => {
 const getActionType = (action) => {
   const map = { allow: 'success', deny: 'danger' }
   return map[action] || ''
+}
+
+const formatDirection = (direction) => {
+  const map = { ingress: '入站', egress: '出站', both: '双向' }
+  return map[direction] || direction || '入站'
 }
 
 const formatPolicyStatus = (status) => {
@@ -488,4 +518,5 @@ useTenantChangeReload(reloadTenantScopedData)
 .filter-section { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
 .pagination-section { margin-top: 20px; display: flex; justify-content: flex-end; }
 .form-help { font-size: 12px; color: #909399; margin-top: 5px; }
+.acl-runtime-cell { display: flex; flex-direction: column; gap: 4px; line-height: 1.25; }
 </style>

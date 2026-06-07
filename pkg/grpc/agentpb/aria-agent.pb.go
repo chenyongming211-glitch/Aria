@@ -10,7 +10,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v4.25.3
-// source: aria-agent.proto
+// source: pkg/grpc/agentpb/aria-agent.proto
 
 package agentpb
 
@@ -52,7 +52,7 @@ type RegisterRequest struct {
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_aria_agent_proto_msgTypes[0]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -64,7 +64,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[0]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -77,7 +77,7 @@ func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterRequest.ProtoReflect.Descriptor instead.
 func (*RegisterRequest) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{0}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *RegisterRequest) GetPublicKey() string {
@@ -191,7 +191,7 @@ type RegisterResponse struct {
 
 func (x *RegisterResponse) Reset() {
 	*x = RegisterResponse{}
-	mi := &file_aria_agent_proto_msgTypes[1]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -203,7 +203,7 @@ func (x *RegisterResponse) String() string {
 func (*RegisterResponse) ProtoMessage() {}
 
 func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[1]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -216,7 +216,7 @@ func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterResponse.ProtoReflect.Descriptor instead.
 func (*RegisterResponse) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{1}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *RegisterResponse) GetAssignedIp() string {
@@ -269,7 +269,7 @@ type SyncRequest struct {
 
 func (x *SyncRequest) Reset() {
 	*x = SyncRequest{}
-	mi := &file_aria_agent_proto_msgTypes[2]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -281,7 +281,7 @@ func (x *SyncRequest) String() string {
 func (*SyncRequest) ProtoMessage() {}
 
 func (x *SyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[2]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -294,7 +294,7 @@ func (x *SyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncRequest.ProtoReflect.Descriptor instead.
 func (*SyncRequest) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{2}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *SyncRequest) GetPublicKey() string {
@@ -366,7 +366,7 @@ type SyncResponse struct {
 
 func (x *SyncResponse) Reset() {
 	*x = SyncResponse{}
-	mi := &file_aria_agent_proto_msgTypes[3]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -378,7 +378,7 @@ func (x *SyncResponse) String() string {
 func (*SyncResponse) ProtoMessage() {}
 
 func (x *SyncResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[3]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -391,7 +391,7 @@ func (x *SyncResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncResponse.ProtoReflect.Descriptor instead.
 func (*SyncResponse) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{3}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *SyncResponse) GetPeers() []*PeerInfo {
@@ -496,7 +496,7 @@ type PeerInfo struct {
 
 func (x *PeerInfo) Reset() {
 	*x = PeerInfo{}
-	mi := &file_aria_agent_proto_msgTypes[4]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -508,7 +508,7 @@ func (x *PeerInfo) String() string {
 func (*PeerInfo) ProtoMessage() {}
 
 func (x *PeerInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[4]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -521,7 +521,7 @@ func (x *PeerInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerInfo.ProtoReflect.Descriptor instead.
 func (*PeerInfo) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{4}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *PeerInfo) GetPublicKey() string {
@@ -602,13 +602,15 @@ type ACLRule struct {
 	MinPort       uint32                 `protobuf:"varint,4,opt,name=min_port,json=minPort,proto3" json:"min_port,omitempty"` // 最小端口（0=any）
 	MaxPort       uint32                 `protobuf:"varint,5,opt,name=max_port,json=maxPort,proto3" json:"max_port,omitempty"` // 最大端口（65535=any）
 	Action        string                 `protobuf:"bytes,6,opt,name=action,proto3" json:"action,omitempty"`                   // 动作：allow 或 deny
+	Direction     string                 `protobuf:"bytes,7,opt,name=direction,proto3" json:"direction,omitempty"`             // 方向：ingress、egress、both
+	Ports         string                 `protobuf:"bytes,8,opt,name=ports,proto3" json:"ports,omitempty"`                     // 端口 bitmap 规则（如 "80-82,443:0"）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ACLRule) Reset() {
 	*x = ACLRule{}
-	mi := &file_aria_agent_proto_msgTypes[5]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -620,7 +622,7 @@ func (x *ACLRule) String() string {
 func (*ACLRule) ProtoMessage() {}
 
 func (x *ACLRule) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[5]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -633,7 +635,7 @@ func (x *ACLRule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ACLRule.ProtoReflect.Descriptor instead.
 func (*ACLRule) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{5}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ACLRule) GetSrcNet() string {
@@ -678,6 +680,20 @@ func (x *ACLRule) GetAction() string {
 	return ""
 }
 
+func (x *ACLRule) GetDirection() string {
+	if x != nil {
+		return x.Direction
+	}
+	return ""
+}
+
+func (x *ACLRule) GetPorts() string {
+	if x != nil {
+		return x.Ports
+	}
+	return ""
+}
+
 type QoSRule struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SrcIp         string                 `protobuf:"bytes,1,opt,name=src_ip,json=srcIp,proto3" json:"src_ip,omitempty"`                          // 源 IP
@@ -686,13 +702,18 @@ type QoSRule struct {
 	DstPort       uint32                 `protobuf:"varint,4,opt,name=dst_port,json=dstPort,proto3" json:"dst_port,omitempty"`                   // 目标端口
 	Protocol      uint32                 `protobuf:"varint,5,opt,name=protocol,proto3" json:"protocol,omitempty"`                                // 协议
 	BandwidthMbps uint64                 `protobuf:"varint,6,opt,name=bandwidth_mbps,json=bandwidthMbps,proto3" json:"bandwidth_mbps,omitempty"` // 带宽限制
+	Direction     string                 `protobuf:"bytes,7,opt,name=direction,proto3" json:"direction,omitempty"`                               // 方向：ingress 或 egress
+	RateBps       uint64                 `protobuf:"varint,8,opt,name=rate_bps,json=rateBps,proto3" json:"rate_bps,omitempty"`                   // 精确速率（bps）
+	BurstBytes    uint64                 `protobuf:"varint,9,opt,name=burst_bytes,json=burstBytes,proto3" json:"burst_bytes,omitempty"`          // 突发字节数
+	Priority      uint32                 `protobuf:"varint,10,opt,name=priority,proto3" json:"priority,omitempty"`                               // 优先级
+	Mode          string                 `protobuf:"bytes,11,opt,name=mode,proto3" json:"mode,omitempty"`                                        // policing 或 shaping
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *QoSRule) Reset() {
 	*x = QoSRule{}
-	mi := &file_aria_agent_proto_msgTypes[6]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -704,7 +725,7 @@ func (x *QoSRule) String() string {
 func (*QoSRule) ProtoMessage() {}
 
 func (x *QoSRule) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[6]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -717,7 +738,7 @@ func (x *QoSRule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QoSRule.ProtoReflect.Descriptor instead.
 func (*QoSRule) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{6}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *QoSRule) GetSrcIp() string {
@@ -762,6 +783,41 @@ func (x *QoSRule) GetBandwidthMbps() uint64 {
 	return 0
 }
 
+func (x *QoSRule) GetDirection() string {
+	if x != nil {
+		return x.Direction
+	}
+	return ""
+}
+
+func (x *QoSRule) GetRateBps() uint64 {
+	if x != nil {
+		return x.RateBps
+	}
+	return 0
+}
+
+func (x *QoSRule) GetBurstBytes() uint64 {
+	if x != nil {
+		return x.BurstBytes
+	}
+	return 0
+}
+
+func (x *QoSRule) GetPriority() uint32 {
+	if x != nil {
+		return x.Priority
+	}
+	return 0
+}
+
+func (x *QoSRule) GetMode() string {
+	if x != nil {
+		return x.Mode
+	}
+	return ""
+}
+
 type BlacklistRule struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Scope         string                 `protobuf:"bytes,1,opt,name=scope,proto3" json:"scope,omitempty"` // src, dst, ports
@@ -773,7 +829,7 @@ type BlacklistRule struct {
 
 func (x *BlacklistRule) Reset() {
 	*x = BlacklistRule{}
-	mi := &file_aria_agent_proto_msgTypes[7]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -785,7 +841,7 @@ func (x *BlacklistRule) String() string {
 func (*BlacklistRule) ProtoMessage() {}
 
 func (x *BlacklistRule) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[7]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -798,7 +854,7 @@ func (x *BlacklistRule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BlacklistRule.ProtoReflect.Descriptor instead.
 func (*BlacklistRule) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{7}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *BlacklistRule) GetScope() string {
@@ -834,7 +890,7 @@ type SyncConfigRequest struct {
 
 func (x *SyncConfigRequest) Reset() {
 	*x = SyncConfigRequest{}
-	mi := &file_aria_agent_proto_msgTypes[8]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -846,7 +902,7 @@ func (x *SyncConfigRequest) String() string {
 func (*SyncConfigRequest) ProtoMessage() {}
 
 func (x *SyncConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[8]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -859,7 +915,7 @@ func (x *SyncConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncConfigRequest.ProtoReflect.Descriptor instead.
 func (*SyncConfigRequest) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{8}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SyncConfigRequest) GetPeers() []*PeerConfig {
@@ -900,7 +956,7 @@ type SyncConfigResponse struct {
 
 func (x *SyncConfigResponse) Reset() {
 	*x = SyncConfigResponse{}
-	mi := &file_aria_agent_proto_msgTypes[9]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -912,7 +968,7 @@ func (x *SyncConfigResponse) String() string {
 func (*SyncConfigResponse) ProtoMessage() {}
 
 func (x *SyncConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[9]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -925,7 +981,7 @@ func (x *SyncConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncConfigResponse.ProtoReflect.Descriptor instead.
 func (*SyncConfigResponse) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{9}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SyncConfigResponse) GetSuccess() bool {
@@ -954,7 +1010,7 @@ type PeerConfig struct {
 
 func (x *PeerConfig) Reset() {
 	*x = PeerConfig{}
-	mi := &file_aria_agent_proto_msgTypes[10]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -966,7 +1022,7 @@ func (x *PeerConfig) String() string {
 func (*PeerConfig) ProtoMessage() {}
 
 func (x *PeerConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[10]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -979,7 +1035,7 @@ func (x *PeerConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerConfig.ProtoReflect.Descriptor instead.
 func (*PeerConfig) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{10}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *PeerConfig) GetPublicKey() string {
@@ -1019,7 +1075,7 @@ type HealthCheckRequest struct {
 
 func (x *HealthCheckRequest) Reset() {
 	*x = HealthCheckRequest{}
-	mi := &file_aria_agent_proto_msgTypes[11]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1031,7 +1087,7 @@ func (x *HealthCheckRequest) String() string {
 func (*HealthCheckRequest) ProtoMessage() {}
 
 func (x *HealthCheckRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[11]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1044,7 +1100,7 @@ func (x *HealthCheckRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheckRequest.ProtoReflect.Descriptor instead.
 func (*HealthCheckRequest) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{11}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *HealthCheckRequest) GetAgentId() string {
@@ -1065,7 +1121,7 @@ type HealthCheckResponse struct {
 
 func (x *HealthCheckResponse) Reset() {
 	*x = HealthCheckResponse{}
-	mi := &file_aria_agent_proto_msgTypes[12]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1077,7 +1133,7 @@ func (x *HealthCheckResponse) String() string {
 func (*HealthCheckResponse) ProtoMessage() {}
 
 func (x *HealthCheckResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[12]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1090,7 +1146,7 @@ func (x *HealthCheckResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheckResponse.ProtoReflect.Descriptor instead.
 func (*HealthCheckResponse) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{12}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *HealthCheckResponse) GetHealthy() bool {
@@ -1128,7 +1184,7 @@ type AgentStats struct {
 
 func (x *AgentStats) Reset() {
 	*x = AgentStats{}
-	mi := &file_aria_agent_proto_msgTypes[13]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1140,7 +1196,7 @@ func (x *AgentStats) String() string {
 func (*AgentStats) ProtoMessage() {}
 
 func (x *AgentStats) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[13]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1153,7 +1209,7 @@ func (x *AgentStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentStats.ProtoReflect.Descriptor instead.
 func (*AgentStats) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{13}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *AgentStats) GetTotalPeers() uint64 {
@@ -1208,7 +1264,7 @@ type ReportStatsRequest struct {
 
 func (x *ReportStatsRequest) Reset() {
 	*x = ReportStatsRequest{}
-	mi := &file_aria_agent_proto_msgTypes[14]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1220,7 +1276,7 @@ func (x *ReportStatsRequest) String() string {
 func (*ReportStatsRequest) ProtoMessage() {}
 
 func (x *ReportStatsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[14]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1233,7 +1289,7 @@ func (x *ReportStatsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportStatsRequest.ProtoReflect.Descriptor instead.
 func (*ReportStatsRequest) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{14}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ReportStatsRequest) GetAgentId() string {
@@ -1259,7 +1315,7 @@ type ReportStatsResponse struct {
 
 func (x *ReportStatsResponse) Reset() {
 	*x = ReportStatsResponse{}
-	mi := &file_aria_agent_proto_msgTypes[15]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1271,7 +1327,7 @@ func (x *ReportStatsResponse) String() string {
 func (*ReportStatsResponse) ProtoMessage() {}
 
 func (x *ReportStatsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[15]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1284,7 +1340,7 @@ func (x *ReportStatsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportStatsResponse.ProtoReflect.Descriptor instead.
 func (*ReportStatsResponse) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{15}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ReportStatsResponse) GetSuccess() bool {
@@ -1308,7 +1364,7 @@ type CommandRequest struct {
 
 func (x *CommandRequest) Reset() {
 	*x = CommandRequest{}
-	mi := &file_aria_agent_proto_msgTypes[16]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1320,7 +1376,7 @@ func (x *CommandRequest) String() string {
 func (*CommandRequest) ProtoMessage() {}
 
 func (x *CommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[16]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1333,7 +1389,7 @@ func (x *CommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandRequest.ProtoReflect.Descriptor instead.
 func (*CommandRequest) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{16}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *CommandRequest) GetCommandId() string {
@@ -1393,7 +1449,7 @@ type CommandResponse struct {
 
 func (x *CommandResponse) Reset() {
 	*x = CommandResponse{}
-	mi := &file_aria_agent_proto_msgTypes[17]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1405,7 +1461,7 @@ func (x *CommandResponse) String() string {
 func (*CommandResponse) ProtoMessage() {}
 
 func (x *CommandResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[17]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1418,7 +1474,7 @@ func (x *CommandResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResponse.ProtoReflect.Descriptor instead.
 func (*CommandResponse) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{17}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *CommandResponse) GetCommandId() string {
@@ -1504,7 +1560,7 @@ type MetricsReportRequest struct {
 
 func (x *MetricsReportRequest) Reset() {
 	*x = MetricsReportRequest{}
-	mi := &file_aria_agent_proto_msgTypes[18]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1516,7 +1572,7 @@ func (x *MetricsReportRequest) String() string {
 func (*MetricsReportRequest) ProtoMessage() {}
 
 func (x *MetricsReportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[18]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1529,7 +1585,7 @@ func (x *MetricsReportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetricsReportRequest.ProtoReflect.Descriptor instead.
 func (*MetricsReportRequest) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{18}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *MetricsReportRequest) GetAgentId() string {
@@ -1696,7 +1752,7 @@ type MetricsReportResponse struct {
 
 func (x *MetricsReportResponse) Reset() {
 	*x = MetricsReportResponse{}
-	mi := &file_aria_agent_proto_msgTypes[19]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1708,7 +1764,7 @@ func (x *MetricsReportResponse) String() string {
 func (*MetricsReportResponse) ProtoMessage() {}
 
 func (x *MetricsReportResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aria_agent_proto_msgTypes[19]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1721,7 +1777,7 @@ func (x *MetricsReportResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetricsReportResponse.ProtoReflect.Descriptor instead.
 func (*MetricsReportResponse) Descriptor() ([]byte, []int) {
-	return file_aria_agent_proto_rawDescGZIP(), []int{19}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *MetricsReportResponse) GetSuccess() bool {
@@ -1738,11 +1794,11 @@ func (x *MetricsReportResponse) GetMessage() string {
 	return ""
 }
 
-var File_aria_agent_proto protoreflect.FileDescriptor
+var File_pkg_grpc_agentpb_aria_agent_proto protoreflect.FileDescriptor
 
-const file_aria_agent_proto_rawDesc = "" +
+const file_pkg_grpc_agentpb_aria_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x10aria-agent.proto\x12\n" +
+	"!pkg/grpc/agentpb/aria-agent.proto\x12\n" +
 	"aria.agent\"\xcb\x03\n" +
 	"\x0fRegisterRequest\x12\x1d\n" +
 	"\n" +
@@ -1813,21 +1869,30 @@ const file_aria_agent_proto_rawDesc = "" +
 	"assignedIp\x12\x12\n" +
 	"\x04role\x18\t \x01(\tR\x04role\x12+\n" +
 	"\x11advertised_routes\x18\n" +
-	" \x03(\tR\x10advertisedRoutes\"\xa5\x01\n" +
+	" \x03(\tR\x10advertisedRoutes\"\xd9\x01\n" +
 	"\aACLRule\x12\x17\n" +
 	"\asrc_net\x18\x01 \x01(\tR\x06srcNet\x12\x17\n" +
 	"\adst_net\x18\x02 \x01(\tR\x06dstNet\x12\x1a\n" +
 	"\bprotocol\x18\x03 \x01(\rR\bprotocol\x12\x19\n" +
 	"\bmin_port\x18\x04 \x01(\rR\aminPort\x12\x19\n" +
 	"\bmax_port\x18\x05 \x01(\rR\amaxPort\x12\x16\n" +
-	"\x06action\x18\x06 \x01(\tR\x06action\"\xb0\x01\n" +
+	"\x06action\x18\x06 \x01(\tR\x06action\x12\x1c\n" +
+	"\tdirection\x18\a \x01(\tR\tdirection\x12\x14\n" +
+	"\x05ports\x18\b \x01(\tR\x05ports\"\xba\x02\n" +
 	"\aQoSRule\x12\x15\n" +
 	"\x06src_ip\x18\x01 \x01(\tR\x05srcIp\x12\x15\n" +
 	"\x06dst_ip\x18\x02 \x01(\tR\x05dstIp\x12\x19\n" +
 	"\bsrc_port\x18\x03 \x01(\rR\asrcPort\x12\x19\n" +
 	"\bdst_port\x18\x04 \x01(\rR\adstPort\x12\x1a\n" +
 	"\bprotocol\x18\x05 \x01(\rR\bprotocol\x12%\n" +
-	"\x0ebandwidth_mbps\x18\x06 \x01(\x04R\rbandwidthMbps\"M\n" +
+	"\x0ebandwidth_mbps\x18\x06 \x01(\x04R\rbandwidthMbps\x12\x1c\n" +
+	"\tdirection\x18\a \x01(\tR\tdirection\x12\x19\n" +
+	"\brate_bps\x18\b \x01(\x04R\arateBps\x12\x1f\n" +
+	"\vburst_bytes\x18\t \x01(\x04R\n" +
+	"burstBytes\x12\x1a\n" +
+	"\bpriority\x18\n" +
+	" \x01(\rR\bpriority\x12\x12\n" +
+	"\x04mode\x18\v \x01(\tR\x04mode\"M\n" +
 	"\rBlacklistRule\x12\x14\n" +
 	"\x05scope\x18\x01 \x01(\tR\x05scope\x12\x12\n" +
 	"\x04cidr\x18\x02 \x01(\tR\x04cidr\x12\x12\n" +
@@ -1939,19 +2004,19 @@ const file_aria_agent_proto_rawDesc = "" +
 	"\vReportStats\x12\x1e.aria.agent.ReportStatsRequest\x1a\x1f.aria.agent.ReportStatsResponseB\x17Z\x15aria/pkg/grpc/agentpbb\x06proto3"
 
 var (
-	file_aria_agent_proto_rawDescOnce sync.Once
-	file_aria_agent_proto_rawDescData []byte
+	file_pkg_grpc_agentpb_aria_agent_proto_rawDescOnce sync.Once
+	file_pkg_grpc_agentpb_aria_agent_proto_rawDescData []byte
 )
 
-func file_aria_agent_proto_rawDescGZIP() []byte {
-	file_aria_agent_proto_rawDescOnce.Do(func() {
-		file_aria_agent_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_aria_agent_proto_rawDesc), len(file_aria_agent_proto_rawDesc)))
+func file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP() []byte {
+	file_pkg_grpc_agentpb_aria_agent_proto_rawDescOnce.Do(func() {
+		file_pkg_grpc_agentpb_aria_agent_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_pkg_grpc_agentpb_aria_agent_proto_rawDesc), len(file_pkg_grpc_agentpb_aria_agent_proto_rawDesc)))
 	})
-	return file_aria_agent_proto_rawDescData
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescData
 }
 
-var file_aria_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
-var file_aria_agent_proto_goTypes = []any{
+var file_pkg_grpc_agentpb_aria_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_pkg_grpc_agentpb_aria_agent_proto_goTypes = []any{
 	(*RegisterRequest)(nil),       // 0: aria.agent.RegisterRequest
 	(*RegisterResponse)(nil),      // 1: aria.agent.RegisterResponse
 	(*SyncRequest)(nil),           // 2: aria.agent.SyncRequest
@@ -1977,7 +2042,7 @@ var file_aria_agent_proto_goTypes = []any{
 	nil,                           // 22: aria.agent.CommandResponse.ResultEntry
 	nil,                           // 23: aria.agent.MetricsReportRequest.CustomMetricsEntry
 }
-var file_aria_agent_proto_depIdxs = []int32{
+var file_pkg_grpc_agentpb_aria_agent_proto_depIdxs = []int32{
 	4,  // 0: aria.agent.SyncResponse.peers:type_name -> aria.agent.PeerInfo
 	5,  // 1: aria.agent.SyncResponse.acl_rules:type_name -> aria.agent.ACLRule
 	6,  // 2: aria.agent.SyncResponse.qos_rules:type_name -> aria.agent.QoSRule
@@ -2013,26 +2078,26 @@ var file_aria_agent_proto_depIdxs = []int32{
 	0,  // [0:14] is the sub-list for field type_name
 }
 
-func init() { file_aria_agent_proto_init() }
-func file_aria_agent_proto_init() {
-	if File_aria_agent_proto != nil {
+func init() { file_pkg_grpc_agentpb_aria_agent_proto_init() }
+func file_pkg_grpc_agentpb_aria_agent_proto_init() {
+	if File_pkg_grpc_agentpb_aria_agent_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aria_agent_proto_rawDesc), len(file_aria_agent_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_grpc_agentpb_aria_agent_proto_rawDesc), len(file_pkg_grpc_agentpb_aria_agent_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
-		GoTypes:           file_aria_agent_proto_goTypes,
-		DependencyIndexes: file_aria_agent_proto_depIdxs,
-		MessageInfos:      file_aria_agent_proto_msgTypes,
+		GoTypes:           file_pkg_grpc_agentpb_aria_agent_proto_goTypes,
+		DependencyIndexes: file_pkg_grpc_agentpb_aria_agent_proto_depIdxs,
+		MessageInfos:      file_pkg_grpc_agentpb_aria_agent_proto_msgTypes,
 	}.Build()
-	File_aria_agent_proto = out.File
-	file_aria_agent_proto_goTypes = nil
-	file_aria_agent_proto_depIdxs = nil
+	File_pkg_grpc_agentpb_aria_agent_proto = out.File
+	file_pkg_grpc_agentpb_aria_agent_proto_goTypes = nil
+	file_pkg_grpc_agentpb_aria_agent_proto_depIdxs = nil
 }

@@ -261,7 +261,9 @@ func expectEmptyQoSRules(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 		WithArgs(tenantID, nodeID).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "category", "src_cidr", "dst_cidr",
-			"src_port", "dst_port", "protocol", "bandwidth_mbps", "enabled", "description", "created_at", "updated_at",
+			"src_port", "dst_port", "protocol", "bandwidth_mbps", "direction",
+			"rate_bps", "burst_bytes", "priority", "mode", "enabled", "description",
+			"created_at", "updated_at",
 		}))
 }
 

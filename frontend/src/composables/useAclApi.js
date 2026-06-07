@@ -13,11 +13,14 @@ if (typeof window !== 'undefined') {
 
 function normalizeRuleRecord(rule, nodeId) {
   const dstPort = Number(rule.dst_port ?? rule.max_port ?? 0)
+  const ports = rule.ports || (dstPort > 0 ? String(dstPort) : '')
   return {
     ...rule,
     node_id: nodeId,
     name: rule.name || '',
     action: rule.action || 'allow',
+    direction: rule.direction || 'ingress',
+    ports,
     src_cidr: rule.src_cidr || rule.src_net || '',
     dst_cidr: rule.dst_cidr || rule.dst_net || '',
     dst_port: dstPort,
@@ -53,12 +56,15 @@ function normalizeRulePayload(rule) {
   const srcCIDR = rule.src_cidr || rule.src_net || ''
   const dstCIDR = rule.dst_cidr || rule.dst_net || ''
   const dstPort = Number(rule.dst_port ?? rule.max_port ?? 0)
+  const ports = rule.ports || (dstPort > 0 ? String(dstPort) : '')
   const payload = {
     name: rule.name,
     src_cidr: srcCIDR,
     dst_cidr: dstCIDR,
     protocol: Number(rule.protocol || 0),
     dst_port: dstPort,
+    direction: rule.direction || 'ingress',
+    ports,
     action: rule.action,
     enabled: rule.enabled !== false,
     priority: Number(rule.priority || 100),

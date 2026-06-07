@@ -23,7 +23,11 @@ func TestBuildTenantNodeQoSPoliciesReturnsCategoryErrors(t *testing.T) {
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, category, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
-		        bandwidth_mbps, enabled, COALESCE(description, ''), created_at, updated_at
+		        bandwidth_mbps, COALESCE(direction, 'egress'),
+		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
+		        COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
+		        COALESCE(priority, 0), COALESCE(mode, 'policing'),
+		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE tenant_id = $1 AND node_id = $2 AND category = $3
 		  ORDER BY created_at DESC`)).

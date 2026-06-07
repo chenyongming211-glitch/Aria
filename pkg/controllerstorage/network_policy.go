@@ -30,6 +30,11 @@ type QoSRuleRecord struct {
 	DstPort       int       `json:"dst_port"`
 	Protocol      int       `json:"protocol"`
 	BandwidthMbps int       `json:"bandwidth_mbps"`
+	Direction     string    `json:"direction"`
+	RateBps       uint64    `json:"rate_bps"`
+	BurstBytes    uint64    `json:"burst_bytes"`
+	Priority      int       `json:"priority"`
+	Mode          string    `json:"mode"`
 	Enabled       bool      `json:"enabled"`
 	Description   string    `json:"description"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -46,6 +51,8 @@ type ACLRuleRecord struct {
 	DstCIDR     string    `json:"dst_cidr"`
 	DstPort     int       `json:"dst_port"`
 	Protocol    int       `json:"protocol"`
+	Direction   string    `json:"direction"`
+	Ports       string    `json:"ports"`
 	Priority    int       `json:"priority"`
 	Enabled     bool      `json:"enabled"`
 	Description string    `json:"description"`
@@ -70,7 +77,11 @@ func (s *Storage) ListTenantNodeQoSRules(tenantID, nodeID uuid.UUID, category st
 	rows, err := s.db.Query(
 		`SELECT id, tenant_id, node_id, category, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
-		        bandwidth_mbps, enabled, COALESCE(description, ''), created_at, updated_at
+		        bandwidth_mbps, COALESCE(direction, 'egress'),
+		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
+		        COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
+		        COALESCE(priority, 0), COALESCE(mode, 'policing'),
+		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE tenant_id = $1 AND node_id = $2 AND category = $3
 		  ORDER BY created_at DESC`,
@@ -94,12 +105,17 @@ func (s *Storage) ListTenantNodeQoSRules(tenantID, nodeID uuid.UUID, category st
 
 func (s *Storage) CreateTenantNodeQoSRule(rule *QoSRuleRecord) (*QoSRuleRecord, error) {
 	created := &QoSRuleRecord{}
+	normalizeQoSRuntimeFields(rule)
 	err := s.db.QueryRow(
-		`INSERT INTO qos_rules (tenant_id, node_id, category, src_cidr, dst_cidr, src_port, dst_port, protocol, bandwidth_mbps, enabled, description)
-		 VALUES ($1, $2, $3, NULLIF($4, '')::cidr, NULLIF($5, '')::cidr, $6, $7, $8, $9, $10, $11)
+		`INSERT INTO qos_rules (tenant_id, node_id, category, src_cidr, dst_cidr, src_port, dst_port, protocol, bandwidth_mbps, direction, rate_bps, burst_bytes, priority, mode, enabled, description)
+		 VALUES ($1, $2, $3, NULLIF($4, '')::cidr, NULLIF($5, '')::cidr, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		 RETURNING id, tenant_id, node_id, category, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		           COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
-		           bandwidth_mbps, enabled, COALESCE(description, ''), created_at, updated_at`,
+		           bandwidth_mbps, COALESCE(direction, 'egress'),
+		           COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
+		           COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
+		           COALESCE(priority, 0), COALESCE(mode, 'policing'),
+		           enabled, COALESCE(description, ''), created_at, updated_at`,
 		rule.TenantID,
 		rule.NodeID,
 		rule.Category,
@@ -109,6 +125,11 @@ func (s *Storage) CreateTenantNodeQoSRule(rule *QoSRuleRecord) (*QoSRuleRecord, 
 		nullableInt(rule.DstPort),
 		nullableInt(rule.Protocol),
 		rule.BandwidthMbps,
+		rule.Direction,
+		rule.RateBps,
+		rule.BurstBytes,
+		rule.Priority,
+		rule.Mode,
 		rule.Enabled,
 		strings.TrimSpace(rule.Description),
 	).Scan(
@@ -122,6 +143,11 @@ func (s *Storage) CreateTenantNodeQoSRule(rule *QoSRuleRecord) (*QoSRuleRecord, 
 		&created.DstPort,
 		&created.Protocol,
 		&created.BandwidthMbps,
+		&created.Direction,
+		&created.RateBps,
+		&created.BurstBytes,
+		&created.Priority,
+		&created.Mode,
 		&created.Enabled,
 		&created.Description,
 		&created.CreatedAt,
@@ -167,7 +193,11 @@ func (s *Storage) GetTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, categ
 	rule, err := scanQoSRule(s.db.QueryRow(
 		`SELECT id, tenant_id, node_id, category, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
-		        bandwidth_mbps, enabled, COALESCE(description, ''), created_at, updated_at
+		        bandwidth_mbps, COALESCE(direction, 'egress'),
+		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
+		        COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
+		        COALESCE(priority, 0), COALESCE(mode, 'policing'),
+		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE id = $1 AND tenant_id = $2 AND node_id = $3 AND category = $4`,
 		ruleID, tenantID, nodeID, category,
@@ -179,17 +209,20 @@ func (s *Storage) GetTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, categ
 }
 
 func (s *Storage) UpdateTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, category string, rule *QoSRuleRecord) (*QoSRuleRecord, error) {
+	normalizeQoSRuntimeFields(rule)
 	result, err := s.db.Exec(
 		`UPDATE qos_rules SET
 			src_cidr = NULLIF($5, ''), dst_cidr = NULLIF($6, ''),
 			src_port = $7, dst_port = $8, protocol = $9,
-			bandwidth_mbps = $10, description = $11,
-			enabled = $12, updated_at = NOW()
+			bandwidth_mbps = $10, direction = $11, rate_bps = $12, burst_bytes = $13,
+			priority = $14, mode = $15, description = $16,
+			enabled = $17, updated_at = NOW()
 		 WHERE id = $1 AND tenant_id = $2 AND node_id = $3 AND category = $4`,
 		ruleID, tenantID, nodeID, category,
 		rule.SrcCIDR, rule.DstCIDR,
 		rule.SrcPort, rule.DstPort, rule.Protocol,
-		rule.BandwidthMbps, rule.Description, rule.Enabled,
+		rule.BandwidthMbps, rule.Direction, rule.RateBps, rule.BurstBytes,
+		rule.Priority, rule.Mode, rule.Description, rule.Enabled,
 	)
 	if err != nil {
 		return nil, err
@@ -219,7 +252,9 @@ func (s *Storage) UpdateTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, ca
 func (s *Storage) ListTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRuleRecord, error) {
 	rows, err := s.db.Query(
 		`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
-		        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
+		        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
+		        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+		        priority, enabled, COALESCE(description, ''),
 		        created_at, updated_at
 		   FROM acl_rules
 		  WHERE tenant_id = $1 AND node_id = $2
@@ -236,7 +271,8 @@ func (s *Storage) ListTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRule
 		rule := &ACLRuleRecord{}
 		err := rows.Scan(
 			&rule.ID, &rule.TenantID, &rule.NodeID, &rule.Name, &rule.Action, &rule.SrcCIDR, &rule.DstCIDR,
-			&rule.DstPort, &rule.Protocol, &rule.Priority, &rule.Enabled, &rule.Description,
+			&rule.DstPort, &rule.Protocol, &rule.Direction, &rule.Ports,
+			&rule.Priority, &rule.Enabled, &rule.Description,
 			&rule.CreatedAt, &rule.UpdatedAt,
 		)
 		if err != nil {
@@ -252,20 +288,24 @@ func (s *Storage) CreateTenantNodeACLRule(rule *ACLRuleRecord) (*ACLRuleRecord, 
 	srcNet := aclNetworkForSync(rule.SrcCIDR)
 	dstNet := aclNetworkForSync(rule.DstCIDR)
 	minPort, maxPort := aclPortRangeForSync(rule.DstPort)
+	normalizeACLRuntimeFields(rule)
 
 	err := s.db.QueryRow(
-		`INSERT INTO acl_rules (tenant_id, node_id, name, action, src_cidr, dst_cidr, dst_port, protocol, priority, enabled, description, src_net, dst_net, min_port, max_port)
-		 VALUES ($1, $2, $3, $4, NULLIF($5, '')::cidr, NULLIF($6, '')::cidr, $7, $8, $9, $10, $11, $12::cidr, $13::cidr, $14, $15)
+		`INSERT INTO acl_rules (tenant_id, node_id, name, action, src_cidr, dst_cidr, dst_port, protocol, direction, ports, priority, enabled, description, src_net, dst_net, min_port, max_port)
+		 VALUES ($1, $2, $3, $4, NULLIF($5, '')::cidr, NULLIF($6, '')::cidr, $7, $8, $9, $10, $11, $12, $13, $14::cidr, $15::cidr, $16, $17)
 		 RETURNING id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
-		           COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
+		           COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
+		           COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+		           priority, enabled, COALESCE(description, ''),
 		           created_at, updated_at`,
 		rule.TenantID, rule.NodeID, strings.TrimSpace(rule.Name), rule.Action,
 		strings.TrimSpace(rule.SrcCIDR), strings.TrimSpace(rule.DstCIDR),
-		nullableInt(rule.DstPort), rule.Protocol, rule.Priority,
-		rule.Enabled, strings.TrimSpace(rule.Description), srcNet, dstNet, minPort, maxPort,
+		nullableInt(rule.DstPort), rule.Protocol, rule.Direction, rule.Ports,
+		rule.Priority, rule.Enabled, strings.TrimSpace(rule.Description), srcNet, dstNet, minPort, maxPort,
 	).Scan(
 		&created.ID, &created.TenantID, &created.NodeID, &created.Name, &created.Action, &created.SrcCIDR, &created.DstCIDR,
-		&created.DstPort, &created.Protocol, &created.Priority, &created.Enabled, &created.Description,
+		&created.DstPort, &created.Protocol, &created.Direction, &created.Ports,
+		&created.Priority, &created.Enabled, &created.Description,
 		&created.CreatedAt, &created.UpdatedAt,
 	)
 	if err != nil {
@@ -303,7 +343,9 @@ func (s *Storage) DeleteTenantNodeACLRuleByID(tenantID, nodeID uuid.UUID, ruleID
 func (s *Storage) GetTenantNodeACLRule(tenantID, nodeID, ruleID uuid.UUID) (*ACLRuleRecord, error) {
 	rule, err := scanACLRuleRecord(s.db.QueryRow(
 		`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
-		        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0), priority, enabled, COALESCE(description, ''),
+		        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
+		        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+		        priority, enabled, COALESCE(description, ''),
 		        created_at, updated_at
 		   FROM acl_rules
 		  WHERE id = $1 AND tenant_id = $2 AND node_id = $3`,
@@ -319,16 +361,17 @@ func (s *Storage) UpdateTenantNodeACLRule(tenantID, nodeID, ruleID uuid.UUID, ru
 	srcNet := aclNetworkForSync(rule.SrcCIDR)
 	dstNet := aclNetworkForSync(rule.DstCIDR)
 	minPort, maxPort := aclPortRangeForSync(rule.DstPort)
+	normalizeACLRuntimeFields(rule)
 
 	result, err := s.db.Exec(
 		`UPDATE acl_rules SET
 			name = $4, action = $5, src_cidr = NULLIF($6, '')::cidr, dst_cidr = NULLIF($7, '')::cidr,
-			dst_port = $8, protocol = $9, priority = $10, description = $11,
-			enabled = $12, src_net = $13::cidr, dst_net = $14::cidr, min_port = $15, max_port = $16, updated_at = NOW()
+			dst_port = $8, protocol = $9, direction = $10, ports = $11, priority = $12, description = $13,
+			enabled = $14, src_net = $15::cidr, dst_net = $16::cidr, min_port = $17, max_port = $18, updated_at = NOW()
 		 WHERE id = $1 AND tenant_id = $2 AND node_id = $3`,
 		ruleID, tenantID, nodeID,
 		strings.TrimSpace(rule.Name), rule.Action, rule.SrcCIDR, rule.DstCIDR,
-		rule.DstPort, rule.Protocol, rule.Priority,
+		rule.DstPort, rule.Protocol, rule.Direction, rule.Ports, rule.Priority,
 		rule.Description, rule.Enabled, srcNet, dstNet, minPort, maxPort,
 	)
 	if err != nil {
@@ -360,7 +403,8 @@ func scanACLRuleRecord(scanner interface {
 	rule := &ACLRuleRecord{}
 	err := scanner.Scan(
 		&rule.ID, &rule.TenantID, &rule.NodeID, &rule.Name, &rule.Action, &rule.SrcCIDR, &rule.DstCIDR,
-		&rule.DstPort, &rule.Protocol, &rule.Priority, &rule.Enabled, &rule.Description,
+		&rule.DstPort, &rule.Protocol, &rule.Direction, &rule.Ports,
+		&rule.Priority, &rule.Enabled, &rule.Description,
 		&rule.CreatedAt, &rule.UpdatedAt,
 	)
 	if err != nil {
@@ -478,7 +522,11 @@ func (s *Storage) GetNodeQoSRulesByPublicKey(publicKey string) ([]*QoSRuleRecord
 	rows, err := s.db.Query(
 		`SELECT id, tenant_id, node_id, category, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
-		        bandwidth_mbps, enabled, COALESCE(description, ''), created_at, updated_at
+		        bandwidth_mbps, COALESCE(direction, 'egress'),
+		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
+		        COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
+		        COALESCE(priority, 0), COALESCE(mode, 'policing'),
+		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE tenant_id = $1 AND node_id = $2 AND enabled = true
 		  ORDER BY category ASC, created_at ASC`,
@@ -544,6 +592,11 @@ func scanQoSRule(scanner interface {
 		&record.DstPort,
 		&record.Protocol,
 		&record.BandwidthMbps,
+		&record.Direction,
+		&record.RateBps,
+		&record.BurstBytes,
+		&record.Priority,
+		&record.Mode,
 		&record.Enabled,
 		&record.Description,
 		&record.CreatedAt,
@@ -553,6 +606,45 @@ func scanQoSRule(scanner interface {
 		return nil, err
 	}
 	return record, nil
+}
+
+func normalizeACLRuntimeFields(rule *ACLRuleRecord) {
+	if strings.TrimSpace(rule.Direction) == "" {
+		rule.Direction = "ingress"
+	}
+	if strings.TrimSpace(rule.Ports) == "" && rule.DstPort > 0 {
+		rule.Ports = fmt.Sprintf("%d", rule.DstPort)
+	}
+}
+
+func normalizeQoSRuntimeFields(rule *QoSRuleRecord) {
+	if strings.TrimSpace(rule.Direction) == "" {
+		rule.Direction = defaultQoSDirection(rule)
+	}
+	if rule.RateBps == 0 && rule.BandwidthMbps > 0 {
+		rule.RateBps = uint64(rule.BandwidthMbps) * 1000000
+	}
+	if rule.BurstBytes == 0 {
+		rule.BurstBytes = defaultQoSBurst(rule.RateBps)
+	}
+	if strings.TrimSpace(rule.Mode) == "" {
+		rule.Mode = "policing"
+	}
+}
+
+func defaultQoSDirection(rule *QoSRuleRecord) string {
+	if strings.TrimSpace(rule.SrcCIDR) != "" && strings.TrimSpace(rule.DstCIDR) == "" {
+		return "ingress"
+	}
+	return "egress"
+}
+
+func defaultQoSBurst(rateBps uint64) uint64 {
+	burst := rateBps / 8 / 10
+	if burst < 1500 {
+		return 1500
+	}
+	return burst
 }
 
 func scanBlacklistRule(scanner interface {
