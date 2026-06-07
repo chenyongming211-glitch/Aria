@@ -55,6 +55,38 @@
         </div>
       </el-card>
 
+      <el-card class="state-card light-card" shadow="never">
+        <template #header>
+          <span class="header-title">Network Identity</span>
+        </template>
+        <el-row :gutter="20">
+          <el-col :xs="24" :sm="6">
+            <div class="state-block">
+              <div class="state-label">Public IP</div>
+              <div class="state-value state-wrap">{{ node.public_ip || '—' }}</div>
+            </div>
+          </el-col>
+          <el-col :xs="24" :sm="6">
+            <div class="state-block">
+              <div class="state-label">VPN IP</div>
+              <div class="state-value state-wrap">{{ node.assigned_ip || '—' }}</div>
+            </div>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <div class="state-block">
+              <div class="state-label">Endpoint</div>
+              <div class="state-value state-wrap">{{ node.endpoint || '—' }}</div>
+            </div>
+          </el-col>
+          <el-col :xs="24" :sm="4">
+            <div class="state-block">
+              <div class="state-label">Region</div>
+              <div class="state-value state-wrap">{{ node.region || '—' }}</div>
+            </div>
+          </el-col>
+        </el-row>
+      </el-card>
+
       <el-card class="summary-card light-card" shadow="never">
         <template #header>
           <span class="header-title">Operations Summary</span>

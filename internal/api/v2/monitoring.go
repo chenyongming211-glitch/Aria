@@ -91,6 +91,10 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 	data := map[string]interface{}{
 		"node_id":             node.ID.String(),
 		"hostname":            node.Hostname,
+		"region":              node.Region,
+		"public_ip":           node.PublicIP,
+		"assigned_ip":         node.AssignedIP,
+		"endpoint":            node.Endpoint,
 		"availability_status": nodeAvailabilityStatus(node),
 	}
 
