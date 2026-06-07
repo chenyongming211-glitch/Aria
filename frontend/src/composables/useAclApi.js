@@ -88,6 +88,23 @@ function normalizeDeliveryFields(rule, nodeState = {}) {
   }
 }
 
+function normalizeListResponse(response) {
+  const body = response?.data
+  if (Array.isArray(body)) return body
+  if (!body || typeof body !== 'object') return []
+
+  if ('success' in body) {
+    const data = body.data
+    if (data == null) return []
+    if (Array.isArray(data)) return data
+    if (Array.isArray(data.items)) return data.items
+    throw new Error('Invalid list response')
+  }
+
+  if (Array.isArray(body.items)) return body.items
+  return []
+}
+
 /**
  * ACL 规则管理 API
  */
@@ -103,7 +120,7 @@ export const useAclApi = {
       if (!nodeId) return []
 
       const response = await api.get(API_ENDPOINTS.TENANT.NODE_ACLS(tenantId, nodeId))
-      const rules = response.data?.data || response.data || []
+      const rules = normalizeListResponse(response)
 
       // 归一化处理，补充节点信息
       const normalizedRules = rules.map(rule => {

@@ -81,7 +81,7 @@ func (s *Storage) ListTenantNodeQoSRules(tenantID, nodeID uuid.UUID, category st
 	}
 	defer rows.Close()
 
-	var rules []*QoSRuleRecord
+	rules := make([]*QoSRuleRecord, 0)
 	for rows.Next() {
 		rule, err := scanQoSRule(rows)
 		if err != nil {
@@ -231,7 +231,7 @@ func (s *Storage) ListTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRule
 	}
 	defer rows.Close()
 
-	var rules []*ACLRuleRecord
+	rules := make([]*ACLRuleRecord, 0)
 	for rows.Next() {
 		rule := &ACLRuleRecord{}
 		err := rows.Scan(

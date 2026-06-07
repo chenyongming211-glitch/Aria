@@ -9,6 +9,23 @@ function normalizeBandwidthMbps(rule) {
   return value
 }
 
+function normalizeListResponse(response) {
+  const body = response?.data
+  if (Array.isArray(body)) return body
+  if (!body || typeof body !== 'object') return []
+
+  if ('success' in body) {
+    const data = body.data
+    if (data == null) return []
+    if (Array.isArray(data)) return data
+    if (Array.isArray(data.items)) return data.items
+    throw new Error('Invalid list response')
+  }
+
+  if (Array.isArray(body.items)) return body.items
+  return []
+}
+
 /**
  * QoS 规则管理 API (v2)
  * 分类定义:
@@ -28,7 +45,7 @@ export const useQosApi = {
       if (!nodeId || !category) return []
 
       const response = await api.get(API_ENDPOINTS.TENANT.NODE_QOS(tenantId, nodeId, category))
-      const rules = response.data?.data || response.data || []
+      const rules = normalizeListResponse(response)
 
       // 统一字段映射
       return rules.map(rule => ({
