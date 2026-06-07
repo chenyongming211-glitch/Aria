@@ -51,12 +51,13 @@ func TestAuthorizeTenantPermission_EnforcementModes(t *testing.T) {
 	t.Run("off mode bypasses permission checks", func(t *testing.T) {
 		t.Setenv("RBAC_ENFORCEMENT", "off")
 
-		db, _, err := sqlmock.New()
+		db, mock, err := sqlmock.New()
 		if err != nil {
 			t.Fatalf("sqlmock.New failed: %v", err)
 		}
 		t.Cleanup(func() { _ = db.Close() })
 
+		expectTenantStatusActive(mock, tenantID)
 		router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 		req := newAuthzRequest("member", tenantID)
 		rr := httptest.NewRecorder()
@@ -64,6 +65,9 @@ func TestAuthorizeTenantPermission_EnforcementModes(t *testing.T) {
 		ok := router.authorizeTenantPermission(rr, req, tenantID, middleware.PermUsersWrite)
 		if !ok {
 			t.Fatalf("expected permission check to be bypassed in off mode")
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatalf("unmet sql expectations: %v", err)
 		}
 	})
 
@@ -76,6 +80,7 @@ func TestAuthorizeTenantPermission_EnforcementModes(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = db.Close() })
 
+		expectTenantStatusActive(mock, tenantID)
 		mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT permissions FROM roles
 		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
@@ -111,6 +116,7 @@ func TestAuthorizeTenantPermission_EnforcementModes(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = db.Close() })
 
+		expectTenantStatusActive(mock, tenantID)
 		mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT permissions FROM roles
 		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
@@ -146,6 +152,7 @@ func TestAuthorizeTenantPermission_EnforcementModes(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = db.Close() })
 
+		expectTenantStatusActive(mock, tenantID)
 		mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT permissions FROM roles
 		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
@@ -184,6 +191,7 @@ func TestAuthorizeTenantPermission_EnforcementModes(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = db.Close() })
 
+		expectTenantStatusActive(mock, tenantID)
 		mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT permissions FROM roles
 		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)

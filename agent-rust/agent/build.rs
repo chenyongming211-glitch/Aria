@@ -16,6 +16,15 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-env-changed=SKIP_EBPF_BUILD");
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS");
+
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_else(|_| "unknown".to_string());
+    if target_os != "linux" {
+        return Err(format!(
+            "aria-agent only supports Linux targets (target_os={target_os}); use GitHub Actions or a Linux builder for agent builds"
+        )
+        .into());
+    }
 
     // 生成 gRPC 代码
     println!("cargo:rerun-if-changed=../proto/aria-agent.proto");

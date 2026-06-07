@@ -176,9 +176,13 @@ func (ts *TenantScopedStorage) GetTenantInfo(tenantID uuid.UUID) (*controllersto
 	row := ts.baseStorage.DB().QueryRow(query, tenantID)
 
 	var info controllerstorage.TenantInfo
-	err := row.Scan(&info.ID, &info.Name, &info.Code, &info.Status, &info.ResourceQuota, &info.CreatedAt, &info.UpdatedAt)
+	var code sql.NullString
+	err := row.Scan(&info.ID, &info.Name, &code, &info.Status, &info.ResourceQuota, &info.CreatedAt, &info.UpdatedAt)
 	if err != nil {
 		return nil, err
+	}
+	if code.Valid {
+		info.Code = code.String
 	}
 	return &info, nil
 }

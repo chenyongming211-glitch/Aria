@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -113,14 +114,15 @@ func (r *Router) listTenantTokens(w http.ResponseWriter, tenantID uuid.UUID) {
 	var tokens []map[string]interface{}
 	for rows.Next() {
 		var id uuid.UUID
-		var tokenStr, tag, status string
+		var tokenStr, status string
+		var tag sql.NullString
 		var maxUses, usedCount int
 		var expiresAt, createdAt time.Time
 		if err := rows.Scan(&id, &tokenStr, &tag, &maxUses, &usedCount, &expiresAt, &createdAt, &status); err != nil {
 			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to scan token: "+err.Error(), nil)
 			return
 		}
-		tokens = append(tokens, redactedTenantTokenResponse(id.String(), tokenStr, tag, maxUses, usedCount, expiresAt, createdAt, status))
+		tokens = append(tokens, redactedTenantTokenResponse(id.String(), tokenStr, tag.String, maxUses, usedCount, expiresAt, createdAt, status))
 	}
 	if err := rows.Err(); err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to list tokens: "+err.Error(), nil)

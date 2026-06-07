@@ -562,14 +562,27 @@ func (s *Storage) GetTenantIDByToken(tokenStr string) (uuid.UUID, error) {
 // GetTenantInfo retrieves tenant information by ID
 func (s *Storage) GetTenantInfo(tenantID uuid.UUID) (*TenantInfo, error) {
 	var info TenantInfo
+	var code sql.NullString
 	err := s.db.QueryRow(
 		`SELECT id, name, code, status, resource_quota, created_at, updated_at FROM tenants WHERE id = $1`,
 		tenantID,
-	).Scan(&info.ID, &info.Name, &info.Code, &info.Status, &info.ResourceQuota, &info.CreatedAt, &info.UpdatedAt)
+	).Scan(&info.ID, &info.Name, &code, &info.Status, &info.ResourceQuota, &info.CreatedAt, &info.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
+	if code.Valid {
+		info.Code = code.String
+	}
 	return &info, nil
+}
+
+func (s *Storage) GetTenantStatus(tenantID uuid.UUID) (string, error) {
+	var status string
+	err := s.db.QueryRow(`SELECT status FROM tenants WHERE id = $1`, tenantID).Scan(&status)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(status), nil
 }
 
 // GetNodesByTenant retrieves all nodes for a specific tenant

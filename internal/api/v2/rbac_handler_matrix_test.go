@@ -38,6 +38,12 @@ func roleLookupName(role string) string {
 	}
 }
 
+func expectTenantStatusActive(mock sqlmock.Sqlmock, tenantID uuid.UUID) {
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT status FROM tenants WHERE id = $1`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("active"))
+}
+
 func withAuthContext(req *http.Request, role string, tenantID uuid.UUID) *http.Request {
 	ctx := context.WithValue(req.Context(), middleware.UserRoleKey, role)
 	ctx = context.WithValue(ctx, middleware.TenantIDKey, tenantID)
@@ -463,6 +469,10 @@ func TestRBACHandlerMatrix_TokensRead(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = db.Close() })
 
+			if tc.role != "super_admin" {
+				expectTenantStatusActive(mock, tenantID)
+			}
+
 			if tc.mode != "off" && tc.role != "super_admin" {
 				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
 			}
@@ -512,6 +522,10 @@ func TestRBACHandlerMatrix_SettingsWrite(t *testing.T) {
 				t.Fatalf("sqlmock.New failed: %v", err)
 			}
 			t.Cleanup(func() { _ = db.Close() })
+
+			if tc.role != "super_admin" {
+				expectTenantStatusActive(mock, tenantID)
+			}
 
 			if tc.mode != "off" && tc.role != "super_admin" {
 				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
@@ -569,6 +583,10 @@ func TestRBACHandlerMatrix_CommandsWrite(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = db.Close() })
 
+			if tc.role != "super_admin" {
+				expectTenantStatusActive(mock, tenantID)
+			}
+
 			if tc.mode != "off" && tc.role != "super_admin" {
 				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
 			}
@@ -617,6 +635,10 @@ func TestRBACHandlerMatrix_RolesRead(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = db.Close() })
 
+			if tc.role != "super_admin" {
+				expectTenantStatusActive(mock, tenantID)
+			}
+
 			if tc.mode != "off" && tc.role != "super_admin" {
 				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
 			}
@@ -660,6 +682,10 @@ func TestRBACHandlerMatrix_UsersRead(t *testing.T) {
 				t.Fatalf("sqlmock.New failed: %v", err)
 			}
 			t.Cleanup(func() { _ = db.Close() })
+
+			if tc.role != "super_admin" {
+				expectTenantStatusActive(mock, tenantID)
+			}
 
 			if tc.mode != "off" && tc.role != "super_admin" {
 				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
@@ -712,6 +738,10 @@ func TestRBACHandlerMatrix_RoutesRead(t *testing.T) {
 
 			// First lookup happens in handleTenantNodes before route permission check.
 			expectNodeLookup(mock, tenantID, nodeID, "{route-a}")
+			if tc.role != "super_admin" {
+				expectTenantStatusActive(mock, tenantID)
+			}
+
 			if tc.mode != "off" && tc.role != "super_admin" {
 				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
 			}
@@ -760,6 +790,10 @@ func TestRBACHandlerMatrix_ACLsRead(t *testing.T) {
 			t.Cleanup(func() { _ = db.Close() })
 
 			expectNodeLookup(mock, tenantID, nodeID, "{}")
+			if tc.role != "super_admin" {
+				expectTenantStatusActive(mock, tenantID)
+			}
+
 			if tc.mode != "off" && tc.role != "super_admin" {
 				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
 			}
@@ -806,6 +840,10 @@ func TestRBACHandlerMatrix_QoSRead(t *testing.T) {
 			t.Cleanup(func() { _ = db.Close() })
 
 			expectNodeLookup(mock, tenantID, nodeID, "{}")
+			if tc.role != "super_admin" {
+				expectTenantStatusActive(mock, tenantID)
+			}
+
 			if tc.mode != "off" && tc.role != "super_admin" {
 				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
 			}
@@ -848,6 +886,10 @@ func TestRBACHandlerMatrix_RolesWrite(t *testing.T) {
 				t.Fatalf("sqlmock.New failed: %v", err)
 			}
 			t.Cleanup(func() { _ = db.Close() })
+
+			if tc.role != "super_admin" {
+				expectTenantStatusActive(mock, tenantID)
+			}
 
 			if tc.mode != "off" && tc.role != "super_admin" {
 				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
@@ -895,6 +937,10 @@ func TestRBACHandlerMatrix_UsersWrite(t *testing.T) {
 				t.Fatalf("sqlmock.New failed: %v", err)
 			}
 			t.Cleanup(func() { _ = db.Close() })
+
+			if tc.role != "super_admin" {
+				expectTenantStatusActive(mock, tenantID)
+			}
 
 			if tc.mode != "off" && tc.role != "super_admin" {
 				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
@@ -950,6 +996,10 @@ func TestRBACHandlerMatrix_RoutesWrite(t *testing.T) {
 			t.Cleanup(func() { _ = db.Close() })
 
 			expectNodeLookup(mock, tenantID, nodeID, "{10.0.0.0/24}")
+			if tc.role != "super_admin" {
+				expectTenantStatusActive(mock, tenantID)
+			}
+
 			if tc.mode != "off" && tc.role != "super_admin" {
 				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
 			}
@@ -997,6 +1047,10 @@ func TestRBACHandlerMatrix_ACLsWrite(t *testing.T) {
 			t.Cleanup(func() { _ = db.Close() })
 
 			expectNodeLookup(mock, tenantID, nodeID, "{}")
+			if tc.role != "super_admin" {
+				expectTenantStatusActive(mock, tenantID)
+			}
+
 			if tc.mode != "off" && tc.role != "super_admin" {
 				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
 			}
@@ -1043,6 +1097,7 @@ func TestACLUpdatePreservesOmittedFields(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	expectTenantStatusActive(mock, tenantID)
 	expectPermissionLookup(mock, tenantID, "admin", []string{"acls:write"})
 	expectACLGetForUpdate(mock, tenantID, nodeID, ruleID)
 	expectACLUpdatePreservingExistingFields(mock, tenantID, nodeID, ruleID)
@@ -1087,6 +1142,10 @@ func TestRBACHandlerMatrix_QoSWrite(t *testing.T) {
 			t.Cleanup(func() { _ = db.Close() })
 
 			expectNodeLookup(mock, tenantID, nodeID, "{}")
+			if tc.role != "super_admin" {
+				expectTenantStatusActive(mock, tenantID)
+			}
+
 			if tc.mode != "off" && tc.role != "super_admin" {
 				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
 			}
@@ -1133,6 +1192,7 @@ func TestQoSUpdatePreservesOmittedFields(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	expectTenantStatusActive(mock, tenantID)
 	expectPermissionLookup(mock, tenantID, "admin", []string{"qos:write"})
 	expectQoSGetForUpdate(mock, tenantID, nodeID, ruleID)
 	expectQoSUpdatePreservingExistingFields(mock, tenantID, nodeID, ruleID)
@@ -1168,6 +1228,7 @@ func TestQoSWriteRejectsZeroBandwidth(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	expectTenantStatusActive(mock, tenantID)
 	expectPermissionLookup(mock, tenantID, "admin", []string{"qos:write"})
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}

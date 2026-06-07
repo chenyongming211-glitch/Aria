@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 
 	"aria/internal/api/apibase"
 	"aria/internal/api/middleware"
@@ -41,6 +44,27 @@ type TenantCreateRequest struct {
 	Phone string `json:"phone"`
 }
 
+var tenantCodePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
+
+func validateTenantCreateRequest(req *TenantCreateRequest) error {
+	req.Name = strings.TrimSpace(req.Name)
+	req.Code = strings.TrimSpace(req.Code)
+	req.Email = strings.TrimSpace(req.Email)
+	req.Phone = strings.TrimSpace(req.Phone)
+
+	nameLen := utf8.RuneCountInString(req.Name)
+	if nameLen < 2 || nameLen > 50 {
+		return fmt.Errorf("tenant name must be between 2 and 50 characters")
+	}
+	if len(req.Code) < 2 || len(req.Code) > 20 {
+		return fmt.Errorf("tenant code must be between 2 and 20 characters")
+	}
+	if !tenantCodePattern.MatchString(req.Code) {
+		return fmt.Errorf("tenant code must start and end with a lowercase alphanumeric character and may contain hyphens")
+	}
+	return nil
+}
+
 func (t *TenantAPI) CreateTenant(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
@@ -50,6 +74,10 @@ func (t *TenantAPI) CreateTenant(w http.ResponseWriter, r *http.Request) {
 	var req TenantCreateRequest
 	if err := apibase.ParseRequestJSON(r, &req); err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
+		return
+	}
+	if err := validateTenantCreateRequest(&req); err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
 		return
 	}
 
@@ -70,6 +98,11 @@ func (t *TenantAPI) CreateTenant(w http.ResponseWriter, r *http.Request) {
 	query := `INSERT INTO tenants (id, name, code, email, phone, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`
 	_, err = tx.Exec(query, tenantID, req.Name, req.Code, req.Email, req.Phone)
 	if err != nil {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+			apibase.WriteError(w, http.StatusConflict, apibase.CodeConflict, "Tenant code already exists", nil)
+			return
+		}
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeCreateTenantFailed, "Failed to create tenant: "+err.Error(), nil)
 		return
 	}
@@ -107,14 +140,18 @@ func (t *TenantAPI) GetTenant(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var tenant controllerstorage.TenantInfo
+	var code sql.NullString
 	query := `SELECT id, name, code, status, resource_quota, created_at, updated_at FROM tenants WHERE id = $1`
 	err := t.store.DB().QueryRow(query, tenantID).Scan(
-		&tenant.ID, &tenant.Name, &tenant.Code, &tenant.Status,
+		&tenant.ID, &tenant.Name, &code, &tenant.Status,
 		&tenant.ResourceQuota, &tenant.CreatedAt, &tenant.UpdatedAt,
 	)
 	if err != nil {
 		apibase.WriteError(w, http.StatusNotFound, apibase.CodeTenantNotFound, "Tenant not found", nil)
 		return
+	}
+	if code.Valid {
+		tenant.Code = code.String
 	}
 
 	resp := TenantResponse{

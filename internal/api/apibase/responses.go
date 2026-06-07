@@ -74,6 +74,7 @@ const (
 	CodeBadRequest          = "BAD_REQUEST"
 	CodeUnauthorized        = "UNAUTHORIZED"
 	CodeForbidden           = "FORBIDDEN"
+	CodeConflict            = "CONFLICT"
 	CodeNotFound            = "NOT_FOUND"
 	CodeInternalServerError = "INTERNAL_ERROR"
 	CodeValidationFailed    = "VALIDATION_FAILED"

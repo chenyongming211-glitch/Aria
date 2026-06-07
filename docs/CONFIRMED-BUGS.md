@@ -1,7 +1,7 @@
 # 代码 Bug 追踪
 
-**最后复核**: 2026-05-29
-**复核方式**: 重新阅读当前代码并核对原始问题描述
+**最后复核**: 2026-06-07
+**复核方式**: 静态代码复核 + GitHub Actions 回归验证
 **说明**: 本文档记录“当前状态”，不再把历史 OPEN 条目和后续 FIXED 结论混写在一起。
 
 ---
@@ -10,11 +10,41 @@
 
 暂无已确认仍开放的代码级 bug。
 
-当前剩余工作主要是产品闭环和风险边界，不再把已经修复的历史问题继续列为 OPEN。新的风险项应先进入 `KNOWN-ISSUES-STATUS.md`，确认可复现代码缺陷后再进入本文档。
+新的风险项应先进入 `KNOWN-ISSUES-STATUS.md`，确认可复现代码缺陷后再进入本文档。
 
 ---
 
 ## 已重新验证为已修复的 Bug
+
+### BUG-21: 租户 `suspended` / `deleted` 状态未进入后端授权链路
+
+- **状态**: ✅ FIXED
+- **文件**: `internal/api/v2/setup.go`, `pkg/controllerstorage/postgres.go`
+- **说明**: 非 `super_admin` 的租户作用域授权现在会读取 `tenants.status`，只有 `active` 租户可继续访问；`super_admin` 保留平台管理能力。
+
+### BUG-22: `tenants.code` 为 NULL 时租户详情误报 404
+
+- **状态**: ✅ FIXED
+- **文件**: `internal/api/handlers/tenant.go`, `pkg/controllerstorage/postgres.go`, `internal/api/middleware/tenant_storage.go`
+- **说明**: 租户信息扫描改为 `sql.NullString`，历史或默认租户的 NULL `code` 会返回空字符串，不再误报 404。
+
+### BUG-23: `tokens.tag` 为 NULL 时 token 查询 / 列表扫描失败
+
+- **状态**: ✅ FIXED
+- **文件**: `internal/token/store.go`, `internal/api/v2/platform.go`
+- **说明**: token store 和租户 token 列表都改为 `sql.NullString` 扫描 tag，NULL tag 会规范化为空字符串。
+
+### BUG-24: 创建租户缺少后端 `name` / `code` 业务校验
+
+- **状态**: ✅ FIXED
+- **文件**: `internal/api/handlers/tenant.go`, `internal/api/apibase/responses.go`
+- **说明**: 后端创建租户现在会校验 `name` / `code` 长度和格式，重复 code 的唯一约束冲突返回 409。
+
+### 构建 / 开发环境风险: Rust Agent 缺少 macOS 平台门禁
+
+- **状态**: ✅ FIXED
+- **文件**: `agent-rust/agent/build.rs`
+- **说明**: Agent build script 在非 Linux target 上会提前给出明确错误，避免失败下沉到 Linux-only 依赖层。
 
 ### BUG-9: Settings 上传鉴权来源错误
 

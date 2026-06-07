@@ -144,6 +144,7 @@ func TestTenantUpdateRejectsDeletedStatusViaPut(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	expectTenantStatusActive(mock, tenantID)
 	expectPermissionLookup(mock, tenantID, "admin", []string{"settings:write"})
 
 	store := controllerstorage.NewStorageWithDB(db)
@@ -244,6 +245,7 @@ func TestTenantListForAdminRequiresSettingsRead(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	expectTenantStatusActive(mock, tenantID)
 	expectPermissionLookup(mock, tenantID, "admin", []string{"nodes:read"})
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
@@ -269,6 +271,7 @@ func TestTenantListForAdminReturnsOnlyCurrentTenant(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	expectTenantStatusActive(mock, tenantID)
 	expectPermissionLookup(mock, tenantID, "admin", []string{"settings:read"})
 	expectSingleTenantSuccess(mock, tenantID)
 
@@ -295,6 +298,7 @@ func TestTenantListMapsOwnerToAdminRole(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	expectTenantStatusActive(mock, tenantID)
 	expectPermissionLookup(mock, tenantID, "owner", []string{"settings:read"})
 	expectSingleTenantSuccess(mock, tenantID)
 

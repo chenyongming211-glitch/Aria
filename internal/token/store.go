@@ -257,9 +257,9 @@ func (s *Store) CleanupExpired() (int, error) {
 }
 
 // scanDestinations DRY refactoring
-func scanDestinations(t *Token, tenantID *sql.NullString, lastUsedAt *sql.NullTime) []any {
+func scanDestinations(t *Token, tag *sql.NullString, tenantID *sql.NullString, lastUsedAt *sql.NullTime) []any {
 	return []any{
-		&t.ID, &t.Token, &t.Tag, tenantID, &t.MaxUses,
+		&t.ID, &t.Token, tag, tenantID, &t.MaxUses,
 		&t.UsedCount, &t.ExpiresAt, &t.CreatedAt,
 		&t.CreatedBy, &t.Status, lastUsedAt, &t.LastUsedBy,
 	}
@@ -268,15 +268,19 @@ func scanDestinations(t *Token, tenantID *sql.NullString, lastUsedAt *sql.NullTi
 // scanToken scans a row into a Token struct
 func (s *Store) scanToken(row *sql.Row) (*Token, error) {
 	t := &Token{}
+	var tag sql.NullString
 	var tenantID sql.NullString
 	var lastUsedAt sql.NullTime
 
-	err := row.Scan(scanDestinations(t, &tenantID, &lastUsedAt)...)
+	err := row.Scan(scanDestinations(t, &tag, &tenantID, &lastUsedAt)...)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if tag.Valid {
+		t.Tag = tag.String
 	}
 	if tenantID.Valid {
 		t.TenantID = tenantID.String
@@ -290,12 +294,16 @@ func (s *Store) scanToken(row *sql.Row) (*Token, error) {
 // scanTokenRows scans rows into a Token slice
 func (s *Store) scanTokenRows(rows *sql.Rows) (*Token, error) {
 	t := &Token{}
+	var tag sql.NullString
 	var tenantID sql.NullString
 	var lastUsedAt sql.NullTime
 
-	err := rows.Scan(scanDestinations(t, &tenantID, &lastUsedAt)...)
+	err := rows.Scan(scanDestinations(t, &tag, &tenantID, &lastUsedAt)...)
 	if err != nil {
 		return nil, err
+	}
+	if tag.Valid {
+		t.Tag = tag.String
 	}
 	if tenantID.Valid {
 		t.TenantID = tenantID.String

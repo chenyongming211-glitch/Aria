@@ -1072,6 +1072,20 @@ func (r *Router) authorizeTenant(w http.ResponseWriter, req *http.Request, targe
 		return false
 	}
 
+	status, err := r.store.GetTenantStatus(targetTenantID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			apibase.WriteError(w, http.StatusNotFound, apibase.CodeTenantNotFound, "Tenant not found", nil)
+			return false
+		}
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to verify tenant status", nil)
+		return false
+	}
+	if !strings.EqualFold(status, "active") {
+		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Tenant is not active", nil)
+		return false
+	}
+
 	if requireAdmin && controllerstorage.NormalizeRoleName(role) != controllerstorage.SystemRoleAdmin {
 		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Admin privileges required", nil)
 		return false
