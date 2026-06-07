@@ -52,11 +52,9 @@ EXPOSE 8080
 ENV POSTGRES_HOST=postgres \
     POSTGRES_PORT=5432 \
     POSTGRES_USER=aria \
-    POSTGRES_PASSWORD=aria-local-password \
     POSTGRES_DATABASE=aria \
     POSTGRES_SSLMODE=disable \
-    REDIS_ADDR=redis:6379 \
-    REDIS_PASSWORD=""
+    REDIS_ADDR=redis:6379
 
 # Run controller
 ENTRYPOINT ["/usr/local/bin/aria"]

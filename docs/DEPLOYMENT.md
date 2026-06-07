@@ -169,6 +169,55 @@ ssh root@8.152.163.101 'curl -fsS http://127.0.0.1:18080/api/version'
 curl -fsS https://aria.yun/api/version
 ```
 
+## Production Deployment Records
+
+Keep each production deployment record in this section so operators can answer
+"is production current?" from the repository and the server state.
+
+Record these fields for every deployment:
+
+| Field | Required value |
+| --- | --- |
+| Date | UTC timestamp of the production deployment |
+| Git commit | `master` commit deployed to Controller and frontend |
+| Push CI run | `Build` run that passed after merge to `master` |
+| Publish run | `workflow_dispatch` run that pushed the Controller image and uploaded artifacts |
+| Controller image | Exact GHCR tag or digest used by `aria-controller` |
+| Frontend backup | Server path for the previous frontend `dist` backup |
+| Config backup | Server path for the pre-deploy config archive |
+| DB backup | Server path for the pre-deploy Postgres dump |
+| Agent artifact | `rust-agent-binary` artifact run id and deployed host |
+| Verification | Login, menu permissions, Nodes, Monitoring, backup download, Agent sync |
+
+### 2026-06-07 Public IP Correction
+
+Status: pending deployment.
+
+Purpose:
+
+- Deploy the node public IP correction so SaaS inventory records the true public
+  IP and VPN IP only.
+- Expected node identity after Agent sync:
+  - `public_ip = 82.156.48.111`
+  - `assigned_ip = 100.64.0.2`
+  - `private_ip = ''`
+  - `endpoint = 82.156.48.111:51820`
+
+Fill these after deployment:
+
+| Field | Value |
+| --- | --- |
+| Date | TBD |
+| Git commit | TBD |
+| Push CI run | TBD |
+| Publish run | TBD |
+| Controller image | TBD |
+| Frontend backup | TBD |
+| Config backup | TBD |
+| DB backup | TBD |
+| Agent artifact | TBD |
+| Verification | TBD |
+
 Agent gray verification:
 
 ```bash
