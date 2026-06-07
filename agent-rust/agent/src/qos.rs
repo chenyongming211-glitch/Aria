@@ -60,6 +60,45 @@ pub struct PairQoSKey {
 
 unsafe impl Pod for PairQoSKey {}
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, PartialEq, Eq)]
+pub struct QosConfig {
+    pub rate_bps: u64,
+    pub burst_bytes: u64,
+    pub priority: u8,
+    pub mode: u8,
+    pub pad: [u8; 6],
+}
+
+unsafe impl Pod for QosConfig {}
+
+impl QosConfig {
+    pub fn new(rate_bps: u64, burst_bytes: u64, priority: u8, mode: u8) -> Self {
+        Self {
+            rate_bps,
+            burst_bytes,
+            priority,
+            mode,
+            pad: [0; 6],
+        }
+    }
+}
+
+pub fn default_qos_burst(rate_bps: u64) -> u64 {
+    (rate_bps / 8 / 10).max(1500)
+}
+
+pub fn qos_mode_from_name(mode: &str) -> Result<u8, QoSError> {
+    match mode.trim().to_ascii_lowercase().as_str() {
+        "" | "policing" => Ok(0),
+        "shaping" => Ok(1),
+        other => Err(QoSError::InvalidParam(format!(
+            "invalid QoS mode '{}': must be policing or shaping",
+            other
+        ))),
+    }
+}
+
 pub struct QoSManager {
     src_id_qos_map: AyaHashMap<MapData, u32, BucketState>,
     pair_id_qos_map: AyaHashMap<MapData, PairQoSKey, BucketState>,

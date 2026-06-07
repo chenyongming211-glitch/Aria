@@ -10,10 +10,95 @@ use thiserror::Error;
 use crate::identity::{IdentityManager, ID_WILDCARD, parse_single_ip};
 use crate::metrics;
 
-pub const ACTION_DROP: u32 = 0;
-pub const ACTION_PASS: u32 = 1;
+pub const ACTION_PASS: u32 = 0;
+pub const ACTION_DROP: u32 = 1;
 
 static RULE_ID_COUNTER: AtomicU32 = AtomicU32::new(1);
+
+pub fn stored_policy_action(action: u32, has_port_filter: bool) -> u32 {
+    if has_port_filter {
+        match action {
+            ACTION_PASS => ACTION_DROP,
+            ACTION_DROP => ACTION_PASS,
+            _ => action,
+        }
+    } else {
+        action
+    }
+}
+
+fn encode_port_action(action: u32) -> Result<u8, AclError> {
+    match action {
+        ACTION_PASS => Ok(2),
+        ACTION_DROP => Ok(1),
+        _ => Err(AclError::InvalidParam(format!(
+            "invalid ACL action {}: must be 0 or 1",
+            action
+        ))),
+    }
+}
+
+pub fn parse_ports(ports: &str, default_action: u32) -> Result<Vec<(u16, u16, u8)>, AclError> {
+    let default_port_action = encode_port_action(default_action)?;
+    let mut entries = Vec::new();
+
+    for raw_part in ports.split(',') {
+        let part = raw_part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = part.split(':').collect();
+        if parts.len() > 2 {
+            return Err(AclError::InvalidParam(format!(
+                "invalid port filter '{}'",
+                part
+            )));
+        }
+
+        let port_action = match parts.get(1) {
+            Some(raw_action) => {
+                let action = raw_action.trim().parse::<u32>().map_err(|_| {
+                    AclError::InvalidParam(format!("invalid port action '{}'", raw_action))
+                })?;
+                encode_port_action(action)?
+            }
+            None => default_port_action,
+        };
+
+        let range = parts[0].trim();
+        if range.contains('-') {
+            let bounds: Vec<&str> = range.split('-').collect();
+            if bounds.len() != 2 {
+                return Err(AclError::InvalidParam(format!(
+                    "invalid port range '{}'",
+                    range
+                )));
+            }
+            let start = bounds[0]
+                .trim()
+                .parse::<u16>()
+                .map_err(|_| AclError::InvalidParam(format!("invalid port '{}'", bounds[0])))?;
+            let end = bounds[1]
+                .trim()
+                .parse::<u16>()
+                .map_err(|_| AclError::InvalidParam(format!("invalid port '{}'", bounds[1])))?;
+            if start > end {
+                return Err(AclError::InvalidParam(format!(
+                    "invalid port range {}-{}",
+                    start, end
+                )));
+            }
+            entries.push((start, end, port_action));
+        } else {
+            let port = range
+                .parse::<u16>()
+                .map_err(|_| AclError::InvalidParam(format!("invalid port '{}'", range)))?;
+            entries.push((port, port, port_action));
+        }
+    }
+
+    Ok(entries)
+}
 
 #[derive(Error, Debug)]
 pub enum AclError {

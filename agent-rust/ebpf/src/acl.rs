@@ -18,7 +18,7 @@ const XDP_DROP: u32 = 1;
 const ETH_P_IP: u16 = 0x0800;
 const ETH_P_IPV6: u16 = 0x86DD;
 
-const ACTION_PASS: u32 = 1;
+const ACTION_PASS: u32 = 0;
 
 const ID_WILDCARD: u32 = 0;
 
