@@ -871,6 +871,15 @@ func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
 	if data["node_id"] != nodeID.String() {
 		t.Fatalf("expected node_id=%s, got %#v", nodeID.String(), data["node_id"])
 	}
+	if data["public_ip"] != "1.1.1.1" {
+		t.Fatalf("expected public_ip=1.1.1.1, got %#v", data["public_ip"])
+	}
+	if data["assigned_ip"] != "10.0.0.10" {
+		t.Fatalf("expected assigned_ip=10.0.0.10, got %#v", data["assigned_ip"])
+	}
+	if data["endpoint"] != "1.1.1.1:51820" {
+		t.Fatalf("expected endpoint=1.1.1.1:51820, got %#v", data["endpoint"])
+	}
 	if _, ok := data["recent_commands"]; !ok {
 		t.Fatalf("expected recent_commands field")
 	}

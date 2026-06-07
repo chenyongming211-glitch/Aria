@@ -71,6 +71,10 @@ const {
     resolveAlert: vi.fn(async () => ({})),
     getNodeDetail: vi.fn(async () => ({
       hostname: 'node-1',
+      public_ip: '1.1.1.1',
+      assigned_ip: '10.0.0.10',
+      endpoint: '1.1.1.1:51820',
+      region: 'sh',
       availability_status: 'online',
       state_convergence: 'diverged',
       desired_state_version: 'desired-1',
@@ -402,6 +406,9 @@ describe('node monitor detail context handling', () => {
     expect(wrapper.vm.contextDescription).toContain('Command: cmd-1')
     expect(wrapper.vm.certificateStatusLabel).toBe('issued')
     expect(wrapper.vm.certificateActivity.last_renew_failure).toBe('runtime token expired')
+    expect(wrapper.text()).toContain('1.1.1.1')
+    expect(wrapper.text()).toContain('10.0.0.10')
+    expect(wrapper.text()).toContain('1.1.1.1:51820')
     expect(wrapper.text()).toContain('Last Renew Failed At')
     expect(wrapper.text()).toContain('runtime token expired')
     expect(wrapper.vm.scrollToFocusSection).toBeTypeOf('function')
