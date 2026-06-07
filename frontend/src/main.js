@@ -107,6 +107,26 @@ style.textContent = `
     background: var(--aria-content-bg-tertiary);
   }
 
+  .el-table .el-table-fixed-column--left,
+  .el-table .el-table-fixed-column--right {
+    background: var(--aria-content-bg-secondary);
+  }
+
+  .el-table th.el-table-fixed-column--left,
+  .el-table th.el-table-fixed-column--right {
+    background: var(--aria-content-bg-tertiary);
+  }
+
+  .el-table--striped .el-table__body tr.el-table__row--striped td.el-table-fixed-column--left,
+  .el-table--striped .el-table__body tr.el-table__row--striped td.el-table-fixed-column--right {
+    background: var(--aria-content-bg-secondary);
+  }
+
+  .el-table--enable-row-hover .el-table__body tr:hover > td.el-table-fixed-column--left,
+  .el-table--enable-row-hover .el-table__body tr:hover > td.el-table-fixed-column--right {
+    background: var(--aria-content-bg-tertiary);
+  }
+
   /* 按钮样式 */
   .el-button {
     border-radius: var(--aria-radius);
@@ -131,6 +151,25 @@ style.textContent = `
     box-shadow: none;
   }
 
+  .el-button--danger {
+    color: #fff;
+    background: var(--aria-danger);
+    border-color: var(--aria-danger);
+    box-shadow: none;
+  }
+
+  .el-button--danger:hover,
+  .el-button--danger:focus {
+    color: #fff;
+    background: var(--aria-danger-dark);
+    border-color: var(--aria-danger-dark);
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+  }
+
+  .el-button--danger:active {
+    box-shadow: none;
+  }
+
   .el-button.is-link {
     color: var(--aria-text-secondary);
     background: transparent;
@@ -140,6 +179,50 @@ style.textContent = `
 
   .el-button.is-link:hover {
     color: var(--aria-primary);
+  }
+
+  .el-table .el-button.is-link {
+    min-width: 28px;
+    height: 28px;
+    padding: 0;
+    justify-content: center;
+    background: var(--aria-content-bg-tertiary);
+    border: 1px solid var(--aria-border-primary);
+    border-radius: var(--aria-radius-sm);
+  }
+
+  .el-table .el-button.is-link:hover,
+  .el-table .el-button.is-link:focus {
+    background: var(--aria-content-bg-secondary);
+    border-color: var(--aria-border-hover);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+  }
+
+  .el-table .el-button.is-link.el-button--primary {
+    color: var(--aria-primary);
+    background: rgba(37, 99, 235, 0.08);
+    border-color: rgba(37, 99, 235, 0.18);
+  }
+
+  .el-table .el-button.is-link.el-button--primary:hover,
+  .el-table .el-button.is-link.el-button--primary:focus {
+    color: var(--aria-primary-dark);
+    background: rgba(37, 99, 235, 0.12);
+    border-color: rgba(37, 99, 235, 0.28);
+  }
+
+  .el-table .el-button.is-link.el-button--danger {
+    color: var(--aria-danger);
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(239, 68, 68, 0.18);
+  }
+
+  .el-table .el-button.is-link.el-button--danger:hover,
+  .el-table .el-button.is-link.el-button--danger:focus {
+    color: var(--aria-danger-dark);
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.28);
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.08);
   }
 
   /* 输入框样式 */
