@@ -149,6 +149,14 @@ impl QoSManager {
 
     pub fn limit_src_id(&mut self, id: u32, mbps: u64) -> Result<(), QoSError> {
         let (rate, burst) = calculate_bucket_params(mbps);
+        self.insert_src_id_bucket(id, rate, burst)
+    }
+
+    pub fn limit_src_id_with_config(&mut self, id: u32, config: QosConfig) -> Result<(), QoSError> {
+        self.insert_src_id_bucket(id, rate_bytes_from_bps(config.rate_bps), config.burst_bytes)
+    }
+
+    fn insert_src_id_bucket(&mut self, id: u32, rate: u64, burst: u64) -> Result<(), QoSError> {
         let now_ns = now_ns();
 
         let bucket = BucketState {
@@ -172,6 +180,12 @@ impl QoSManager {
         Ok(id)
     }
 
+    pub fn limit_src_cidr_with_config(&mut self, cidr: &str, config: QosConfig) -> Result<u32, QoSError> {
+        let id = self.with_identity_mgr(|m| m.assign_id(cidr))?;
+        self.limit_src_id_with_config(id, config)?;
+        Ok(id)
+    }
+
     pub fn remove_src_id_limit(&mut self, id: u32) -> Result<(), QoSError> {
         self.src_id_qos_map.remove(&id)?;
         Ok(())
@@ -187,6 +201,30 @@ impl QoSManager {
 
     pub fn limit_pair_id(&mut self, src_id: u32, dst_id: u32, mbps: u64) -> Result<(), QoSError> {
         let (rate, burst) = calculate_bucket_params(mbps);
+        self.insert_pair_id_bucket(src_id, dst_id, rate, burst)
+    }
+
+    pub fn limit_pair_id_with_config(
+        &mut self,
+        src_id: u32,
+        dst_id: u32,
+        config: QosConfig,
+    ) -> Result<(), QoSError> {
+        self.insert_pair_id_bucket(
+            src_id,
+            dst_id,
+            rate_bytes_from_bps(config.rate_bps),
+            config.burst_bytes,
+        )
+    }
+
+    fn insert_pair_id_bucket(
+        &mut self,
+        src_id: u32,
+        dst_id: u32,
+        rate: u64,
+        burst: u64,
+    ) -> Result<(), QoSError> {
         let now_ns = now_ns();
 
         let bucket = BucketState {
@@ -221,6 +259,22 @@ impl QoSManager {
         Ok((src_id, dst_id))
     }
 
+    pub fn limit_pair_cidr_with_config(
+        &mut self,
+        src_cidr: &str,
+        dst_cidr: &str,
+        config: QosConfig,
+    ) -> Result<(u32, u32), QoSError> {
+        if src_cidr.is_empty() || dst_cidr.is_empty() {
+            return Err(QoSError::InvalidParam("src_cidr and dst_cidr are required for pair limit".to_string()));
+        }
+
+        let src_id = self.with_identity_mgr(|m| m.assign_id(src_cidr))?;
+        let dst_id = self.with_identity_mgr(|m| m.assign_id(dst_cidr))?;
+        self.limit_pair_id_with_config(src_id, dst_id, config)?;
+        Ok((src_id, dst_id))
+    }
+
     pub fn remove_pair_id_limit(&mut self, src_id: u32, dst_id: u32) -> Result<(), QoSError> {
         let key = PairQoSKey { src_id, dst_id };
         self.pair_id_qos_map.remove(&key)?;
@@ -243,6 +297,36 @@ impl QoSManager {
         mbps: u64,
     ) -> Result<(), QoSError> {
         let (rate, burst) = calculate_bucket_params(mbps);
+        self.insert_service_bucket(src_id, dst_id, dst_port, protocol, rate, burst)
+    }
+
+    pub fn limit_service_id_with_config(
+        &mut self,
+        src_id: u32,
+        dst_id: u32,
+        dst_port: u16,
+        protocol: u8,
+        config: QosConfig,
+    ) -> Result<(), QoSError> {
+        self.insert_service_bucket(
+            src_id,
+            dst_id,
+            dst_port,
+            protocol,
+            rate_bytes_from_bps(config.rate_bps),
+            config.burst_bytes,
+        )
+    }
+
+    fn insert_service_bucket(
+        &mut self,
+        src_id: u32,
+        dst_id: u32,
+        dst_port: u16,
+        protocol: u8,
+        rate: u64,
+        burst: u64,
+    ) -> Result<(), QoSError> {
         let now_ns = now_ns();
 
         let bucket = BucketState {
@@ -289,6 +373,30 @@ impl QoSManager {
         };
 
         self.limit_service_id(src_id, dst_id, dst_port, protocol, mbps)?;
+        Ok((src_id, dst_id))
+    }
+
+    pub fn limit_service_cidr_with_config(
+        &mut self,
+        src_cidr: &str,
+        dst_cidr: &str,
+        dst_port: u16,
+        protocol: u8,
+        config: QosConfig,
+    ) -> Result<(u32, u32), QoSError> {
+        let src_id = if src_cidr.is_empty() || src_cidr == "0" {
+            ID_WILDCARD
+        } else {
+            self.with_identity_mgr(|m| m.assign_id(src_cidr))?
+        };
+
+        let dst_id = if dst_cidr.is_empty() || dst_cidr == "0" {
+            ID_WILDCARD
+        } else {
+            self.with_identity_mgr(|m| m.assign_id(dst_cidr))?
+        };
+
+        self.limit_service_id_with_config(src_id, dst_id, dst_port, protocol, config)?;
         Ok((src_id, dst_id))
     }
 
@@ -740,6 +848,10 @@ fn calculate_bucket_params(mbps: u64) -> (u64, u64) {
     let burst = rate / 10;
     let burst = burst.max(1500);
     (rate, burst)
+}
+
+fn rate_bytes_from_bps(rate_bps: u64) -> u64 {
+    (rate_bps / 8).max(1)
 }
 
 fn now_ns() -> u64 {

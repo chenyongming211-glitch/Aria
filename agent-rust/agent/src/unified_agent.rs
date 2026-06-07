@@ -26,12 +26,15 @@ use crate::grpc_client::{
 use crate::wireguard::{WireGuardManager, PeerConfig};
 use crate::routing::RoutingManager;
 use crate::acl::AclManager;
-use crate::qos::QoSManager;
+use crate::qos::{QosConfig, QoSManager};
 use crate::identity::IdentityManager;
 use crate::metrics;
 use crate::config::{AgentConfig, ConfigManager};
 use crate::certificate_client;
 use crate::runtime_credential::RuntimeCredentialStore;
+use crate::sync_apply::{
+    acl_apply_operations_from_sync_rule, qos_apply_operation_from_sync_rule, QosApplyTarget,
+};
 
 const BPF_FS_PATH: &str = "/sys/fs/bpf/aria";
 const CERTIFICATE_RENEW_CHECK_INTERVAL: Duration = Duration::from_secs(30 * 60);
@@ -1597,41 +1600,48 @@ impl UnifiedAgent {
             let mut fail_count = 0;
             
             for rule in &new_rules {
-                // 根据规则特征判断类型并应用
-                let result = if rule.src_ip.is_empty() && rule.dst_ip.is_empty() {
-                    // 端口级规则（已弃用，忽略）
-                    tracing::warn!("Port-level rules are deprecated, skipping");
-                    continue;
-                } else if rule.src_ip.is_empty() || rule.dst_ip.is_empty() {
-                    // IP 级规则
-                    let ip = if !rule.src_ip.is_empty() {
-                        &rule.src_ip
-                    } else {
-                        &rule.dst_ip
-                    };
-                    mgr.limit_ip(ip, rule.bandwidth_mbps).map_err(|e| anyhow::anyhow!(e))
-                } else if rule.src_port == 0 && rule.dst_port == 0 {
-                    // Peer 级规则（只有 IP 对）
-                    mgr.limit_peer_pair(&rule.src_ip, &rule.dst_ip, rule.bandwidth_mbps).map_err(|e| anyhow::anyhow!(e))
-                } else {
-                    // 服务级规则（五元组）
-                    mgr.limit_service(
-                        &rule.src_ip,
-                        &rule.dst_ip,
-                        rule.src_port as u16,
-                        rule.dst_port as u16,
-                        rule.protocol as u8,
-                        rule.bandwidth_mbps,
-                    ).map_err(|e| anyhow::anyhow!(e))
-                };
+                let result = qos_apply_operation_from_sync_rule(rule).and_then(|operation| {
+                    let config = QosConfig::new(
+                        operation.rate_bps,
+                        operation.burst_bytes,
+                        operation.priority,
+                        operation.mode,
+                    );
+
+                    match operation.target {
+                        QosApplyTarget::Source { cidr } => mgr
+                            .limit_src_cidr_with_config(&cidr, config)
+                            .map(|_| ())
+                            .map_err(|e| anyhow::anyhow!(e)),
+                        QosApplyTarget::Pair { src_cidr, dst_cidr } => mgr
+                            .limit_pair_cidr_with_config(&src_cidr, &dst_cidr, config)
+                            .map(|_| ())
+                            .map_err(|e| anyhow::anyhow!(e)),
+                        QosApplyTarget::Service {
+                            src_cidr,
+                            dst_cidr,
+                            dst_port,
+                            protocol,
+                        } => mgr
+                            .limit_service_cidr_with_config(
+                                &src_cidr,
+                                &dst_cidr,
+                                dst_port,
+                                protocol,
+                                config,
+                            )
+                            .map(|_| ())
+                            .map_err(|e| anyhow::anyhow!(e)),
+                    }
+                });
                 
                 match result {
                     Ok(_) => {
                         success_count += 1;
                         tracing::debug!(
-                            "Applied QoS rule: {}:{}:{}:{}:{} -> {} Mbps",
+                            "Applied QoS rule: {}:{}:{}:{}:{} -> {} bps",
                             rule.src_ip, rule.dst_ip, rule.src_port,
-                            rule.dst_port, rule.protocol, rule.bandwidth_mbps
+                            rule.dst_port, rule.protocol, rule.rate_bps
                         );
                     }
                     Err(e) => {
@@ -2005,26 +2015,14 @@ impl UnifiedAgent {
         acl.clear_all_rules()?;
         
         for rule in rules {
-            match rule.action.trim().to_ascii_lowercase().as_str() {
-                "" | "allow" => {
-                    acl.allow(
-                        &rule.src_net,
-                        &rule.dst_net,
-                        rule.min_port as u16,
-                        rule.protocol as u8,
-                    )?;
-                }
-                "deny" => {
-                    acl.deny(
-                        &rule.src_net,
-                        &rule.dst_net,
-                        rule.min_port as u16,
-                        rule.protocol as u8,
-                    )?;
-                }
-                action => {
-                    return Err(anyhow::anyhow!("invalid ACL action '{}'", action));
-                }
+            for operation in acl_apply_operations_from_sync_rule(rule)? {
+                acl.apply_policy(
+                    &operation.src_net,
+                    &operation.dst_net,
+                    operation.dst_port,
+                    operation.protocol,
+                    operation.action,
+                )?;
             }
         }
         
