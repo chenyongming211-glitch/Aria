@@ -230,6 +230,31 @@ Immediate sync completed
 QoS sync completed
 ```
 
+### 2026-06-07 Nodes API Public IP Response Hotfix
+
+Status: deployed.
+
+Purpose:
+
+- Expose `public_ip`, `private_ip`, and `endpoint` in the tenant-scoped Nodes
+  list/detail API responses so the existing frontend `Public IP` column can
+  render the real public node address.
+- This was a Controller-only hotfix. The frontend artifact and Agent binary were
+  not changed for this deployment.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-07T02:42Z |
+| Git commit | `44d6e88a4ed38306227e11f833f5e5682823c72e` |
+| Push CI run | `27080519182` |
+| Publish run | `27080569906` |
+| Controller image | `ghcr.io/chenyongming211-glitch/aria-controller:0.2.35-test@sha256:c1e38f42d144bb5ec8f354f2a7c39de996e801c32963ef8b069fb658691b14f5` |
+| Frontend backup | Not changed; frontend remained from the previous deployment. |
+| Config backup | Not changed; no Controller config update in this hotfix. |
+| DB backup | Not taken; no schema or data migration in this response-only hotfix. |
+| Agent artifact | Not changed; Agent remained from workflow run `27079625892`. |
+| Verification | Controller container healthy on image `sha256:c1e38f42d144`; `/api/version` returned `0.2.35-test`; `sysadmin` login returned 200; tenant node list and detail both returned `public_ip=82.156.48.111`, empty `private_ip`, `assigned_ip=100.64.0.2`, and `endpoint=82.156.48.111:51820`; browser confirmed the Public IP column is visible. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
