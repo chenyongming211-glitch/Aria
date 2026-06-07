@@ -68,6 +68,14 @@ pub fn acl_apply_operations_from_sync_rule(rule: &AclRule) -> Result<Vec<AclAppl
     };
 
     let mut operations = Vec::new();
+    operations.push(AclApplyOperation {
+        src_net: dataplane_cidr(policy.src_group.clone()),
+        dst_net: dataplane_cidr(policy.dst_group.clone()),
+        dst_port: 0,
+        protocol: policy.proto,
+        action: inverted_acl_action(default_action)?,
+    });
+
     for (start, end, encoded_action) in parse_ports(ports, default_action)? {
         let span = u32::from(end) - u32::from(start) + 1;
         if operations.len() as u32 + span > MAX_EXPANDED_ACL_PORTS {
@@ -137,6 +145,14 @@ fn acl_action_from_port_encoding(action: u8) -> Result<u32> {
         1 => Ok(ACTION_DROP),
         2 => Ok(ACTION_PASS),
         other => Err(anyhow::anyhow!("invalid encoded ACL port action {}", other)),
+    }
+}
+
+fn inverted_acl_action(action: u32) -> Result<u32> {
+    match action {
+        ACTION_PASS => Ok(ACTION_DROP),
+        ACTION_DROP => Ok(ACTION_PASS),
+        other => Err(anyhow::anyhow!("invalid ACL action {}", other)),
     }
 }
 
@@ -213,6 +229,7 @@ mod tests {
         assert_eq!(
             ports_and_actions,
             vec![
+                (0, ACTION_PASS),
                 (80, ACTION_DROP),
                 (81, ACTION_DROP),
                 (82, ACTION_DROP),
