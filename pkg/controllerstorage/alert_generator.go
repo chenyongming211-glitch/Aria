@@ -121,7 +121,7 @@ func (s *Storage) GenerateSyncFailedAlert(tenantID, nodeID uuid.UUID, commandID,
 
 // GeneratePolicyFailedAlert creates a policy_failed alert when a policy delivery fails.
 // Also creates an alert_created audit event. Idempotent check applied.
-func (s *Storage) GeneratePolicyFailedAlert(tenantID, nodeID uuid.UUID, domain, ref, errorMsg string) error {
+func (s *Storage) GeneratePolicyFailedAlert(tenantID, nodeID uuid.UUID, domain, ref, commandID, errorMsg string) error {
 	// 检查是否已有活跃的相同类型告警
 	existing, _ := s.GetActiveAlertByNodeAndType(tenantID, nodeID, "policy_failed")
 	if existing != nil {
@@ -134,9 +134,11 @@ func (s *Storage) GeneratePolicyFailedAlert(tenantID, nodeID uuid.UUID, domain, 
 		AlertType: "policy_failed",
 		Severity:  "warning",
 		Title:     "策略下发失败",
+		Message:   fmt.Sprintf("策略 %s/%s 下发失败: %s", domain, ref, errorMsg),
 		Context: map[string]interface{}{
 			"policy_domain": domain,
 			"policy_ref":    ref,
+			"command_id":    commandID,
 			"error":         errorMsg,
 		},
 	}

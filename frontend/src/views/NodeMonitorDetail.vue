@@ -503,7 +503,13 @@ const cmdStatusType = (status) => {
   switch (status) {
     case 'completed': return 'success'
     case 'failed': return 'danger'
-    case 'pending': case 'queued': return 'warning'
+    case 'pending':
+    case 'queued':
+    case 'sent':
+    case 'acknowledged':
+    case 'in_progress':
+    case 'running':
+      return 'warning'
     default: return 'info'
   }
 }

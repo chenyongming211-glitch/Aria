@@ -415,6 +415,8 @@ describe('node monitor detail context handling', () => {
     expect(wrapper.vm.commandRowClassName({ row: { id: 'cmd-1' } })).toBe('context-match-row')
     expect(wrapper.vm.policyRowClassName({ row: { policy_ref: 'acl-1', command_id: 'other' } })).toBe('context-match-row')
     expect(wrapper.vm.alertRowClassName({ row: { id: 'alert-1' } })).toBe('context-match-row')
+    expect(wrapper.vm.cmdStatusType('sent')).toBe('warning')
+    expect(wrapper.vm.cmdStatusType('acknowledged')).toBe('warning')
   })
 
   it('routes to policy center with current node and policy filters', async () => {

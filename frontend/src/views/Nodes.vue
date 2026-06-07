@@ -639,7 +639,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, reactive, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, reactive, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Search,
@@ -686,6 +686,7 @@ const pageSize = ref(10)
 const detailDialogVisible = ref(false)
 const selectedNode = ref(null)
 const commandLoading = ref(false)
+const commandPollTimer = ref(null)
 
 // 编辑相关状态
 const editDialogVisible = ref(false)
@@ -875,6 +876,7 @@ const handleDeleteNode = async (id) => {
 }
 
 const closeDetailDialog = () => {
+  stopCommandPolling()
   detailDialogVisible.value = false
   selectedNode.value = null
 }
@@ -928,6 +930,41 @@ const reloadSelectedNode = async (preserveCommand = null) => {
   }
 }
 
+const isTerminalCommandStatus = (status) => ['completed', 'failed'].includes(status)
+
+const findRecentCommand = (commandId) => {
+  if (!commandId || !selectedNode.value?.recentCommands) return null
+  return selectedNode.value.recentCommands.find(item => item.id === commandId) || null
+}
+
+const stopCommandPolling = () => {
+  if (commandPollTimer.value) {
+    clearTimeout(commandPollTimer.value)
+    commandPollTimer.value = null
+  }
+}
+
+const pollCommandStatus = (command, attemptsRemaining = 15) => {
+  stopCommandPolling()
+  if (!command?.id || attemptsRemaining <= 0 || !detailDialogVisible.value) return
+
+  commandPollTimer.value = setTimeout(async () => {
+    commandPollTimer.value = null
+    if (!selectedNode.value?.id || !detailDialogVisible.value) return
+
+    try {
+      await reloadSelectedNode(command)
+      const latest = findRecentCommand(command.id)
+      if (!latest || !isTerminalCommandStatus(latest.status)) {
+        pollCommandStatus(command, attemptsRemaining - 1)
+      }
+    } catch (error) {
+      console.error('Failed to poll command status:', error)
+      pollCommandStatus(command, attemptsRemaining - 1)
+    }
+  }, 2000)
+}
+
 const normalizeQueuedCommand = (command, response) => ({
   id: response?.command_id || response?.id || '',
   command: response?.command || command,
@@ -967,6 +1004,10 @@ const runQuickCommand = async (command) => {
     prependCommandIfMissing(queuedCommand)
     ElMessage.success(`${command} queued`)
     await reloadSelectedNode(queuedCommand)
+    const latest = findRecentCommand(queuedCommand.id)
+    if (!latest || !isTerminalCommandStatus(latest.status)) {
+      pollCommandStatus(queuedCommand)
+    }
   } catch (error) {
     console.error(`Failed to queue ${command}:`, error)
     ElMessage.error(`Failed to queue ${command}`)
@@ -1072,6 +1113,10 @@ const reloadTenantScopedData = async () => {
 
 onMounted(() => {
   refreshNodes()
+})
+
+onBeforeUnmount(() => {
+  stopCommandPolling()
 })
 
 useTenantChangeReload(reloadTenantScopedData)

@@ -48,7 +48,7 @@ func TestGeneratePolicyFailedAlertIncludesCommandContext(t *testing.T) {
 			"policy_failed",
 			"warning",
 			"策略下发失败",
-			"",
+			"策略 acl/acl-1 下发失败: iptables apply failed",
 			jsonContextContains{
 				"policy_domain": "acl",
 				"policy_ref":    "acl-1",
@@ -61,7 +61,7 @@ func TestGeneratePolicyFailedAlertIncludesCommandContext(t *testing.T) {
 			"id", "tenant_id", "node_id", "alert_type", "severity", "title", "message",
 			"context", "status", "created_at", "resolved_at",
 		}).AddRow(
-			alertID, tenantID, nodeID, "policy_failed", "warning", "策略下发失败", "",
+			alertID, tenantID, nodeID, "policy_failed", "warning", "策略下发失败", "策略 acl/acl-1 下发失败: iptables apply failed",
 			[]byte(`{"policy_domain":"acl","policy_ref":"acl-1","command_id":"`+commandID+`"}`), "active", now, nil,
 		))
 

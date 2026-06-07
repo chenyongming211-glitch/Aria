@@ -442,7 +442,7 @@ func (s *Storage) emitPolicyDeliveryAlertAndAudit(commandID, status, errorMsg st
 
 		switch status {
 		case AgentCommandStatusFailed:
-			if err := s.GeneratePolicyFailedAlert(tenantID, nodeID, domain, ref, errorMsg); err != nil {
+			if err := s.GeneratePolicyFailedAlert(tenantID, nodeID, domain, ref, commandID, errorMsg); err != nil {
 				log.Printf("[agent_commands] failed to generate policy_failed alert for command %s domain %s: %v", commandID, domain, err)
 			}
 			if _, err := s.CreateAuditEvent(&AuditEvent{
