@@ -70,8 +70,9 @@ style.textContent = `
 
   /* 表格样式 */
   .el-table {
-    --el-table-bg-color: transparent;
-    --el-table-tr-bg-color: transparent;
+    --el-table-bg-color: var(--aria-content-bg-secondary);
+    --el-table-tr-bg-color: var(--aria-content-bg-secondary);
+    --el-table-header-bg-color: var(--aria-content-bg-tertiary);
     --el-table-row-hover-bg-color: var(--aria-content-bg-tertiary);
     --el-table-border-color: var(--aria-border-primary);
     border-radius: var(--aria-radius-md);
@@ -79,15 +80,17 @@ style.textContent = `
   }
 
   .el-table__header-wrapper {
+    background: var(--el-table-header-bg-color);
     border-radius: var(--aria-radius-md) var(--aria-radius-md) 0 0;
   }
 
   .el-table__body-wrapper {
+    background: var(--el-table-tr-bg-color);
     border-radius: 0 0 var(--aria-radius-md) var(--aria-radius-md);
   }
 
   .el-table th.el-table__cell {
-    background: var(--aria-content-bg-tertiary);
+    background: var(--el-table-header-bg-color);
     color: var(--aria-text-secondary);
     font-weight: 600;
     font-size: 13px;
@@ -95,6 +98,7 @@ style.textContent = `
   }
 
   .el-table td.el-table__cell {
+    background: var(--el-table-tr-bg-color);
     color: var(--aria-text-primary);
     border-bottom: 1px solid var(--aria-border-primary);
   }
@@ -109,12 +113,24 @@ style.textContent = `
 
   .el-table .el-table-fixed-column--left,
   .el-table .el-table-fixed-column--right {
-    background: var(--aria-content-bg-secondary);
+    background: var(--el-table-tr-bg-color);
   }
 
   .el-table th.el-table-fixed-column--left,
   .el-table th.el-table-fixed-column--right {
-    background: var(--aria-content-bg-tertiary);
+    background: var(--el-table-header-bg-color);
+  }
+
+  .el-table .el-table__header-wrapper tr th.el-table-fixed-column--left,
+  .el-table .el-table__header-wrapper tr th.el-table-fixed-column--right {
+    background: var(--el-table-header-bg-color);
+  }
+
+  .el-table .el-table__body-wrapper tr td.el-table-fixed-column--left,
+  .el-table .el-table__body-wrapper tr td.el-table-fixed-column--right,
+  .el-table .el-table__footer-wrapper tr td.el-table-fixed-column--left,
+  .el-table .el-table__footer-wrapper tr td.el-table-fixed-column--right {
+    background: var(--el-table-tr-bg-color);
   }
 
   .el-table--striped .el-table__body tr.el-table__row--striped td.el-table-fixed-column--left,
