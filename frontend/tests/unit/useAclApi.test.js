@@ -30,6 +30,17 @@ describe('useAclApi', () => {
   })
 
   describe('getACLRules', () => {
+    it('应该把空 ACL 规则响应规范化为空数组', async () => {
+      api.get.mockResolvedValue({
+        data: { success: true, data: null }
+      })
+
+      const rules = await useAclApi.getACLRulesByNode('node-1')
+
+      expect(api.get).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/security/acls')
+      expect(rules).toEqual([])
+    })
+
     it('应该返回 ACL 规则列表', async () => {
       const mockRules = [
         { id: 1, name: 'allow-web', action: 'allow', src_cidr: '10.0.0.0/24', dst_cidr: '0.0.0.0/0', dst_port: 443 },

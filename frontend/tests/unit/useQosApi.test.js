@@ -26,6 +26,17 @@ describe('useQosApi', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
   })
 
+  it('应该把空 QoS 规则响应规范化为空数组', async () => {
+    api.get.mockResolvedValue({
+      data: { success: true, data: null }
+    })
+
+    const rules = await useQosApi.getQoSRulesByNode('node-1', 'service')
+
+    expect(api.get).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/qos/service')
+    expect(rules).toEqual([])
+  })
+
   it('应该创建 QoS 规则并发送标准化带宽字段', async () => {
     api.post.mockResolvedValue({
       data: { success: true, data: { id: 'rule-1' } }
