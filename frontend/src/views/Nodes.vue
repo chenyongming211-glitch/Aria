@@ -246,6 +246,7 @@
             </el-descriptions-item>
             <el-descriptions-item label="Public IP">{{ selectedNode.publicIp }}</el-descriptions-item>
             <el-descriptions-item label="VPN IP">{{ selectedNode.vpnIp }}</el-descriptions-item>
+            <el-descriptions-item label="Endpoint">{{ selectedNode.endpoint }}</el-descriptions-item>
             <el-descriptions-item label="Status">
               <span class="status-badge" :class="selectedNode.status">
                 {{ selectedNode.status }}
@@ -765,6 +766,7 @@ const filteredNodes = computed(() => {
     String(node.hostname || '').toLowerCase().includes(query) ||
     String(node.publicIp || '').includes(query) ||
     String(node.vpnIp || '').includes(query) ||
+    String(node.endpoint || '').includes(query) ||
     String(node.region || '').toLowerCase().includes(query)
   )
 })
