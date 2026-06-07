@@ -227,7 +227,7 @@ impl GrpcClient {
     /// 从 Controller 同步配置（不带状态上报，向后兼容）
     #[allow(dead_code)]
     pub async fn sync(&self, node_id: Option<String>, public_key: String, runtime_token: Option<String>) -> Result<SyncResult> {
-        self.sync_with_state(node_id, public_key, None, None, None, runtime_token).await
+        self.sync_with_state(node_id, public_key, None, None, None, None, None, runtime_token).await
     }
 
     pub async fn sync_with_state(
@@ -237,6 +237,8 @@ impl GrpcClient {
         applied_state_version: Option<String>,
         observed_state: Option<String>,
         observed_message: Option<String>,
+        public_ip: Option<String>,
+        endpoint: Option<String>,
         runtime_token: Option<String>,
     ) -> Result<SyncResult> {
         let mut request = tonic::Request::new(aria::SyncRequest {
@@ -245,6 +247,8 @@ impl GrpcClient {
             applied_state_version: applied_state_version.unwrap_or_default(),
             observed_state: observed_state.unwrap_or_default(),
             observed_message: observed_message.unwrap_or_default(),
+            public_ip: public_ip.unwrap_or_default(),
+            endpoint: endpoint.unwrap_or_default(),
         });
 
         if let Some(token) = &runtime_token {

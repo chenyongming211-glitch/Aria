@@ -24,6 +24,10 @@ pub struct BootstrapConfig {
     pub tls_server_name: Option<String>,
     #[serde(default)]
     pub enrollment_token: Option<String>,
+    #[serde(default)]
+    pub public_ip: Option<String>,
+    #[serde(default)]
+    pub public_endpoint: Option<String>,
     #[serde(default = "default_interface")]
     pub interface_name: String,
     #[serde(default = "default_listen_port")]
@@ -94,6 +98,10 @@ pub struct AgentConfig {
     pub tls_server_name: Option<String>,
     #[serde(default)]
     pub enrollment_token: Option<String>,
+    #[serde(default)]
+    pub public_ip: Option<String>,
+    #[serde(default)]
+    pub public_endpoint: Option<String>,
     #[serde(default)]
     pub node_id: Option<String>,
     #[serde(default)]
@@ -198,6 +206,8 @@ impl Default for BootstrapConfig {
             client_key: String::new(),
             tls_server_name: None,
             enrollment_token: None,
+            public_ip: None,
+            public_endpoint: None,
             interface_name: default_interface(),
             listen_port: default_listen_port(),
             mtu: default_mtu(),
@@ -247,6 +257,8 @@ impl AgentConfig {
             client_key: bootstrap.client_key,
             tls_server_name: bootstrap.tls_server_name,
             enrollment_token: bootstrap.enrollment_token,
+            public_ip: bootstrap.public_ip,
+            public_endpoint: bootstrap.public_endpoint,
             node_id: state.node_id,
             device_id: state.device_id,
             private_key: state.private_key,
@@ -283,6 +295,8 @@ impl AgentConfig {
             client_key: self.client_key.clone(),
             tls_server_name: self.tls_server_name.clone(),
             enrollment_token: self.enrollment_token.clone(),
+            public_ip: self.public_ip.clone(),
+            public_endpoint: self.public_endpoint.clone(),
             interface_name: self.interface_name.clone(),
             listen_port: self.listen_port,
             mtu: self.mtu,

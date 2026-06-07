@@ -1,6 +1,6 @@
 use std::os::unix::net::UnixStream;
 use std::io::{BufReader, BufWriter, BufRead, Write};
-use std::net::UdpSocket;
+use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -60,6 +60,10 @@ enum Commands {
         server: String,
         #[arg(long)]
         token: String,
+        #[arg(long)]
+        public_ip: Option<String>,
+        #[arg(long)]
+        public_endpoint: Option<String>,
         #[arg(long)]
         hostname: Option<String>,
         #[arg(long)]
@@ -289,6 +293,8 @@ fn main() -> Result<()> {
         Commands::Init {
             server,
             token,
+            public_ip,
+            public_endpoint,
             hostname,
             region,
             interface,
@@ -303,6 +309,8 @@ fn main() -> Result<()> {
             run_init(
                 &server,
                 &token,
+                public_ip.as_deref(),
+                public_endpoint.as_deref(),
                 hostname.as_deref(),
                 region.as_deref(),
                 interface.as_deref(),
@@ -572,6 +580,8 @@ fn send_log_command(level: &str) -> Result<()> {
 fn run_init(
     server: &str,
     token: &str,
+    public_ip: Option<&str>,
+    public_endpoint: Option<&str>,
     hostname: Option<&str>,
     region: Option<&str>,
     interface: Option<&str>,
@@ -604,6 +614,9 @@ fn run_init(
         client_key: client_key.unwrap_or_default().to_string(),
         tls_server_name: tls_server_name.map(|value| value.to_string()),
         enrollment_token: Some(token.to_string()),
+        public_ip: public_ip.and_then(normalize_public_ipv4),
+        public_endpoint: public_endpoint
+            .and_then(|value| normalize_public_endpoint(Some(value), public_ip, 51820)),
         interface_name: iface.to_string(),
         listen_port: 51820,
         mtu: 1360,
@@ -700,14 +713,168 @@ fn generate_fallback_device_id(hostname: &str) -> String {
     format!("{}-{}", hostname.replace(' ', "-"), ts)
 }
 
-fn detect_primary_ipv4() -> Option<String> {
+fn normalize_public_ipv4(candidate: &str) -> Option<String> {
+    let candidate = candidate
+        .trim()
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .trim_matches(|ch| ch == '"' || ch == char::from(39));
+    match candidate.parse::<IpAddr>().ok()? {
+        IpAddr::V4(ip) if is_public_ipv4(ip) => Some(ip.to_string()),
+        _ => None,
+    }
+}
+
+fn is_public_ipv4(ip: Ipv4Addr) -> bool {
+    let octets = ip.octets();
+    if ip.is_unspecified()
+        || ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_multicast()
+        || ip.is_broadcast()
+    {
+        return false;
+    }
+
+    match octets {
+        [100, second, _, _] if (64..=127).contains(&second) => false, // CGNAT
+        [0, _, _, _] => false,
+        [169, 254, _, _] => false,
+        [192, 0, 0, _] => false,
+        [192, 0, 2, _] => false,
+        [198, second, _, _] if second == 18 || second == 19 => false,
+        [198, 51, 100, _] => false,
+        [203, 0, 113, _] => false,
+        [first, _, _, _] if first >= 224 => false,
+        _ => true,
+    }
+}
+
+fn detect_route_source_public_ipv4() -> Option<String> {
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("8.8.8.8:80").ok()?;
     let local_addr = socket.local_addr().ok()?;
     match local_addr.ip() {
-        std::net::IpAddr::V4(ip) if !ip.is_loopback() => Some(ip.to_string()),
+        IpAddr::V4(ip) if is_public_ipv4(ip) => Some(ip.to_string()),
         _ => None,
     }
+}
+
+fn normalize_public_endpoint(
+    configured_endpoint: Option<&str>,
+    public_ip: Option<&str>,
+    listen_port: u16,
+) -> Option<String> {
+    if let Some(endpoint) = configured_endpoint.map(str::trim).filter(|value| !value.is_empty()) {
+        let (host, port) = split_endpoint_host_port(endpoint);
+        if host.is_empty() {
+            return public_ip
+                .and_then(normalize_public_ipv4)
+                .map(|ip| format!("{}:{}", ip, port.unwrap_or_else(|| listen_port.to_string())));
+        }
+        if let Ok(IpAddr::V4(ip)) = host.parse::<IpAddr>() {
+            if is_public_ipv4(ip) {
+                return Some(endpoint.to_string());
+            }
+            return public_ip
+                .and_then(normalize_public_ipv4)
+                .map(|ip| format!("{}:{}", ip, port.unwrap_or_else(|| listen_port.to_string())));
+        }
+        if host.eq_ignore_ascii_case("localhost") {
+            return None;
+        }
+        return Some(endpoint.to_string());
+    }
+
+    public_ip
+        .and_then(normalize_public_ipv4)
+        .map(|ip| format!("{}:{}", ip, listen_port))
+}
+
+fn split_endpoint_host_port(endpoint: &str) -> (String, Option<String>) {
+    let endpoint = endpoint.trim();
+    if let Some(port) = endpoint.strip_prefix(':') {
+        return ("".to_string(), Some(port.to_string()));
+    }
+    if let Some(rest) = endpoint.strip_prefix('[') {
+        if let Some((host, tail)) = rest.split_once(']') {
+            let port = tail.strip_prefix(':').map(|value| value.to_string());
+            return (host.to_string(), port);
+        }
+    }
+    match endpoint.rsplit_once(':') {
+        Some((host, port)) => (host.to_string(), Some(port.to_string())),
+        None => (endpoint.to_string(), None),
+    }
+}
+
+async fn detect_public_ipv4(configured: Option<&str>) -> Option<String> {
+    if let Some(ip) = configured.and_then(normalize_public_ipv4) {
+        return Some(ip);
+    }
+
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(1))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return detect_route_source_public_ipv4(),
+    };
+    let probes: &[(&str, &[(&str, &str)])] = &[
+        ("http://metadata.tencentyun.com/latest/meta-data/public-ipv4", &[]),
+        ("http://100.100.100.200/latest/meta-data/eipv4", &[]),
+        ("http://100.100.100.200/latest/meta-data/public-ipv4", &[]),
+        ("http://169.254.169.254/latest/meta-data/public-ipv4", &[]),
+        (
+            "http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip",
+            &[("Metadata-Flavor", "Google")],
+        ),
+        ("https://checkip.amazonaws.com", &[]),
+        ("https://api.ipify.org", &[]),
+        ("https://ifconfig.me/ip", &[]),
+    ];
+
+    for (url, headers) in probes {
+        let mut request = client.get(*url);
+        for (key, value) in *headers {
+            request = request.header(*key, *value);
+        }
+        if let Ok(response) = request.send().await {
+            if response.status().is_success() {
+                if let Ok(body) = response.text().await {
+                    if let Some(ip) = normalize_public_ipv4(&body) {
+                        return Some(ip);
+                    }
+                }
+            }
+        }
+    }
+
+    detect_route_source_public_ipv4()
+}
+
+async fn ensure_public_network_identity(bootstrap: &mut config::BootstrapConfig) -> bool {
+    let mut changed = false;
+    let detected_public_ip = detect_public_ipv4(bootstrap.public_ip.as_deref()).await;
+    if bootstrap.public_ip != detected_public_ip {
+        bootstrap.public_ip = detected_public_ip.clone();
+        changed = true;
+    }
+
+    let endpoint = normalize_public_endpoint(
+        bootstrap.public_endpoint.as_deref(),
+        detected_public_ip.as_deref(),
+        bootstrap.listen_port,
+    );
+    if bootstrap.public_endpoint != endpoint {
+        bootstrap.public_endpoint = endpoint;
+        changed = true;
+    }
+
+    changed
 }
 
 fn ensure_local_identity(
@@ -801,13 +968,20 @@ async fn bootstrap_register(
         .clone()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| generate_fallback_device_id(&hostname));
-    let public_ip = detect_primary_ipv4().unwrap_or_default();
-    let endpoint = if public_ip.is_empty() {
-        tracing::warn!("Unable to detect primary IPv4 address, registering endpoint without host");
-        format!(":{}", bootstrap.listen_port)
-    } else {
-        format!("{}:{}", public_ip, bootstrap.listen_port)
-    };
+    let public_ip = bootstrap
+        .public_ip
+        .as_deref()
+        .and_then(normalize_public_ipv4)
+        .unwrap_or_default();
+    let endpoint = normalize_public_endpoint(
+        bootstrap.public_endpoint.as_deref(),
+        (!public_ip.is_empty()).then_some(public_ip.as_str()),
+        bootstrap.listen_port,
+    )
+    .unwrap_or_default();
+    if public_ip.is_empty() {
+        tracing::warn!("Unable to detect public IPv4 address, registering without public_ip");
+    }
 
     let grpc_client = grpc_client::GrpcClient::new_with_options(
         bootstrap.controller_url.clone(),
@@ -1054,7 +1228,10 @@ async fn run_unified_agent(
         .load_parts_or_init(false)?
         .context("Agent is not initialized. Run 'aria-agent init' first.")?;
 
-    let (bootstrap_changed, mut state_changed) = ensure_local_identity(&mut bootstrap, &mut state)?;
+    let (mut bootstrap_changed, mut state_changed) = ensure_local_identity(&mut bootstrap, &mut state)?;
+    if ensure_public_network_identity(&mut bootstrap).await {
+        bootstrap_changed = true;
+    }
 
     if needs_bootstrap_registration(&state, current_epoch_seconds()) {
         info!("Runtime registration state missing or expired, starting bootstrap registration");
@@ -1090,9 +1267,13 @@ async fn run_unified_agent(
 
 #[cfg(test)]
 mod tests {
-    use super::{acl_command_request, needs_bootstrap_registration, AclCommands};
+    use super::{
+        acl_command_request, is_public_ipv4, needs_bootstrap_registration,
+        normalize_public_endpoint, normalize_public_ipv4, AclCommands,
+    };
     use crate::config::AgentState;
     use serde_json::json;
+    use std::net::Ipv4Addr;
 
     #[test]
     fn bootstrap_needed_when_assigned_ip_exists_but_runtime_credential_missing() {
@@ -1147,5 +1328,32 @@ mod tests {
 
         assert_eq!(req.cmd, "acl_block_dst_ip");
         assert_eq!(req.args, json!({"dst_ip": "10.0.0.20"}));
+    }
+
+    #[test]
+    fn public_ipv4_filter_rejects_private_and_vpn_ranges() {
+        for value in [
+            "10.2.0.3",
+            "172.16.0.1",
+            "192.168.1.1",
+            "100.64.0.2",
+            "127.0.0.1",
+            "169.254.1.1",
+        ] {
+            assert_eq!(normalize_public_ipv4(value), None);
+        }
+        assert!(!is_public_ipv4(Ipv4Addr::new(10, 2, 0, 3)));
+    }
+
+    #[test]
+    fn public_endpoint_replaces_private_host_with_public_ip() {
+        assert_eq!(
+            normalize_public_endpoint(Some("10.2.0.3:51820"), Some("82.156.48.111"), 51820),
+            Some("82.156.48.111:51820".to_string())
+        );
+        assert_eq!(
+            normalize_public_endpoint(None, Some("82.156.48.111"), 51820),
+            Some("82.156.48.111:51820".to_string())
+        );
     }
 }

@@ -261,6 +261,8 @@ type SyncRequest struct {
 	AppliedStateVersion string                 `protobuf:"bytes,3,opt,name=applied_state_version,json=appliedStateVersion,proto3" json:"applied_state_version,omitempty"` // Agent 当前已应用的 desired state 版本
 	ObservedState       string                 `protobuf:"bytes,4,opt,name=observed_state,json=observedState,proto3" json:"observed_state,omitempty"`                     // Agent 当前观测状态：applied / healthy / error / in_progress
 	ObservedMessage     string                 `protobuf:"bytes,5,opt,name=observed_message,json=observedMessage,proto3" json:"observed_message,omitempty"`               // Agent 当前观测说明或错误信息
+	PublicIp            string                 `protobuf:"bytes,6,opt,name=public_ip,json=publicIp,proto3" json:"public_ip,omitempty"`                                    // Agent 观测到的真实公网 IPv4，不能是本地/VPC 地址
+	Endpoint            string                 `protobuf:"bytes,7,opt,name=endpoint,proto3" json:"endpoint,omitempty"`                                                    // Agent 对外可达 WireGuard 端点
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -326,6 +328,20 @@ func (x *SyncRequest) GetObservedState() string {
 func (x *SyncRequest) GetObservedMessage() string {
 	if x != nil {
 		return x.ObservedMessage
+	}
+	return ""
+}
+
+func (x *SyncRequest) GetPublicIp() string {
+	if x != nil {
+		return x.PublicIp
+	}
+	return ""
+}
+
+func (x *SyncRequest) GetEndpoint() string {
+	if x != nil {
+		return x.Endpoint
 	}
 	return ""
 }
@@ -1754,14 +1770,16 @@ const file_aria_agent_proto_rawDesc = "" +
 	"\x14metrics_push_gateway\x18\x02 \x01(\tR\x12metricsPushGateway\x12\x17\n" +
 	"\anode_id\x18\x03 \x01(\tR\x06nodeId\x12#\n" +
 	"\rruntime_token\x18\x04 \x01(\tR\fruntimeToken\x127\n" +
-	"\x18runtime_token_expires_at\x18\x05 \x01(\x03R\x15runtimeTokenExpiresAt\"\xcb\x01\n" +
+	"\x18runtime_token_expires_at\x18\x05 \x01(\x03R\x15runtimeTokenExpiresAt\"\x84\x02\n" +
 	"\vSyncRequest\x12\x1d\n" +
 	"\n" +
 	"public_key\x18\x01 \x01(\tR\tpublicKey\x12\x17\n" +
 	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x122\n" +
 	"\x15applied_state_version\x18\x03 \x01(\tR\x13appliedStateVersion\x12%\n" +
 	"\x0eobserved_state\x18\x04 \x01(\tR\robservedState\x12)\n" +
-	"\x10observed_message\x18\x05 \x01(\tR\x0fobservedMessage\"\xaf\x05\n" +
+	"\x10observed_message\x18\x05 \x01(\tR\x0fobservedMessage\x12\x1b\n" +
+	"\tpublic_ip\x18\x06 \x01(\tR\bpublicIp\x12\x1a\n" +
+	"\bendpoint\x18\a \x01(\tR\bendpoint\"\xaf\x05\n" +
 	"\fSyncResponse\x12*\n" +
 	"\x05peers\x18\x01 \x03(\v2\x14.aria.agent.PeerInfoR\x05peers\x12\x1f\n" +
 	"\vassigned_ip\x18\x02 \x01(\tR\n" +

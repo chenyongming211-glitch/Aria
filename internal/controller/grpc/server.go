@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"aria/internal/auth"
+	"aria/internal/nodeidentity"
 	controllerstorage "aria/pkg/controllerstorage"
 	"aria/pkg/grpc/agentpb"
 	"github.com/google/uuid"
@@ -431,7 +432,12 @@ func (s *ControllerServer) reportRuntimeSyncState(node *controllerstorage.Node, 
 		LastSyncAt:          &now,
 		LastSyncError:       lastSyncError,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+
+	publicIP, endpoint := nodeidentity.NormalizeReportedNetwork(req.PublicIp, req.Endpoint)
+	return s.store.UpdateNodePublicIdentity(node.ID, publicIP, endpoint)
 }
 
 func (s *ControllerServer) ensureDesiredStateVersion(node *controllerstorage.Node) (string, error) {

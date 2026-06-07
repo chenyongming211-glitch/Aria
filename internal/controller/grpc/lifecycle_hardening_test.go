@@ -125,6 +125,7 @@ func TestSyncResponseIncludesSnapshotMetadata(t *testing.T) {
 	expectNodeByID(mock, nodeID, publicKey, tenantID, now)
 	expectNodeByPublicKey(mock, publicKey, nodeID, tenantID, now)
 	expectReportNodeControlState(mock, tenantID, nodeID, "applied-1", "applied", "", now)
+	expectUpdateNodePublicIdentity(mock, nodeID, "82.156.48.111", "82.156.48.111:51820")
 	expectNodeByPublicKey(mock, publicKey, nodeID, tenantID, now)
 	expectEmptyQoSRules(mock, tenantID, nodeID)
 	expectNodeByPublicKey(mock, publicKey, nodeID, tenantID, now)
@@ -147,6 +148,8 @@ func TestSyncResponseIncludesSnapshotMetadata(t *testing.T) {
 		PublicKey:           publicKey,
 		AppliedStateVersion: "applied-1",
 		ObservedState:       "applied",
+		PublicIp:            "82.156.48.111",
+		Endpoint:            "10.2.0.3:51820",
 	})
 	if err != nil {
 		t.Fatalf("Sync failed: %v", err)
@@ -214,6 +217,23 @@ func expectReportNodeControlState(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UU
 	mock.ExpectQuery(`(?s)INSERT INTO node_control_states .*RETURNING tenant_id, node_id`).
 		WithArgs(tenantID, nodeID, appliedVersion, observedState, observedMessage, sqlmock.AnyArg(), "").
 		WillReturnRows(nodeControlStateRowsFor(tenantID, nodeID, "dsv-phase1", now))
+}
+
+func expectUpdateNodePublicIdentity(mock sqlmock.Sqlmock, nodeID uuid.UUID, publicIP, endpoint string) {
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE nodes
+		SET public_ip = COALESCE(NULLIF($2, ''), public_ip),
+		    endpoint = COALESCE(NULLIF($3, ''), endpoint),
+		    private_ip = '',
+		    updated_at = NOW()
+		WHERE id = $1
+		  AND status NOT IN ('deleted', 'suspended', 'banned')
+		  AND (
+		      ($2 <> '' AND COALESCE(public_ip, '') <> $2)
+		   OR ($3 <> '' AND COALESCE(endpoint, '') <> $3)
+		   OR COALESCE(private_ip, '') <> ''
+		  )`)).
+		WithArgs(nodeID, publicIP, endpoint).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
 func expectGetNodeControlState(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, desiredVersion string, now time.Time) {

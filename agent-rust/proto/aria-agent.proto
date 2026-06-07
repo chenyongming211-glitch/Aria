@@ -81,6 +81,8 @@ message SyncRequest {
   string applied_state_version = 3;   // Agent 当前已应用的 desired state 版本
   string observed_state = 4;          // Agent 当前观测状态：applied / healthy / error / in_progress
   string observed_message = 5;        // Agent 当前观测说明或错误信息
+  string public_ip = 6;               // Agent 观测到的真实公网 IPv4，不能是本地/VPC 地址
+  string endpoint = 7;                // Agent 对外可达 WireGuard 端点
 }
 
 message SyncResponse {

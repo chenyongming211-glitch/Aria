@@ -1515,6 +1515,8 @@ impl UnifiedAgent {
                 self.config.last_applied_version.clone(),
                 self.config.last_sync_status.clone(),
                 self.config.last_sync_message.clone(),
+                self.config.public_ip.clone(),
+                self.config.public_endpoint.clone(),
                 self.config.current_credential.clone(),
             )
             .await?;

@@ -29,6 +29,7 @@ import (
 	"aria/internal/auth"
 	grpcserver "aria/internal/controller/grpc"
 	"aria/internal/im"
+	"aria/internal/nodeidentity"
 	"aria/internal/security/certissuance"
 	"aria/internal/service"
 	"aria/internal/token"
@@ -1822,10 +1823,19 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 	}
 	requestedTenantID := authResult.RequestedTenantID
 
-	// Use provided public IP or empty
-	if req.PublicIP == "" {
-		req.PublicIP = publicIP
+	// Persist only the node's true public identity. VPC/local interface
+	// addresses are not useful for SaaS inventory or cross-site reachability.
+	normalizedPublicIP := nodeidentity.NormalizePublicIPv4(req.PublicIP)
+	if normalizedPublicIP == "" {
+		normalizedPublicIP = nodeidentity.NormalizePublicIPv4(publicIP)
 	}
+	normalizedEndpoint := nodeidentity.NormalizePublicEndpoint(req.Endpoint, normalizedPublicIP)
+	if normalizedPublicIP == "" {
+		normalizedPublicIP, _ = nodeidentity.NormalizeReportedNetwork("", normalizedEndpoint)
+	}
+	req.PublicIP = normalizedPublicIP
+	req.Endpoint = normalizedEndpoint
+	req.PrivateIP = ""
 
 	var assignedIP string
 	var ipOffset int
@@ -1886,7 +1896,7 @@ func (c *Controller) processRegistration(req *RegisterRequest, publicIP string) 
 	node := &controllerstorage.Node{
 		PublicKey:         req.PublicKey,
 		Endpoint:          req.Endpoint,
-		PrivateIP:         req.PrivateIP,
+		PrivateIP:         "",
 		PublicIP:          req.PublicIP,
 		Region:            req.Region,
 		VPCID:             req.VPCID,

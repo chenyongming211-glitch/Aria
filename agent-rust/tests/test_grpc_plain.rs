@@ -23,6 +23,8 @@ async fn main() {
                 applied_state_version: String::new(),
                 observed_state: String::new(),
                 observed_message: String::new(),
+                public_ip: String::new(),
+                endpoint: String::new(),
             });
             
             match client.sync(request).await {

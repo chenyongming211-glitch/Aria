@@ -119,6 +119,38 @@ func TestUpdateNodeHeartbeatDoesNotReviveInactiveNode(t *testing.T) {
 	}
 }
 
+func TestUpdateNodePublicIdentityClearsPrivateIP(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	nodeID := uuid.New()
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE nodes
+		SET public_ip = COALESCE(NULLIF($2, ''), public_ip),
+		    endpoint = COALESCE(NULLIF($3, ''), endpoint),
+		    private_ip = '',
+		    updated_at = NOW()
+		WHERE id = $1
+		  AND status NOT IN ('deleted', 'suspended', 'banned')
+		  AND (
+		      ($2 <> '' AND COALESCE(public_ip, '') <> $2)
+		   OR ($3 <> '' AND COALESCE(endpoint, '') <> $3)
+		   OR COALESCE(private_ip, '') <> ''
+		  )`)).
+		WithArgs(nodeID, "82.156.48.111", "82.156.48.111:51820").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err = NewStorageWithDB(db).UpdateNodePublicIdentity(nodeID, "82.156.48.111", "82.156.48.111:51820")
+	if err != nil {
+		t.Fatalf("UpdateNodePublicIdentity failed: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestGetNodesByTenantReturnsRowsErr(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

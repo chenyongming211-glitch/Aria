@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -662,6 +663,30 @@ func (s *Storage) UpdateNodeHeartbeat(nodeID uuid.UUID, lastSeen int64) error {
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+func (s *Storage) UpdateNodePublicIdentity(nodeID uuid.UUID, publicIP, endpoint string) error {
+	publicIP = strings.TrimSpace(publicIP)
+	endpoint = strings.TrimSpace(endpoint)
+	if publicIP == "" && endpoint == "" {
+		return nil
+	}
+
+	_, err := s.db.Exec(`
+		UPDATE nodes
+		SET public_ip = COALESCE(NULLIF($2, ''), public_ip),
+		    endpoint = COALESCE(NULLIF($3, ''), endpoint),
+		    private_ip = '',
+		    updated_at = NOW()
+		WHERE id = $1
+		  AND status NOT IN ('deleted', 'suspended', 'banned')
+		  AND (
+		      ($2 <> '' AND COALESCE(public_ip, '') <> $2)
+		   OR ($3 <> '' AND COALESCE(endpoint, '') <> $3)
+		   OR COALESCE(private_ip, '') <> ''
+		  )
+	`, nodeID, publicIP, endpoint)
+	return err
 }
 
 func (s *Storage) GetNode(publicKey string) (*Node, error) {
