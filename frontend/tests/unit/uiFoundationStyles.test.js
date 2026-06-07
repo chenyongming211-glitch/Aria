@@ -9,9 +9,14 @@ const mainJs = readFileSync(resolve(__dirname, '../../src/main.js'), 'utf8')
 
 describe('UI foundation styles', () => {
   it('keeps fixed table action columns on the themed table surface', () => {
-    expect(mainJs).toContain('.el-table .el-table-fixed-column--right')
-    expect(mainJs).toContain('.el-table .el-table-fixed-column--left')
-    expect(mainJs).toContain('background: var(--aria-content-bg-secondary);')
+    expect(mainJs).toContain('--el-table-header-bg-color: var(--aria-content-bg-tertiary);')
+    expect(mainJs).toContain('--el-table-tr-bg-color: var(--aria-content-bg-secondary);')
+    expect(mainJs).toContain('.el-table .el-table__header-wrapper tr th.el-table-fixed-column--right')
+    expect(mainJs).toContain('.el-table .el-table__header-wrapper tr th.el-table-fixed-column--left')
+    expect(mainJs).toContain('.el-table .el-table__body-wrapper tr td.el-table-fixed-column--right')
+    expect(mainJs).toContain('.el-table .el-table__body-wrapper tr td.el-table-fixed-column--left')
+    expect(mainJs).toContain('background: var(--el-table-header-bg-color);')
+    expect(mainJs).toContain('background: var(--el-table-tr-bg-color);')
   })
 
   it('gives table link action buttons a visible themed surface', () => {
