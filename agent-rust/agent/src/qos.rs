@@ -709,3 +709,24 @@ fn now_ns() -> u64 {
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0)
 }
+
+#[cfg(test)]
+mod reference_contract_tests {
+    use super::{default_qos_burst, qos_mode_from_name, QosConfig};
+
+    #[test]
+    fn qos_default_burst_matches_reference_contract() {
+        assert_eq!(default_qos_burst(100_000_000), 1_250_000);
+        assert_eq!(default_qos_burst(1), 1500);
+    }
+
+    #[test]
+    fn qos_config_uses_rate_bps_burst_priority_and_mode() {
+        let config = QosConfig::new(250_000_000, 4_000_000, 7, qos_mode_from_name("shaping").unwrap());
+
+        assert_eq!(config.rate_bps, 250_000_000);
+        assert_eq!(config.burst_bytes, 4_000_000);
+        assert_eq!(config.priority, 7);
+        assert_eq!(config.mode, 1);
+    }
+}

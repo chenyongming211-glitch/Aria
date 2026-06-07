@@ -30,6 +30,31 @@ pub enum AclError {
     LockError,
 }
 
+#[cfg(test)]
+mod reference_contract_tests {
+    use super::{parse_ports, stored_policy_action, ACTION_DROP, ACTION_PASS};
+
+    #[test]
+    fn acl_action_encoding_matches_reference_contract() {
+        assert_eq!(ACTION_PASS, 0);
+        assert_eq!(ACTION_DROP, 1);
+    }
+
+    #[test]
+    fn port_bitmap_encodes_default_and_explicit_actions() {
+        let ports = parse_ports("80-82,443:0", ACTION_DROP).expect("valid port spec");
+
+        assert_eq!(ports, vec![(80, 82, 1), (443, 443, 2)]);
+    }
+
+    #[test]
+    fn policy_with_port_filter_uses_inverted_fallback_action() {
+        assert_eq!(stored_policy_action(ACTION_PASS, true), ACTION_DROP);
+        assert_eq!(stored_policy_action(ACTION_DROP, true), ACTION_PASS);
+        assert_eq!(stored_policy_action(ACTION_PASS, false), ACTION_PASS);
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, serde::Serialize)]
 pub struct PolicyValue {
