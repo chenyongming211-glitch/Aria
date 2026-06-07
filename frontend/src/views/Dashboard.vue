@@ -1,6 +1,14 @@
 <!-- src/views/Dashboard.vue - 浅色主题仪表盘 -->
 <template>
-  <div class="dashboard">
+  <div class="dashboard page-shell">
+    <section class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-eyebrow">Operations Overview</div>
+        <h1 class="page-heading">Network control dashboard</h1>
+        <p class="page-description">Live tenant health, traffic, node coverage, and recent control-plane activity in one operational view.</p>
+      </div>
+    </section>
+
     <!-- 统计卡片行 -->
     <el-row :gutter="20" class="stats-row">
       <el-col :xs="24" :sm="12" :lg="6" v-for="(stat, index) in stats" :key="index">
@@ -680,7 +688,7 @@ onBeforeUnmount(() => {
 .dashboard {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 18px;
 }
 
 .stats-row {
@@ -691,13 +699,12 @@ onBeforeUnmount(() => {
   position: relative;
   padding: 24px;
   border-radius: var(--aria-radius-lg);
-  transition: all var(--aria-transition-base);
+  transition: border-color var(--aria-transition-base), box-shadow var(--aria-transition-base);
   cursor: pointer;
 }
 
 .stat-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--aria-shadow-lg);
+  box-shadow: var(--aria-shadow);
   border-color: var(--aria-border-hover);
 }
 
@@ -810,7 +817,8 @@ onBeforeUnmount(() => {
 .region-item {
   display: flex; align-items: center; gap: 16px; padding: 12px;
   background: var(--aria-content-bg-tertiary); border-radius: var(--aria-radius);
-  transition: all var(--aria-transition-fast);
+  border: 1px solid transparent;
+  transition: background var(--aria-transition-fast), border-color var(--aria-transition-fast);
 }
 .region-item:hover { background: var(--aria-content-bg-secondary); border: 1px solid var(--aria-border-hover); }
 .region-info { display: flex; align-items: center; gap: 12px; flex: 1; }
@@ -825,12 +833,12 @@ onBeforeUnmount(() => {
 .quick-action-item {
   display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px;
   background: var(--aria-content-bg-tertiary); border-radius: var(--aria-radius);
-  cursor: pointer; transition: all var(--aria-transition-base);
+  cursor: pointer; transition: background var(--aria-transition-base), border-color var(--aria-transition-base), box-shadow var(--aria-transition-base);
   border: 1px solid var(--aria-border-primary);
 }
 .quick-action-item:hover {
   background: var(--aria-content-bg-secondary); border-color: var(--aria-border-hover);
-  transform: translateY(-2px); box-shadow: var(--aria-shadow);
+  box-shadow: var(--aria-shadow);
 }
 .action-icon {
   width: 48px; height: 48px; border-radius: var(--aria-radius-md);

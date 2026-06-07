@@ -7,11 +7,11 @@
    ============================================ */
 :root {
   /* === Primary Colors === */
-  --aria-primary: #3B82F6;
-  --aria-primary-light: #60A5FA;
-  --aria-primary-dark: #2563EB;
-  --aria-primary-grad-start: #3B82F6;
-  --aria-primary-grad-end: #007BFD;
+  --aria-primary: #2563EB;
+  --aria-primary-light: #3B82F6;
+  --aria-primary-dark: #1D4ED8;
+  --aria-primary-grad-start: #2563EB;
+  --aria-primary-grad-end: #0F766E;
 
   /* === Accent Colors === */
   --aria-success: #22C55E;
@@ -27,20 +27,24 @@
   --aria-info-light: #67E8F9;
   --aria-info-dark: #0891B2;
 
-  /* === Dark Theme Colors (用于侧边栏和顶部栏) === */
+  /* === Dark Theme Colors (用于侧边栏) === */
   --aria-sidebar-bg: #0F172A;
-  --aria-header-bg: #1E293B;
+  --aria-header-bg: #FFFFFF;
 
   /* === Light Theme Colors (用于内容区域) === */
   --aria-content-bg: #F8FAFC;
   --aria-content-bg-secondary: #FFFFFF;
   --aria-content-bg-tertiary: #F1F5F9;
   --aria-content-bg-elevated: rgba(255, 255, 255, 0.95);
+  --aria-bg-primary: var(--aria-content-bg);
+  --aria-bg-secondary: var(--aria-content-bg-secondary);
+  --aria-bg-tertiary: var(--aria-content-bg-tertiary);
+  --aria-bg-elevated: var(--aria-content-bg-elevated);
 
   /* === Glass Effect (浅色主题) === */
-  --aria-glass-bg: rgba(255, 255, 255, 0.8);
-  --aria-glass-border: rgba(0, 0, 0, 0.06);
-  --aria-glass-blur: 16px;
+  --aria-glass-bg: var(--aria-content-bg-secondary);
+  --aria-glass-border: var(--aria-border-primary);
+  --aria-glass-blur: 0px;
 
   /* === Text Colors (浅色内容区) === */
   --aria-text-primary: #1E293B;
@@ -55,21 +59,22 @@
   --aria-dark-text-disabled: #475569;
 
   /* === Border Colors === */
-  --aria-border-primary: rgba(0, 0, 0, 0.08);
-  --aria-border-hover: rgba(59, 130, 246, 0.2);
-  --aria-border-focus: rgba(59, 130, 246, 0.4);
+  --aria-border-primary: #E2E8F0;
+  --aria-border-subtle: #EDF2F7;
+  --aria-border-hover: rgba(37, 99, 235, 0.24);
+  --aria-border-focus: rgba(37, 99, 235, 0.42);
 
   /* === Dark Border Colors (用于侧边栏) === */
   --aria-dark-border-primary: rgba(255, 255, 255, 0.08);
   --aria-dark-border-hover: rgba(59, 130, 246, 0.3);
 
   /* === Shadows === */
-  --aria-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --aria-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
-  --aria-shadow-md: 0 4px 8px rgba(0, 0, 0, 0.08);
-  --aria-shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.1);
-  --aria-shadow-xl: 0 16px 32px rgba(0, 0, 0, 0.12);
-  --aria-shadow-glow: 0 0 20px rgba(59, 130, 246, 0.15);
+  --aria-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --aria-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
+  --aria-shadow-md: 0 6px 14px rgba(15, 23, 42, 0.08);
+  --aria-shadow-lg: 0 10px 22px rgba(15, 23, 42, 0.1);
+  --aria-shadow-xl: 0 18px 38px rgba(15, 23, 42, 0.12);
+  --aria-shadow-glow: 0 0 20px rgba(37, 99, 235, 0.14);
   --aria-shadow-glow-success: 0 0 20px rgba(34, 197, 94, 0.15);
 
   /* === Spacing === */
@@ -82,12 +87,13 @@
 
   /* === Border Radius === */
   --aria-radius-sm: 6px;
-  --aria-radius: 10px;
-  --aria-radius-md: 12px;
-  --aria-radius-lg: 16px;
-  --aria-radius-xl: 20px;
-  --aria-radius-2xl: 24px;
+  --aria-radius: 8px;
+  --aria-radius-md: 8px;
+  --aria-radius-lg: 10px;
+  --aria-radius-xl: 12px;
+  --aria-radius-2xl: 14px;
   --aria-radius-full: 9999px;
+  --radius-full: var(--aria-radius-full);
 
   /* === Transitions === */
   --aria-transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -170,8 +176,7 @@ a:hover {
 
 .light-card:hover {
   border-color: var(--aria-border-hover);
-  box-shadow: var(--aria-shadow-md);
-  transform: translateY(-2px);
+  box-shadow: var(--aria-shadow);
 }
 
 /* ============================================
@@ -278,8 +283,7 @@ a:hover {
 }
 
 .stat-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--aria-shadow-lg);
+  box-shadow: var(--aria-shadow);
   border-color: var(--aria-border-hover);
 }
 
@@ -449,5 +453,181 @@ textarea:focus-visible {
 
   .stat-card .stat-value {
     font-size: 24px;
+  }
+}
+
+/* ============================================
+   Operational Page Foundation
+   ============================================ */
+.page-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.page-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 4px;
+}
+
+.page-hero-main {
+  min-width: 0;
+}
+
+.page-eyebrow {
+  margin: 0 0 4px;
+  color: var(--aria-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.page-heading {
+  margin: 0;
+  color: var(--aria-text-primary);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.page-description {
+  max-width: 760px;
+  margin: 6px 0 0;
+  color: var(--aria-text-secondary);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.page-actions,
+.toolbar-actions,
+.table-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.kpi-card {
+  min-height: 92px;
+  padding: 14px 16px;
+  background: var(--aria-content-bg-secondary);
+  border: 1px solid var(--aria-border-primary);
+  border-radius: var(--aria-radius-lg);
+  box-shadow: var(--aria-shadow-sm);
+  transition: border-color var(--aria-transition-base), box-shadow var(--aria-transition-base);
+}
+
+.kpi-card:hover,
+.kpi-card.is-clickable:hover {
+  border-color: var(--aria-border-hover);
+  box-shadow: var(--aria-shadow);
+}
+
+.kpi-card.is-clickable {
+  cursor: pointer;
+}
+
+.kpi-label {
+  color: var(--aria-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.kpi-value {
+  margin-top: 8px;
+  color: var(--aria-text-primary);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.kpi-meta {
+  margin-top: 6px;
+  color: var(--aria-text-muted);
+  font-size: 12px;
+}
+
+.data-panel,
+.table-card {
+  background: var(--aria-content-bg-secondary);
+  border: 1px solid var(--aria-border-primary);
+  border-radius: var(--aria-radius-lg);
+  box-shadow: var(--aria-shadow-sm);
+}
+
+.toolbar-panel {
+  background: var(--aria-content-bg-secondary);
+  border: 1px solid var(--aria-border-primary);
+  border-radius: var(--aria-radius-lg);
+  box-shadow: var(--aria-shadow-sm);
+}
+
+.panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.panel-title {
+  margin: 0;
+  color: var(--aria-text-primary);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.panel-subtitle {
+  margin: 4px 0 0;
+  color: var(--aria-text-muted);
+  font-size: 12px;
+}
+
+.filter-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  background: var(--aria-content-bg-secondary);
+  border: 1px solid var(--aria-border-primary);
+  border-radius: var(--aria-radius-lg);
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .page-hero,
+  .panel-header,
+  .filter-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .page-actions,
+  .toolbar-actions {
+    width: 100%;
+  }
+
+  .page-actions > *,
+  .toolbar-actions > * {
+    flex: 1;
   }
 }

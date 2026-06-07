@@ -1,6 +1,19 @@
 <!-- src/views/Monitoring.vue -->
 <template>
-  <div class="monitoring">
+  <div class="monitoring page-shell">
+    <section class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-eyebrow">Observability</div>
+        <h1 class="page-heading">Monitoring Center</h1>
+        <p class="page-description">Track alerts, certificate risk, sync health, policy delivery, and command outcomes across the tenant.</p>
+      </div>
+      <div class="page-actions">
+        <el-button type="primary" :icon="Refresh" :loading="refreshing" @click="refreshAll">
+          Refresh
+        </el-button>
+      </div>
+    </section>
+
     <!-- Stats Cards -->
     <el-row :gutter="16" class="stats-row">
       <el-col :xs="12" :sm="8" :lg="4" v-for="card in statCards" :key="card.key">
@@ -23,7 +36,7 @@
     </el-row>
 
     <!-- Filter Bar + Refresh -->
-    <el-card class="filter-card light-card" shadow="never">
+    <el-card class="filter-card toolbar-panel" shadow="never">
       <div class="filter-bar">
         <div class="filter-left">
           <el-select
@@ -61,13 +74,10 @@
             <el-option label="Info" value="info" />
           </el-select>
         </div>
-        <el-button type="primary" :icon="Refresh" :loading="refreshing" @click="refreshAll">
-          Refresh
-        </el-button>
       </div>
     </el-card>
 
-    <el-card ref="alertsSectionRef" class="alerts-card light-card" shadow="never" v-loading="alertsLoading">
+    <el-card ref="alertsSectionRef" class="alerts-card table-card" shadow="never" v-loading="alertsLoading">
       <template #header>
         <div class="card-header">
           <div class="header-left">
@@ -146,7 +156,7 @@
     </el-card>
 
     <!-- Event Feed Timeline -->
-    <el-card ref="eventsSectionRef" class="events-card light-card" shadow="never" v-loading="eventsLoading">
+    <el-card ref="eventsSectionRef" class="events-card table-card" shadow="never" v-loading="eventsLoading">
       <template #header>
         <div class="card-header">
           <div class="header-left">
@@ -660,7 +670,7 @@ useTenantChangeReload(reloadTenantScopedData)
 .monitoring {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
 }
 
 /* Stats Cards */
@@ -672,12 +682,11 @@ useTenantChangeReload(reloadTenantScopedData)
   padding: 16px;
   border-radius: var(--aria-radius-lg, 12px);
   text-align: center;
-  transition: all 0.2s;
+  transition: border-color var(--aria-transition-base), box-shadow var(--aria-transition-base);
   margin-bottom: 12px;
 }
 
 .stat-card:hover {
-  transform: translateY(-2px);
   box-shadow: var(--aria-shadow, 0 2px 8px rgba(0,0,0,0.08));
 }
 
@@ -722,6 +731,7 @@ useTenantChangeReload(reloadTenantScopedData)
 /* Filter Bar */
 .filter-card {
   padding: 0;
+  box-shadow: var(--aria-shadow-sm);
 }
 
 .filter-card :deep(.el-card__body) {
@@ -733,11 +743,13 @@ useTenantChangeReload(reloadTenantScopedData)
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .filter-left {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 /* Events Card */

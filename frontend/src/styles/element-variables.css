@@ -1,22 +1,22 @@
 /* src/styles/element-variables.css */
 :root {
   /* 主色调 */
-  --el-color-primary: #1890ff;
-  --el-color-primary-light-3: #40a9ff;
-  --el-color-primary-light-5: #69c0ff;
-  --el-color-primary-light-7: #91d5ff;
-  --el-color-primary-light-8: #b3e0ff;
-  --el-color-primary-light-9: #d6eaff;
-  --el-color-primary-dark-2: #096dd9;
+  --el-color-primary: #2563eb;
+  --el-color-primary-light-3: #3b82f6;
+  --el-color-primary-light-5: #93c5fd;
+  --el-color-primary-light-7: #bfdbfe;
+  --el-color-primary-light-8: #dbeafe;
+  --el-color-primary-light-9: #eff6ff;
+  --el-color-primary-dark-2: #1d4ed8;
 
   /* 成功、警告、危险等辅助色 */
-  --el-color-success: #52c41a;
-  --el-color-warning: #faad14;
-  --el-color-danger: #f5222d;
-  --el-color-info: #8c8c8c;
+  --el-color-success: #22c55e;
+  --el-color-warning: #f59e0b;
+  --el-color-danger: #ef4444;
+  --el-color-info: #06b6d4;
 
   /* 背景色 */
-  --el-bg-color: #f5f7fa;
+  --el-bg-color: #f8fafc;
   --el-bg-color-overlay: #ffffff;
 
   /* 文字颜色 */
@@ -26,15 +26,15 @@
   --el-text-color-placeholder: #9ca3af;
 
   /* 边框颜色 */
-  --el-border-color: #d1d5db;
-  --el-border-color-light: #e5e7eb;
-  --el-border-color-lighter: #f3f4f6;
+  --el-border-color: #e2e8f0;
+  --el-border-color-light: #e2e8f0;
+  --el-border-color-lighter: #edf2f7;
 
   /* 阴影 */
-  --el-box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
-  --el-box-shadow-light: 0 2px 8px 0 rgba(0, 0, 0, 0.09);
-  --el-box-shadow-lighter: 0 1px 6px 0 rgba(0, 0, 0, 0.05);
-  --el-box-shadow-dark: 0 4px 12px 0 rgba(0, 0, 0, 0.15);
+  --el-box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
+  --el-box-shadow-light: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --el-box-shadow-lighter: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --el-box-shadow-dark: 0 10px 22px rgba(15, 23, 42, 0.1);
 
   /* 菜单背景 */
   --el-menu-bg-color: #1d222a;

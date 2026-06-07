@@ -106,7 +106,7 @@
 
     <!-- 主内容区域 -->
     <el-container class="main-container">
-      <!-- 顶部导航栏（深色） -->
+      <!-- 顶部导航栏 -->
       <el-header class="top-header">
         <div class="header-content">
           <!-- 左侧：折叠按钮和标题 -->
@@ -535,12 +535,12 @@ const openHelp = () => {
 }
 
 /* ============================================
-   Top Header (深色主题)
+   Top Header
    ============================================ */
 .top-header {
   padding: 0;
   background: var(--aria-header-bg);
-  border-bottom: 1px solid var(--aria-dark-border-primary);
+  border-bottom: 1px solid var(--aria-border-primary);
   height: 64px;
   box-shadow: var(--aria-shadow-sm);
   position: relative;
@@ -570,23 +570,24 @@ const openHelp = () => {
 }
 
 .menu-toggle {
-  color: var(--aria-dark-text-secondary);
+  color: var(--aria-text-secondary);
   transition: all var(--aria-transition-fast);
 }
 
 .menu-toggle:hover {
-  color: var(--aria-dark-text-primary);
+  color: var(--aria-text-primary);
+  background: var(--aria-content-bg-tertiary);
 }
 
 .page-title {
   font-size: 18px;
   font-weight: 600;
-  color: var(--aria-dark-text-primary);
-  letter-spacing: -0.2px;
+  color: var(--aria-text-primary);
+  letter-spacing: 0;
 }
 
 .header-btn {
-  color: var(--aria-dark-text-secondary);
+  color: var(--aria-text-secondary);
   font-weight: 500;
   font-size: 14px;
   transition: all var(--aria-transition-fast);
@@ -603,18 +604,18 @@ const openHelp = () => {
 
 .header-divider {
   height: 24px;
-  border-color: var(--aria-dark-border-primary);
+  border-color: var(--aria-border-primary);
   margin: 0 8px;
 }
 
 .version-badge {
-  color: var(--aria-dark-text-muted);
+  color: var(--aria-text-muted);
   font-size: 12px;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   padding: 4px 8px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--aria-content-bg-tertiary);
   border-radius: var(--aria-radius-sm);
-  border: 1px solid var(--aria-dark-border-primary);
+  border: 1px solid var(--aria-border-primary);
 }
 
 /* User Profile */
@@ -630,8 +631,8 @@ const openHelp = () => {
 }
 
 .user-profile:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: var(--aria-dark-border-hover);
+  background: var(--aria-content-bg-tertiary);
+  border-color: var(--aria-border-primary);
 }
 
 .user-avatar {
@@ -644,7 +645,7 @@ const openHelp = () => {
 .user-name {
   font-weight: 500;
   font-size: 14px;
-  color: var(--aria-dark-text-primary);
+  color: var(--aria-text-primary);
   max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -652,7 +653,7 @@ const openHelp = () => {
 }
 
 .dropdown-icon {
-  color: var(--aria-dark-text-muted);
+  color: var(--aria-text-muted);
   font-size: 14px;
   transition: transform var(--aria-transition-fast);
 }
@@ -663,8 +664,8 @@ const openHelp = () => {
 
 /* User Dropdown */
 :deep(.user-dropdown) {
-  background: var(--aria-header-bg);
-  border: 1px solid var(--aria-dark-border-primary);
+  background: var(--aria-content-bg-secondary);
+  border: 1px solid var(--aria-border-primary);
   box-shadow: var(--aria-shadow-lg);
   border-radius: var(--aria-radius-md);
   padding: 8px;
@@ -672,7 +673,7 @@ const openHelp = () => {
 }
 
 :deep(.user-dropdown .el-dropdown-menu__item) {
-  color: var(--aria-dark-text-secondary);
+  color: var(--aria-text-secondary);
   padding: 10px 12px;
   border-radius: var(--aria-radius-sm);
   display: flex;
@@ -682,8 +683,8 @@ const openHelp = () => {
 }
 
 :deep(.user-dropdown .el-dropdown-menu__item:hover) {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--aria-dark-text-primary);
+  background: var(--aria-content-bg-tertiary);
+  color: var(--aria-text-primary);
 }
 
 :deep(.user-dropdown .el-dropdown-menu__item .el-icon) {
@@ -691,7 +692,7 @@ const openHelp = () => {
 }
 
 :deep(.user-dropdown .el-dropdown-menu__item--divided::before) {
-  background: var(--aria-dark-border-primary);
+  background: var(--aria-border-primary);
 }
 
 /* ============================================

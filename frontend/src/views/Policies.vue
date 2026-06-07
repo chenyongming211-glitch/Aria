@@ -1,29 +1,37 @@
 <template>
-  <div class="policy-center">
-    <el-card>
+  <div class="policy-center page-shell">
+    <section class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-eyebrow">Policy Operations</div>
+        <h1 class="page-heading">Policy Center</h1>
+        <p class="page-description">统一查看租户内 ACL、QoS 和 Route 策略，以及它们最近的交付状态。</p>
+      </div>
+      <div class="page-actions">
+        <el-button @click="goToKind('acl')">
+          <el-icon><Lock /></el-icon>
+          ACL 规则
+        </el-button>
+        <el-button @click="goToKind('qos')">
+          <el-icon><Histogram /></el-icon>
+          流量控制
+        </el-button>
+        <el-button @click="goToKind('route')">
+          <el-icon><Connection /></el-icon>
+          路由管理
+        </el-button>
+        <el-button type="primary" @click="refreshData">
+          <el-icon><Refresh /></el-icon>
+          刷新
+        </el-button>
+      </div>
+    </section>
+
+    <el-card class="policy-card table-card" shadow="never">
       <template #header>
-        <div class="card-header">
+        <div class="card-header panel-header">
           <div>
-            <h3>Policy Center</h3>
-            <p class="header-subtitle">统一查看租户内的 ACL、QoS 和 Route 策略，以及它们最近的交付状态。</p>
-          </div>
-          <div class="header-actions">
-            <el-button @click="goToKind('acl')">
-              <el-icon><Lock /></el-icon>
-              ACL 规则
-            </el-button>
-            <el-button @click="goToKind('qos')">
-              <el-icon><Histogram /></el-icon>
-              流量控制
-            </el-button>
-            <el-button @click="goToKind('route')">
-              <el-icon><Connection /></el-icon>
-              路由管理
-            </el-button>
-            <el-button type="primary" @click="refreshData">
-              <el-icon><Refresh /></el-icon>
-              刷新
-            </el-button>
+            <h3 class="panel-title">Unified policy inventory</h3>
+            <p class="panel-subtitle">具体写操作仍保留在 ACL、QoS、Route 各自专页。</p>
           </div>
         </div>
       </template>
@@ -57,38 +65,38 @@
       </el-alert>
 
       <el-row :gutter="16" class="stats-row">
-        <el-col :span="4">
-          <el-card class="stat-card">
+        <el-col :xs="12" :sm="8" :lg="4">
+          <el-card class="stat-card kpi-card" shadow="never">
             <div class="stat-value">{{ stats.total }}</div>
             <div class="stat-label">总策略数</div>
           </el-card>
         </el-col>
-        <el-col :span="4">
-          <el-card class="stat-card">
+        <el-col :xs="12" :sm="8" :lg="4">
+          <el-card class="stat-card kpi-card" shadow="never">
             <div class="stat-value">{{ stats.acl }}</div>
             <div class="stat-label">ACL</div>
           </el-card>
         </el-col>
-        <el-col :span="4">
-          <el-card class="stat-card">
+        <el-col :xs="12" :sm="8" :lg="4">
+          <el-card class="stat-card kpi-card" shadow="never">
             <div class="stat-value">{{ stats.qos }}</div>
             <div class="stat-label">QoS</div>
           </el-card>
         </el-col>
-        <el-col :span="4">
-          <el-card class="stat-card">
+        <el-col :xs="12" :sm="8" :lg="4">
+          <el-card class="stat-card kpi-card" shadow="never">
             <div class="stat-value">{{ stats.route }}</div>
             <div class="stat-label">Route</div>
           </el-card>
         </el-col>
-        <el-col :span="4">
-          <el-card class="stat-card">
+        <el-col :xs="12" :sm="8" :lg="4">
+          <el-card class="stat-card kpi-card" shadow="never">
             <div class="stat-value">{{ stats.applied }}</div>
             <div class="stat-label">已应用</div>
           </el-card>
         </el-col>
-        <el-col :span="4">
-          <el-card class="stat-card">
+        <el-col :xs="12" :sm="8" :lg="4">
+          <el-card class="stat-card kpi-card" shadow="never">
             <div class="stat-value">{{ stats.pending }}</div>
             <div class="stat-label">待下发</div>
           </el-card>
@@ -615,19 +623,16 @@ watch(() => route.fullPath, () => {
 
 <style scoped>
 .policy-center {
-  padding: 20px;
+  padding: 0;
 }
 
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 20px;
+.policy-card {
+  border-radius: var(--aria-radius-lg);
 }
 
 .header-subtitle {
   margin: 8px 0 0;
-  color: #909399;
+  color: var(--aria-text-secondary);
   font-size: 13px;
 }
 
@@ -642,18 +647,20 @@ watch(() => route.fullPath, () => {
 }
 
 .stat-card {
+  min-height: 86px;
   text-align: center;
+  justify-content: center;
 }
 
 .stat-value {
   font-size: 24px;
   font-weight: 700;
-  color: #303133;
+  color: var(--aria-text-primary);
 }
 
 .stat-label {
   margin-top: 6px;
-  color: #909399;
+  color: var(--aria-text-secondary);
   font-size: 13px;
 }
 
@@ -662,6 +669,10 @@ watch(() => route.fullPath, () => {
   gap: 12px;
   margin-bottom: 20px;
   flex-wrap: wrap;
+  padding: 14px 16px;
+  background: var(--aria-content-bg-tertiary);
+  border: 1px solid var(--aria-border-primary);
+  border-radius: var(--aria-radius-lg);
 }
 
 .filter-item {
@@ -697,7 +708,7 @@ watch(() => route.fullPath, () => {
   padding: 12px;
   background: #0f172a;
   color: #e2e8f0;
-  border-radius: 8px;
+  border-radius: var(--aria-radius);
   overflow-x: auto;
   font-size: 12px;
   line-height: 1.5;
@@ -711,9 +722,9 @@ watch(() => route.fullPath, () => {
 
 .delivery-item {
   padding: 12px;
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
-  background: #fafafa;
+  border: 1px solid var(--aria-border-primary);
+  border-radius: var(--aria-radius);
+  background: var(--aria-content-bg-tertiary);
 }
 
 .delivery-item-match {
@@ -731,7 +742,7 @@ watch(() => route.fullPath, () => {
 
 .delivery-meta {
   margin-top: 8px;
-  color: #909399;
+  color: var(--aria-text-secondary);
   font-size: 12px;
 }
 
@@ -742,12 +753,12 @@ watch(() => route.fullPath, () => {
 
 .delivery-error {
   margin-top: 8px;
-  color: #f56c6c;
+  color: var(--aria-danger);
   font-size: 12px;
 }
 
 .empty-history {
-  color: #909399;
+  color: var(--aria-text-muted);
 }
 
 .drawer-actions {
@@ -758,5 +769,12 @@ watch(() => route.fullPath, () => {
 
 :deep(.context-match-row > td) {
   background: rgba(59, 130, 246, 0.10) !important;
+}
+
+@media (max-width: 768px) {
+  .filter-item,
+  .keyword-filter {
+    width: 100%;
+  }
 }
 </style>

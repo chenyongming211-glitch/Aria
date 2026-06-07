@@ -1,16 +1,14 @@
 <!-- src/views/Nodes.vue - 现代化节点管理页面 -->
 <template>
-  <div class="nodes-page">
+  <div class="nodes-page page-shell">
     <!-- 页面头部 -->
-    <div class="page-header">
-      <div class="header-content">
-        <h2 class="page-title">
-          <el-icon class="title-icon"><Monitor /></el-icon>
-          Node Management
-        </h2>
-        <p class="page-subtitle">Monitor and manage your network nodes</p>
+    <section class="page-hero">
+      <div class="page-hero-main">
+        <div class="page-eyebrow">Fleet Inventory</div>
+        <h1 class="page-heading">Node Management</h1>
+        <p class="page-description">Monitor registration, runtime health, desired state convergence, and node-level operations.</p>
       </div>
-      <div class="header-actions">
+      <div class="page-actions">
         <el-input
           v-model="searchQuery"
           placeholder="Search nodes..."
@@ -32,11 +30,11 @@
           Add Node
         </el-button>
       </div>
-    </div>
+    </section>
 
     <!-- 统计卡片 -->
-    <div class="stats-cards">
-      <div class="stat-item">
+    <div class="stats-cards kpi-grid">
+      <div class="stat-item kpi-card">
         <div class="stat-icon blue">
           <el-icon><Monitor /></el-icon>
         </div>
@@ -45,7 +43,7 @@
           <div class="stat-label">Total Nodes</div>
         </div>
       </div>
-      <div class="stat-item">
+      <div class="stat-item kpi-card">
         <div class="stat-icon green">
           <el-icon><CircleCheck /></el-icon>
         </div>
@@ -54,7 +52,7 @@
           <div class="stat-label">Online</div>
         </div>
       </div>
-      <div class="stat-item">
+      <div class="stat-item kpi-card">
         <div class="stat-icon orange">
           <el-icon><CircleClose /></el-icon>
         </div>
@@ -63,7 +61,7 @@
           <div class="stat-label">Offline</div>
         </div>
       </div>
-      <div class="stat-item">
+      <div class="stat-item kpi-card">
         <div class="stat-icon purple">
           <el-icon><Setting /></el-icon>
         </div>
@@ -75,7 +73,7 @@
     </div>
 
     <!-- 节点列表卡片 -->
-    <el-card class="nodes-card glass-card" shadow="never">
+    <el-card class="nodes-card table-card" shadow="never">
       <el-table
         :data="paginatedNodes"
         stripe
@@ -1126,7 +1124,7 @@ useTenantChangeReload(reloadTenantScopedData)
 /* ============================================
    Nodes Page Styles
    ============================================ */
-.nodes-page { display: flex; flex-direction: column; gap: 20px; }
+.nodes-page { display: flex; flex-direction: column; gap: 18px; }
 .detail-toolbar { display: flex; gap: 12px; }
 .section-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
 .section-header .section-title { margin-bottom: 0; }
@@ -1144,21 +1142,14 @@ useTenantChangeReload(reloadTenantScopedData)
 .route-edit-tag { margin: 2px; }
 .new-route-input { width: 140px; margin: 2px; vertical-align: middle; }
 .button-new-tag { margin: 2px; height: 24px; line-height: 22px; padding-top: 0; padding-bottom: 0; }
-.form-help { font-size: 12px; color: #909399; margin-top: 4px; line-height: 1.4; }
+.form-help { font-size: 12px; color: var(--aria-text-muted); margin-top: 4px; line-height: 1.4; }
 
-/* Existing Styles ... */
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
-.header-content { flex: 1; min-width: 300px; }
-.page-title { display: flex; align-items: center; gap: 12px; font-size: 24px; font-weight: 700; margin: 0 0 8px 0; color: var(--aria-text-primary); }
-.title-icon { font-size: 28px; color: var(--aria-primary); }
-.page-subtitle { font-size: 14px; color: var(--aria-text-secondary); margin: 0; }
-.header-actions { display: flex; align-items: center; gap: 12px; }
 .search-input { width: 280px; }
 
-.stats-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
-.stat-item { display: flex; align-items: center; gap: 16px; padding: 20px; background: var(--aria-bg-secondary); border: 1px solid var(--aria-border-primary); border-radius: var(--aria-radius-lg); transition: all var(--aria-transition-base); }
-.stat-item:hover { border-color: var(--aria-border-hover); transform: translateY(-2px); box-shadow: var(--aria-shadow); }
-.stat-icon { width: 56px; height: 56px; border-radius: var(--aria-radius-md); display: flex; align-items: center; justify-content: center; font-size: 28px; flex-shrink: 0; }
+.stats-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.stat-item { display: flex; align-items: center; gap: 16px; padding: 16px; background: var(--aria-bg-secondary); border: 1px solid var(--aria-border-primary); border-radius: var(--aria-radius-lg); transition: border-color var(--aria-transition-base), box-shadow var(--aria-transition-base); }
+.stat-item:hover { border-color: var(--aria-border-hover); box-shadow: var(--aria-shadow); }
+.stat-icon { width: 48px; height: 48px; border-radius: var(--aria-radius-md); display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0; }
 .stat-icon.blue { background: rgba(59, 130, 246, 0.15); color: #3B82F6; }
 .stat-icon.green { background: rgba(34, 197, 94, 0.15); color: #22C55E; }
 .stat-icon.orange { background: rgba(245, 158, 11, 0.15); color: #F59E0B; }

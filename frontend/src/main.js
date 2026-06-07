@@ -48,7 +48,7 @@ style.textContent = `
     border: 1px solid var(--aria-border-primary);
     border-radius: var(--aria-radius-lg);
     box-shadow: var(--aria-shadow-sm);
-    transition: all var(--aria-transition-base);
+    transition: border-color var(--aria-transition-base), box-shadow var(--aria-transition-base);
   }
 
   .el-card__header {
@@ -111,24 +111,24 @@ style.textContent = `
   .el-button {
     border-radius: var(--aria-radius);
     font-weight: 500;
-    transition: all var(--aria-transition-base);
+    transition: background-color var(--aria-transition-base), border-color var(--aria-transition-base), color var(--aria-transition-base), box-shadow var(--aria-transition-base);
   }
 
   .el-button--primary {
-    background: linear-gradient(135deg, var(--aria-primary) 0%, var(--aria-primary-dark) 100%);
-    border: none;
-    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25);
+    background: var(--aria-primary);
+    border-color: var(--aria-primary);
+    box-shadow: none;
   }
 
   .el-button--primary:hover,
   .el-button--primary:focus {
-    background: linear-gradient(135deg, var(--aria-primary-light) 0%, var(--aria-primary) 100%);
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35);
-    transform: translateY(-1px);
+    background: var(--aria-primary-dark);
+    border-color: var(--aria-primary-dark);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
   }
 
   .el-button--primary:active {
-    transform: translateY(0);
+    box-shadow: none;
   }
 
   .el-button.is-link {
@@ -157,7 +157,7 @@ style.textContent = `
 
   .el-input__wrapper.is-focus {
     border-color: var(--aria-primary);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
   }
 
   .el-input__inner {
@@ -190,7 +190,7 @@ style.textContent = `
 
   .el-textarea__inner:focus {
     border-color: var(--aria-primary);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
   }
 
   /* 下拉菜单 */
@@ -291,13 +291,13 @@ style.textContent = `
   }
 
   .el-tag--info {
-    background: rgba(59, 130, 246, 0.1);
-    color: #3B82F6;
+    background: rgba(6, 182, 212, 0.1);
+    color: #06B6D4;
   }
 
   .el-tag--primary {
-    background: rgba(59, 130, 246, 0.1);
-    color: #3B82F6;
+    background: rgba(37, 99, 235, 0.1);
+    color: #2563EB;
   }
 
   /* 复选框 */
