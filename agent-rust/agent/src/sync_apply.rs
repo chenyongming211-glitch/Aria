@@ -239,6 +239,28 @@ mod tests {
     }
 
     #[test]
+    fn acl_allow_with_ports_adds_drop_fallback() {
+        let operations = acl_apply_operations_from_sync_rule(&AclRule {
+            src_net: "10.10.0.0/24".to_string(),
+            dst_net: "10.20.0.0/24".to_string(),
+            protocol: 6,
+            min_port: 0,
+            max_port: 0,
+            action: "allow".to_string(),
+            direction: "ingress".to_string(),
+            ports: "443".to_string(),
+        })
+        .expect("valid ACL sync rule");
+
+        let ports_and_actions: Vec<(u16, u32)> = operations
+            .iter()
+            .map(|op| (op.dst_port, op.action))
+            .collect();
+
+        assert_eq!(ports_and_actions, vec![(0, ACTION_DROP), (443, ACTION_PASS)]);
+    }
+
+    #[test]
     fn qos_sync_rule_keeps_rate_and_burst_before_apply() {
         let operation = qos_apply_operation_from_sync_rule(&QoSRule {
             src_ip: "10.10.0.0/24".to_string(),
