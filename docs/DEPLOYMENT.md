@@ -191,7 +191,7 @@ Record these fields for every deployment:
 
 ### 2026-06-07 Public IP Correction
 
-Status: pending deployment.
+Status: deployed.
 
 Purpose:
 
@@ -203,20 +203,18 @@ Purpose:
   - `private_ip = ''`
   - `endpoint = 82.156.48.111:51820`
 
-Fill these after deployment:
-
 | Field | Value |
 | --- | --- |
-| Date | TBD |
-| Git commit | TBD |
-| Push CI run | TBD |
-| Publish run | TBD |
-| Controller image | TBD |
-| Frontend backup | TBD |
-| Config backup | TBD |
-| DB backup | TBD |
-| Agent artifact | TBD |
-| Verification | TBD |
+| Date | 2026-06-07T02:20Z |
+| Git commit | `60e964b59b003fdc4f2e78c1a60362ec091e02ce` |
+| Push CI run | `27079569595` |
+| Publish run | `27079625892` |
+| Controller image | `ghcr.io/chenyongming211-glitch/aria-controller:0.2.35-test@sha256:409d404e991ec8a4ff4fbe50a81cf2360050f6917f34559521f97863bf9af1b4` |
+| Frontend backup | `/root/aria-controller/deploy-backups/frontend-dist-20260607T015817Z` |
+| Config backup | `/root/aria-controller/backups/pre-public-ip-deploy-config-20260607T015817Z.tar.gz` |
+| DB backup | `/root/aria-controller/backups/pre-public-ip-deploy-20260607T015817Z.sql` |
+| Agent artifact | `rust-agent-binary` from workflow run `27079625892`, deployed to `82.156.48.111` |
+| Verification | Controller container healthy on image `sha256:409d404e991e`; frontend container healthy; `/api/version` returned `0.2.35-test`; `sysadmin` login returned 200; `/api/v2/tenants`, tenant nodes, and tenant roles returned 200; Agent command stream connected and sync completed; node row shows `public_ip=82.156.48.111`, `assigned_ip=100.64.0.2`, empty `private_ip`, and `endpoint=82.156.48.111:51820`. |
 
 Agent gray verification:
 
