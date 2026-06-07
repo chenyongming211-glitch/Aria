@@ -91,6 +91,7 @@ describe('node store', () => {
               hostname: 'edge-1',
               assigned_ip: '100.64.0.2',
               public_ip: '203.0.113.10',
+              endpoint: '203.0.113.10:51820',
               region: 'sh',
               status: 'online',
               advertised_routes: ['10.10.0.0/16']
@@ -173,6 +174,7 @@ describe('node store', () => {
     const node = await store.loadNodeDetail('node-1')
 
     expect(node.desiredStateVersion).toBe('desired-1')
+    expect(node.endpoint).toBe('203.0.113.10:51820')
     expect(node.appliedStateVersion).toBe('applied-1')
     expect(node.observedState).toBe('healthy')
     expect(node.certificate.status).toBe('issued')

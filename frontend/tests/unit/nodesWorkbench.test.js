@@ -15,6 +15,7 @@ const {
         hostname: 'edge-1',
         publicIp: '203.0.113.10',
         vpnIp: '100.64.0.2',
+        endpoint: '203.0.113.10:51820',
         region: 'sh',
         status: 'online',
         mode: 'kernel',
@@ -31,6 +32,7 @@ const {
       hostname: 'edge-1',
       publicIp: '203.0.113.10',
       vpnIp: '100.64.0.2',
+      endpoint: '203.0.113.10:51820',
       region: 'sh',
       status: 'online',
       uptime: '1 hour',
@@ -203,6 +205,7 @@ describe('Nodes workbench detail', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Operations Summary')
+    expect(wrapper.text()).toContain('203.0.113.10:51820')
     expect(wrapper.text()).toContain('Certificate Status')
     expect(wrapper.text()).toContain('serial-1')
     expect(wrapper.text()).toContain('certificate_expiring')
