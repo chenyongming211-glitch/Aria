@@ -547,6 +547,15 @@ func TestNodesAPI_GetByIDSuccessReturnsContractFields(t *testing.T) {
 	if data["tenant_id"] != tenantID.String() {
 		t.Fatalf("expected tenant_id=%s, got %#v", tenantID.String(), data["tenant_id"])
 	}
+	if data["public_ip"] != "1.1.1.1" {
+		t.Fatalf("expected public_ip=1.1.1.1, got %#v", data["public_ip"])
+	}
+	if data["private_ip"] != "10.0.0.1" {
+		t.Fatalf("expected private_ip=10.0.0.1, got %#v", data["private_ip"])
+	}
+	if data["endpoint"] != "1.1.1.1:51820" {
+		t.Fatalf("expected endpoint=1.1.1.1:51820, got %#v", data["endpoint"])
+	}
 	if _, ok := data["status"]; !ok {
 		t.Fatalf("expected status field in node payload")
 	}
