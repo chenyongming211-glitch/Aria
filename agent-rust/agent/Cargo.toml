@@ -32,6 +32,7 @@ name = "test-command-stream-timeout"
 path = "../tests/test_command_stream_timeout.rs"
 
 [dependencies]
+aria-shared = { path = "../shared" }
 aya.workspace = true
 aya-log.workspace = true
 tokio = { workspace = true, features = ["full"] }

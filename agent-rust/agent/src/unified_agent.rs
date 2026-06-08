@@ -25,15 +25,17 @@ use crate::grpc_client::{
 };
 use crate::wireguard::{WireGuardManager, PeerConfig};
 use crate::routing::RoutingManager;
-use crate::acl::AclManager;
-use crate::qos::{QosConfig, QoSManager};
+use crate::acl_qos_manager::{
+    AclQosManager, AclQosSnapshot, AclRuleSpec, QosRuleSpec,
+};
+use crate::acl_qos_state::{requested_directions, ACTION_DROP, DIRECTION_INGRESS, DIRECTION_EGRESS};
 use crate::identity::IdentityManager;
 use crate::metrics;
 use crate::config::{AgentConfig, ConfigManager};
 use crate::certificate_client;
 use crate::runtime_credential::RuntimeCredentialStore;
-use crate::sync_apply::{
-    acl_apply_operations_from_sync_rule, qos_apply_operation_from_sync_rule, QosApplyTarget,
+use crate::grpc_client::{
+    acl_policy_from_sync_rule, qos_policy_from_sync_rule,
 };
 
 const BPF_FS_PATH: &str = "/sys/fs/bpf/aria";
@@ -68,8 +70,7 @@ pub struct UnifiedAgent {
     config: AgentConfig,
     config_path: String,
 
-    acl_mgr: Arc<Mutex<AclManager>>,
-    qos_mgr: Arc<Mutex<QoSManager>>,
+    acl_qos_mgr: Arc<Mutex<AclQosManager>>,
     grpc_client: GrpcClient,
     wg_manager: Arc<Mutex<WireGuardManager>>,
     wg_managers: HashMap<String, Arc<Mutex<WireGuardManager>>>,
@@ -128,7 +129,7 @@ impl UnifiedAgent {
             .clone();
 
         // Load eBPF programs and attach to ALL interfaces
-        let (acl_mgr, qos_mgr, _identity_mgr) = Self::load_ebpf_programs_multi(&interfaces)?;
+        let (acl_qos_mgr, _identity_mgr) = Self::load_ebpf_programs_multi(&interfaces)?;
         tracing::info!("✅ eBPF programs loaded and attached to {} interfaces", interfaces.len());
         
         let grpc_client = GrpcClient::new_with_options(
@@ -152,8 +153,7 @@ impl UnifiedAgent {
         Ok(Self {
             config,
             config_path,
-            acl_mgr,
-            qos_mgr,
+            acl_qos_mgr,
             grpc_client,
             wg_manager,
             wg_managers,
@@ -196,8 +196,7 @@ impl UnifiedAgent {
     
     #[allow(dead_code)]
     fn load_ebpf_programs(interface: &str) -> Result<(
-        Arc<Mutex<AclManager>>,
-        Arc<Mutex<QoSManager>>,
+        Arc<Mutex<AclQosManager>>,
         Arc<StdMutex<IdentityManager>>,
     )> {
         tracing::info!("Step 1: Loading eBPF bytecodes...");
@@ -240,13 +239,6 @@ impl UnifiedAgent {
         let identity_mgr = Arc::new(StdMutex::new(identity_mgr));
         tracing::info!("Step 13: IdentityManager wrapped in Arc");
         
-        tracing::info!("Step 14: Creating AclManager...");
-        let acl_mgr = AclManager::new(&mut acl_ebpf, identity_mgr.clone())?;
-        tracing::info!("Step 15: AclManager created");
-        
-        let acl_mgr = Arc::new(Mutex::new(acl_mgr));
-        tracing::info!("Step 16: AclManager wrapped in Arc");
-        
         tracing::info!("Step 17: Creating QoS EbpfLoader...");
         let mut qos_ebpf = EbpfLoader::new()
             .load(qos_bytes)?;
@@ -277,16 +269,20 @@ impl UnifiedAgent {
         program.attach(interface, TcAttachType::Egress)?;
         tracing::info!("Step 26: TC program attached");
         
-        let qos_mgr = QoSManager::new(&mut qos_ebpf, identity_mgr.clone())?;
-        let qos_mgr = Arc::new(Mutex::new(qos_mgr));
+        let acl_qos_mgr = AclQosManager::new(
+            &mut acl_ebpf,
+            &mut qos_ebpf,
+            identity_mgr.clone(),
+            vec![interface.to_string()],
+        )?;
+        let acl_qos_mgr = Arc::new(Mutex::new(acl_qos_mgr));
         
-        Ok((acl_mgr, qos_mgr, identity_mgr))
+        Ok((acl_qos_mgr, identity_mgr))
     }
 
     /// Load eBPF programs and attach XDP/TC to multiple interfaces (multi-tunnel mode)
     fn load_ebpf_programs_multi(interfaces: &[String]) -> Result<(
-        Arc<Mutex<AclManager>>,
-        Arc<Mutex<QoSManager>>,
+        Arc<Mutex<AclQosManager>>,
         Arc<StdMutex<IdentityManager>>,
     )> {
         tracing::info!("Loading eBPF programs for {} interfaces: {:?}", interfaces.len(), interfaces);
@@ -312,7 +308,6 @@ impl UnifiedAgent {
 
         let identity_mgr = IdentityManager::new(&mut acl_ebpf)?;
         let identity_mgr = Arc::new(StdMutex::new(identity_mgr));
-        let acl_mgr = Arc::new(Mutex::new(AclManager::new(&mut acl_ebpf, identity_mgr.clone())?));
 
         // Load QoS eBPF
         let qos_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/qos"));
@@ -332,9 +327,15 @@ impl UnifiedAgent {
             tracing::info!("✅ TC attached to {}", iface);
         }
 
-        let qos_mgr = Arc::new(Mutex::new(QoSManager::new(&mut qos_ebpf, identity_mgr.clone())?));
+        let acl_qos_mgr = AclQosManager::new(
+            &mut acl_ebpf,
+            &mut qos_ebpf,
+            identity_mgr.clone(),
+            interfaces.to_vec(),
+        )?;
+        let acl_qos_mgr = Arc::new(Mutex::new(acl_qos_mgr));
 
-        Ok((acl_mgr, qos_mgr, identity_mgr))
+        Ok((acl_qos_mgr, identity_mgr))
     }
     
     pub async fn start(&mut self) -> Result<()> {
@@ -656,8 +657,7 @@ impl UnifiedAgent {
         use tokio::net::UnixListener;
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         
-        let acl_mgr = self.acl_mgr.clone();
-        let qos_mgr = self.qos_mgr.clone();
+        let acl_qos_mgr = self.acl_qos_mgr.clone();
         let wg_manager = self.wg_manager.clone();
         let socket_path = self.unix_socket_path.clone();
         let cancel_token = self.cancel_token.clone();
@@ -685,8 +685,7 @@ impl UnifiedAgent {
                     accept_result = listener.accept() => {
                         match accept_result {
                             Ok((stream, _)) => {
-                                let acl_mgr = acl_mgr.clone();
-                                let qos_mgr = qos_mgr.clone();
+                                let acl_qos_mgr = acl_qos_mgr.clone();
                                 let wg_manager = wg_manager.clone();
                                 let log_handle = log_handle.clone();
                                 let current_log_level = current_log_level.clone();
@@ -713,8 +712,7 @@ impl UnifiedAgent {
                                             Ok(req) => {
                                                 Self::handle_unix_command(
                                                     req,
-                                                    &acl_mgr,
-                                                    &qos_mgr,
+                                                    &acl_qos_mgr,
                                                     &wg_manager,
                                                     &log_handle,
                                                     &current_log_level,
@@ -758,8 +756,7 @@ impl UnifiedAgent {
     
     async fn handle_unix_command(
         req: UnixRequest,
-        acl_mgr: &Arc<Mutex<AclManager>>,
-        qos_mgr: &Arc<Mutex<QoSManager>>,
+        acl_qos_mgr: &Arc<Mutex<AclQosManager>>,
         wg_manager: &Arc<Mutex<WireGuardManager>>,
         log_handle: &Arc<StdMutex<Option<reload::Handle<EnvFilter, Registry>>>>,
         current_log_level: &Arc<StdMutex<String>>,
@@ -858,7 +855,7 @@ impl UnifiedAgent {
                 let ip = req.args["ip"].as_str().unwrap_or("").to_string();
                 let mbps = req.args["mbps"].as_u64().unwrap_or(0);
                 
-                let mut mgr = qos_mgr.lock().await;
+                let mut mgr = acl_qos_mgr.lock().await;
                 match mgr.limit_ip(&ip, mbps) {
                     Ok(_) => UnixResponse {
                         success: true,
@@ -877,7 +874,7 @@ impl UnifiedAgent {
                 let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
                 let mbps = req.args["mbps"].as_u64().unwrap_or(0);
                 
-                let mut mgr = qos_mgr.lock().await;
+                let mut mgr = acl_qos_mgr.lock().await;
                 match mgr.limit_peer_pair(&src_ip, &dst_ip, mbps) {
                     Ok(_) => UnixResponse {
                         success: true,
@@ -896,7 +893,7 @@ impl UnifiedAgent {
                 let mbps = req.args["mbps"].as_u64().unwrap_or(0);
                 let protocol = req.args["protocol"].as_u64().unwrap_or(0) as u8;
                 
-                let mut mgr = qos_mgr.lock().await;
+                let mut mgr = acl_qos_mgr.lock().await;
                 match mgr.limit_port(port, mbps, protocol) {
                     Ok(_) => UnixResponse {
                         success: true,
@@ -918,7 +915,7 @@ impl UnifiedAgent {
                 let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
                 let mbps = req.args["mbps"].as_u64().unwrap_or(0);
                 
-                let mut mgr = qos_mgr.lock().await;
+                let mut mgr = acl_qos_mgr.lock().await;
                 match mgr.limit_service(&src_ip, &dst_ip, src_port, dst_port, protocol, mbps) {
                     Ok(_) => UnixResponse {
                         success: true,
@@ -934,7 +931,7 @@ impl UnifiedAgent {
             }
             "qos_remove_ip" => {
                 let ip = req.args["ip"].as_str().unwrap_or("").to_string();
-                let mut mgr = qos_mgr.lock().await;
+                let mut mgr = acl_qos_mgr.lock().await;
                 match mgr.remove_ip_limit(&ip) {
                     Ok(_) => UnixResponse {
                         success: true,
@@ -951,7 +948,7 @@ impl UnifiedAgent {
             "qos_remove_peer" => {
                 let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
                 let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
-                let mut mgr = qos_mgr.lock().await;
+                let mut mgr = acl_qos_mgr.lock().await;
                 match mgr.remove_peer_limit(&src_ip, &dst_ip) {
                     Ok(_) => UnixResponse {
                         success: true,
@@ -971,7 +968,7 @@ impl UnifiedAgent {
                 let src_port = req.args["src_port"].as_u64().unwrap_or(0) as u16;
                 let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
                 let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
-                let mut mgr = qos_mgr.lock().await;
+                let mut mgr = acl_qos_mgr.lock().await;
                 match mgr.remove_service_limit(&src_ip, &dst_ip, src_port, dst_port, protocol) {
                     Ok(_) => UnixResponse {
                         success: true,
@@ -987,7 +984,7 @@ impl UnifiedAgent {
             }
             "qos_stats_ip" => {
                 let ip = req.args["ip"].as_str().unwrap_or("").to_string();
-                let mgr = qos_mgr.lock().await;
+                let mgr = acl_qos_mgr.lock().await;
                 match mgr.get_ip_stats(&ip) {
                     Ok(Some(stats)) => UnixResponse {
                         success: true,
@@ -1009,7 +1006,7 @@ impl UnifiedAgent {
             "qos_stats_peer" => {
                 let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
                 let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
-                let mgr = qos_mgr.lock().await;
+                let mgr = acl_qos_mgr.lock().await;
                 match mgr.get_peer_stats(&src_ip, &dst_ip) {
                     Ok(Some(stats)) => UnixResponse {
                         success: true,
@@ -1035,7 +1032,7 @@ impl UnifiedAgent {
                 let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
                 let protocol = req.args["protocol"].as_u64().unwrap_or(6) as u8;
                 
-                let mgr = qos_mgr.lock().await;
+                let mgr = acl_qos_mgr.lock().await;
                 match mgr.get_service_stats(&src_ip, &dst_ip, src_port, dst_port, protocol) {
                     Ok(Some(stats)) => UnixResponse {
                         success: true,
@@ -1062,7 +1059,7 @@ impl UnifiedAgent {
                 let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
                 let protocol = req.args["protocol"].as_u64().unwrap_or(0) as u8;
                 
-                let mut mgr = acl_mgr.lock().await;
+                let mut mgr = acl_qos_mgr.lock().await;
                 match mgr.allow(&src_ip, &dst_ip, dst_port, protocol) {
                     Ok(_) => UnixResponse {
                         success: true,
@@ -1082,7 +1079,7 @@ impl UnifiedAgent {
                 let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
                 let protocol = req.args["protocol"].as_u64().unwrap_or(0) as u8;
                 
-                let mut mgr = acl_mgr.lock().await;
+                let mut mgr = acl_qos_mgr.lock().await;
                 match mgr.deny(&src_ip, &dst_ip, dst_port, protocol) {
                     Ok(_) => UnixResponse {
                         success: true,
@@ -1098,7 +1095,7 @@ impl UnifiedAgent {
             }
             "acl_block_src_ip" => {
                 let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
-                let mut mgr = acl_mgr.lock().await;
+                let mut mgr = acl_qos_mgr.lock().await;
                 match mgr.block_src_ip(&src_ip) {
                     Ok(_) => UnixResponse {
                         success: true,
@@ -1114,7 +1111,7 @@ impl UnifiedAgent {
             }
             "acl_block_dst_ip" => {
                 let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
-                let mut mgr = acl_mgr.lock().await;
+                let mut mgr = acl_qos_mgr.lock().await;
                 match mgr.block_dst_ip(&dst_ip) {
                     Ok(_) => UnixResponse {
                         success: true,
@@ -1130,7 +1127,7 @@ impl UnifiedAgent {
             }
             "acl_block_port" => {
                 let port = req.args["port"].as_u64().unwrap_or(0) as u16;
-                let mut mgr = acl_mgr.lock().await;
+                let mut mgr = acl_qos_mgr.lock().await;
                 match mgr.block_port(port) {
                     Ok(_) => UnixResponse {
                         success: true,
@@ -1146,7 +1143,7 @@ impl UnifiedAgent {
             }
             "acl_unblock_src_ip" => {
                 let src_ip = req.args["src_ip"].as_str().unwrap_or("").to_string();
-                let mut mgr = acl_mgr.lock().await;
+                let mut mgr = acl_qos_mgr.lock().await;
                 match mgr.unblock_src_ip(&src_ip) {
                     Ok(_) => UnixResponse {
                         success: true,
@@ -1162,7 +1159,7 @@ impl UnifiedAgent {
             }
             "acl_unblock_dst_ip" => {
                 let dst_ip = req.args["dst_ip"].as_str().unwrap_or("").to_string();
-                let mut mgr = acl_mgr.lock().await;
+                let mut mgr = acl_qos_mgr.lock().await;
                 match mgr.unblock_dst_ip(&dst_ip) {
                     Ok(_) => UnixResponse {
                         success: true,
@@ -1178,7 +1175,7 @@ impl UnifiedAgent {
             }
             "acl_unblock_port" => {
                 let port = req.args["port"].as_u64().unwrap_or(0) as u16;
-                let mut mgr = acl_mgr.lock().await;
+                let mut mgr = acl_qos_mgr.lock().await;
                 match mgr.unblock_port(port) {
                     Ok(_) => UnixResponse {
                         success: true,
@@ -1198,7 +1195,7 @@ impl UnifiedAgent {
                 let dst_port = req.args["dst_port"].as_u64().unwrap_or(0) as u16;
                 let protocol = req.args["protocol"].as_u64().unwrap_or(0) as u8;
                 
-                let mut mgr = acl_mgr.lock().await;
+                let mut mgr = acl_qos_mgr.lock().await;
                 match mgr.remove_rule(&src_ip, &dst_ip, dst_port, protocol) {
                     Ok(_) => UnixResponse {
                         success: true,
@@ -1213,20 +1210,17 @@ impl UnifiedAgent {
                 }
             }
             "acl_stats" => {
-                let mgr = acl_mgr.lock().await;
+                let mgr = acl_qos_mgr.lock().await;
                 match mgr.get_all_rule_stats() {
                     Ok(stats) => {
                         let stats_json: Vec<serde_json::Value> = stats
                             .into_iter()
-                            .map(|(key, value)| {
+                            .map(|(rule_id, action, packets, bytes)| {
                                 serde_json::json!({
-                                    "src_id": key.src_id,
-                                    "dst_id": key.dst_id,
-                                    "protocol": key.protocol,
-                                    "dst_port": key.dst_port,
-                                    "action": value.action,
-                                    "packets": value.packets,
-                                    "bytes": value.bytes,
+                                    "rule_id": rule_id,
+                                    "action": action,
+                                    "packets": packets,
+                                    "bytes": bytes,
                                 })
                             })
                             .collect();
@@ -1444,8 +1438,7 @@ impl UnifiedAgent {
                 cmd: request.command.clone(),
                 args,
             },
-            &self.acl_mgr,
-            &self.qos_mgr,
+            &self.acl_qos_mgr,
             &self.wg_manager,
             &self.log_handle,
             &self.current_log_level,
@@ -1537,19 +1530,16 @@ impl UnifiedAgent {
         *self.last_sync_peers.lock().await = sync_result.peers.clone();
 
         let mut apply_errors = Vec::new();
-        if let Err(e) = self.sync_acl_rules(&sync_result.acl_rules).await {
-            tracing::error!("Failed to sync ACL rules: {:?}", e);
-            apply_errors.push(format!("acl: {}", e));
-        }
-
-        if let Err(e) = self.sync_blacklist_rules(&sync_result.blacklist_rules).await {
-            tracing::error!("Failed to sync blacklist rules: {:?}", e);
-            apply_errors.push(format!("blacklist: {}", e));
-        }
-        
-        if let Err(e) = self.sync_qos_rules(&sync_result.qos_rules).await {
-            tracing::error!("Failed to sync QoS rules: {:?}", e);
-            apply_errors.push(format!("qos: {}", e));
+        if let Err(e) = self
+            .sync_acl_qos_snapshot(
+                &sync_result.acl_rules,
+                &sync_result.blacklist_rules,
+                &sync_result.qos_rules,
+            )
+            .await
+        {
+            tracing::error!("Failed to sync ACL/QoS snapshot: {:?}", e);
+            apply_errors.push(format!("acl_qos: {}", e));
         }
 
         if !apply_errors.is_empty() {
@@ -1584,145 +1574,108 @@ impl UnifiedAgent {
         Ok(())
     }
     
-    /// 同步 QoS 规则
-    async fn sync_qos_rules(&mut self, new_rules: &[GrpcQoSRule]) -> Result<()> {
-        tracing::info!("Syncing {} QoS rules", new_rules.len());
-        
-        // 克隆 Arc 以便在 spawn_blocking 中使用
-        let qos_mgr = self.qos_mgr.clone();
-        let new_rules = new_rules.to_vec();
-        
-        let result = tokio::task::spawn_blocking(move || -> Result<()> {
-            let mut mgr = qos_mgr.blocking_lock();
-            mgr.clear_all_rules().map_err(|e| anyhow::anyhow!(e))?;
-            
-            let mut success_count = 0;
-            let mut fail_count = 0;
-            
-            for rule in &new_rules {
-                let result = qos_apply_operation_from_sync_rule(rule).and_then(|operation| {
-                    let config = QosConfig::new(
-                        operation.rate_bps,
-                        operation.burst_bytes,
-                        operation.priority,
-                        operation.mode,
-                    );
+    async fn sync_acl_qos_snapshot(
+        &mut self,
+        acl_rules: &[AclRule],
+        blacklist_rules: &[GrpcBlacklistRule],
+        qos_rules: &[GrpcQoSRule],
+    ) -> Result<()> {
+        tracing::info!(
+            "Syncing ACL/QoS snapshot: {} ACL, {} blacklist, {} QoS rules",
+            acl_rules.len(),
+            blacklist_rules.len(),
+            qos_rules.len()
+        );
 
-                    match operation.target {
-                        QosApplyTarget::Source { cidr } => mgr
-                            .limit_src_cidr_with_config(&cidr, config)
-                            .map(|_| ())
-                            .map_err(|e| anyhow::anyhow!(e)),
-                        QosApplyTarget::Pair { src_cidr, dst_cidr } => mgr
-                            .limit_pair_cidr_with_config(&src_cidr, &dst_cidr, config)
-                            .map(|_| ())
-                            .map_err(|e| anyhow::anyhow!(e)),
-                        QosApplyTarget::Service {
-                            src_cidr,
-                            dst_cidr,
-                            dst_port,
-                            protocol,
-                        } => mgr
-                            .limit_service_cidr_with_config(
-                                &src_cidr,
-                                &dst_cidr,
-                                dst_port,
-                                protocol,
-                                config,
-                            )
-                            .map(|_| ())
-                            .map_err(|e| anyhow::anyhow!(e)),
-                    }
+        let mut snapshot = AclQosSnapshot {
+            acl_rules: Vec::new(),
+            qos_rules: Vec::new(),
+            acl_enabled: true,
+            qos_enabled: true,
+        };
+
+        for rule in acl_rules {
+            let policy = acl_policy_from_sync_rule(rule)?;
+            for direction in requested_directions(policy.direction) {
+                snapshot.acl_rules.push(AclRuleSpec {
+                    src_group: policy.src_group.clone(),
+                    dst_group: policy.dst_group.clone(),
+                    proto: policy.proto,
+                    action: policy.action,
+                    direction,
+                    ports: policy.ports.clone(),
                 });
-                
-                match result {
-                    Ok(_) => {
-                        success_count += 1;
-                        tracing::debug!(
-                            "Applied QoS rule: {}:{}:{}:{}:{} -> {} bps",
-                            rule.src_ip, rule.dst_ip, rule.src_port,
-                            rule.dst_port, rule.protocol, rule.rate_bps
-                        );
-                    }
-                    Err(e) => {
-                        fail_count += 1;
-                        tracing::error!(
-                            "Failed to apply QoS rule: {}:{}:{}:{}:{} -> {:?}",
-                            rule.src_ip, rule.dst_ip, rule.src_port,
-                            rule.dst_port, rule.protocol, e
-                        );
-                    }
-                }
             }
-            
-            tracing::info!(
-                "QoS sync completed: {} success, {} failed",
-                success_count,
-                fail_count
-            );
+        }
 
-            if fail_count > 0 {
-                return Err(anyhow::anyhow!(
-                    "qos sync partially failed: {} success, {} failed",
-                    success_count,
-                    fail_count
-                ));
-            }
-
-            Ok(())
-        }).await?;
-        
-        result
-    }
-
-    async fn sync_blacklist_rules(&mut self, new_rules: &[GrpcBlacklistRule]) -> Result<()> {
-        tracing::info!("Syncing {} blacklist rules", new_rules.len());
-
-        let acl_mgr = self.acl_mgr.clone();
-        let new_rules = new_rules.to_vec();
-
-        let result = tokio::task::spawn_blocking(move || -> Result<()> {
-            let mut mgr = acl_mgr.blocking_lock();
-            mgr.clear_all_blacklists().map_err(|e| anyhow::anyhow!(e))?;
-
-            let mut success_count = 0;
-            let mut fail_count = 0;
-
-            for rule in &new_rules {
-                let apply_result = match rule.scope.as_str() {
-                    "src" if !rule.cidr.is_empty() => mgr.block_src_cidr(&rule.cidr).map(|_| ()).map_err(|e| anyhow::anyhow!(e)),
-                    "dst" if !rule.cidr.is_empty() => mgr.block_dst_cidr(&rule.cidr).map(|_| ()).map_err(|e| anyhow::anyhow!(e)),
-                    "ports" if rule.port > 0 => mgr.block_port(rule.port as u16).map_err(|e| anyhow::anyhow!(e)),
-                    _ => Err(anyhow::anyhow!("invalid blacklist rule payload")),
-                };
-
-                match apply_result {
-                    Ok(_) => success_count += 1,
-                    Err(e) => {
-                        fail_count += 1;
-                        tracing::error!("Failed to apply blacklist rule {:?}: {:?}", rule, e);
+        for rule in blacklist_rules {
+            match rule.scope.as_str() {
+                "src" if !rule.cidr.is_empty() => snapshot.acl_rules.push(AclRuleSpec {
+                    src_group: rule.cidr.clone(),
+                    dst_group: "any".to_string(),
+                    proto: 0,
+                    action: ACTION_DROP,
+                    direction: DIRECTION_INGRESS,
+                    ports: None,
+                }),
+                "dst" if !rule.cidr.is_empty() => snapshot.acl_rules.push(AclRuleSpec {
+                    src_group: "any".to_string(),
+                    dst_group: rule.cidr.clone(),
+                    proto: 0,
+                    action: ACTION_DROP,
+                    direction: DIRECTION_INGRESS,
+                    ports: None,
+                }),
+                "ports" if rule.port > 0 => {
+                    let ports = rule.port.to_string();
+                    for proto in [6u8, 17u8] {
+                        snapshot.acl_rules.push(AclRuleSpec {
+                            src_group: "any".to_string(),
+                            dst_group: "any".to_string(),
+                            proto,
+                            action: ACTION_DROP,
+                            direction: DIRECTION_INGRESS,
+                            ports: Some(ports.clone()),
+                        });
                     }
                 }
+                _ => return Err(anyhow::anyhow!("invalid blacklist rule payload")),
             }
+        }
 
-            tracing::info!(
-                "Blacklist sync completed: {} success, {} failed",
-                success_count,
-                fail_count
-            );
-
-            if fail_count > 0 {
-                return Err(anyhow::anyhow!(
-                    "blacklist sync partially failed: {} success, {} failed",
-                    success_count,
-                    fail_count
-                ));
+        for rule in qos_rules {
+            let policy = qos_policy_from_sync_rule(rule)?;
+            if policy.rate_bps == 0 {
+                return Err(anyhow::anyhow!("QoS rate_bps must be greater than zero"));
             }
+            for direction in requested_directions(policy.direction) {
+                snapshot.qos_rules.push(QosRuleSpec {
+                    group: policy.group.clone(),
+                    direction,
+                    rate_bps: policy.rate_bps,
+                    burst_bytes: policy.burst_bytes,
+                    priority: policy.priority,
+                    mode: policy.mode,
+                });
+            }
+        }
 
-            Ok(())
-        }).await?;
+        let acl_qos_mgr = self.acl_qos_mgr.clone();
+        let applied_counts = (snapshot.acl_rules.len(), snapshot.qos_rules.len());
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let mut mgr = acl_qos_mgr.blocking_lock();
+            mgr.apply_snapshot(snapshot).map_err(|e| anyhow::anyhow!(e))
+        })
+        .await??;
 
-        result
+        metrics::record_acl_rule_count(applied_counts.0);
+        metrics::record_qos_rule_count(applied_counts.1);
+        tracing::info!(
+            "ACL/QoS snapshot applied: {} ACL policies, {} QoS policies",
+            applied_counts.0,
+            applied_counts.1
+        );
+        Ok(())
     }
     
     async fn sync_peers(&mut self, new_peers: &[GrpcPeerInfo]) -> Result<()> {
@@ -2009,40 +1962,17 @@ impl UnifiedAgent {
         Ok(())
     }
     
-    async fn sync_acl_rules(&mut self, rules: &[AclRule]) -> Result<()> {
-        let mut acl = self.acl_mgr.lock().await;
-        
-        acl.clear_all_rules()?;
-        
-        for rule in rules {
-            for operation in acl_apply_operations_from_sync_rule(rule)? {
-                acl.apply_policy(
-                    &operation.src_net,
-                    &operation.dst_net,
-                    operation.dst_port,
-                    operation.protocol,
-                    operation.action,
-                )?;
-            }
-        }
-        
-        metrics::record_acl_rule_count(rules.len());
-        tracing::info!("Synced {} ACL rules", rules.len());
-        Ok(())
-    }
-    
     async fn collect_and_report_metrics(&self) -> Result<()> {
         tracing::trace!("Collecting metrics...");
         
         let wg_manager = self.wg_manager.clone();
-        let acl_mgr = self.acl_mgr.clone();
-        let qos_mgr = self.qos_mgr.clone();
+        let acl_qos_mgr = self.acl_qos_mgr.clone();
         
         let result = tokio::task::spawn_blocking(move || -> Result<(
             Vec<(String, Option<String>, u64, u64, Option<u64>)>, // peers
             (usize, usize, u64, u64), // wg totals
-            Vec<(u32, &str, u64, u64)>, // acl stats
-            Vec<(&str, u32, u64, u64)> // qos stats
+            Vec<(u32, &'static str, u64, u64)>, // acl stats
+            Vec<(&'static str, u32, u64, u64)> // qos stats
         )> {
             // 收集 WireGuard 统计
             let wg = wg_manager.blocking_lock();
@@ -2062,34 +1992,9 @@ impl UnifiedAgent {
             
             drop(wg);
             
-            // 收集 ACL 统计
-            let acl = acl_mgr.blocking_lock();
-            let acl_stats: Vec<_> = acl.get_all_rule_stats()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(_, value)| {
-                    let action = if value.action == 1 { "pass" } else { "drop" };
-                    (value.rule_id, action, value.packets, value.bytes)
-                })
-                .collect();
-            drop(acl);
-            
-            // 收集 QoS 统计
-            let qos = qos_mgr.blocking_lock();
-            let qos_stats: Vec<_> = qos.get_all_qos_stats()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(rule_type, rule_id, passed, dropped)| {
-                    // 将 String 转换为 &'static str 需要特殊处理
-                    match rule_type.as_str() {
-                        "ip" => ("ip", rule_id, passed, dropped),
-                        "peer" => ("peer", rule_id, passed, dropped),
-                        "service" => ("service", rule_id, passed, dropped),
-                        _ => ("unknown", rule_id, passed, dropped),
-                    }
-                })
-                .collect();
-            drop(qos);
+            let acl_qos = acl_qos_mgr.blocking_lock();
+            let acl_stats = acl_qos.get_all_rule_stats().unwrap_or_default();
+            let qos_stats = acl_qos.get_all_qos_stats().unwrap_or_default();
             
             Ok((peer_stats, wg_totals, acl_stats, qos_stats))
         }).await?;

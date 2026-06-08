@@ -29,7 +29,9 @@ mod wireguard;
 mod routing;
 mod system_optimization;
 mod runtime_credential;
-mod sync_apply;
+mod acl_qos_state;
+mod acl_qos_maps;
+mod acl_qos_manager;
 
 const SOCKET_PATH: &str = "/run/aria-agent.sock";
 const DEFAULT_CONFIG_PATH: &str = "/etc/aria/agent.yaml";
