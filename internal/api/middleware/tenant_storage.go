@@ -295,38 +295,3 @@ func (ts *TenantScopedStorage) DeleteTenantACLRule(ctx context.Context, id int) 
 	}
 	return nil
 }
-
-func (ts *TenantScopedStorage) GetEnabledTenantACLRules(ctx context.Context) ([]*controllerstorage.ACLRule, error) {
-	tenantID, exists := GetTenantID(ctx)
-	if !exists {
-		return nil, fmt.Errorf("tenant ID not found in context")
-	}
-
-	query := `
-		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
-		       COALESCE(action, 'allow'), enabled, priority, COALESCE(description, ''), created_at, updated_at
-		FROM acl_rules
-		WHERE tenant_id = $1 AND enabled = true
-		ORDER BY priority ASC, id ASC
-	`
-	rows, err := ts.baseStorage.DB().Query(query, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var rules []*controllerstorage.ACLRule
-	for rows.Next() {
-		rule := &controllerstorage.ACLRule{}
-		err := rows.Scan(
-			&rule.ID, &rule.Name, &rule.SrcNode, &rule.SrcNet, &rule.DstNode, &rule.DstNet, &rule.Protocol,
-			&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Enabled, &rule.Priority,
-			&rule.Description, &rule.CreatedAt, &rule.UpdatedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		rules = append(rules, rule)
-	}
-	return rules, nil
-}

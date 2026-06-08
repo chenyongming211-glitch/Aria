@@ -244,15 +244,20 @@ impl UnifiedAgent {
             .load(qos_bytes)?;
         tracing::info!("Step 18: QoS eBPF loaded into memory");
         
-        tracing::info!("Step 19: Getting TC program...");
-        let program: &mut SchedClassifier = qos_ebpf.program_mut("tc_egress_qos")
-            .context("TC program not found")?
-            .try_into()?;
-        tracing::info!("Step 20: TC program obtained");
-        
-        tracing::info!("Step 21: Loading TC program into kernel...");
-        program.load()?;
-        tracing::info!("Step 22: TC program loaded");
+        tracing::info!("Step 19: Loading TC ingress and egress programs...");
+        {
+            let program: &mut SchedClassifier = qos_ebpf.program_mut("tc_ingress_qos")
+                .context("TC ingress program not found")?
+                .try_into()?;
+            program.load()?;
+        }
+        {
+            let program: &mut SchedClassifier = qos_ebpf.program_mut("tc_egress_qos")
+                .context("TC egress program not found")?
+                .try_into()?;
+            program.load()?;
+        }
+        tracing::info!("Step 22: TC programs loaded");
         
         tracing::info!("Step 23: Preparing clsact qdisc for {}...", interface);
         // 先删除旧的 clsact qdisc（忽略错误）
@@ -265,16 +270,28 @@ impl UnifiedAgent {
         tc::qdisc_add_clsact(interface)?;
         tracing::info!("Step 24: clsact qdisc added");
         
-        tracing::info!("Step 25: Attaching TC program to {} egress...", interface);
-        program.attach(interface, TcAttachType::Egress)?;
-        tracing::info!("Step 26: TC program attached");
+        tracing::info!("Step 25: Attaching TC programs to {} ingress/egress...", interface);
+        {
+            let program: &mut SchedClassifier = qos_ebpf.program_mut("tc_ingress_qos")
+                .context("TC ingress program not found")?
+                .try_into()?;
+            program.attach(interface, TcAttachType::Ingress)?;
+        }
+        {
+            let program: &mut SchedClassifier = qos_ebpf.program_mut("tc_egress_qos")
+                .context("TC egress program not found")?
+                .try_into()?;
+            program.attach(interface, TcAttachType::Egress)?;
+        }
+        tracing::info!("Step 26: TC programs attached");
         
         let acl_qos_mgr = AclQosManager::new(
-            &mut acl_ebpf,
-            &mut qos_ebpf,
+            acl_ebpf,
+            qos_ebpf,
             identity_mgr.clone(),
             vec![interface.to_string()],
         )?;
+        Self::verify_ebpf_attachments(&[interface.to_string()])?;
         let acl_qos_mgr = Arc::new(Mutex::new(acl_qos_mgr));
         
         Ok((acl_qos_mgr, identity_mgr))
@@ -312,10 +329,18 @@ impl UnifiedAgent {
         // Load QoS eBPF
         let qos_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/qos"));
         let mut qos_ebpf = EbpfLoader::new().load(qos_bytes)?;
-        let tc_program: &mut SchedClassifier = qos_ebpf.program_mut("tc_egress_qos")
-            .context("TC program not found")?
-            .try_into()?;
-        tc_program.load()?;
+        {
+            let tc_program: &mut SchedClassifier = qos_ebpf.program_mut("tc_ingress_qos")
+                .context("TC ingress program not found")?
+                .try_into()?;
+            tc_program.load()?;
+        }
+        {
+            let tc_program: &mut SchedClassifier = qos_ebpf.program_mut("tc_egress_qos")
+                .context("TC egress program not found")?
+                .try_into()?;
+            tc_program.load()?;
+        }
 
         // Attach TC to ALL interfaces
         for iface in interfaces {
@@ -323,19 +348,109 @@ impl UnifiedAgent {
                 .args(&["qdisc", "del", "dev", iface, "clsact"])
                 .output();
             tc::qdisc_add_clsact(iface)?;
-            tc_program.attach(iface, TcAttachType::Egress)?;
-            tracing::info!("✅ TC attached to {}", iface);
+            {
+                let tc_program: &mut SchedClassifier = qos_ebpf.program_mut("tc_ingress_qos")
+                    .context("TC ingress program not found")?
+                    .try_into()?;
+                tc_program.attach(iface, TcAttachType::Ingress)?;
+            }
+            {
+                let tc_program: &mut SchedClassifier = qos_ebpf.program_mut("tc_egress_qos")
+                    .context("TC egress program not found")?
+                    .try_into()?;
+                tc_program.attach(iface, TcAttachType::Egress)?;
+            }
+            tracing::info!("✅ TC ingress/egress attached to {}", iface);
         }
 
         let acl_qos_mgr = AclQosManager::new(
-            &mut acl_ebpf,
-            &mut qos_ebpf,
+            acl_ebpf,
+            qos_ebpf,
             identity_mgr.clone(),
             interfaces.to_vec(),
         )?;
+        Self::verify_ebpf_attachments(interfaces)?;
         let acl_qos_mgr = Arc::new(Mutex::new(acl_qos_mgr));
 
         Ok((acl_qos_mgr, identity_mgr))
+    }
+
+    fn verify_ebpf_attachments(interfaces: &[String]) -> Result<()> {
+        for iface in interfaces {
+            Self::verify_xdp_attachment(iface)
+                .with_context(|| format!("XDP ACL attachment verification failed for {}", iface))?;
+            Self::verify_tc_attachment(iface, "ingress", "tc_ingress_qos")
+                .with_context(|| format!("TC ingress QoS attachment verification failed for {}", iface))?;
+            Self::verify_tc_attachment(iface, "egress", "tc_egress_qos")
+                .with_context(|| format!("TC egress QoS attachment verification failed for {}", iface))?;
+        }
+        Ok(())
+    }
+
+    fn verify_xdp_attachment(interface: &str) -> Result<()> {
+        let output = std::process::Command::new("bpftool")
+            .arg("net")
+            .output()
+            .context("failed to execute bpftool net")?;
+        if !output.status.success() {
+            return Err(anyhow::anyhow!(
+                "bpftool net failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if !stdout.contains(interface) {
+            return Err(anyhow::anyhow!(
+                "no XDP program is attached to {}; bpftool net output: {}",
+                interface,
+                stdout
+            ));
+        }
+
+        let prog_output = std::process::Command::new("bpftool")
+            .args(["prog", "show"])
+            .output()
+            .context("failed to execute bpftool prog show")?;
+        if !prog_output.status.success() {
+            return Err(anyhow::anyhow!(
+                "bpftool prog show failed: {}",
+                String::from_utf8_lossy(&prog_output.stderr)
+            ));
+        }
+        let prog_stdout = String::from_utf8_lossy(&prog_output.stdout);
+        if !prog_stdout.contains("xdp_ingress_acl") {
+            return Err(anyhow::anyhow!(
+                "xdp_ingress_acl is not loaded; bpftool prog show output: {}",
+                prog_stdout
+            ));
+        }
+        Ok(())
+    }
+
+    fn verify_tc_attachment(interface: &str, direction: &str, program_name: &str) -> Result<()> {
+        let output = std::process::Command::new("tc")
+            .args(["filter", "show", "dev", interface, direction])
+            .output()
+            .with_context(|| format!("failed to execute tc filter show dev {} {}", interface, direction))?;
+        if !output.status.success() {
+            return Err(anyhow::anyhow!(
+                "tc filter show dev {} {} failed: {}",
+                interface,
+                direction,
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if !stdout.contains(program_name) && !stdout.contains("bpf") {
+            return Err(anyhow::anyhow!(
+                "{} is not attached to {} {}; tc output: {}",
+                program_name,
+                interface,
+                direction,
+                stdout
+            ));
+        }
+        Ok(())
     }
     
     pub async fn start(&mut self) -> Result<()> {

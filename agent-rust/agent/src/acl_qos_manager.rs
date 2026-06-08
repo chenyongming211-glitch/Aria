@@ -72,21 +72,26 @@ pub struct AclQosManager {
     state: FirewallState,
     runtime: TapMapRuntime,
     interfaces: Vec<String>,
+    _acl_ebpf: Ebpf,
+    _qos_ebpf: Ebpf,
 }
 
 impl AclQosManager {
     pub fn new(
-        acl_ebpf: &mut Ebpf,
-        qos_ebpf: &mut Ebpf,
+        mut acl_ebpf: Ebpf,
+        mut qos_ebpf: Ebpf,
         identity_mgr: Arc<StdMutex<IdentityManager>>,
         interfaces: Vec<String>,
     ) -> Result<Self, AclQosError> {
         let mut manager = Self {
-            maps: AclQosMapHandles::new(acl_ebpf, qos_ebpf).map_err(AclQosError::Kernel)?,
+            maps: AclQosMapHandles::new(&mut acl_ebpf, &mut qos_ebpf)
+                .map_err(AclQosError::Kernel)?,
             identity_mgr,
             state: FirewallState::default(),
             runtime: TapMapRuntime::default(),
             interfaces,
+            _acl_ebpf: acl_ebpf,
+            _qos_ebpf: qos_ebpf,
         };
         sync_runtime_config(&mut manager.maps, manager.runtime, Some(true), Some(false))
             .map_err(AclQosError::Kernel)?;

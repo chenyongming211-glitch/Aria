@@ -1599,65 +1599,6 @@ func (s *Storage) ScanACLRuleRows(rows *sql.Rows) (*ACLRule, error) {
 	return rule, err
 }
 
-// GetEnabledACLRulesByTenant returns only enabled ACL rules for a specific tenant.
-func (s *Storage) GetEnabledACLRulesByTenant(tenantID uuid.UUID) ([]*ACLRule, error) {
-	query := `
-		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
-		       COALESCE(action, 'allow'), COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
-		       enabled, priority, COALESCE(description, ''), created_at, updated_at
-		FROM acl_rules
-		WHERE tenant_id = $1 AND enabled = true
-		ORDER BY priority ASC, id ASC
-	`
-	rows, err := s.db.Query(query, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var rules []*ACLRule
-	for rows.Next() {
-		rule, err := s.ScanACLRuleRows(rows)
-		if err != nil {
-			return nil, err
-		}
-		rules = append(rules, rule)
-	}
-	return rules, nil
-}
-
-// GetEnabledACLRules returns only enabled ACL rules for sync.
-func (s *Storage) GetEnabledACLRules() ([]*ACLRule, error) {
-	query := `
-		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
-		       COALESCE(action, 'allow'), COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
-		       enabled, priority, COALESCE(description, ''), created_at, updated_at
-		FROM acl_rules
-		WHERE enabled = true
-		ORDER BY priority ASC, id ASC
-	`
-	rows, err := s.db.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var rules []*ACLRule
-	for rows.Next() {
-		rule := &ACLRule{}
-		err := rows.Scan(
-			&rule.ID, &rule.Name, &rule.SrcNode, &rule.SrcNet, &rule.DstNode, &rule.DstNet, &rule.Protocol,
-			&rule.MinPort, &rule.MaxPort, &rule.Action, &rule.Direction, &rule.Ports, &rule.Enabled, &rule.Priority,
-			&rule.Description, &rule.CreatedAt, &rule.UpdatedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		rules = append(rules, rule)
-	}
-	return rules, nil
-}
-
 // GetACLRulesByTenant returns all ACL rules for a specific tenant.
 func (s *Storage) GetACLRulesByTenant(tenantID uuid.UUID) ([]*ACLRule, error) {
 	query := `

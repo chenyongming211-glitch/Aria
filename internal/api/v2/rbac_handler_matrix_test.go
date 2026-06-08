@@ -888,7 +888,7 @@ func TestRBACHandlerMatrix_QoSRead(t *testing.T) {
 	}
 }
 
-func TestTenantNodeQoSRejectsLegacyCategoryListPath(t *testing.T) {
+func TestTenantNodeQoSDoesNotExposeLegacyCategoryListPath(t *testing.T) {
 	t.Setenv("RBAC_ENFORCEMENT", "enforce")
 
 	tenantID := uuid.New()
@@ -910,8 +910,8 @@ func TestTenantNodeQoSRejectsLegacyCategoryListPath(t *testing.T) {
 	rr := httptest.NewRecorder()
 	router.HandleTenantScoped(rr, req)
 
-	if rr.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("expected status %d, got %d, body=%s", http.StatusMethodNotAllowed, rr.Code, rr.Body.String())
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusNotFound, rr.Code, rr.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

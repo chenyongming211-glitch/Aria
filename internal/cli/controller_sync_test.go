@@ -48,7 +48,7 @@ func TestSyncNodeReturnsInternalServerErrorWhenPeerQueryFails(t *testing.T) {
 	}
 }
 
-func TestSyncNodeFiltersACLRegionWithTenantNodesOnly(t *testing.T) {
+func TestSyncNodeReturnsNodeScopedACLWithoutRegionFiltering(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
 	ruleID := uuid.New()
@@ -65,20 +65,22 @@ func TestSyncNodeFiltersACLRegionWithTenantNodesOnly(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"tenant_id"}).AddRow(tenantID))
 	expectSyncNodePeerQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows(syncNodeColumns()).AddRow(
 		nodeID, "node-public-key", "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-a", "100.64.0.2", 2,
-		now.Unix(), now.Add(-time.Hour).Unix(), "spoke", "kernel", "6.0", true, "online", int64(0), "{10.10.0.0/24}", "", now, now,
+		now.Unix(), now.Add(-time.Hour).Unix(), "spoke", "kernel", "6.0", true, "online", int64(0), "{}", "", now, now,
 	))
 	mock.ExpectQuery(regexp.QuoteMeta(`
-			SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
-			       COALESCE(action, 'allow'), COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
-			       enabled, priority, COALESCE(description, ''), created_at, updated_at
-			FROM acl_rules
-			WHERE tenant_id = $1 AND enabled = true
-			ORDER BY priority ASC, id ASC
+			SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+			        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
+			        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+			        priority, enabled, COALESCE(description, ''),
+			        created_at, updated_at
+			   FROM acl_rules
+			  WHERE tenant_id = $1 AND node_id = $2 AND enabled = true
+			  ORDER BY priority ASC, created_at ASC
 		`)).
-		WithArgs(tenantID).
+		WithArgs(tenantID, nodeID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "src_node", "src_net", "dst_node", "dst_net", "protocol", "min_port", "max_port", "action", "direction", "ports", "enabled", "priority", "description", "created_at", "updated_at",
-		}).AddRow(ruleID, "allow-tenant-route", "", "10.10.0.0/24", "", "0.0.0.0/0", uint8(6), uint16(443), uint16(443), "allow", "ingress", "443", true, 100, "allow tenant route", now, now))
+			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(ruleID, tenantID, nodeID, "deny-node-port", "deny", "198.51.100.10/32", "203.0.113.10/32", 65530, 6, "ingress", "65530", 201, true, "node scoped acl", now, now))
 	expectSyncNodeControlState(mock, tenantID, nodeID, "dsv-rest-phase1", now)
 
 	controller := &Controller{
@@ -101,12 +103,16 @@ func TestSyncNodeFiltersACLRegionWithTenantNodesOnly(t *testing.T) {
 		t.Fatalf("failed to decode sync response: %v", err)
 	}
 	if len(resp.ACLRules) != 1 {
-		t.Fatalf("expected one ACL rule from tenant node region lookup, got %#v", resp.ACLRules)
+		t.Fatalf("expected one node-scoped ACL rule, got %#v", resp.ACLRules)
 	}
 	if !resp.SnapshotComplete {
 		t.Fatalf("expected REST sync snapshot_complete=true")
 	}
-	if resp.ACLRules[0].Direction != "ingress" || resp.ACLRules[0].Ports != "443" {
+	if resp.ACLRules[0].SrcNet != "198.51.100.10/32" ||
+		resp.ACLRules[0].DstNet != "203.0.113.10/32" ||
+		resp.ACLRules[0].Direction != "ingress" ||
+		resp.ACLRules[0].Ports != "65530" ||
+		resp.ACLRules[0].Action != "deny" {
 		t.Fatalf("expected REST sync ACL runtime fields, got %#v", resp.ACLRules[0])
 	}
 	if resp.DomainVersions["acl"] != "dsv-rest-phase1" {

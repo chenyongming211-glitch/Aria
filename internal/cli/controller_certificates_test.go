@@ -780,7 +780,7 @@ func TestHandleRegister_CSRSuccessIncludesCertificateInSyncResponse(t *testing.T
 		WillReturnError(sql.ErrNoRows)
 	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, persistedNodeID, "online", now)
 
-	// peers query by tenant returns empty
+	// peers query by tenant returns the requesting node so sync can load node-scoped ACLs
 	mock.ExpectQuery(regexp.QuoteMeta(
 		`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND COALESCE(status, 'online') NOT IN ('deleted', 'suspended', 'banned')`,
 	)).
@@ -789,21 +789,28 @@ func TestHandleRegister_CSRSuccessIncludesCertificateInSyncResponse(t *testing.T
 			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
 			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
 			"created_at", "updated_at",
+		}).AddRow(
+			persistedNodeID, publicKey, "machine-cert", tenantID, "1.1.1.1:51820", "", "1.1.1.1", "test-region", "", "node-c", "100.64.0.2", 2,
+			now.Unix(), now.Unix(), "spoke", "kernel", "6.0", true, "online", int64(0), "{}", "", now, now,
+		))
+
+	// node-scoped ACL query returns empty rule list
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+		        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
+		        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+		        priority, enabled, COALESCE(description, ''),
+		        created_at, updated_at
+		   FROM acl_rules
+		  WHERE tenant_id = $1 AND node_id = $2 AND enabled = true
+		  ORDER BY priority ASC, created_at ASC
+	`)).
+		WithArgs(tenantID, persistedNodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
 		}))
 
-	// tenant ACL query returns empty rule list
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, COALESCE(name, ''), COALESCE(src_node, ''), COALESCE(src_net::text, src_cidr::text, '0.0.0.0/0'), COALESCE(dst_node, ''), COALESCE(dst_net::text, dst_cidr::text, '0.0.0.0/0'), protocol, min_port, max_port,
-		       COALESCE(action, 'allow'), COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
-		       enabled, priority, COALESCE(description, ''), created_at, updated_at
-		FROM acl_rules
-		WHERE tenant_id = $1 AND enabled = true
-		ORDER BY priority ASC, id ASC
-	`)).
-		WithArgs(tenantID).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "name", "src_node", "src_net", "dst_node", "dst_net", "protocol", "min_port", "max_port", "action", "direction", "ports", "enabled", "priority", "description", "created_at", "updated_at",
-		}))
+	expectSyncNodeControlState(mock, tenantID, persistedNodeID, "dsv-register-cert", now)
 
 	// attachNodeCertificateToSyncResponse
 	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, persistedNodeID, "online", now)

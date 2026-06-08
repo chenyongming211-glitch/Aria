@@ -446,6 +446,10 @@ func (r *Router) handleTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	ruleIDStr := ""
 	if len(parts) == 8 {
 		ruleIDStr = parts[7]
+		if _, err := uuid.Parse(ruleIDStr); err != nil {
+			apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Unknown QoS endpoint", nil)
+			return
+		}
 	}
 
 	switch req.Method {

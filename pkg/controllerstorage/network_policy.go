@@ -548,6 +548,42 @@ func (s *Storage) GetNodeQoSRulesByPublicKey(publicKey string) ([]*QoSRuleRecord
 	return rules, rows.Err()
 }
 
+func (s *Storage) GetNodeACLRulesByPublicKey(publicKey string) ([]*ACLRuleRecord, error) {
+	node, err := s.GetNode(publicKey)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetEnabledTenantNodeACLRules(node.TenantID, node.ID)
+}
+
+func (s *Storage) GetEnabledTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRuleRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+		        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
+		        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+		        priority, enabled, COALESCE(description, ''),
+		        created_at, updated_at
+		   FROM acl_rules
+		  WHERE tenant_id = $1 AND node_id = $2 AND enabled = true
+		  ORDER BY priority ASC, created_at ASC`,
+		tenantID, nodeID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rules := make([]*ACLRuleRecord, 0)
+	for rows.Next() {
+		rule, err := scanACLRuleRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		rules = append(rules, rule)
+	}
+	return rules, rows.Err()
+}
+
 func (s *Storage) GetNodeBlacklistRulesByPublicKey(publicKey string) ([]*BlacklistRuleRecord, error) {
 	node, err := s.GetNode(publicKey)
 	if err != nil {

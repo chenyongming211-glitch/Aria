@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
@@ -826,7 +825,6 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 	defer rows.Close()
 
 	var peerInfos []NodeInfo
-	var tenantNodes []*controllerstorage.Node
 	var requestingNode *controllerstorage.Node
 	for rows.Next() {
 		peer, err := c.store.ScanNodeRows(rows)
@@ -834,7 +832,6 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 			c.logger.Error("Failed to scan peer: %v", err)
 			continue
 		}
-		tenantNodes = append(tenantNodes, peer)
 		if peer.PublicKey == req.PublicKey {
 			requestingNode = peer
 		}
@@ -862,21 +859,21 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 		}
 	}
 
-	// Get enabled ACL rules for sync (filtered by tenant and region)
+	// Get enabled ACL rules owned by the requesting node. ACL is a node-scoped
+	// runtime policy; region/advertised-route filtering belongs to the legacy
+	// topology model and must not hide node ACLs from the owning agent.
 	var aclRulesJSON []ACLRuleJSON
-	aclRules, err := c.store.GetEnabledACLRulesByTenant(nodeTenantID)
-	if err != nil {
-		c.logger.Error("Failed to get ACL rules for tenant %s: %v", nodeTenantID, err)
+	if requestingNode == nil {
+		c.logger.Warn("Agent %s was not found in tenant peer set; sending no ACL rules", previewString(req.PublicKey, 16))
 	} else {
-		// Filter rules by region
-		aclRulesJSON = c.getACLRulesForRegionInNodes(req.Region, aclRules, tenantNodes)
-		// Safe truncation of public key
-		pk := req.PublicKey
-		if len(pk) > 16 {
-			pk = pk[:16]
+		aclRules, err := c.store.GetEnabledTenantNodeACLRules(nodeTenantID, requestingNode.ID)
+		if err != nil {
+			c.logger.Error("Failed to get node ACL rules for tenant %s node %s: %v", nodeTenantID, requestingNode.ID, err)
+		} else {
+			aclRulesJSON = aclRuleRecordsForSync(aclRules)
 		}
-		c.logger.Info("Agent %s (Region: %s): sending %d ACL rules", pk, req.Region, len(aclRulesJSON))
 	}
+	c.logger.Info("Agent %s: sending %d node ACL rules", previewString(req.PublicKey, 16), len(aclRulesJSON))
 
 	desiredVersion, err := c.ensureRESTDesiredStateVersion(requestingNode)
 	if err != nil {
@@ -1654,93 +1651,6 @@ type PolicyResponse struct {
 	Action   string `json:"action"`
 }
 
-func (c *Controller) getRegionByNetworkInNodes(network string, nodes []*controllerstorage.Node) string {
-	// Parse the target network
-	_, targetNet, err := net.ParseCIDR(network)
-	if err != nil {
-		c.logger.Error("Invalid network CIDR %s: %v", network, err)
-		return ""
-	}
-
-	// Search through all nodes and their advertised routes
-	for _, node := range nodes {
-		if node.Region == "" {
-			continue
-		}
-
-		// Check if any advertised route matches or contains the target network
-		for _, route := range node.AdvertisedRoutes {
-			_, routeNet, err := net.ParseCIDR(route)
-			if err != nil {
-				continue
-			}
-
-			// Check if the route matches or contains the target network
-			if route == network || cidrsOverlap(routeNet, targetNet) {
-				return node.Region
-			}
-		}
-	}
-
-	return ""
-}
-
-// Get enabled ACL rules for sync (filtered by region) - now with tenant isolation
-func (c *Controller) getTenantEnabledACLRules(ctx context.Context) ([]*controllerstorage.ACLRule, error) {
-	// Use tenant-scoped storage to get rules for current tenant
-	if c.tenantScopedStore != nil {
-		return c.tenantScopedStore.GetEnabledTenantACLRules(ctx)
-	}
-	// Fallback to original method if tenant-scoped storage not available
-	return c.store.GetEnabledACLRules()
-}
-
-func (c *Controller) getACLRulesForRegionInNodes(region string, allRules []*controllerstorage.ACLRule, nodes []*controllerstorage.Node) []ACLRuleJSON {
-	if region == "" {
-		// If no region specified, return all rules (backward compatibility)
-		c.logger.Warn("Agent has no region, returning all ACL rules")
-		result := make([]ACLRuleJSON, 0, len(allRules))
-		for _, rule := range allRules {
-			result = append(result, ACLRuleJSON{
-				SrcNet:    rule.SrcNet,
-				DstNet:    rule.DstNet,
-				Protocol:  rule.Protocol,
-				MinPort:   rule.MinPort,
-				MaxPort:   rule.MaxPort,
-				Action:    defaultRegistrationACLAction(rule.Action),
-				Direction: rule.Direction,
-				Ports:     rule.Ports,
-			})
-		}
-		return result
-	}
-
-	var result []ACLRuleJSON
-	for _, rule := range allRules {
-		// Find regions for source and destination networks
-		srcRegion := c.getRegionByNetworkInNodes(rule.SrcNet, nodes)
-		dstRegion := c.getRegionByNetworkInNodes(rule.DstNet, nodes)
-
-		// Include rule if this region is involved (source or destination)
-		// This ensures both outbound and inbound traffic are allowed
-		if srcRegion == region || dstRegion == region {
-			result = append(result, ACLRuleJSON{
-				SrcNet:    rule.SrcNet,
-				DstNet:    rule.DstNet,
-				Protocol:  rule.Protocol,
-				MinPort:   rule.MinPort,
-				MaxPort:   rule.MaxPort,
-				Action:    defaultRegistrationACLAction(rule.Action),
-				Direction: rule.Direction,
-				Ports:     rule.Ports,
-			})
-		}
-	}
-
-	c.logger.Debug("Region %s: filtered %d rules from %d total", region, len(result), len(allRules))
-	return result
-}
-
 // ========== gRPC Adapters ==========
 // 以下两个方法将 REST API handler 适配为 gRPC 所需的格式
 
@@ -2024,12 +1934,10 @@ func (c *Controller) processSync(publicKey string) (interface{}, string, interfa
 	}
 
 	var peers []map[string]interface{}
-	syncNodes := make([]*controllerstorage.Node, 0, len(tenantNodes))
 	for _, n := range tenantNodes {
 		if !nodeEligibleForSync(n) {
 			continue
 		}
-		syncNodes = append(syncNodes, n)
 		if n.PublicKey == publicKey {
 			continue
 		}
@@ -2047,35 +1955,54 @@ func (c *Controller) processSync(publicKey string) (interface{}, string, interfa
 		})
 	}
 
-	allACLRules, err := c.store.GetACLRulesByTenant(node.TenantID)
+	aclRuleRecords, err := c.store.GetEnabledTenantNodeACLRules(node.TenantID, node.ID)
 	if err != nil {
-		c.logger.Warn("Failed to get tenant ACL rules for %s: %v", node.TenantID, err)
-		allACLRules = []*controllerstorage.ACLRule{}
+		c.logger.Warn("Failed to get node ACL rules for tenant %s node %s: %v", node.TenantID, node.ID, err)
+		aclRuleRecords = []*controllerstorage.ACLRuleRecord{}
 	}
 
-	enabledACLRules := make([]*controllerstorage.ACLRule, 0, len(allACLRules))
-	for _, rule := range allACLRules {
-		if rule.Enabled {
-			enabledACLRules = append(enabledACLRules, rule)
-		}
-	}
-
-	regionACLs := c.getACLRulesForRegionInNodes(node.Region, enabledACLRules, syncNodes)
-	var aclRules []map[string]interface{}
-	for _, rule := range regionACLs {
-		aclRules = append(aclRules, map[string]interface{}{
-			"src_net":   rule.SrcNet,
-			"dst_net":   rule.DstNet,
-			"protocol":  rule.Protocol,
-			"min_port":  rule.MinPort,
-			"max_port":  rule.MaxPort,
-			"action":    defaultRegistrationACLAction(rule.Action),
-			"direction": rule.Direction,
-			"ports":     rule.Ports,
-		})
-	}
+	aclRules := aclRuleRecordsForSync(aclRuleRecords)
 
 	return peers, node.AssignedIP, aclRules, node.TenantID, nil
+}
+
+func aclRuleRecordsForSync(rules []*controllerstorage.ACLRuleRecord) []ACLRuleJSON {
+	result := make([]ACLRuleJSON, 0, len(rules))
+	for _, rule := range rules {
+		if rule == nil || !rule.Enabled {
+			continue
+		}
+		result = append(result, aclRuleRecordForSync(rule))
+	}
+	return result
+}
+
+func aclRuleRecordForSync(rule *controllerstorage.ACLRuleRecord) ACLRuleJSON {
+	minPort, maxPort := aclPortsForSync(rule)
+	return ACLRuleJSON{
+		SrcNet:    rule.SrcCIDR,
+		DstNet:    rule.DstCIDR,
+		Protocol:  uint8(rule.Protocol),
+		MinPort:   minPort,
+		MaxPort:   maxPort,
+		Action:    defaultRegistrationACLAction(rule.Action),
+		Direction: rule.Direction,
+		Ports:     rule.Ports,
+	}
+}
+
+func aclPortsForSync(rule *controllerstorage.ACLRuleRecord) (uint16, uint16) {
+	if rule == nil {
+		return 0, 0
+	}
+	if rule.DstPort > 0 && rule.DstPort <= 65535 {
+		port := uint16(rule.DstPort)
+		return port, port
+	}
+	if strings.TrimSpace(rule.Ports) == "" {
+		return 0, 0
+	}
+	return parsePortRange(rule.Ports)
 }
 
 func nodeEligibleForSync(node *controllerstorage.Node) bool {
