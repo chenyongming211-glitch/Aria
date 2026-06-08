@@ -165,28 +165,6 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 		}
 	}
 
-	// 转换 ACL Rules
-	var aclRules []*agentpb.ACLRule
-	if aclRulesInterface != nil {
-		if aclBytes, err := json.Marshal(aclRulesInterface); err == nil {
-			var ruleList []map[string]interface{}
-			if err := json.Unmarshal(aclBytes, &ruleList); err == nil {
-				for _, r := range ruleList {
-					aclRules = append(aclRules, &agentpb.ACLRule{
-						SrcNet:    getString(r, "src_net"),
-						DstNet:    getString(r, "dst_net"),
-						Protocol:  getUint32(r, "protocol"),
-						MinPort:   getUint32(r, "min_port"),
-						MaxPort:   getUint32(r, "max_port"),
-						Action:    defaultACLAction(getString(r, "action")),
-						Direction: getString(r, "direction"),
-						Ports:     getString(r, "ports"),
-					})
-				}
-			}
-		}
-	}
-
 	// 查询 QoS 规则
 	qosRules, err := s.getQoSRules(ctx, node.PublicKey)
 	if err != nil {
@@ -196,6 +174,11 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 	blacklistRules, err := s.getBlacklistRules(ctx, node.PublicKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get blacklist rules: %w", err)
+	}
+
+	policySnapshot, err := compileAgentPolicySnapshot(aclRulesInterface, qosRules, blacklistRules)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile policy snapshot: %w", err)
 	}
 
 	desiredVersion, err := s.ensureDesiredStateVersion(node)
@@ -213,10 +196,10 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 		Peers:                 peers,
 		AssignedIp:            assignedIP,
 		LastUpdate:            time.Now().Unix(),
-		AclRules:              aclRules,
+		AclRules:              policySnapshot.ACLRules,
 		MetricsPushGateway:    metricsGateway,
-		QosRules:              qosRules,
-		BlacklistRules:        blacklistRules,
+		QosRules:              policySnapshot.QoSRules,
+		BlacklistRules:        policySnapshot.BlacklistRules,
 		DesiredStateVersion:   desiredVersion,
 		RuntimeToken:          runtimeToken,
 		RuntimeTokenExpiresAt: runtimeTokenExpiresAt,
