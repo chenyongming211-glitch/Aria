@@ -8,7 +8,10 @@ use tokio::sync::{Mutex, mpsc, oneshot, Notify};
 use tokio_util::sync::CancellationToken;
 use aya::{
     include_bytes_aligned,
-    programs::{tc, SchedClassifier, TcAttachType, Xdp, XdpFlags},
+    programs::{
+        tc::{self, NlOptions, TcAttachOptions},
+        SchedClassifier, TcAttachType, Xdp, XdpFlags,
+    },
     EbpfLoader,
 };
 use serde::{Deserialize, Serialize};
@@ -275,13 +278,13 @@ impl UnifiedAgent {
             let program: &mut SchedClassifier = qos_ebpf.program_mut("tc_ingress_qos")
                 .context("TC ingress program not found")?
                 .try_into()?;
-            program.attach(interface, TcAttachType::Ingress)?;
+            Self::attach_tc_program(program, interface, TcAttachType::Ingress)?;
         }
         {
             let program: &mut SchedClassifier = qos_ebpf.program_mut("tc_egress_qos")
                 .context("TC egress program not found")?
                 .try_into()?;
-            program.attach(interface, TcAttachType::Egress)?;
+            Self::attach_tc_program(program, interface, TcAttachType::Egress)?;
         }
         tracing::info!("Step 26: TC programs attached");
         
@@ -352,13 +355,13 @@ impl UnifiedAgent {
                 let tc_program: &mut SchedClassifier = qos_ebpf.program_mut("tc_ingress_qos")
                     .context("TC ingress program not found")?
                     .try_into()?;
-                tc_program.attach(iface, TcAttachType::Ingress)?;
+                Self::attach_tc_program(tc_program, iface, TcAttachType::Ingress)?;
             }
             {
                 let tc_program: &mut SchedClassifier = qos_ebpf.program_mut("tc_egress_qos")
                     .context("TC egress program not found")?
                     .try_into()?;
-                tc_program.attach(iface, TcAttachType::Egress)?;
+                Self::attach_tc_program(tc_program, iface, TcAttachType::Egress)?;
             }
             tracing::info!("✅ TC ingress/egress attached to {}", iface);
         }
@@ -373,6 +376,22 @@ impl UnifiedAgent {
         let acl_qos_mgr = Arc::new(Mutex::new(acl_qos_mgr));
 
         Ok((acl_qos_mgr, identity_mgr))
+    }
+
+    fn attach_tc_program(
+        program: &mut SchedClassifier,
+        interface: &str,
+        attach_type: TcAttachType,
+    ) -> Result<()> {
+        // Aya 0.13 uses TCX by default on Linux >= 6.6. That path is valid, but it is
+        // not visible through `tc filter show`. Use netlink clsact attach so runtime
+        // health checks and operator verification can prove the datapath is active.
+        program.attach_with_options(
+            interface,
+            attach_type,
+            TcAttachOptions::Netlink(NlOptions::default()),
+        )?;
+        Ok(())
     }
 
     fn verify_ebpf_attachments(interfaces: &[String]) -> Result<()> {
