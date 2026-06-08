@@ -743,31 +743,31 @@
       <div class="section-header">
         <div class="sh-icon" style="background:#fefce8;color:#eab308;">&#9889;</div>
         <h2>Bandwidth Control (QoS)</h2>
-        <span class="sh-desc">Three-tier QoS: Service, Peer, and IP levels</span>
+        <span class="sh-desc">Runtime QoS: group, direction, rate, burst, and mode</span>
       </div>
 
       <!-- Info Banner -->
       <div class="info-banner">
         <div class="ib-icon">&#9432;</div>
         <div class="ib-text">
-          <strong>QoS Three-Tier Architecture</strong>
-          <span>Service &gt; Peers &gt; IP hierarchy. Higher priority rules are matched first. Service-level rules define bandwidth for application traffic, Peer-level rules control bandwidth between node pairs, and IP-level rules manage per-address limits.</span>
+          <strong>QoS Runtime Model</strong>
+          <span>Each rule is compiled directly into a runtime group, direction, rate, burst, and mode. Lower priority values are matched first; old category-based modeling is no longer part of the product surface.</span>
         </div>
       </div>
 
       <!-- Sub Tabs -->
       <div class="sub-tabs">
-        <div class="sub-tab active" onclick="showSubTab('service')">Service Level</div>
-        <div class="sub-tab" onclick="showSubTab('peer')">Peer Level</div>
-        <div class="sub-tab" onclick="showSubTab('ip')">IP Level</div>
+        <div class="sub-tab active" onclick="showSubTab('rules')">Runtime Rules</div>
+        <div class="sub-tab" onclick="showSubTab('delivery')">Delivery</div>
+        <div class="sub-tab" onclick="showSubTab('stats')">Stats</div>
       </div>
 
-      <!-- ===== Sub-Tab: Service Level ===== -->
-      <div id="subtab-service" class="subtab-content active">
+      <!-- ===== Sub-Tab: Runtime Rules ===== -->
+      <div id="subtab-rules" class="subtab-content active">
         <div class="card">
           <div class="card-header">
-            <span class="card-title">Service Level QoS Rules</span>
-            <button class="btn btn-primary btn-sm" onclick="document.getElementById('create-qos-dialog').style.display='block'">+ Add Service Rule</button>
+            <span class="card-title">Runtime QoS Rules</span>
+            <button class="btn btn-primary btn-sm" onclick="document.getElementById('create-qos-dialog').style.display='block'">+ Add QoS Rule</button>
           </div>
           <div class="table-wrapper">
             <table>
@@ -850,12 +850,12 @@
         </div>
       </div>
 
-      <!-- ===== Sub-Tab: Peer Level ===== -->
-      <div id="subtab-peer" class="subtab-content">
+      <!-- ===== Sub-Tab: Delivery ===== -->
+      <div id="subtab-delivery" class="subtab-content">
         <div class="card">
           <div class="card-header">
-            <span class="card-title">Peer Level QoS Rules</span>
-            <button class="btn btn-primary btn-sm">+ Add Peer Rule</button>
+            <span class="card-title">QoS Delivery State</span>
+            <button class="btn btn-primary btn-sm">Refresh Delivery</button>
           </div>
           <div class="table-wrapper">
             <table>
@@ -928,12 +928,12 @@
         </div>
       </div>
 
-      <!-- ===== Sub-Tab: IP Level ===== -->
-      <div id="subtab-ip" class="subtab-content">
+      <!-- ===== Sub-Tab: Stats ===== -->
+      <div id="subtab-stats" class="subtab-content">
         <div class="card">
           <div class="card-header">
-            <span class="card-title">IP Level QoS Rules</span>
-            <button class="btn btn-primary btn-sm">+ Add IP Rule</button>
+            <span class="card-title">QoS Runtime Stats</span>
+            <button class="btn btn-primary btn-sm">Refresh Stats</button>
           </div>
           <div class="table-wrapper">
             <table>
@@ -1009,13 +1009,11 @@
       <!-- Add QoS Rule Dialog (inline mockup) -->
       <div id="create-qos-dialog" class="card" style="border: 2px dashed #eab308; background: #fffef8; margin-top: 20px;">
         <div class="dialog-title">Add QoS Rule</div>
-        <p style="font-size:13px;color:#6b7280;margin-bottom:20px;">This dialog appears when clicking "+ Add Service Rule". Shown inline for mockup purposes.</p>
+        <p style="font-size:13px;color:#6b7280;margin-bottom:20px;">This dialog appears when clicking "+ Add QoS Rule". Shown inline for mockup purposes.</p>
 
         <!-- Level selector -->
         <div class="sub-tabs" style="margin-bottom:20px;">
-          <div class="sub-tab active">Service Level</div>
-          <div class="sub-tab">Peer Level</div>
-          <div class="sub-tab">IP Level</div>
+          <div class="sub-tab active">Runtime Rule</div>
         </div>
 
         <div class="grid-2">
@@ -1065,7 +1063,7 @@
     <!-- END TAB 3 -->
 
     <div class="page-note">
-      <strong>Mockup Note:</strong> This is a static HTML mockup for the Aria SD-WAN Policy Center page. All three tabs (Policy Overview, ACL Rules, Bandwidth Control) are shown via tab navigation. The QoS section includes three sub-tabs for Service, Peer, and IP levels. Create dialogs are displayed inline for review purposes.
+      <strong>Mockup Note:</strong> This is a static HTML mockup for the Aria SD-WAN Policy Center page. Top-level tabs are Policy Overview, ACL Rules, and Bandwidth Control. The QoS section uses runtime rule, delivery, and stats views. Create dialogs are displayed inline for review purposes.
     </div>
 
   </div>
@@ -1087,9 +1085,9 @@
     document.querySelectorAll('.sub-tab').forEach(el => el.classList.remove('active'));
     document.getElementById('subtab-' + tab).classList.add('active');
     const subTabs = document.querySelectorAll('.sub-tab');
-    if (tab === 'service') subTabs[0].classList.add('active');
-    if (tab === 'peer') subTabs[1].classList.add('active');
-    if (tab === 'ip') subTabs[2].classList.add('active');
+    if (tab === 'rules') subTabs[0].classList.add('active');
+    if (tab === 'delivery') subTabs[1].classList.add('active');
+    if (tab === 'stats') subTabs[2].classList.add('active');
   }
 </script>
 

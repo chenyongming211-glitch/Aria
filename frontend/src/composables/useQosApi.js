@@ -98,23 +98,19 @@ function normalizeListResponse(response) {
 
 /**
  * QoS 规则管理 API (v2)
- * 分类定义:
- * - service: 服务级限速 (五元组)
- * - peers: 节点对限速 (src/dst IP)
- * - ip: 单节点/IP 限速 (src IP)
+ * 新运行模型：每条规则直接描述 group + direction + rate/burst + mode。
  */
 export const useQosApi = {
   /**
    * 获取指定节点的 QoS 规则
    * @param {string} nodeId - 节点ID
-   * @param {string} category - 分类 (service, peers, ip)
    */
-  getQoSRulesByNode: async (nodeId, category) => {
+  getQoSRulesByNode: async (nodeId) => {
     try {
       const tenantId = requireCurrentTenantId()
-      if (!nodeId || !category) return []
+      if (!nodeId) return []
 
-      const response = await api.get(API_ENDPOINTS.TENANT.NODE_QOS(tenantId, nodeId, category))
+      const response = await api.get(API_ENDPOINTS.TENANT.NODE_QOS(tenantId, nodeId))
       const rules = normalizeListResponse(response)
 
       // 统一字段映射
@@ -128,7 +124,6 @@ export const useQosApi = {
         const normalized = {
           ...rule,
           node_id: nodeId,
-          category: category,
           direction: normalizeDirection(rule),
           mode: normalizeMode(rule),
           rate_bps: rateBps,
@@ -148,7 +143,7 @@ export const useQosApi = {
         return normalized
       })
     } catch (error) {
-      console.error(`获取节点 QoS 规则 (${category}) 失败:`, error)
+      console.error('获取节点 QoS 规则失败:', error)
       throw error
     }
   },
@@ -156,13 +151,13 @@ export const useQosApi = {
   /**
    * 创建 QoS 规则
    */
-  createQoSRule: async (nodeId, category, rule) => {
+  createQoSRule: async (nodeId, rule) => {
     try {
       const tenantId = requireCurrentTenantId()
       const payload = normalizeRulePayload(rule)
 
       const response = await api.post(
-        API_ENDPOINTS.TENANT.NODE_QOS(tenantId, nodeId, category),
+        API_ENDPOINTS.TENANT.NODE_QOS(tenantId, nodeId),
         payload
       )
       return response.data?.data || response.data
@@ -175,11 +170,11 @@ export const useQosApi = {
   /**
    * 删除 QoS 规则
    */
-  deleteQoSRule: async (nodeId, category, ruleId) => {
+  deleteQoSRule: async (nodeId, ruleId) => {
     try {
       const tenantId = requireCurrentTenantId()
       const response = await api.delete(
-        API_ENDPOINTS.TENANT.NODE_QOS_RULE(tenantId, nodeId, category, ruleId)
+        API_ENDPOINTS.TENANT.NODE_QOS_RULE(tenantId, nodeId, ruleId)
       )
       return response.data?.data || response.data
     } catch (error) {
@@ -188,13 +183,13 @@ export const useQosApi = {
     }
   },
 
-  updateQoSRule: async (nodeId, category, ruleId, rule) => {
+  updateQoSRule: async (nodeId, ruleId, rule) => {
     try {
       const tenantId = requireCurrentTenantId()
       const payload = normalizeRulePayload(rule)
 
       const response = await api.put(
-        API_ENDPOINTS.TENANT.NODE_QOS_RULE(tenantId, nodeId, category, ruleId),
+        API_ENDPOINTS.TENANT.NODE_QOS_RULE(tenantId, nodeId, ruleId),
         payload
       )
       return response.data?.data || response.data

@@ -135,31 +135,13 @@ SD-WAN 核心物理与逻辑网络资产管理。
 
 ## 6. QoS 域（质量与带宽控制）
 
-基于 eBPF 的三级流量整形与限速架构。
-
-### 6.1 服务级限速（最高优先级，五元组精确匹配）
+基于 eBPF 的 group + direction + rate/burst 运行时限速模型。
 
 | 方法 | URL | 匹配 eBPF MAP |
 |---|---|---|
-| `GET/POST` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/service` | `SERVICE_QOS_MAP` |
-| `PUT` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/service/{rule_id}` | `SERVICE_QOS_MAP` |
-| `DELETE` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/service/{rule_id}` | - |
-
-### 6.2 节点对限速（中优先级，源 CIDR + 目标 CIDR）
-
-| 方法 | URL | 匹配 eBPF MAP |
-|---|---|---|
-| `GET/POST` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/peers` | `PAIR_ID_QOS_MAP` |
-| `PUT` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/peers/{rule_id}` | `PAIR_ID_QOS_MAP` |
-| `DELETE` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/peers/{rule_id}` | - |
-
-### 6.3 单节点限速（最低优先级，单个 CIDR）
-
-| 方法 | URL | 匹配 eBPF MAP |
-|---|---|---|
-| `GET/POST` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/ip` | `SRC_ID_QOS_MAP` |
-| `PUT` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/ip/{rule_id}` | `SRC_ID_QOS_MAP` |
-| `DELETE` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/ip/{rule_id}` | - |
+| `GET/POST` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos` | `QOS_CONFIG` |
+| `PUT` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/{rule_id}` | `QOS_CONFIG` |
+| `DELETE` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/{rule_id}` | - |
 
 注：QoS 所有接口均需租户隔离，增删操作需 `admin` 权限。
 

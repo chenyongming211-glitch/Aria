@@ -105,8 +105,8 @@ export const API_ENDPOINTS = {
     NODE_ROUTE: (tenantId, nodeId, routeId) => buildTenantPath(tenantId, `/nodes/${nodeId}/routes/${encodeURIComponent(routeId)}`),
     NODE_ACLS: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}/security/acls`),
     NODE_ACL: (tenantId, nodeId, ruleId) => buildTenantPath(tenantId, `/nodes/${nodeId}/security/acls/${ruleId}`),
-    NODE_QOS: (tenantId, nodeId, category) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos/${category}`),
-    NODE_QOS_RULE: (tenantId, nodeId, category, ruleId) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos/${category}/${ruleId}`),
+    NODE_QOS: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos`),
+    NODE_QOS_RULE: (tenantId, nodeId, ruleId) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos/${ruleId}`),
     AI_CHAT: (tenantId) => buildTenantPath(tenantId, '/ai/chat'),
     AI_CONFIRM: (tenantId) => buildTenantPath(tenantId, '/ai/confirm'),
     ROLES: (tenantId) => buildTenantPath(tenantId, '/roles'),
@@ -130,8 +130,8 @@ export const API_ENDPOINTS = {
 
   // 带宽管理 API
   BANDWIDTH: {
-    CATEGORY: (tenantId, nodeId, category) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos/${category}`),
-    RULE: (tenantId, nodeId, category, ruleId) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos/${category}/${ruleId}`)
+    LIST: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos`),
+    RULE: (tenantId, nodeId, ruleId) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos/${ruleId}`)
   },
 
   // 监控 API

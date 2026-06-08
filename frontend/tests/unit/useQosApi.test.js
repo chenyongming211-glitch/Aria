@@ -31,9 +31,9 @@ describe('useQosApi', () => {
       data: { success: true, data: null }
     })
 
-    const rules = await useQosApi.getQoSRulesByNode('node-1', 'service')
+    const rules = await useQosApi.getQoSRulesByNode('node-1')
 
-    expect(api.get).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/qos/service')
+    expect(api.get).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/qos')
     expect(rules).toEqual([])
   })
 
@@ -42,19 +42,19 @@ describe('useQosApi', () => {
       data: { success: true, data: { id: 'rule-1' } }
     })
 
-    await useQosApi.createQoSRule('node-1', 'service', {
-      dst_port: 443,
-      protocol: 6,
+    await useQosApi.createQoSRule('node-1', {
+      group_cidr: '10.0.0.0/24',
+      direction: 'egress',
       bandwidth_mbps: 200,
       description: 'https limit'
     })
 
-    expect(api.post).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/qos/service', {
+    expect(api.post).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/qos', {
       src_cidr: '',
-      dst_cidr: '',
+      dst_cidr: '10.0.0.0/24',
       src_port: 0,
-      dst_port: 443,
-      protocol: 6,
+      dst_port: 0,
+      protocol: 0,
       bandwidth_mbps: 200,
       direction: 'egress',
       rate_bps: 200000000,
@@ -67,9 +67,8 @@ describe('useQosApi', () => {
   })
 
   it('应该拒绝 0 Mbps 的 QoS 规则', async () => {
-    await expect(useQosApi.createQoSRule('node-1', 'service', {
-      dst_port: 443,
-      protocol: 6,
+    await expect(useQosApi.createQoSRule('node-1', {
+      group_cidr: '10.0.0.0/24',
       bandwidth_mbps: 0
     })).rejects.toThrow('bandwidth_mbps must be greater than 0')
 

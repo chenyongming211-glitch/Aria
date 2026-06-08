@@ -10,9 +10,7 @@ import (
 )
 
 const (
-	QoSCategoryService = "service"
-	QoSCategoryPeers   = "peers"
-	QoSCategoryIP      = "ip"
+	QoSCategoryRuntime = "runtime"
 
 	BlacklistScopeSrc   = "src"
 	BlacklistScopeDst   = "dst"
@@ -73,7 +71,7 @@ type BlacklistRuleRecord struct {
 	UpdatedAt   time.Time
 }
 
-func (s *Storage) ListTenantNodeQoSRules(tenantID, nodeID uuid.UUID, category string) ([]*QoSRuleRecord, error) {
+func (s *Storage) ListTenantNodeQoSRules(tenantID, nodeID uuid.UUID) ([]*QoSRuleRecord, error) {
 	rows, err := s.db.Query(
 		`SELECT id, tenant_id, node_id, category, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
@@ -84,8 +82,8 @@ func (s *Storage) ListTenantNodeQoSRules(tenantID, nodeID uuid.UUID, category st
 		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE tenant_id = $1 AND node_id = $2 AND category = $3
-		  ORDER BY created_at DESC`,
-		tenantID, nodeID, category,
+		  ORDER BY priority ASC, created_at DESC`,
+		tenantID, nodeID, QoSCategoryRuntime,
 	)
 	if err != nil {
 		return nil, err
@@ -105,6 +103,7 @@ func (s *Storage) ListTenantNodeQoSRules(tenantID, nodeID uuid.UUID, category st
 
 func (s *Storage) CreateTenantNodeQoSRule(rule *QoSRuleRecord) (*QoSRuleRecord, error) {
 	created := &QoSRuleRecord{}
+	rule.Category = QoSCategoryRuntime
 	normalizeQoSRuntimeFields(rule)
 	err := s.db.QueryRow(
 		`INSERT INTO qos_rules (tenant_id, node_id, category, src_cidr, dst_cidr, src_port, dst_port, protocol, bandwidth_mbps, direction, rate_bps, burst_bytes, priority, mode, enabled, description)
@@ -165,10 +164,10 @@ func (s *Storage) CreateTenantNodeQoSRule(rule *QoSRuleRecord) (*QoSRuleRecord, 
 	return created, nil
 }
 
-func (s *Storage) DeleteTenantNodeQoSRule(tenantID, nodeID uuid.UUID, category string, ruleID uuid.UUID) error {
+func (s *Storage) DeleteTenantNodeQoSRule(tenantID, nodeID uuid.UUID, ruleID uuid.UUID) error {
 	result, err := s.db.Exec(
 		`DELETE FROM qos_rules WHERE id = $1 AND tenant_id = $2 AND node_id = $3 AND category = $4`,
-		ruleID, tenantID, nodeID, category,
+		ruleID, tenantID, nodeID, QoSCategoryRuntime,
 	)
 	if err != nil {
 		return err
@@ -189,7 +188,7 @@ func (s *Storage) DeleteTenantNodeQoSRule(tenantID, nodeID uuid.UUID, category s
 	return nil
 }
 
-func (s *Storage) GetTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, category string) (*QoSRuleRecord, error) {
+func (s *Storage) GetTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID) (*QoSRuleRecord, error) {
 	rule, err := scanQoSRule(s.db.QueryRow(
 		`SELECT id, tenant_id, node_id, category, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
@@ -200,7 +199,7 @@ func (s *Storage) GetTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, categ
 		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE id = $1 AND tenant_id = $2 AND node_id = $3 AND category = $4`,
-		ruleID, tenantID, nodeID, category,
+		ruleID, tenantID, nodeID, QoSCategoryRuntime,
 	))
 	if err != nil {
 		return nil, err
@@ -208,7 +207,8 @@ func (s *Storage) GetTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, categ
 	return rule, nil
 }
 
-func (s *Storage) UpdateTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, category string, rule *QoSRuleRecord) (*QoSRuleRecord, error) {
+func (s *Storage) UpdateTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, rule *QoSRuleRecord) (*QoSRuleRecord, error) {
+	rule.Category = QoSCategoryRuntime
 	normalizeQoSRuntimeFields(rule)
 	result, err := s.db.Exec(
 		`UPDATE qos_rules SET
@@ -218,7 +218,7 @@ func (s *Storage) UpdateTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, ca
 			priority = $14, mode = $15, description = $16,
 			enabled = $17, updated_at = NOW()
 		 WHERE id = $1 AND tenant_id = $2 AND node_id = $3 AND category = $4`,
-		ruleID, tenantID, nodeID, category,
+		ruleID, tenantID, nodeID, QoSCategoryRuntime,
 		rule.SrcCIDR, rule.DstCIDR,
 		rule.SrcPort, rule.DstPort, rule.Protocol,
 		rule.BandwidthMbps, rule.Direction, rule.RateBps, rule.BurstBytes,
@@ -242,7 +242,7 @@ func (s *Storage) UpdateTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, ca
 	rule.ID = ruleID
 	rule.TenantID = tenantID
 	rule.NodeID = nodeID
-	rule.Category = category
+	rule.Category = QoSCategoryRuntime
 	rule.UpdatedAt = time.Now()
 	return rule, nil
 }
@@ -667,15 +667,6 @@ func scanBlacklistRule(scanner interface {
 		return nil, err
 	}
 	return record, nil
-}
-
-func ValidateQoSCategory(category string) error {
-	switch category {
-	case QoSCategoryService, QoSCategoryPeers, QoSCategoryIP:
-		return nil
-	default:
-		return fmt.Errorf("unsupported QoS category: %s", category)
-	}
 }
 
 func ValidateBlacklistScope(scope string) error {

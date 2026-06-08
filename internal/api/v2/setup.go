@@ -1435,39 +1435,34 @@ func (r *Router) buildTenantNodeACLPolicies(tenantID uuid.UUID, node *controller
 }
 
 func (r *Router) buildTenantNodeQoSPolicies(tenantID uuid.UUID, node *controllerstorage.Node) ([]map[string]interface{}, error) {
-	// 汇总所有分类的 QoS
-	categories := []string{"service", "peers", "ip"}
 	allPolicies := make([]map[string]interface{}, 0)
 
-	for _, cat := range categories {
-		rules, err := r.store.ListTenantNodeQoSRules(tenantID, node.ID, cat)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load %s QoS rules: %w", cat, err)
-		}
-		for _, rule := range rules {
-			allPolicies = append(allPolicies, map[string]interface{}{
-				"id":             rule.ID.String(),
-				"node_id":        node.ID.String(),
-				"node_name":      firstNonEmpty(node.Hostname, node.PublicKey),
-				"kind":           "qos",
-				"category":       cat,
-				"name":           rule.Description,
-				"src_cidr":       rule.SrcCIDR,
-				"dst_cidr":       rule.DstCIDR,
-				"src_port":       rule.SrcPort,
-				"dst_port":       rule.DstPort,
-				"protocol":       rule.Protocol,
-				"bandwidth_mbps": rule.BandwidthMbps,
-				"direction":      rule.Direction,
-				"rate_bps":       rule.RateBps,
-				"burst_bytes":    rule.BurstBytes,
-				"priority":       rule.Priority,
-				"mode":           rule.Mode,
-				"enabled":        rule.Enabled,
-				"created_at":     rule.CreatedAt,
-				"updated_at":     rule.UpdatedAt,
-			})
-		}
+	rules, err := r.store.ListTenantNodeQoSRules(tenantID, node.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load QoS rules: %w", err)
+	}
+	for _, rule := range rules {
+		allPolicies = append(allPolicies, map[string]interface{}{
+			"id":             rule.ID.String(),
+			"node_id":        node.ID.String(),
+			"node_name":      firstNonEmpty(node.Hostname, node.PublicKey),
+			"kind":           "qos",
+			"name":           rule.Description,
+			"src_cidr":       rule.SrcCIDR,
+			"dst_cidr":       rule.DstCIDR,
+			"src_port":       rule.SrcPort,
+			"dst_port":       rule.DstPort,
+			"protocol":       rule.Protocol,
+			"bandwidth_mbps": rule.BandwidthMbps,
+			"direction":      rule.Direction,
+			"rate_bps":       rule.RateBps,
+			"burst_bytes":    rule.BurstBytes,
+			"priority":       rule.Priority,
+			"mode":           rule.Mode,
+			"enabled":        rule.Enabled,
+			"created_at":     rule.CreatedAt,
+			"updated_at":     rule.UpdatedAt,
+		})
 	}
 
 	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "qos", allPolicies, "id"); err != nil {

@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestBuildTenantNodeQoSPoliciesReturnsCategoryErrors(t *testing.T) {
+func TestBuildTenantNodeQoSPoliciesReturnsRuntimeErrors(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
 	db, mock, err := sqlmock.New()
@@ -30,8 +30,8 @@ func TestBuildTenantNodeQoSPoliciesReturnsCategoryErrors(t *testing.T) {
 		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE tenant_id = $1 AND node_id = $2 AND category = $3
-		  ORDER BY created_at DESC`)).
-		WithArgs(tenantID, nodeID, controllerstorage.QoSCategoryService).
+		  ORDER BY priority ASC, created_at DESC`)).
+		WithArgs(tenantID, nodeID, controllerstorage.QoSCategoryRuntime).
 		WillReturnError(errors.New("qos query failed"))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
@@ -41,10 +41,10 @@ func TestBuildTenantNodeQoSPoliciesReturnsCategoryErrors(t *testing.T) {
 		Hostname: "node-a",
 	})
 	if err == nil {
-		t.Fatalf("expected QoS category query error")
+		t.Fatalf("expected QoS runtime query error")
 	}
-	if !strings.Contains(err.Error(), controllerstorage.QoSCategoryService) {
-		t.Fatalf("expected category in error, got %v", err)
+	if !strings.Contains(err.Error(), "QoS rules") {
+		t.Fatalf("expected QoS error context, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

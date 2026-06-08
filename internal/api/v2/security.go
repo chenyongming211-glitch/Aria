@@ -438,45 +438,48 @@ func (r *Router) handleTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		return
 	}
 
-	if len(parts) < 8 {
-		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidPath, "QoS category is required", nil)
-		return
-	}
-	category := parts[7]
-	if err := controllerstorage.ValidateQoSCategory(category); err != nil {
-		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
+	if len(parts) > 8 {
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Unknown QoS endpoint", nil)
 		return
 	}
 
 	ruleIDStr := ""
-	if len(parts) > 8 {
-		ruleIDStr = parts[8]
+	if len(parts) == 8 {
+		ruleIDStr = parts[7]
 	}
 
 	switch req.Method {
 	case http.MethodGet:
-		r.listTenantNodeQoS(w, tenantID, node.ID, category)
+		if ruleIDStr != "" {
+			apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+			return
+		}
+		r.listTenantNodeQoS(w, tenantID, node.ID)
 	case http.MethodPost:
-		r.createTenantNodeQoS(w, req, tenantID, node, category)
+		if ruleIDStr != "" {
+			apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+			return
+		}
+		r.createTenantNodeQoS(w, req, tenantID, node)
 	case http.MethodPut:
 		if ruleIDStr == "" {
 			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Rule ID is required for update", nil)
 			return
 		}
-		r.updateTenantNodeQoS(w, req, tenantID, node, category, ruleIDStr)
+		r.updateTenantNodeQoS(w, req, tenantID, node, ruleIDStr)
 	case http.MethodDelete:
 		if ruleIDStr == "" {
 			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Rule ID is required for deletion", nil)
 			return
 		}
-		r.deleteTenantNodeQoS(w, tenantID, node, category, ruleIDStr)
+		r.deleteTenantNodeQoS(w, tenantID, node, ruleIDStr)
 	default:
 		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
 	}
 }
 
-func (r *Router) listTenantNodeQoS(w http.ResponseWriter, tenantID, nodeID uuid.UUID, category string) {
-	rules, err := r.store.ListTenantNodeQoSRules(tenantID, nodeID, category)
+func (r *Router) listTenantNodeQoS(w http.ResponseWriter, tenantID, nodeID uuid.UUID) {
+	rules, err := r.store.ListTenantNodeQoSRules(tenantID, nodeID)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to list QoS rules: "+err.Error(), nil)
 		return
@@ -484,7 +487,7 @@ func (r *Router) listTenantNodeQoS(w http.ResponseWriter, tenantID, nodeID uuid.
 	apibase.WriteSuccess(w, rules, fmt.Sprintf("%d QoS rules retrieved", len(rules)))
 }
 
-func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, category string) {
+func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node) {
 	var body struct {
 		SrcCIDR       string `json:"src_cidr"`
 		DstCIDR       string `json:"dst_cidr"`
@@ -512,7 +515,7 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	rule := &controllerstorage.QoSRuleRecord{
 		TenantID:      tenantID,
 		NodeID:        node.ID,
-		Category:      category,
+		Category:      controllerstorage.QoSCategoryRuntime,
 		SrcCIDR:       body.SrcCIDR,
 		DstCIDR:       body.DstCIDR,
 		SrcPort:       body.SrcPort,
@@ -537,7 +540,6 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	r.writePolicyMutationSuccess(w, node, "qos", "create", map[string]interface{}{
 		"id":             created.ID.String(),
 		"node_id":        node.ID.String(),
-		"category":       created.Category,
 		"src_cidr":       created.SrcCIDR,
 		"dst_cidr":       created.DstCIDR,
 		"src_port":       created.SrcPort,
@@ -554,13 +556,12 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		"created_at":     created.CreatedAt,
 		"updated_at":     created.UpdatedAt,
 	}, "QoS rule created successfully", map[string]interface{}{
-		"node_id":  node.ID.String(),
-		"rule_id":  created.ID.String(),
-		"category": created.Category,
+		"node_id": node.ID.String(),
+		"rule_id": created.ID.String(),
 	})
 }
 
-func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, category, ruleIDStr string) {
+func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, ruleIDStr string) {
 	ruleID, err := uuid.Parse(ruleIDStr)
 	if err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid rule ID format", nil)
@@ -588,7 +589,7 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		return
 	}
 
-	existing, err := r.store.GetTenantNodeQoSRule(tenantID, node.ID, ruleID, category)
+	existing, err := r.store.GetTenantNodeQoSRule(tenantID, node.ID, ruleID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			apibase.WriteError(w, http.StatusNotFound, apibase.CodeNotFound, "QoS rule not found", nil)
@@ -643,7 +644,7 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		rule.Enabled = *body.Enabled
 	}
 
-	updated, err := r.store.UpdateTenantNodeQoSRule(tenantID, node.ID, ruleID, category, &rule)
+	updated, err := r.store.UpdateTenantNodeQoSRule(tenantID, node.ID, ruleID, &rule)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to update QoS rule: "+err.Error(), nil)
 		return
@@ -652,7 +653,6 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	r.writePolicyMutationSuccess(w, node, "qos", "update", map[string]interface{}{
 		"id":             ruleID.String(),
 		"node_id":        node.ID.String(),
-		"category":       updated.Category,
 		"src_cidr":       updated.SrcCIDR,
 		"dst_cidr":       updated.DstCIDR,
 		"src_port":       updated.SrcPort,
@@ -668,32 +668,29 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		"description":    updated.Description,
 		"updated_at":     updated.UpdatedAt,
 	}, "QoS rule updated successfully", map[string]interface{}{
-		"node_id":  node.ID.String(),
-		"rule_id":  ruleID.String(),
-		"category": updated.Category,
+		"node_id": node.ID.String(),
+		"rule_id": ruleID.String(),
 	})
 }
 
-func (r *Router) deleteTenantNodeQoS(w http.ResponseWriter, tenantID uuid.UUID, node *controllerstorage.Node, category, ruleIDStr string) {
+func (r *Router) deleteTenantNodeQoS(w http.ResponseWriter, tenantID uuid.UUID, node *controllerstorage.Node, ruleIDStr string) {
 	ruleID, err := uuid.Parse(ruleIDStr)
 	if err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid rule ID format", nil)
 		return
 	}
 
-	if err := r.store.DeleteTenantNodeQoSRule(tenantID, node.ID, category, ruleID); err != nil {
+	if err := r.store.DeleteTenantNodeQoSRule(tenantID, node.ID, ruleID); err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to delete QoS rule: "+err.Error(), nil)
 		return
 	}
 
 	r.writePolicyMutationSuccess(w, node, "qos", "delete", map[string]interface{}{
-		"id":       ruleIDStr,
-		"node_id":  node.ID.String(),
-		"category": category,
-		"status":   "deleted",
+		"id":      ruleIDStr,
+		"node_id": node.ID.String(),
+		"status":  "deleted",
 	}, "QoS rule deleted successfully", map[string]interface{}{
-		"node_id":  node.ID.String(),
-		"rule_id":  ruleIDStr,
-		"category": category,
+		"node_id": node.ID.String(),
+		"rule_id": ruleIDStr,
 	})
 }

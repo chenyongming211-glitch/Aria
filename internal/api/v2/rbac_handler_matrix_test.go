@@ -286,11 +286,11 @@ func expectQoSListSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE tenant_id = $1 AND node_id = $2 AND category = $3
-		  ORDER BY created_at DESC`)).
-		WithArgs(tenantID, nodeID, "service").
+		  ORDER BY priority ASC, created_at DESC`)).
+		WithArgs(tenantID, nodeID, "runtime").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "category", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at",
-		}).AddRow(uuid.New(), tenantID, nodeID, "service", "", "", 0, 443, 6, 200, "egress", uint64(200000000), uint64(2500000), 0, "policing", true, "https limit", now, now))
+		}).AddRow(uuid.New(), tenantID, nodeID, "runtime", "", "10.0.0.0/24", 0, 0, 0, 200, "egress", uint64(200000000), uint64(2500000), 0, "policing", true, "https limit", now, now))
 }
 
 func expectRolesCreateSuccess(mock sqlmock.Sqlmock, tenantID uuid.UUID) {
@@ -337,10 +337,10 @@ func expectQoSCreateSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 		           COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
 		           COALESCE(priority, 0), COALESCE(mode, 'policing'),
 		           enabled, COALESCE(description, ''), created_at, updated_at`)).
-		WithArgs(tenantID, nodeID, "service", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), 200, "egress", uint64(200000000), uint64(2500000), 0, "policing", true, "qos web").
+		WithArgs(tenantID, nodeID, "runtime", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), 200, "egress", uint64(200000000), uint64(2500000), 100, "policing", true, "qos web").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "category", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at",
-		}).AddRow(uuid.New(), tenantID, nodeID, "service", "", "", 0, 443, 6, 200, "egress", uint64(200000000), uint64(2500000), 0, "policing", true, "qos web", now, now))
+		}).AddRow(uuid.New(), tenantID, nodeID, "runtime", "", "10.0.0.0/24", 0, 0, 0, 200, "egress", uint64(200000000), uint64(2500000), 100, "policing", true, "qos web", now, now))
 }
 
 func expectACLGetForUpdate(mock sqlmock.Sqlmock, tenantID, nodeID, ruleID uuid.UUID) {
@@ -379,10 +379,10 @@ func expectQoSGetForUpdate(mock sqlmock.Sqlmock, tenantID, nodeID, ruleID uuid.U
 		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE id = $1 AND tenant_id = $2 AND node_id = $3 AND category = $4`)).
-		WithArgs(ruleID, tenantID, nodeID, "service").
+		WithArgs(ruleID, tenantID, nodeID, "runtime").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "category", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at",
-		}).AddRow(ruleID, tenantID, nodeID, "service", "10.0.0.0/24", "0.0.0.0/0", 1000, 443, 6, 200, "egress", uint64(200000000), uint64(2500000), 0, "policing", true, "qos web", now, now))
+		}).AddRow(ruleID, tenantID, nodeID, "runtime", "", "10.0.0.0/24", 0, 0, 0, 200, "egress", uint64(200000000), uint64(2500000), 100, "policing", true, "qos web", now, now))
 }
 
 func expectQoSUpdatePreservingExistingFields(mock sqlmock.Sqlmock, tenantID, nodeID, ruleID uuid.UUID) {
@@ -393,7 +393,7 @@ func expectQoSUpdatePreservingExistingFields(mock sqlmock.Sqlmock, tenantID, nod
 			priority = $14, mode = $15, description = $16,
 			enabled = $17, updated_at = NOW()
 		 WHERE id = $1 AND tenant_id = $2 AND node_id = $3 AND category = $4`)).
-		WithArgs(ruleID, tenantID, nodeID, "service", "10.0.0.0/24", "0.0.0.0/0", 1000, 443, 6, 200, "egress", uint64(200000000), uint64(2500000), 0, "policing", "qos web", false).
+		WithArgs(ruleID, tenantID, nodeID, "runtime", "", "10.0.0.0/24", 0, 0, 0, 200, "egress", uint64(200000000), uint64(2500000), 100, "policing", "qos web", false).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
@@ -841,7 +841,7 @@ func TestRBACHandlerMatrix_ACLsRead(t *testing.T) {
 func TestRBACHandlerMatrix_QoSRead(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
-	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/qos/service"
+	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/qos"
 	cases := []handlerMatrixCase{
 		{name: "off mode bypasses QoS read permission", mode: "off", role: "member", expectStatus: http.StatusOK},
 		{name: "audit mode allows denied QoS read with marker", mode: "audit", role: "viewer", permissions: []string{"nodes:read"}, expectStatus: http.StatusOK, expectAudit: true},
@@ -885,6 +885,36 @@ func TestRBACHandlerMatrix_QoSRead(t *testing.T) {
 				t.Fatalf("unmet sql expectations: %v", err)
 			}
 		})
+	}
+}
+
+func TestTenantNodeQoSRejectsLegacyCategoryListPath(t *testing.T) {
+	t.Setenv("RBAC_ENFORCEMENT", "enforce")
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/qos/service"
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	expectTenantStatusActive(mock, tenantID)
+	expectPermissionLookup(mock, tenantID, "admin", []string{"qos:read"})
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withAuthContext(httptest.NewRequest(http.MethodGet, path, nil), "admin", tenantID)
+	rr := httptest.NewRecorder()
+	router.HandleTenantScoped(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusMethodNotAllowed, rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
 
@@ -1143,7 +1173,7 @@ func TestACLUpdatePreservesOmittedFields(t *testing.T) {
 func TestRBACHandlerMatrix_QoSWrite(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
-	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/qos/service"
+	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/qos"
 	cases := []handlerMatrixCase{
 		{name: "off mode bypasses QoS write permission", mode: "off", role: "member", expectStatus: http.StatusOK},
 		{name: "audit mode allows denied QoS write with marker", mode: "audit", role: "viewer", permissions: []string{"qos:read"}, expectStatus: http.StatusOK, expectAudit: true},
@@ -1178,7 +1208,7 @@ func TestRBACHandlerMatrix_QoSWrite(t *testing.T) {
 			req := withAuthContext(httptest.NewRequest(
 				http.MethodPost,
 				path,
-				strings.NewReader(`{"dst_port":443,"protocol":6,"bandwidth_mbps":200,"description":"qos web"}`),
+				strings.NewReader(`{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":200,"priority":100,"description":"qos web"}`),
 			), tc.role, tenantID)
 			rr := httptest.NewRecorder()
 			router.HandleTenantScoped(rr, req)
@@ -1202,7 +1232,7 @@ func TestQoSUpdatePreservesOmittedFields(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
 	ruleID := uuid.New()
-	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/qos/service/" + ruleID.String()
+	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/qos/" + ruleID.String()
 
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -1238,7 +1268,7 @@ func TestQoSUpdatePreservesOmittedFields(t *testing.T) {
 func TestQoSWriteRejectsZeroBandwidth(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
-	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/qos/service"
+	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/qos"
 
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -1254,7 +1284,7 @@ func TestQoSWriteRejectsZeroBandwidth(t *testing.T) {
 	req := withAuthContext(httptest.NewRequest(
 		http.MethodPost,
 		path,
-		strings.NewReader(`{"dst_port":443,"protocol":6,"bandwidth_mbps":0,"description":"invalid qos"}`),
+		strings.NewReader(`{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":0,"description":"invalid qos"}`),
 	), "admin", tenantID)
 	rr := httptest.NewRecorder()
 	router.HandleTenantScoped(rr, req)
