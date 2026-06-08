@@ -17,8 +17,6 @@ use tracing_subscriber::{
     fmt,
 };
 
-mod acl;
-mod qos;
 mod identity;
 mod config;
 mod metrics;
