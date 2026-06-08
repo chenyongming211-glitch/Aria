@@ -266,7 +266,7 @@ fn apply_qos_bucket(key: &QosKey, config: QosConfig, pkt_len: u64, direction: u8
 }
 
 fn update_qos_stats(key: &QosKey, pkt_len: u64, dropped: bool, shaped: bool) {
-    if let Some(stats_ptr) = unsafe { QOS_STATS.get_ptr_mut(key) } {
+    if let Some(stats_ptr) = QOS_STATS.get_ptr_mut(key) {
         let stats = unsafe { &mut *stats_ptr };
         if dropped {
             stats.dropped_packets = stats.dropped_packets.wrapping_add(1);
@@ -315,9 +315,7 @@ fn mul_div(left: u64, right: u64, divisor: u64) -> u64 {
     }
     let whole = left / divisor;
     let rem = left % divisor;
-    whole
-        .saturating_mul(right)
-        .saturating_add(rem.saturating_mul(right) / divisor)
+    (whole * right) + ((rem * right) / divisor)
 }
 
 #[inline(always)]

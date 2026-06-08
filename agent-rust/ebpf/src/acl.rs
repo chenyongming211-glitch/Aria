@@ -287,7 +287,7 @@ fn policy_action(tap_id: u32, policy: PolicyValue, dst_port: u16) -> u8 {
 }
 
 fn update_rule_stats(key: &PolicyKey, pkt_len: u64, dropped: bool) {
-    if let Some(stats_ptr) = unsafe { RULE_STATS.get_ptr_mut(key) } {
+    if let Some(stats_ptr) = RULE_STATS.get_ptr_mut(key) {
         let stats = unsafe { &mut *stats_ptr };
         stats.packets = stats.packets.wrapping_add(1);
         stats.bytes = stats.bytes.wrapping_add(pkt_len);
