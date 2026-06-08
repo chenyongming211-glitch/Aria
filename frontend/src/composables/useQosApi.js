@@ -11,8 +11,8 @@ function normalizeBandwidthMbps(rule) {
 
 function normalizeDirection(rule) {
   const value = String(rule.direction || '').trim().toLowerCase()
-  if (['ingress', 'egress'].includes(value)) return value
-  if ((rule.src_cidr || rule.src_net) && !(rule.dst_cidr || rule.dst_net)) return 'ingress'
+  if (['ingress', 'egress', 'both'].includes(value)) return value
+  if ((rule.src_cidr || rule.src_net || rule.group_cidr || rule.group) && !(rule.dst_cidr || rule.dst_net)) return 'ingress'
   return 'egress'
 }
 
@@ -33,17 +33,43 @@ function normalizeBurstBytes(rule, rateBps) {
   return Math.max(Math.floor(rateBps / 8 / 10), 1500)
 }
 
+function normalizeStats(rule) {
+  const stats = rule.stats || rule.datapath_stats || {}
+  return {
+    passed_packets: Number(stats.passed_packets ?? stats.packets ?? 0),
+    passed_bytes: Number(stats.passed_bytes ?? stats.bytes ?? 0),
+    dropped_packets: Number(stats.dropped_packets ?? 0),
+    dropped_bytes: Number(stats.dropped_bytes ?? 0),
+    shaped_packets: Number(stats.shaped_packets ?? 0),
+    shaped_bytes: Number(stats.shaped_bytes ?? 0)
+  }
+}
+
+function qosGroupForRule(rule) {
+  const direction = normalizeDirection(rule)
+  const src = rule.src_cidr || rule.src_net || rule.src_ip || ''
+  const dst = rule.dst_cidr || rule.dst_net || rule.dst_ip || ''
+  const explicit = rule.group_cidr || rule.group || rule.runtime_group || ''
+  if (explicit) return explicit
+  if (direction === 'ingress') return src || dst || 'any'
+  return dst || src || 'any'
+}
+
 function normalizeRulePayload(rule) {
   const bandwidthMbps = normalizeBandwidthMbps(rule)
   const rateBps = normalizeRateBps(rule, bandwidthMbps)
+  const direction = normalizeDirection(rule)
+  const group = rule.group_cidr || rule.group || ''
+  const srcCIDR = rule.src_cidr || rule.src_net || (direction === 'ingress' ? group : '') || ''
+  const dstCIDR = rule.dst_cidr || rule.dst_net || (direction !== 'ingress' ? group : '') || ''
   return {
-    src_cidr: rule.src_cidr || rule.src_net || '',
-    dst_cidr: rule.dst_cidr || rule.dst_net || '',
+    src_cidr: srcCIDR,
+    dst_cidr: dstCIDR,
     src_port: Number(rule.src_port || 0),
     dst_port: Number(rule.dst_port || 0),
     protocol: Number(rule.protocol || 0),
     bandwidth_mbps: bandwidthMbps,
-    direction: normalizeDirection(rule),
+    direction,
     rate_bps: rateBps,
     burst_bytes: normalizeBurstBytes(rule, rateBps),
     priority: Number(rule.priority || 0),
@@ -92,20 +118,35 @@ export const useQosApi = {
       const rules = normalizeListResponse(response)
 
       // 统一字段映射
-      return rules.map(rule => ({
-        ...rule,
-        node_id: nodeId,
-        category: category,
-        direction: normalizeDirection(rule),
-        mode: normalizeMode(rule),
-        rate_bps: Number(rule.rate_bps || 0),
-        burst_bytes: Number(rule.burst_bytes || 0),
-        priority: Number(rule.priority || 0),
-        // 兼容旧 UI 字段名
-        bandwidth: rule.bandwidth_mbps,
-        status: rule.enabled ? 'active' : 'inactive',
-        policyStatus: rule.policy_status || 'idle'
-      }))
+      return rules.map(rule => {
+        let bandwidthMbps = Number(rule.bandwidth_mbps ?? rule.bandwidth ?? 0)
+        const rateBps = normalizeRateBps(rule, bandwidthMbps)
+        if ((!Number.isFinite(bandwidthMbps) || bandwidthMbps <= 0) && rateBps > 0) {
+          bandwidthMbps = rateBps / 1000000
+        }
+        const burstBytes = normalizeBurstBytes(rule, rateBps)
+        const normalized = {
+          ...rule,
+          node_id: nodeId,
+          category: category,
+          direction: normalizeDirection(rule),
+          mode: normalizeMode(rule),
+          rate_bps: rateBps,
+          burst_bytes: burstBytes,
+          priority: Number(rule.priority || 0),
+          stats: normalizeStats(rule),
+          // 兼容旧 UI 字段名
+          bandwidth_mbps: bandwidthMbps,
+          bandwidth: bandwidthMbps,
+          status: rule.enabled ? 'active' : 'inactive',
+          policyStatus: rule.policy_status || 'idle'
+        }
+        normalized.runtime_group = qosGroupForRule(normalized)
+        normalized.group_cidr = normalized.runtime_group
+        normalized.runtime_rate = normalized.rate_bps
+        normalized.runtime_burst = normalized.burst_bytes
+        return normalized
+      })
     } catch (error) {
       console.error(`获取节点 QoS 规则 (${category}) 失败:`, error)
       throw error

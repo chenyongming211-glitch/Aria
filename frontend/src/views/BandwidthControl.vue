@@ -40,9 +40,9 @@
 
       <!-- QoS Priority Info Banner -->
       <el-alert
-        title="QoS 优先级架构"
+        title="Agent QoS 运行模型"
         type="warning"
-        description="Aria 采用三层 eBPF 限速：Service (五元组) > Peers (节点对) > IP (单节点)。高优先级规则匹配后，该流量将豁免于低优先级限速。"
+        description="Controller 保留 Service / Peers / IP 分类用于管理入口；下发到 Agent 时会编译成 group + direction + rate_bps + mode 的运行时规则。"
         :closable="false"
         show-icon
         style="margin-bottom: 20px;"
@@ -54,13 +54,18 @@
             <span>服务级 <el-badge :value="rules.service.length" class="item" :hidden="!rules.service.length" /></span>
           </template>
           <div class="tab-content">
-            <p class="tab-desc">最高优先级：基于五元组（IP+端口+协议）进行精细化限速。</p>
+            <p class="tab-desc">服务分类：保留源/目标/端口信息；Agent 运行时按 group 与方向限速。</p>
             <el-table :data="rules.service" stripe v-loading="loading">
               <el-table-column prop="description" label="描述" min-width="150" />
+              <el-table-column label="运行时 Group" min-width="170">
+                <template #default="{ row }">
+                  <code>{{ row.runtime_group || 'any' }}</code>
+                </template>
+              </el-table-column>
               <el-table-column label="匹配条件" min-width="250">
                 <template #default="{ row }">
                   <code>{{ row.src_cidr || '*' }}</code>:{{ row.src_port || '*' }} → 
-                  <code>{{ row.dst_cidr || '*' }}</code>:{{ row.dst_port }} ({{ getProtocolName(row.protocol) }})
+                  <code>{{ row.dst_cidr || '*' }}</code>:{{ row.dst_port || '*' }} ({{ getProtocolName(row.protocol) }})
                 </template>
               </el-table-column>
               <el-table-column label="带宽限制" width="150">
@@ -84,6 +89,14 @@
                   </div>
                 </template>
               </el-table-column>
+              <el-table-column label="Stats" width="160">
+                <template #default="{ row }">
+                  <div class="qos-runtime-cell">
+                    <span>pass {{ formatBytes(row.stats?.passed_bytes) }}</span>
+                    <small>drop {{ formatBytes(row.stats?.dropped_bytes) }} / shape {{ formatBytes(row.stats?.shaped_bytes) }}</small>
+                  </div>
+                </template>
+              </el-table-column>
               <el-table-column label="同步状态" width="120">
                 <template #default="{ row }">
                   <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">{{ formatPolicyStatus(row.policyStatus) }}</el-tag>
@@ -103,9 +116,14 @@
             <span>节点对 <el-badge :value="rules.peers.length" class="item" :hidden="!rules.peers.length" /></span>
           </template>
           <div class="tab-content">
-            <p class="tab-desc">中优先级：控制两个特定网络节点之间的总通信带宽。</p>
+            <p class="tab-desc">节点对分类：用于描述源/目标网络关系；Agent 运行时按选定 group 与方向限速。</p>
             <el-table :data="rules.peers" stripe v-loading="loading">
               <el-table-column prop="description" label="描述" min-width="150" />
+              <el-table-column label="运行时 Group" min-width="170">
+                <template #default="{ row }">
+                  <code>{{ row.runtime_group || 'any' }}</code>
+                </template>
+              </el-table-column>
               <el-table-column label="匹配条件" min-width="250">
                 <template #default="{ row }">
                   <code>{{ row.src_cidr }}</code> ↔ <code>{{ row.dst_cidr }}</code>
@@ -125,6 +143,14 @@
                 </template>
               </el-table-column>
               <el-table-column prop="priority" label="优先级" width="90" />
+              <el-table-column label="Stats" width="160">
+                <template #default="{ row }">
+                  <div class="qos-runtime-cell">
+                    <span>pass {{ formatBytes(row.stats?.passed_bytes) }}</span>
+                    <small>drop {{ formatBytes(row.stats?.dropped_bytes) }} / shape {{ formatBytes(row.stats?.shaped_bytes) }}</small>
+                  </div>
+                </template>
+              </el-table-column>
               <el-table-column label="同步状态" width="120">
                 <template #default="{ row }">
                   <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">{{ formatPolicyStatus(row.policyStatus) }}</el-tag>
@@ -144,12 +170,12 @@
             <span>单节点 <el-badge :value="rules.ip.length" class="item" :hidden="!rules.ip.length" /></span>
           </template>
           <div class="tab-content">
-            <p class="tab-desc">低优先级：为单个节点设置总出口带宽上限（兜底规则）。</p>
+            <p class="tab-desc">IP 分类：直接选择一个 group/CIDR，并按入站或出站方向限速。</p>
             <el-table :data="rules.ip" stripe v-loading="loading">
               <el-table-column prop="description" label="描述" min-width="150" />
-              <el-table-column label="目标 IP/网段" min-width="200">
+              <el-table-column label="运行时 Group" min-width="200">
                 <template #default="{ row }">
-                  <code>{{ row.src_cidr }}</code>
+                  <code>{{ row.runtime_group || row.group_cidr || row.src_cidr || row.dst_cidr || 'any' }}</code>
                 </template>
               </el-table-column>
               <el-table-column label="带宽限制" width="150">
@@ -166,6 +192,14 @@
                 </template>
               </el-table-column>
               <el-table-column prop="priority" label="优先级" width="90" />
+              <el-table-column label="Stats" width="160">
+                <template #default="{ row }">
+                  <div class="qos-runtime-cell">
+                    <span>pass {{ formatBytes(row.stats?.passed_bytes) }}</span>
+                    <small>drop {{ formatBytes(row.stats?.dropped_bytes) }} / shape {{ formatBytes(row.stats?.shaped_bytes) }}</small>
+                  </div>
+                </template>
+              </el-table-column>
               <el-table-column label="同步状态" width="120">
                 <template #default="{ row }">
                   <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">{{ formatPolicyStatus(row.policyStatus) }}</el-tag>
@@ -192,6 +226,10 @@
       <el-form :model="form" label-width="120px" ref="formRef" :rules="formRules">
         <el-form-item label="描述" prop="description">
           <el-input v-model="form.description" placeholder="例如: 限制数据库备份流量" />
+        </el-form-item>
+
+        <el-form-item label="运行时 Group">
+          <el-input v-model="form.group_cidr" placeholder="可选；留空时按方向从源/目标 CIDR 推导" />
         </el-form-item>
 
         <el-form-item label="源 CIDR" prop="src_cidr">
@@ -304,6 +342,7 @@ const form = reactive({
   dst_cidr: '',
   dst_port: 80,
   protocol: 6,
+  group_cidr: '',
   bandwidth_mbps: 100,
   direction: 'egress',
   rate_bps: 0,
@@ -413,6 +452,7 @@ const resetForm = () => {
     dst_cidr: '',
     dst_port: 80,
     protocol: 6,
+    group_cidr: '',
     bandwidth_mbps: 100,
     direction: activeCategory.value === 'ip' ? 'ingress' : 'egress',
     rate_bps: 0,

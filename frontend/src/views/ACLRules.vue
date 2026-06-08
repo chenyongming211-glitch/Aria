@@ -51,18 +51,21 @@
       <el-table-column prop="node_name" label="节点" width="160" />
       <el-table-column prop="priority" label="优先级" width="80" sortable />
       <el-table-column prop="name" label="名称" width="150" />
-      <el-table-column prop="src_cidr" label="源网络" width="150" />
-      <el-table-column prop="dst_cidr" label="目标网络" width="150" />
-      <el-table-column label="目标端口" width="100">
+      <el-table-column label="源 Group/CIDR" min-width="170">
         <template #default="{ row }">
-          {{ row.dst_port || 0 }}
+          <code>{{ row.runtime_src_group || row.src_cidr || 'any' }}</code>
         </template>
       </el-table-column>
-      <el-table-column label="方向/端口规则" width="150">
+      <el-table-column label="目标 Group/CIDR" min-width="170">
+        <template #default="{ row }">
+          <code>{{ row.runtime_dst_group || row.dst_cidr || 'any' }}</code>
+        </template>
+      </el-table-column>
+      <el-table-column label="方向/端口规则" min-width="160">
         <template #default="{ row }">
           <div class="acl-runtime-cell">
             <el-tag size="small" effect="plain">{{ formatDirection(row.direction) }}</el-tag>
-            <span>{{ row.ports || '-' }}</span>
+            <span>{{ row.runtime_ports || row.ports || 'all' }}</span>
           </div>
         </template>
       </el-table-column>
@@ -95,6 +98,14 @@
         </template>
       </el-table-column>
       <el-table-column prop="pending_cmds" label="待执行" width="90" />
+      <el-table-column label="Stats" width="150">
+        <template #default="{ row }">
+          <div class="acl-runtime-cell">
+            <span>{{ formatNumber(row.stats?.packets) }} pkts / {{ formatBytes(row.stats?.bytes) }}</span>
+            <small>drop {{ formatNumber(row.stats?.dropped_packets) }} / {{ formatBytes(row.stats?.dropped_bytes) }}</small>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column label="最近命令" width="150">
         <template #default="{ row }">
           <el-tooltip
@@ -155,6 +166,7 @@
         
         <el-form-item label="协议" prop="protocol">
           <el-select v-model="form.protocol">
+            <el-option label="Any" :value="0" />
             <el-option label="TCP" :value="6" />
             <el-option label="UDP" :value="17" />
             <el-option label="ICMP" :value="1" />
@@ -180,6 +192,7 @@
 
         <el-form-item label="端口规则">
           <el-input v-model="form.ports" placeholder="例如: 80-82,443；留空则使用目标端口" />
+          <div class="form-help">Any 协议带端口时，Controller 会下发为 TCP/UDP 两条运行时规则。</div>
         </el-form-item>
         
         <el-form-item label="动作" prop="action">
@@ -447,7 +460,7 @@ const resetForm = () => {
 }
 
 const getProtocolName = (protocol) => {
-  const map = { 6: 'TCP', 17: 'UDP', 1: 'ICMP' }
+  const map = { 0: 'Any', 6: 'TCP', 17: 'UDP', 1: 'ICMP' }
   return map[protocol] || 'Unknown'
 }
 
@@ -495,6 +508,21 @@ const shortCommandId = (commandId) => {
   return commandId.slice(0, 8)
 }
 
+const formatNumber = (value) => {
+  const number = Number(value || 0)
+  if (number >= 1000000) return `${(number / 1000000).toFixed(1)}M`
+  if (number >= 1000) return `${(number / 1000).toFixed(1)}K`
+  return String(number)
+}
+
+const formatBytes = (value) => {
+  const bytes = Number(value || 0)
+  if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`
+  if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${bytes} B`
+}
+
 const reloadTenantScopedData = async () => {
   rules.value = []
   tenantNodes.value = []
@@ -519,4 +547,6 @@ useTenantChangeReload(reloadTenantScopedData)
 .pagination-section { margin-top: 20px; display: flex; justify-content: flex-end; }
 .form-help { font-size: 12px; color: #909399; margin-top: 5px; }
 .acl-runtime-cell { display: flex; flex-direction: column; gap: 4px; line-height: 1.25; }
+.acl-runtime-cell small { color: var(--aria-text-muted, #8a93a6); }
+code { background: #f4f4f5; padding: 2px 4px; border-radius: 4px; color: #cf9236; font-family: monospace; }
 </style>

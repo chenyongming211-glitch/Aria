@@ -370,6 +370,24 @@
                 <div class="stat-box-label">Latency</div>
               </div>
             </div>
+            <div class="stat-box">
+              <div class="stat-icon-box policies">
+                <el-icon><Operation /></el-icon>
+              </div>
+              <div class="stat-info">
+                <div class="stat-box-value">{{ formatLargeNumber(policyDatapathStats.aclPackets) }}</div>
+                <div class="stat-box-label">ACL Packets</div>
+              </div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-icon-box qos">
+                <el-icon><TrendCharts /></el-icon>
+              </div>
+              <div class="stat-info">
+                <div class="stat-box-value">{{ formatMetricBytes(policyDatapathStats.qosPassedBytes) }}</div>
+                <div class="stat-box-label">QoS Passed</div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -712,6 +730,18 @@ const failedCommandCount = computed(() => (selectedNode.value?.recentCommands ||
 const pendingCommandCount = computed(() => (selectedNode.value?.recentCommands || []).filter(item => isPendingCommandStatus(item.status)).length)
 const failedDeliveryCount = computed(() => (selectedNode.value?.recentPolicyDeliveries || []).filter(item => item.command_status === 'failed').length)
 const pendingDeliveryCount = computed(() => (selectedNode.value?.recentPolicyDeliveries || []).filter(item => isPendingCommandStatus(item.command_status)).length)
+const policyDatapathStats = computed(() => {
+  const raw = selectedNode.value?.policyStats || selectedNode.value?.policy_stats || {}
+  const acl = raw.acl || {}
+  const qos = raw.qos || {}
+  return {
+    aclPackets: Number(raw.acl_packets ?? acl.packets ?? 0),
+    aclDroppedPackets: Number(raw.acl_dropped_packets ?? acl.dropped_packets ?? 0),
+    qosPassedBytes: Number(raw.qos_passed_bytes ?? qos.passed_bytes ?? 0),
+    qosDroppedBytes: Number(raw.qos_dropped_bytes ?? qos.dropped_bytes ?? 0),
+    qosShapedBytes: Number(raw.qos_shaped_bytes ?? qos.shaped_bytes ?? 0)
+  }
+})
 const isStateDiverged = computed(() => {
   if (!selectedNode.value) return false
   const desired = selectedNode.value.desiredStateVersion
@@ -1094,6 +1124,21 @@ const shortCommandId = (value) => {
   return String(value).length > 10 ? `${String(value).slice(0, 10)}...` : String(value)
 }
 
+const formatLargeNumber = (value) => {
+  const number = Number(value || 0)
+  if (number >= 1000000) return `${(number / 1000000).toFixed(1)}M`
+  if (number >= 1000) return `${(number / 1000).toFixed(1)}K`
+  return String(number)
+}
+
+const formatMetricBytes = (value) => {
+  const bytes = Number(value || 0)
+  if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`
+  if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${bytes} B`
+}
+
 const formatCommandTime = (value) => {
   if (!value) return 'N/A'
   const date = new Date(value)
@@ -1195,6 +1240,8 @@ useTenantChangeReload(reloadTenantScopedData)
 .stat-icon-box.upload { background: rgba(59, 130, 246, 0.15); color: #3B82F6; }
 .stat-icon-box.download { background: rgba(34, 197, 94, 0.15); color: #22C55E; }
 .stat-icon-box.latency { background: rgba(245, 158, 11, 0.15); color: #F59E0B; }
+.stat-icon-box.policies { background: rgba(139, 92, 246, 0.15); color: #8B5CF6; }
+.stat-icon-box.qos { background: rgba(20, 184, 166, 0.15); color: #14B8A6; }
 .stat-box-value { font-size: 20px; font-weight: 700; color: var(--aria-text-primary); }
 .stat-box-label { font-size: 12px; color: var(--aria-text-secondary); }
 .routes-list { display: flex; flex-wrap: wrap; gap: 10px; }

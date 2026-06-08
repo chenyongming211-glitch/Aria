@@ -14,18 +14,26 @@ if (typeof window !== 'undefined') {
 function normalizeRuleRecord(rule, nodeId) {
   const dstPort = Number(rule.dst_port ?? rule.max_port ?? 0)
   const ports = rule.ports || (dstPort > 0 ? String(dstPort) : '')
+  const srcCIDR = rule.src_cidr || rule.src_net || ''
+  const dstCIDR = rule.dst_cidr || rule.dst_net || ''
+  const action = normalizeAction(rule.action)
+  const direction = normalizeDirection(rule.direction)
   return {
     ...rule,
     node_id: nodeId,
     name: rule.name || '',
-    action: rule.action || 'allow',
-    direction: rule.direction || 'ingress',
+    action,
+    direction,
     ports,
-    src_cidr: rule.src_cidr || rule.src_net || '',
-    dst_cidr: rule.dst_cidr || rule.dst_net || '',
+    src_cidr: srcCIDR,
+    dst_cidr: dstCIDR,
     dst_port: dstPort,
-    src_net: rule.src_cidr || rule.src_net || '',
-    dst_net: rule.dst_cidr || rule.dst_net || '',
+    src_net: srcCIDR,
+    dst_net: dstCIDR,
+    runtime_src_group: cidrOrAny(srcCIDR),
+    runtime_dst_group: cidrOrAny(dstCIDR),
+    runtime_ports: ports || 'all',
+    stats: normalizeStats(rule),
     min_port: dstPort > 0 ? dstPort : 0,
     max_port: dstPort > 0 ? dstPort : 65535
   }
@@ -63,9 +71,9 @@ function normalizeRulePayload(rule) {
     dst_cidr: dstCIDR,
     protocol: Number(rule.protocol || 0),
     dst_port: dstPort,
-    direction: rule.direction || 'ingress',
+    direction: normalizeDirection(rule.direction),
     ports,
-    action: rule.action,
+    action: normalizeAction(rule.action),
     enabled: rule.enabled !== false,
     priority: Number(rule.priority || 100),
     description: rule.description || ''
@@ -79,6 +87,39 @@ function normalizeRulePayload(rule) {
   }
 
   return payload
+}
+
+function normalizeAction(action) {
+  const value = String(action || '').trim().toLowerCase()
+  if (['deny', 'drop'].includes(value)) return 'deny'
+  return 'allow'
+}
+
+function normalizeDirection(direction) {
+  const value = String(direction || '').trim().toLowerCase()
+  if (['ingress', 'egress', 'both'].includes(value)) return value
+  if (value === 'in') return 'ingress'
+  if (value === 'out') return 'egress'
+  if (value === 'all') return 'both'
+  return 'ingress'
+}
+
+function cidrOrAny(value) {
+  const trimmed = String(value || '').trim()
+  if (!trimmed || trimmed === '0' || trimmed === '0.0.0.0/0' || trimmed === '::/0') {
+    return 'any'
+  }
+  return trimmed
+}
+
+function normalizeStats(rule) {
+  const stats = rule.stats || rule.datapath_stats || {}
+  return {
+    packets: Number(stats.packets ?? stats.passed_packets ?? 0),
+    bytes: Number(stats.bytes ?? stats.passed_bytes ?? 0),
+    dropped_packets: Number(stats.dropped_packets ?? 0),
+    dropped_bytes: Number(stats.dropped_bytes ?? 0)
+  }
 }
 
 function normalizeDeliveryFields(rule, nodeState = {}) {
