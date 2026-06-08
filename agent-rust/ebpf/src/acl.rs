@@ -3,7 +3,7 @@
 
 use aya_ebpf::{
     macros::{map, xdp},
-    maps::{HashMap, LpmTrie, lpm_trie::Key},
+    maps::{lpm_trie::Key, HashMap, LpmTrie, PerCpuHashMap},
     programs::XdpContext,
 };
 use network_types::{
@@ -18,30 +18,81 @@ const XDP_DROP: u32 = 1;
 const ETH_P_IP: u16 = 0x0800;
 const ETH_P_IPV6: u16 = 0x86DD;
 
-const ACTION_PASS: u32 = 0;
-
+const TAP_ID_UNASSIGNED: u32 = 0;
 const ID_WILDCARD: u32 = 0;
+const PROTO_WILDCARD: u8 = 0;
+const DIRECTION_INGRESS: u8 = 0;
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PolicyValue {
-    pub action: u32,
-    pub rule_id: u32,
-    pub bytes: u64,
-    pub packets: u64,
-}
+const ACTION_ALLOW: u8 = 0;
+const ACTION_DROP: u8 = 1;
+const PORT_ACTION_DROP: u8 = 1;
+const PORT_ACTION_PASS: u8 = 2;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PolicyKey {
+    pub tap_id: u32,
     pub src_id: u32,
     pub dst_id: u32,
-    pub dst_port: u16,
-    pub protocol: u8,
-    pub pad: u8,
+    pub proto: u8,
+    pub direction: u8,
+    pub pad: [u8; 2],
 }
 
-// 修复点：直接使用 u32 和 [u8; 16] 作为 LpmTrie 的数据泛型，无需自定义结构体
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PolicyValue {
+    pub action: u8,
+    pub has_port_filter: u8,
+    pub pad1: [u8; 2],
+    pub bitmap_idx: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct PortKey {
+    pub tap_id: u32,
+    pub idx: u32,
+    pub port: u16,
+    pub pad: u16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RuleStatsValue {
+    pub packets: u64,
+    pub bytes: u64,
+    pub dropped_packets: u64,
+    pub dropped_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FirewallConfig {
+    pub conntrack_enabled: u8,
+    pub monitoring_enabled: u8,
+    pub num_cpus: u16,
+    pub qos_enabled: u8,
+    pub acl_enabled: u8,
+    pub mirror_enabled: u8,
+    pub tcprt_enabled: u8,
+    pub ssl_enabled: u8,
+    pub lb_enabled: u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TapConfig {
+    pub conntrack_enabled: u8,
+    pub monitoring_enabled: u8,
+    pub acl_enabled: u8,
+    pub qos_enabled: u8,
+    pub mirror_enabled: u8,
+    pub tcprt_enabled: u8,
+    pub lb_enabled: u8,
+    pub pad: [u8; 1],
+}
+
 #[map(name = "SRC_IPV4_ID_MAP", pin)]
 static SRC_IPV4_ID_MAP: LpmTrie<u32, u32> = LpmTrie::with_max_entries(10000, 0);
 
@@ -54,17 +105,21 @@ static SRC_IPV6_ID_MAP: LpmTrie<[u8; 16], u32> = LpmTrie::with_max_entries(10000
 #[map(name = "DST_IPV6_ID_MAP", pin)]
 static DST_IPV6_ID_MAP: LpmTrie<[u8; 16], u32> = LpmTrie::with_max_entries(10000, 0);
 
-#[map]
-static POLICY_MAP: HashMap<PolicyKey, PolicyValue> = HashMap::with_max_entries(65536, 0);
+#[map(name = "POLICY_TABLE", pin)]
+static POLICY_TABLE: HashMap<PolicyKey, PolicyValue> = HashMap::with_max_entries(65536, 0);
 
-#[map]
-static BLOCK_SRC_ID_MAP: HashMap<u32, u8> = HashMap::with_max_entries(8192, 0);
+#[map(name = "PORT_BITMAP_POOL", pin)]
+static PORT_BITMAP_POOL: HashMap<PortKey, u8> = HashMap::with_max_entries(262144, 0);
 
-#[map]
-static BLOCK_DST_ID_MAP: HashMap<u32, u8> = HashMap::with_max_entries(8192, 0);
+#[map(name = "RULE_STATS", pin)]
+static RULE_STATS: PerCpuHashMap<PolicyKey, RuleStatsValue> =
+    PerCpuHashMap::with_max_entries(65536, 0);
 
-#[map]
-static BLOCK_PORT_MAP: HashMap<u16, u8> = HashMap::with_max_entries(8192, 0);
+#[map(name = "FIREWALL_CONFIG", pin)]
+static FIREWALL_CONFIG: HashMap<u32, FirewallConfig> = HashMap::with_max_entries(1, 0);
+
+#[map(name = "TAP_CONFIG_MAP", pin)]
+static TAP_CONFIG_MAP: HashMap<u32, TapConfig> = HashMap::with_max_entries(1024, 0);
 
 #[xdp]
 pub fn xdp_ingress_acl(ctx: XdpContext) -> u32 {
@@ -75,137 +130,199 @@ pub fn xdp_ingress_acl(ctx: XdpContext) -> u32 {
 }
 
 fn try_xdp_ingress_acl(ctx: XdpContext) -> Result<u32, u64> {
+    let tap_id = TAP_ID_UNASSIGNED;
+    if !acl_enabled(tap_id) {
+        return Ok(XDP_PASS);
+    }
+
     let eth = ptr_at::<EthHdr>(&ctx, 0)?;
     let pkt_len = (ctx.data_end() - ctx.data()) as u64;
-    
-    // 修复点：把未使用的 src_port 改为 _src_port 消除警告
-    let (src_id, dst_id, proto_byte, _src_port, dst_port) = match u16::from_be(eth.ether_type) {
+
+    let (src_id, dst_id, proto, _src_port, dst_port) = match u16::from_be(eth.ether_type) {
         ETH_P_IP => {
             let ip = ptr_at::<Ipv4Hdr>(&ctx, EthHdr::LEN)?;
             let (src_port, dst_port) = parse_ports_ipv4(&ctx, ip)?;
-            let src_id = lookup_ipv4_id(&SRC_IPV4_ID_MAP, u32::from_be_bytes(ip.src_addr))?;
-            let dst_id = lookup_ipv4_id(&DST_IPV4_ID_MAP, u32::from_be_bytes(ip.dst_addr))?;
+            let src_id = lookup_ipv4_id(&SRC_IPV4_ID_MAP, u32::from_be_bytes(ip.src_addr));
+            let dst_id = lookup_ipv4_id(&DST_IPV4_ID_MAP, u32::from_be_bytes(ip.dst_addr));
             (src_id, dst_id, ip.proto as u8, src_port, dst_port)
         }
         ETH_P_IPV6 => {
             let ip = ptr_at::<Ipv6Hdr>(&ctx, EthHdr::LEN)?;
             let (src_port, dst_port) = parse_ports_ipv6(&ctx, ip)?;
-            let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, ip.src_addr)?;
-            let dst_id = lookup_ipv6_id(&DST_IPV6_ID_MAP, ip.dst_addr)?;
+            let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, ip.src_addr);
+            let dst_id = lookup_ipv6_id(&DST_IPV6_ID_MAP, ip.dst_addr);
             (src_id, dst_id, ip.next_hdr as u8, src_port, dst_port)
         }
         _ => return Ok(XDP_PASS),
     };
 
-    // 检查源 ID 黑名单
-    if let Some(_) = unsafe { BLOCK_SRC_ID_MAP.get(&src_id) } {
-        return Ok(XDP_DROP);
-    }
-
-    // 检查目标 ID 黑名单
-    if let Some(_) = unsafe { BLOCK_DST_ID_MAP.get(&dst_id) } {
-        return Ok(XDP_DROP);
-    }
-
-    // 检查端口黑名单
-    if dst_port != 0 {
-        if let Some(_) = unsafe { BLOCK_PORT_MAP.get(&dst_port) } {
-            return Ok(XDP_DROP);
-        }
-    }
-
-    let key = PolicyKey {
-        src_id,
-        dst_id,
-        dst_port,
-        protocol: proto_byte,
-        pad: 0,
-    };
-
-    if let Some(policy) = unsafe { POLICY_MAP.get(&key) } {
-        update_policy_stats(&key, policy, pkt_len);
-        return Ok(if policy.action == ACTION_PASS { XDP_PASS } else { XDP_DROP });
-    }
-
-    let wildcard_src_key = PolicyKey {
-        src_id: ID_WILDCARD,
-        dst_id,
-        dst_port,
-        protocol: proto_byte,
-        pad: 0,
-    };
-    if let Some(policy) = unsafe { POLICY_MAP.get(&wildcard_src_key) } {
-        update_policy_stats(&wildcard_src_key, policy, pkt_len);
-        return Ok(if policy.action == ACTION_PASS { XDP_PASS } else { XDP_DROP });
-    }
-
-    let wildcard_dst_key = PolicyKey {
-        src_id,
-        dst_id: ID_WILDCARD,
-        dst_port,
-        protocol: proto_byte,
-        pad: 0,
-    };
-    if let Some(policy) = unsafe { POLICY_MAP.get(&wildcard_dst_key) } {
-        update_policy_stats(&wildcard_dst_key, policy, pkt_len);
-        return Ok(if policy.action == ACTION_PASS { XDP_PASS } else { XDP_DROP });
-    }
-
-    let full_wildcard_key = PolicyKey {
-        src_id: ID_WILDCARD,
-        dst_id: ID_WILDCARD,
-        dst_port,
-        protocol: proto_byte,
-        pad: 0,
-    };
-    if let Some(policy) = unsafe { POLICY_MAP.get(&full_wildcard_key) } {
-        update_policy_stats(&full_wildcard_key, policy, pkt_len);
-        return Ok(if policy.action == ACTION_PASS { XDP_PASS } else { XDP_DROP });
-    }
-
-    if dst_port != 0 {
-        let port_wildcard_key = PolicyKey {
-            src_id,
-            dst_id,
-            dst_port: 0,
-            protocol: proto_byte,
-            pad: 0,
-        };
-        if let Some(policy) = unsafe { POLICY_MAP.get(&port_wildcard_key) } {
-            update_policy_stats(&port_wildcard_key, policy, pkt_len);
-            return Ok(if policy.action == ACTION_PASS { XDP_PASS } else { XDP_DROP });
-        }
+    if let Some((key, policy)) = lookup_policy(tap_id, src_id, dst_id, proto, DIRECTION_INGRESS) {
+        let action = policy_action(tap_id, policy, dst_port);
+        update_rule_stats(&key, pkt_len, action == ACTION_DROP);
+        return Ok(if action == ACTION_DROP {
+            XDP_DROP
+        } else {
+            XDP_PASS
+        });
     }
 
     Ok(XDP_PASS)
 }
 
-// 修复点：直接传入 LpmTrie<u32, u32>，并使用 aya 的 Key::new 进行查询
-fn lookup_ipv4_id(map: &LpmTrie<u32, u32>, ip: u32) -> Result<u32, u64> {
-    let key = Key::new(32, ip);
-    if let Some(id) = map.get(&key) {
-        return Ok(*id);
+fn acl_enabled(tap_id: u32) -> bool {
+    if let Some(tap) = unsafe { TAP_CONFIG_MAP.get(&tap_id) } {
+        return tap.acl_enabled != 0;
     }
-    Ok(ID_WILDCARD)
+
+    let key = 0;
+    if let Some(config) = unsafe { FIREWALL_CONFIG.get(&key) } {
+        return config.acl_enabled != 0;
+    }
+
+    true
 }
 
-fn lookup_ipv6_id(map: &LpmTrie<[u8; 16], u32>, ip: [u8; 16]) -> Result<u32, u64> {
+fn lookup_policy(
+    tap_id: u32,
+    src_id: u32,
+    dst_id: u32,
+    proto: u8,
+    direction: u8,
+) -> Option<(PolicyKey, PolicyValue)> {
+    if let Some(policy) = lookup_policy_for_proto(tap_id, src_id, dst_id, proto, direction) {
+        return Some(policy);
+    }
+
+    if proto != PROTO_WILDCARD {
+        return lookup_policy_for_proto(tap_id, src_id, dst_id, PROTO_WILDCARD, direction);
+    }
+
+    None
+}
+
+fn lookup_policy_for_proto(
+    tap_id: u32,
+    src_id: u32,
+    dst_id: u32,
+    proto: u8,
+    direction: u8,
+) -> Option<(PolicyKey, PolicyValue)> {
+    let exact_key = PolicyKey {
+        tap_id,
+        src_id,
+        dst_id,
+        proto,
+        direction,
+        pad: [0; 2],
+    };
+    if let Some(policy) = unsafe { POLICY_TABLE.get(&exact_key) } {
+        return Some((exact_key, *policy));
+    }
+
+    let wildcard_src_key = PolicyKey {
+        tap_id,
+        src_id: ID_WILDCARD,
+        dst_id,
+        proto,
+        direction,
+        pad: [0; 2],
+    };
+    if let Some(policy) = unsafe { POLICY_TABLE.get(&wildcard_src_key) } {
+        return Some((wildcard_src_key, *policy));
+    }
+
+    let wildcard_dst_key = PolicyKey {
+        tap_id,
+        src_id,
+        dst_id: ID_WILDCARD,
+        proto,
+        direction,
+        pad: [0; 2],
+    };
+    if let Some(policy) = unsafe { POLICY_TABLE.get(&wildcard_dst_key) } {
+        return Some((wildcard_dst_key, *policy));
+    }
+
+    let full_wildcard_key = PolicyKey {
+        tap_id,
+        src_id: ID_WILDCARD,
+        dst_id: ID_WILDCARD,
+        proto,
+        direction,
+        pad: [0; 2],
+    };
+    if let Some(policy) = unsafe { POLICY_TABLE.get(&full_wildcard_key) } {
+        return Some((full_wildcard_key, *policy));
+    }
+
+    None
+}
+
+fn policy_action(tap_id: u32, policy: PolicyValue, dst_port: u16) -> u8 {
+    if policy.has_port_filter == 0 {
+        return policy.action;
+    }
+
+    if dst_port == 0 {
+        return policy.action;
+    }
+
+    let port_key = PortKey {
+        tap_id,
+        idx: policy.bitmap_idx,
+        port: dst_port,
+        pad: 0,
+    };
+
+    if let Some(action) = unsafe { PORT_BITMAP_POOL.get(&port_key) } {
+        if *action == PORT_ACTION_DROP {
+            return ACTION_DROP;
+        }
+        if *action == PORT_ACTION_PASS {
+            return ACTION_ALLOW;
+        }
+    }
+
+    policy.action
+}
+
+fn update_rule_stats(key: &PolicyKey, pkt_len: u64, dropped: bool) {
+    if let Some(stats_ptr) = unsafe { RULE_STATS.get_ptr_mut(key) } {
+        let stats = unsafe { &mut *stats_ptr };
+        stats.packets = stats.packets.wrapping_add(1);
+        stats.bytes = stats.bytes.wrapping_add(pkt_len);
+        if dropped {
+            stats.dropped_packets = stats.dropped_packets.wrapping_add(1);
+            stats.dropped_bytes = stats.dropped_bytes.wrapping_add(pkt_len);
+        }
+    }
+}
+
+fn lookup_ipv4_id(map: &LpmTrie<u32, u32>, ip: u32) -> u32 {
+    let key = Key::new(32, ip);
+    if let Some(id) = map.get(&key) {
+        return *id;
+    }
+    ID_WILDCARD
+}
+
+fn lookup_ipv6_id(map: &LpmTrie<[u8; 16], u32>, ip: [u8; 16]) -> u32 {
     let key = Key::new(128, ip);
     if let Some(id) = map.get(&key) {
-        return Ok(*id);
+        return *id;
     }
-    Ok(ID_WILDCARD)
+    ID_WILDCARD
 }
 
 fn parse_ports_ipv4(ctx: &XdpContext, ip: &Ipv4Hdr) -> Result<(u16, u16), u64> {
     let ip_hdr_len = (ip.ihl() as usize) * 4;
     match IpProto::from(ip.proto) {
         IpProto::Tcp => {
-            let tcp = ptr_at::<TcpHdr>(&ctx, EthHdr::LEN + ip_hdr_len)?;
+            let tcp = ptr_at::<TcpHdr>(ctx, EthHdr::LEN + ip_hdr_len)?;
             Ok((u16::from_be_bytes(tcp.source), u16::from_be_bytes(tcp.dest)))
         }
         IpProto::Udp => {
-            let udp = ptr_at::<UdpHdr>(&ctx, EthHdr::LEN + ip_hdr_len)?;
+            let udp = ptr_at::<UdpHdr>(ctx, EthHdr::LEN + ip_hdr_len)?;
             Ok((u16::from_be_bytes(udp.src), u16::from_be_bytes(udp.dst)))
         }
         _ => Ok((0, 0)),
@@ -215,25 +332,15 @@ fn parse_ports_ipv4(ctx: &XdpContext, ip: &Ipv4Hdr) -> Result<(u16, u16), u64> {
 fn parse_ports_ipv6(ctx: &XdpContext, ip: &Ipv6Hdr) -> Result<(u16, u16), u64> {
     match IpProto::from(ip.next_hdr) {
         IpProto::Tcp => {
-            let tcp = ptr_at::<TcpHdr>(&ctx, EthHdr::LEN + Ipv6Hdr::LEN)?;
+            let tcp = ptr_at::<TcpHdr>(ctx, EthHdr::LEN + Ipv6Hdr::LEN)?;
             Ok((u16::from_be_bytes(tcp.source), u16::from_be_bytes(tcp.dest)))
         }
         IpProto::Udp => {
-            let udp = ptr_at::<UdpHdr>(&ctx, EthHdr::LEN + Ipv6Hdr::LEN)?;
+            let udp = ptr_at::<UdpHdr>(ctx, EthHdr::LEN + Ipv6Hdr::LEN)?;
             Ok((u16::from_be_bytes(udp.src), u16::from_be_bytes(udp.dst)))
         }
         _ => Ok((0, 0)),
     }
-}
-
-fn update_policy_stats(key: &PolicyKey, policy: &PolicyValue, pkt_len: u64) {
-    let new_policy = PolicyValue {
-        action: policy.action,
-        rule_id: policy.rule_id,
-        bytes: policy.bytes.wrapping_add(pkt_len),
-        packets: policy.packets.wrapping_add(1),
-    };
-    let _ = POLICY_MAP.insert(key, &new_policy, 0);
 }
 
 #[inline(always)]
