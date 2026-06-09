@@ -151,7 +151,7 @@ fn try_tc_qos(ctx: TcContext, direction: u8) -> Result<i32, u64> {
         }
     }
 
-    let first = *ptr_at::<u8>(&ctx, 0)?;
+    let first = first_byte(&ctx)?;
     match first >> 4 {
         IP_VERSION_4 => try_tc_qos_ipv4(&ctx, direction, pkt_len, 0),
         IP_VERSION_6 => try_tc_qos_ipv6(&ctx, direction, pkt_len, 0),
@@ -363,6 +363,18 @@ fn ptr_at<T>(ctx: &TcContext, offset: usize) -> Result<&T, u64> {
     }
 
     Ok(unsafe { &*((start + offset) as *const T) })
+}
+
+#[inline(always)]
+fn first_byte(ctx: &TcContext) -> Result<u8, u64> {
+    let start = ctx.data();
+    let end = ctx.data_end();
+
+    if start + 1 > end {
+        return Err(0);
+    }
+
+    Ok(unsafe { *(start as *const u8) })
 }
 
 #[panic_handler]
