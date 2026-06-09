@@ -1,5 +1,7 @@
-use aya::maps::{HashMap as AyaHashMap, MapData, PerCpuHashMap};
+use aya::maps::{HashMap as AyaHashMap, MapData, PerCpuHashMap, PerCpuValues};
+use aya::util::nr_cpus;
 use aya::Ebpf;
+use aya::Pod;
 use aria_shared::{
     FirewallConfig, PolicyKey, PolicyValue, PortKey, QosConfig, QosKey, QosStatsValue,
     RuleStatsValue, TapConfig, TokenBucket, TAP_ID_UNASSIGNED,
@@ -79,6 +81,15 @@ where
         .ok_or_else(|| format!("map not found: {}", name))?
         .try_into()
         .map_err(|e| format!("convert {} to PerCpuHashMap: {:?}", name, e))
+}
+
+fn zero_per_cpu_values<V>() -> Result<PerCpuValues<V>, String>
+where
+    V: Pod + Default + Copy,
+{
+    let cpus = nr_cpus().map_err(|(_, error)| format!("nr_cpus: {}", error))?;
+    PerCpuValues::try_from(vec![V::default(); cpus])
+        .map_err(|error| format!("per-cpu zero values: {}", error))
 }
 
 pub fn stored_policy_action(action: u8, has_port_filter: bool) -> u8 {
@@ -225,7 +236,11 @@ pub fn add_policy_to_maps(
     handles
         .policy_table
         .insert(key, value, 0)
-        .map_err(|e| format!("POLICY_TABLE insert: {:?}", e))
+        .map_err(|e| format!("POLICY_TABLE insert: {:?}", e))?;
+    handles
+        .rule_stats
+        .insert(key, zero_per_cpu_values::<RuleStatsValue>()?, 0)
+        .map_err(|e| format!("RULE_STATS insert: {:?}", e))
 }
 
 pub fn delete_policy_from_maps(
@@ -245,7 +260,10 @@ pub fn delete_policy_from_maps(
         pad: [0; 2],
     };
     match handles.policy_table.remove(&key) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            let _ = handles.rule_stats.remove(&key);
+            Ok(())
+        }
         Err(e) if format!("{:?}", e).contains("KeyNotFound") => Ok(()),
         Err(e) => Err(format!("POLICY_TABLE remove: {:?}", e)),
     }
@@ -301,6 +319,10 @@ pub fn add_qos_rule_to_maps(
         .qos_config
         .insert(key, config, 0)
         .map_err(|e| format!("QOS_CONFIG insert: {:?}", e))?;
+    handles
+        .qos_stats
+        .insert(key, zero_per_cpu_values::<QosStatsValue>()?, 0)
+        .map_err(|e| format!("QOS_STATS insert: {:?}", e))?;
     sync_runtime_config(handles, runtime, None, Some(user_qos_enabled))
 }
 
@@ -319,6 +341,7 @@ pub fn delete_qos_rule_from_maps(
     };
     let _ = handles.qos_config.remove(&key);
     let _ = handles.qos_token_bucket.remove(&key);
+    let _ = handles.qos_stats.remove(&key);
     sync_runtime_config(handles, runtime, None, Some(user_qos_enabled && has_qos_rules(handles, runtime)))
 }
 

@@ -17,6 +17,8 @@ const TC_ACT_SHOT: i32 = 2;
 const ETH_P_IP: u16 = 0x0800;
 const ETH_P_IPV6: u16 = 0x86DD;
 const NS_PER_SEC: u64 = 1_000_000_000;
+const IP_VERSION_4: u8 = 4;
+const IP_VERSION_6: u8 = 6;
 
 const TAP_ID_UNASSIGNED: u32 = 0;
 const ID_WILDCARD: u32 = 0;
@@ -139,18 +141,18 @@ fn try_tc_qos(ctx: TcContext, direction: u8) -> Result<i32, u64> {
         return Ok(TC_ACT_OK);
     }
 
-    let eth = ptr_at::<EthHdr>(&ctx, 0)?;
     let pkt_len = ctx.skb.len() as u64;
+    let (ip_offset, ip_version) = packet_ip_offset(&ctx)?;
 
-    let (src_id, dst_id) = match u16::from_be(eth.ether_type) {
-        ETH_P_IP => {
-            let ip = ptr_at::<Ipv4Hdr>(&ctx, EthHdr::LEN)?;
+    let (src_id, dst_id) = match ip_version {
+        IP_VERSION_4 => {
+            let ip = ptr_at::<Ipv4Hdr>(&ctx, ip_offset)?;
             let src_id = lookup_ipv4_id(&SRC_IPV4_ID_MAP, u32::from_be_bytes(ip.src_addr));
             let dst_id = lookup_ipv4_id(&DST_IPV4_ID_MAP, u32::from_be_bytes(ip.dst_addr));
             (src_id, dst_id)
         }
-        ETH_P_IPV6 => {
-            let ip = ptr_at::<Ipv6Hdr>(&ctx, EthHdr::LEN)?;
+        IP_VERSION_6 => {
+            let ip = ptr_at::<Ipv6Hdr>(&ctx, ip_offset)?;
             let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, ip.src_addr);
             let dst_id = lookup_ipv6_id(&DST_IPV6_ID_MAP, ip.dst_addr);
             (src_id, dst_id)
@@ -170,6 +172,23 @@ fn try_tc_qos(ctx: TcContext, direction: u8) -> Result<i32, u64> {
     }
 
     Ok(TC_ACT_OK)
+}
+
+fn packet_ip_offset(ctx: &TcContext) -> Result<(usize, u8), u64> {
+    if let Ok(eth) = ptr_at::<EthHdr>(ctx, 0) {
+        match u16::from_be(eth.ether_type) {
+            ETH_P_IP => return Ok((EthHdr::LEN, IP_VERSION_4)),
+            ETH_P_IPV6 => return Ok((EthHdr::LEN, IP_VERSION_6)),
+            _ => {}
+        }
+    }
+
+    let first = *ptr_at::<u8>(ctx, 0)?;
+    match first >> 4 {
+        IP_VERSION_4 => Ok((0, IP_VERSION_4)),
+        IP_VERSION_6 => Ok((0, IP_VERSION_6)),
+        _ => Err(0),
+    }
 }
 
 fn qos_enabled(tap_id: u32) -> bool {

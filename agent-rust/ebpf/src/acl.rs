@@ -17,6 +17,8 @@ const XDP_PASS: u32 = 2;
 const XDP_DROP: u32 = 1;
 const ETH_P_IP: u16 = 0x0800;
 const ETH_P_IPV6: u16 = 0x86DD;
+const IP_VERSION_4: u8 = 4;
+const IP_VERSION_6: u8 = 6;
 
 const TAP_ID_UNASSIGNED: u32 = 0;
 const ID_WILDCARD: u32 = 0;
@@ -135,20 +137,20 @@ fn try_xdp_ingress_acl(ctx: XdpContext) -> Result<u32, u64> {
         return Ok(XDP_PASS);
     }
 
-    let eth = ptr_at::<EthHdr>(&ctx, 0)?;
     let pkt_len = (ctx.data_end() - ctx.data()) as u64;
+    let (ip_offset, ip_version) = packet_ip_offset(&ctx)?;
 
-    let (src_id, dst_id, proto, _src_port, dst_port) = match u16::from_be(eth.ether_type) {
-        ETH_P_IP => {
-            let ip = ptr_at::<Ipv4Hdr>(&ctx, EthHdr::LEN)?;
-            let (src_port, dst_port) = parse_ports_ipv4(&ctx, ip)?;
+    let (src_id, dst_id, proto, _src_port, dst_port) = match ip_version {
+        IP_VERSION_4 => {
+            let ip = ptr_at::<Ipv4Hdr>(&ctx, ip_offset)?;
+            let (src_port, dst_port) = parse_ports_ipv4(&ctx, ip_offset, ip)?;
             let src_id = lookup_ipv4_id(&SRC_IPV4_ID_MAP, u32::from_be_bytes(ip.src_addr));
             let dst_id = lookup_ipv4_id(&DST_IPV4_ID_MAP, u32::from_be_bytes(ip.dst_addr));
             (src_id, dst_id, ip.proto as u8, src_port, dst_port)
         }
-        ETH_P_IPV6 => {
-            let ip = ptr_at::<Ipv6Hdr>(&ctx, EthHdr::LEN)?;
-            let (src_port, dst_port) = parse_ports_ipv6(&ctx, ip)?;
+        IP_VERSION_6 => {
+            let ip = ptr_at::<Ipv6Hdr>(&ctx, ip_offset)?;
+            let (src_port, dst_port) = parse_ports_ipv6(&ctx, ip_offset, ip)?;
             let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, ip.src_addr);
             let dst_id = lookup_ipv6_id(&DST_IPV6_ID_MAP, ip.dst_addr);
             (src_id, dst_id, ip.next_hdr as u8, src_port, dst_port)
@@ -167,6 +169,23 @@ fn try_xdp_ingress_acl(ctx: XdpContext) -> Result<u32, u64> {
     }
 
     Ok(XDP_PASS)
+}
+
+fn packet_ip_offset(ctx: &XdpContext) -> Result<(usize, u8), u64> {
+    if let Ok(eth) = ptr_at::<EthHdr>(ctx, 0) {
+        match u16::from_be(eth.ether_type) {
+            ETH_P_IP => return Ok((EthHdr::LEN, IP_VERSION_4)),
+            ETH_P_IPV6 => return Ok((EthHdr::LEN, IP_VERSION_6)),
+            _ => {}
+        }
+    }
+
+    let first = *ptr_at::<u8>(ctx, 0)?;
+    match first >> 4 {
+        IP_VERSION_4 => Ok((0, IP_VERSION_4)),
+        IP_VERSION_6 => Ok((0, IP_VERSION_6)),
+        _ => Err(0),
+    }
 }
 
 fn acl_enabled(tap_id: u32) -> bool {
@@ -314,29 +333,29 @@ fn lookup_ipv6_id(map: &LpmTrie<[u8; 16], u32>, ip: [u8; 16]) -> u32 {
     ID_WILDCARD
 }
 
-fn parse_ports_ipv4(ctx: &XdpContext, ip: &Ipv4Hdr) -> Result<(u16, u16), u64> {
+fn parse_ports_ipv4(ctx: &XdpContext, ip_offset: usize, ip: &Ipv4Hdr) -> Result<(u16, u16), u64> {
     let ip_hdr_len = (ip.ihl() as usize) * 4;
     match IpProto::from(ip.proto) {
         IpProto::Tcp => {
-            let tcp = ptr_at::<TcpHdr>(ctx, EthHdr::LEN + ip_hdr_len)?;
+            let tcp = ptr_at::<TcpHdr>(ctx, ip_offset + ip_hdr_len)?;
             Ok((u16::from_be_bytes(tcp.source), u16::from_be_bytes(tcp.dest)))
         }
         IpProto::Udp => {
-            let udp = ptr_at::<UdpHdr>(ctx, EthHdr::LEN + ip_hdr_len)?;
+            let udp = ptr_at::<UdpHdr>(ctx, ip_offset + ip_hdr_len)?;
             Ok((u16::from_be_bytes(udp.src), u16::from_be_bytes(udp.dst)))
         }
         _ => Ok((0, 0)),
     }
 }
 
-fn parse_ports_ipv6(ctx: &XdpContext, ip: &Ipv6Hdr) -> Result<(u16, u16), u64> {
+fn parse_ports_ipv6(ctx: &XdpContext, ip_offset: usize, ip: &Ipv6Hdr) -> Result<(u16, u16), u64> {
     match IpProto::from(ip.next_hdr) {
         IpProto::Tcp => {
-            let tcp = ptr_at::<TcpHdr>(ctx, EthHdr::LEN + Ipv6Hdr::LEN)?;
+            let tcp = ptr_at::<TcpHdr>(ctx, ip_offset + Ipv6Hdr::LEN)?;
             Ok((u16::from_be_bytes(tcp.source), u16::from_be_bytes(tcp.dest)))
         }
         IpProto::Udp => {
-            let udp = ptr_at::<UdpHdr>(ctx, EthHdr::LEN + Ipv6Hdr::LEN)?;
+            let udp = ptr_at::<UdpHdr>(ctx, ip_offset + Ipv6Hdr::LEN)?;
             Ok((u16::from_be_bytes(udp.src), u16::from_be_bytes(udp.dst)))
         }
         _ => Ok((0, 0)),
