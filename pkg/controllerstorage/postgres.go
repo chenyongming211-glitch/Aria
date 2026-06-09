@@ -300,7 +300,7 @@ func (s *Storage) Migrate() error {
 			description TEXT,
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			updated_at TIMESTAMPTZ DEFAULT NOW(),
-			CHECK (category IN ('runtime', 'service', 'peers', 'ip'))
+			CHECK (category = 'runtime')
 		)`,
 
 		`CREATE TABLE IF NOT EXISTS blacklist_rules (
@@ -359,8 +359,9 @@ func (s *Storage) Migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_qos_rules_tenant_node_category ON qos_rules(tenant_id, node_id, category)`,
 		`CREATE INDEX IF NOT EXISTS idx_qos_rules_enabled ON qos_rules(enabled)`,
 		`ALTER TABLE qos_rules ALTER COLUMN category SET DEFAULT 'runtime'`,
+		`DELETE FROM qos_rules WHERE category IS DISTINCT FROM 'runtime'`,
 		`ALTER TABLE qos_rules DROP CONSTRAINT IF EXISTS qos_rules_category_check`,
-		`ALTER TABLE qos_rules ADD CONSTRAINT qos_rules_category_check CHECK (category IN ('runtime', 'service', 'peers', 'ip'))`,
+		`ALTER TABLE qos_rules ADD CONSTRAINT qos_rules_category_check CHECK (category = 'runtime')`,
 		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS direction VARCHAR(16) DEFAULT 'egress'`,
 		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS rate_bps BIGINT`,
 		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS burst_bytes BIGINT`,

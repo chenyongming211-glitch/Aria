@@ -12,7 +12,7 @@
 
 ### 网络控制
 - **eBPF 防火墙** - 基于五元组的高性能包过滤
-- **eBPF QoS** - 端口级/服务级/IP 级流量限速
+- **eBPF QoS** - 基于运行时 group、方向、rate、burst、mode 的节点级流量控制
 - **无状态防火墙** - 高性能 ACL 规则，不追踪连接状态
 - **ECMP 路由** - 多隧道负载均衡
 
@@ -98,9 +98,8 @@ aria peers
 # 查看路由
 aria route list
 
-# 启用 eBPF QoS（需要 root）
-sudo aria ebpf status
-sudo aria ebpf qos limit-port 80 --mbps 100
+# ACL/QoS 策略通过 Controller API 或 Web UI 下发到 Agent
+aria status
 ```
 
 ## CLI 命令
@@ -114,7 +113,6 @@ sudo aria ebpf qos limit-port 80 --mbps 100
 | `aria route` | 管理路由 |
 | `aria token` | 管理 Token |
 | `aria metrics` | 查看 Metrics |
-| `aria ebpf` | eBPF 防火墙/QoS |
 | `aria init` | 初始化 Agent |
 
 ## API
@@ -124,7 +122,8 @@ sudo aria ebpf qos limit-port 80 --mbps 100
 | `/api/v2/tenants/:tid/nodes` | GET | 节点列表 |
 | `/api/v2/tenants/:tid/nodes/:nid` | GET | 节点详情 |
 | `/api/v2/tenants/:tid/policies` | GET | 策略读模型 |
-| `/api/v2/tenants/:tid/nodes/:nid/qos/:category` | GET/POST | 带宽控制 |
+| `/api/v2/tenants/:tid/nodes/:nid/qos` | GET/POST | 节点级 QoS 规则 |
+| `/api/v2/tenants/:tid/nodes/:nid/security/acls` | GET/POST | 节点级 ACL 规则 |
 | `/api/v2/tenants` | GET/POST | 租户管理 |
 | `/api/v2/tenants/:tid/tokens` | GET/POST | Token 管理 |
 | `/api/v2/tenants/:tid/ai/chat` | POST | AI 对话 |

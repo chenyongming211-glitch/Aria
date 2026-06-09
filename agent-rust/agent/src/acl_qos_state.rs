@@ -6,7 +6,6 @@ pub const DIRECTION_INGRESS: u8 = 0;
 pub const DIRECTION_EGRESS: u8 = 1;
 pub const DIRECTION_BOTH: u8 = 2;
 
-pub const ACTION_ALLOW: u8 = 0;
 pub const ACTION_DROP: u8 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -96,48 +95,6 @@ pub struct AddRuleResult {
     pub bitmap_idx: Option<u32>,
     pub is_new_port_set: bool,
     pub old_port_set_released: Option<(u32, String)>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RemoveRuleResult {
-    pub bitmap_idx: Option<u32>,
-    pub port_set_released: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AclQosWalEntry {
-    AddRule {
-        src_id: u32,
-        dst_id: u32,
-        proto: u8,
-        action: u8,
-        ports: Option<String>,
-        direction: u8,
-    },
-    RemoveRule {
-        src_id: u32,
-        dst_id: u32,
-        proto: u8,
-        direction: u8,
-    },
-    AddQos {
-        group_name: String,
-        group_id: u32,
-        direction: u8,
-        rate_bps: u64,
-        burst_bytes: u64,
-        priority: u8,
-        #[serde(default)]
-        mode: u8,
-    },
-    DeleteQos {
-        group_id: u32,
-        direction: u8,
-    },
-    UpdateConfig {
-        acl: Option<bool>,
-        qos: Option<bool>,
-    },
 }
 
 fn default_max_port_policies() -> u32 {
@@ -377,108 +334,6 @@ impl FirewallState {
         result.is_new_port_set = is_new;
         Ok(result)
     }
-
-    pub fn apply_remove_rule(
-        &mut self,
-        src_group_id: u32,
-        dst_group_id: u32,
-        proto: u8,
-        direction: u8,
-    ) -> Result<RemoveRuleResult, String> {
-        let Some(pos) = self.rules.iter().position(|r| {
-            r.src_group_id == src_group_id
-                && r.dst_group_id == dst_group_id
-                && r.proto == proto
-                && r.direction == direction
-        }) else {
-            return Err(format!(
-                "policy not found: src_id={}, dst_id={}, proto={}, direction={}",
-                src_group_id, dst_group_id, proto, direction
-            ));
-        };
-
-        let rule = self.rules.remove(pos);
-        let mut result = RemoveRuleResult {
-            bitmap_idx: rule.bitmap_idx,
-            port_set_released: None,
-        };
-
-        if let Some(idx) = rule.bitmap_idx {
-            let ports_normalized = self
-                .port_sets
-                .iter()
-                .find(|(_, ps)| ps.bitmap_idx == idx)
-                .map(|(_, ps)| ps.ports_normalized.clone());
-            release_port_set(&mut self.port_sets, &mut self.free_bitmap_indices, idx);
-            if self.free_bitmap_indices.contains(&idx) {
-                result.port_set_released = ports_normalized;
-            }
-        }
-
-        Ok(result)
-    }
-}
-
-pub fn apply_acl_qos_wal_entry(state: &mut FirewallState, entry: AclQosWalEntry) -> bool {
-    match entry {
-        AclQosWalEntry::AddRule {
-            src_id,
-            dst_id,
-            proto,
-            action,
-            ports,
-            direction,
-        } => state
-            .apply_add_rule(src_id, dst_id, proto, action, ports.as_deref(), direction)
-            .is_ok(),
-        AclQosWalEntry::RemoveRule {
-            src_id,
-            dst_id,
-            proto,
-            direction,
-        } => state.apply_remove_rule(src_id, dst_id, proto, direction).is_ok(),
-        AclQosWalEntry::AddQos {
-            group_name,
-            group_id,
-            direction,
-            rate_bps,
-            burst_bytes,
-            priority,
-            mode,
-        } => {
-            state
-                .qos_rules
-                .retain(|r| !(r.group_id == group_id && r.direction == direction));
-            state.qos_rules.push(QosRuleInfo {
-                group_name,
-                group_id,
-                direction,
-                rate_bps,
-                burst_bytes,
-                priority,
-                mode,
-            });
-            true
-        }
-        AclQosWalEntry::DeleteQos {
-            group_id,
-            direction,
-        } => {
-            state
-                .qos_rules
-                .retain(|r| !(r.group_id == group_id && r.direction == direction));
-            true
-        }
-        AclQosWalEntry::UpdateConfig { acl, qos } => {
-            if let Some(enabled) = acl {
-                state.acl_enabled = enabled;
-            }
-            if let Some(enabled) = qos {
-                state.qos_enabled = enabled;
-            }
-            true
-        }
-    }
 }
 
 #[cfg(test)]
@@ -505,23 +360,6 @@ mod tests {
     }
 
     #[test]
-    fn remove_rule_releases_last_port_set_reference() {
-        let mut state = FirewallState::default();
-        let added = state
-            .apply_add_rule(1, 2, 6, ACTION_ALLOW, Some("443"), DIRECTION_INGRESS)
-            .expect("add rule");
-
-        let removed = state
-            .apply_remove_rule(1, 2, 6, DIRECTION_INGRESS)
-            .expect("remove rule");
-
-        assert_eq!(removed.bitmap_idx, added.bitmap_idx);
-        assert_eq!(removed.port_set_released.as_deref(), Some("443:0"));
-        assert!(state.port_sets.is_empty());
-        assert_eq!(state.free_bitmap_indices, vec![added.bitmap_idx.unwrap()]);
-    }
-
-    #[test]
     fn both_direction_expands_to_ingress_and_egress() {
         assert_eq!(direction_from_string("both").unwrap(), DIRECTION_BOTH);
         assert_eq!(
@@ -530,32 +368,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn wal_replays_qos_and_runtime_config() {
-        let mut state = FirewallState::default();
-
-        assert!(apply_acl_qos_wal_entry(
-            &mut state,
-            AclQosWalEntry::AddQos {
-                group_name: "cidr:10.0.0.0/24".to_string(),
-                group_id: 7,
-                direction: DIRECTION_EGRESS,
-                rate_bps: 100_000_000,
-                burst_bytes: 1_000_000,
-                priority: 3,
-                mode: 1,
-            },
-        ));
-        assert_eq!(state.qos_rules.len(), 1);
-
-        assert!(apply_acl_qos_wal_entry(
-            &mut state,
-            AclQosWalEntry::UpdateConfig {
-                acl: Some(false),
-                qos: Some(true),
-            },
-        ));
-        assert!(!state.acl_enabled);
-        assert!(state.qos_enabled);
-    }
 }

@@ -2,7 +2,7 @@ import api from './useApi'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 
 function normalizeBandwidthMbps(rule) {
-  const value = Number(rule.bandwidth_mbps ?? rule.bandwidth ?? 0)
+  const value = Number(rule.bandwidth_mbps ?? 0)
   if (!Number.isFinite(value) || value <= 0) {
     throw new Error('bandwidth_mbps must be greater than 0')
   }
@@ -47,8 +47,8 @@ function normalizeStats(rule) {
 
 function qosGroupForRule(rule) {
   const direction = normalizeDirection(rule)
-  const src = rule.src_cidr || rule.src_net || rule.src_ip || ''
-  const dst = rule.dst_cidr || rule.dst_net || rule.dst_ip || ''
+  const src = rule.src_cidr || rule.src_net || ''
+  const dst = rule.dst_cidr || rule.dst_net || ''
   const explicit = rule.group_cidr || rule.group || rule.runtime_group || ''
   if (explicit) return explicit
   if (direction === 'ingress') return src || dst || 'any'
@@ -115,7 +115,7 @@ export const useQosApi = {
 
       // 统一字段映射
       return rules.map(rule => {
-        let bandwidthMbps = Number(rule.bandwidth_mbps ?? rule.bandwidth ?? 0)
+        let bandwidthMbps = Number(rule.bandwidth_mbps ?? 0)
         const rateBps = normalizeRateBps(rule, bandwidthMbps)
         if ((!Number.isFinite(bandwidthMbps) || bandwidthMbps <= 0) && rateBps > 0) {
           bandwidthMbps = rateBps / 1000000

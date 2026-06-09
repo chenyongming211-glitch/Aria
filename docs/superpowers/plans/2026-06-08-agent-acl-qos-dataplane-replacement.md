@@ -43,7 +43,7 @@
 - Replace `agent-rust/ebpf/src/qos.rs`
   - New QoS datapath with `QOS_CONFIG`, `QOS_TOKEN_BUCKET`, `QOS_STATS`, runtime config maps, policing and shaping behavior.
 - Create `agent-rust/agent/src/acl_qos_state.rs`
-  - `FirewallState`, `GroupInfo`, `RuleInfo`, `QosRuleInfo`, `PortSetInfo`, `AclQosWalEntry`, and state mutation helpers.
+  - `FirewallState`, `GroupInfo`, `RuleInfo`, `QosRuleInfo`, `PortSetInfo`, and snapshot-oriented state mutation helpers.
 - Create `agent-rust/agent/src/acl_qos_maps.rs`
   - Userspace map operations: add/delete ACL policy, add/delete port bitmap, add/delete QoS, runtime config read/update, stats read/clear, FQ qdisc helpers.
 - Create `agent-rust/agent/src/acl_qos_manager.rs`
