@@ -32,42 +32,28 @@ pub struct CidrEntry {
     pub prefix_len: u8,
 }
 
-pub struct IdentityManager {
+struct IdentityMapSet {
     src_ipv4_id_map: AyaLpmTrie<MapData, u32, u32>,
     dst_ipv4_id_map: AyaLpmTrie<MapData, u32, u32>,
     src_ipv6_id_map: AyaLpmTrie<MapData, [u8; 16], u32>,
     dst_ipv6_id_map: AyaLpmTrie<MapData, [u8; 16], u32>,
+}
+
+pub struct IdentityManager {
+    map_sets: Vec<IdentityMapSet>,
     cidr_to_id: HashMap<CidrEntry, u32>,
     id_to_cidr: HashMap<u32, CidrEntry>,
 }
 
 impl IdentityManager {
-    pub fn new(ebpf: &mut Ebpf) -> Result<Self, IdentityError> {
-        let src_ipv4_id_map: AyaLpmTrie<_, u32, u32> = ebpf
-            .take_map("SRC_IPV4_ID_MAP")
-            .ok_or_else(|| IdentityError::MapNotFound("SRC_IPV4_ID_MAP".to_string()))?
-            .try_into()?;
-
-        let dst_ipv4_id_map: AyaLpmTrie<_, u32, u32> = ebpf
-            .take_map("DST_IPV4_ID_MAP")
-            .ok_or_else(|| IdentityError::MapNotFound("DST_IPV4_ID_MAP".to_string()))?
-            .try_into()?;
-
-        let src_ipv6_id_map: AyaLpmTrie<_, [u8; 16], u32> = ebpf
-            .take_map("SRC_IPV6_ID_MAP")
-            .ok_or_else(|| IdentityError::MapNotFound("SRC_IPV6_ID_MAP".to_string()))?
-            .try_into()?;
-
-        let dst_ipv6_id_map: AyaLpmTrie<_, [u8; 16], u32> = ebpf
-            .take_map("DST_IPV6_ID_MAP")
-            .ok_or_else(|| IdentityError::MapNotFound("DST_IPV6_ID_MAP".to_string()))?
-            .try_into()?;
+    pub fn new(primary_ebpf: &mut Ebpf, secondary_ebpf: Option<&mut Ebpf>) -> Result<Self, IdentityError> {
+        let mut map_sets = vec![IdentityMapSet::take(primary_ebpf)?];
+        if let Some(ebpf) = secondary_ebpf {
+            map_sets.push(IdentityMapSet::take(ebpf)?);
+        }
 
         Ok(Self {
-            src_ipv4_id_map,
-            dst_ipv4_id_map,
-            src_ipv6_id_map,
-            dst_ipv6_id_map,
+            map_sets,
             cidr_to_id: HashMap::new(),
             id_to_cidr: HashMap::new(),
         })
@@ -75,26 +61,15 @@ impl IdentityManager {
 
     pub fn assign_id(&mut self, cidr: &str) -> Result<u32, IdentityError> {
         let entry = parse_cidr(cidr)?;
-        
+
         if let Some(&id) = self.cidr_to_id.get(&entry) {
             return Ok(id);
         }
 
         let id = ID_COUNTER.fetch_add(1, Ordering::SeqCst);
-        
-        match entry.network {
-            IpAddr::V4(ipv4) => {
-                let ip = u32::from_be_bytes(ipv4.octets());
-                let key = Key::new(entry.prefix_len as u32, ip);
-                self.src_ipv4_id_map.insert(&key, id, 0)?;
-                self.dst_ipv4_id_map.insert(&key, id, 0)?;
-            }
-            IpAddr::V6(ipv6) => {
-                let ip = ipv6.octets();
-                let key = Key::new(entry.prefix_len as u32, ip);
-                self.src_ipv6_id_map.insert(&key, id, 0)?;
-                self.dst_ipv6_id_map.insert(&key, id, 0)?;
-            }
+
+        for map_set in &mut self.map_sets {
+            map_set.insert(&entry, id)?;
         }
 
         self.cidr_to_id.insert(entry.clone(), id);
@@ -108,19 +83,8 @@ impl IdentityManager {
         let entry = self.id_to_cidr.remove(&id)
             .ok_or_else(|| IdentityError::IdNotFound(id))?;
 
-        match entry.network {
-            IpAddr::V4(ipv4) => {
-                let ip = u32::from_be_bytes(ipv4.octets());
-                let key = Key::new(entry.prefix_len as u32, ip);
-                let _ = self.src_ipv4_id_map.remove(&key);
-                let _ = self.dst_ipv4_id_map.remove(&key);
-            }
-            IpAddr::V6(ipv6) => {
-                let ip = ipv6.octets();
-                let key = Key::new(entry.prefix_len as u32, ip);
-                let _ = self.src_ipv6_id_map.remove(&key);
-                let _ = self.dst_ipv6_id_map.remove(&key);
-            }
+        for map_set in &mut self.map_sets {
+            map_set.remove(&entry);
         }
 
         self.cidr_to_id.remove(&entry);
@@ -147,6 +111,72 @@ impl IdentityManager {
                 (*id, cidr)
             })
             .collect()
+    }
+}
+
+impl IdentityMapSet {
+    fn take(ebpf: &mut Ebpf) -> Result<Self, IdentityError> {
+        let src_ipv4_id_map: AyaLpmTrie<_, u32, u32> = ebpf
+            .take_map("SRC_IPV4_ID_MAP")
+            .ok_or_else(|| IdentityError::MapNotFound("SRC_IPV4_ID_MAP".to_string()))?
+            .try_into()?;
+
+        let dst_ipv4_id_map: AyaLpmTrie<_, u32, u32> = ebpf
+            .take_map("DST_IPV4_ID_MAP")
+            .ok_or_else(|| IdentityError::MapNotFound("DST_IPV4_ID_MAP".to_string()))?
+            .try_into()?;
+
+        let src_ipv6_id_map: AyaLpmTrie<_, [u8; 16], u32> = ebpf
+            .take_map("SRC_IPV6_ID_MAP")
+            .ok_or_else(|| IdentityError::MapNotFound("SRC_IPV6_ID_MAP".to_string()))?
+            .try_into()?;
+
+        let dst_ipv6_id_map: AyaLpmTrie<_, [u8; 16], u32> = ebpf
+            .take_map("DST_IPV6_ID_MAP")
+            .ok_or_else(|| IdentityError::MapNotFound("DST_IPV6_ID_MAP".to_string()))?
+            .try_into()?;
+
+        Ok(Self {
+            src_ipv4_id_map,
+            dst_ipv4_id_map,
+            src_ipv6_id_map,
+            dst_ipv6_id_map,
+        })
+    }
+
+    fn insert(&mut self, entry: &CidrEntry, id: u32) -> Result<(), IdentityError> {
+        match entry.network {
+            IpAddr::V4(ipv4) => {
+                let ip = u32::from_be_bytes(ipv4.octets());
+                let key = Key::new(entry.prefix_len as u32, ip);
+                self.src_ipv4_id_map.insert(&key, id, 0)?;
+                self.dst_ipv4_id_map.insert(&key, id, 0)?;
+            }
+            IpAddr::V6(ipv6) => {
+                let ip = ipv6.octets();
+                let key = Key::new(entry.prefix_len as u32, ip);
+                self.src_ipv6_id_map.insert(&key, id, 0)?;
+                self.dst_ipv6_id_map.insert(&key, id, 0)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn remove(&mut self, entry: &CidrEntry) {
+        match entry.network {
+            IpAddr::V4(ipv4) => {
+                let ip = u32::from_be_bytes(ipv4.octets());
+                let key = Key::new(entry.prefix_len as u32, ip);
+                let _ = self.src_ipv4_id_map.remove(&key);
+                let _ = self.dst_ipv4_id_map.remove(&key);
+            }
+            IpAddr::V6(ipv6) => {
+                let ip = ipv6.octets();
+                let key = Key::new(entry.prefix_len as u32, ip);
+                let _ = self.src_ipv6_id_map.remove(&key);
+                let _ = self.dst_ipv6_id_map.remove(&key);
+            }
+        }
     }
 }
 

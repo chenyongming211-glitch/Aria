@@ -235,13 +235,6 @@ impl UnifiedAgent {
         tracing::info!("Step 10.5: Verifying XDP attachment...");
         std::thread::sleep(std::time::Duration::from_millis(100));
         
-        tracing::info!("Step 11: Creating IdentityManager...");
-        let identity_mgr = IdentityManager::new(&mut acl_ebpf)?;
-        tracing::info!("Step 12: IdentityManager created");
-        
-        let identity_mgr = Arc::new(StdMutex::new(identity_mgr));
-        tracing::info!("Step 13: IdentityManager wrapped in Arc");
-        
         tracing::info!("Step 17: Creating QoS EbpfLoader...");
         let mut qos_ebpf = EbpfLoader::new()
             .load(qos_bytes)?;
@@ -261,6 +254,13 @@ impl UnifiedAgent {
             program.load()?;
         }
         tracing::info!("Step 22: TC programs loaded");
+
+        tracing::info!("Step 22.5: Creating IdentityManager...");
+        let identity_mgr = IdentityManager::new(&mut acl_ebpf, Some(&mut qos_ebpf))?;
+        tracing::info!("Step 22.6: IdentityManager created");
+
+        let identity_mgr = Arc::new(StdMutex::new(identity_mgr));
+        tracing::info!("Step 22.7: IdentityManager wrapped in Arc");
         
         tracing::info!("Step 23: Preparing clsact qdisc for {}...", interface);
         // 先删除旧的 clsact qdisc（忽略错误）
@@ -326,9 +326,6 @@ impl UnifiedAgent {
             tracing::info!("✅ XDP attached to {}", iface);
         }
 
-        let identity_mgr = IdentityManager::new(&mut acl_ebpf)?;
-        let identity_mgr = Arc::new(StdMutex::new(identity_mgr));
-
         // Load QoS eBPF
         let qos_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/qos"));
         let mut qos_ebpf = EbpfLoader::new().load(qos_bytes)?;
@@ -344,6 +341,9 @@ impl UnifiedAgent {
                 .try_into()?;
             tc_program.load()?;
         }
+
+        let identity_mgr = IdentityManager::new(&mut acl_ebpf, Some(&mut qos_ebpf))?;
+        let identity_mgr = Arc::new(StdMutex::new(identity_mgr));
 
         // Attach TC to ALL interfaces
         for iface in interfaces {
