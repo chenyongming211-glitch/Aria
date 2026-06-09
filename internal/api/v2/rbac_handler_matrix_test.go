@@ -387,7 +387,7 @@ func expectQoSGetForUpdate(mock sqlmock.Sqlmock, tenantID, nodeID, ruleID uuid.U
 
 func expectQoSUpdatePreservingExistingFields(mock sqlmock.Sqlmock, tenantID, nodeID, ruleID uuid.UUID) {
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE qos_rules SET
-			src_cidr = NULLIF($5, ''), dst_cidr = NULLIF($6, ''),
+			src_cidr = NULLIF($5, '')::cidr, dst_cidr = NULLIF($6, '')::cidr,
 			src_port = $7, dst_port = $8, protocol = $9,
 			bandwidth_mbps = $10, direction = $11, rate_bps = $12, burst_bytes = $13,
 			priority = $14, mode = $15, description = $16,
