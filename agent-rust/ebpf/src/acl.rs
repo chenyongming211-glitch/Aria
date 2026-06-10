@@ -2,9 +2,9 @@
 #![no_main]
 
 use aya_ebpf::{
-    macros::{map, xdp},
+    macros::{classifier, map, xdp},
     maps::{lpm_trie::Key, HashMap, LpmTrie, PerCpuHashMap},
-    programs::XdpContext,
+    programs::{TcContext, XdpContext},
 };
 use network_types::{
     eth::EthHdr,
@@ -15,6 +15,8 @@ use network_types::{
 
 const XDP_PASS: u32 = 2;
 const XDP_DROP: u32 = 1;
+const TC_ACT_OK: i32 = 0;
+const TC_ACT_SHOT: i32 = 2;
 const ETH_P_IP: u16 = 0x0800;
 const ETH_P_IPV6: u16 = 0x86DD;
 const IP_VERSION_4: u8 = 4;
@@ -24,6 +26,7 @@ const TAP_ID_UNASSIGNED: u32 = 0;
 const ID_WILDCARD: u32 = 0;
 const PROTO_WILDCARD: u8 = 0;
 const DIRECTION_INGRESS: u8 = 0;
+const DIRECTION_EGRESS: u8 = 1;
 
 const ACTION_ALLOW: u8 = 0;
 const ACTION_DROP: u8 = 1;
@@ -131,6 +134,14 @@ pub fn xdp_ingress_acl(ctx: XdpContext) -> u32 {
     }
 }
 
+#[classifier]
+pub fn tc_egress_acl(ctx: TcContext) -> i32 {
+    match try_tc_egress_acl(ctx) {
+        Ok(ret) => ret,
+        Err(_) => TC_ACT_OK,
+    }
+}
+
 fn try_xdp_ingress_acl(ctx: XdpContext) -> Result<u32, u64> {
     let tap_id = TAP_ID_UNASSIGNED;
     if !acl_enabled(tap_id) {
@@ -162,6 +173,37 @@ fn try_xdp_ingress_acl(ctx: XdpContext) -> Result<u32, u64> {
     Ok(XDP_PASS)
 }
 
+fn try_tc_egress_acl(ctx: TcContext) -> Result<i32, u64> {
+    let tap_id = TAP_ID_UNASSIGNED;
+    if !acl_enabled(tap_id) {
+        return Ok(TC_ACT_OK);
+    }
+
+    let pkt_len = ctx.skb.len() as u64;
+
+    if let Ok(eth) = ptr_at_tc::<EthHdr>(&ctx, 0) {
+        match u16::from_be(eth.ether_type) {
+            ETH_P_IP => return try_tc_egress_acl_ipv4(&ctx, pkt_len, EthHdr::LEN),
+            ETH_P_IPV6 => return try_tc_egress_acl_ipv6(&ctx, pkt_len, EthHdr::LEN),
+            _ => {}
+        }
+    }
+
+    if let Ok(ip) = ptr_at_tc::<Ipv4Hdr>(&ctx, 0) {
+        if ip.version() == IP_VERSION_4 {
+            return try_tc_egress_acl_ipv4(&ctx, pkt_len, 0);
+        }
+    }
+
+    if let Ok(ip) = ptr_at_tc::<Ipv6Hdr>(&ctx, 0) {
+        if ip.version() == IP_VERSION_6 {
+            return try_tc_egress_acl_ipv6(&ctx, pkt_len, 0);
+        }
+    }
+
+    Ok(TC_ACT_OK)
+}
+
 #[inline(always)]
 fn try_xdp_ingress_acl_ipv4(
     ctx: &XdpContext,
@@ -169,10 +211,22 @@ fn try_xdp_ingress_acl_ipv4(
     ip_offset: usize,
 ) -> Result<u32, u64> {
     let ip = ptr_at::<Ipv4Hdr>(ctx, ip_offset)?;
-    let (src_port, dst_port) = parse_ports_ipv4(ctx, ip_offset, ip)?;
+    let (_, dst_port) = parse_ports_ipv4(ctx, ip_offset, ip)?;
     let src_id = lookup_ipv4_id(&SRC_IPV4_ID_MAP, u32::from_be_bytes(ip.src_addr));
     let dst_id = lookup_ipv4_id(&DST_IPV4_ID_MAP, u32::from_be_bytes(ip.dst_addr));
-    apply_acl_policy(src_id, dst_id, ip.proto as u8, src_port, dst_port, pkt_len)
+    let action = acl_policy_action(
+        src_id,
+        dst_id,
+        ip.proto as u8,
+        dst_port,
+        pkt_len,
+        DIRECTION_INGRESS,
+    );
+    Ok(if action == ACTION_DROP {
+        XDP_DROP
+    } else {
+        XDP_PASS
+    })
 }
 
 #[inline(always)]
@@ -182,45 +236,92 @@ fn try_xdp_ingress_acl_ipv6(
     ip_offset: usize,
 ) -> Result<u32, u64> {
     let ip = ptr_at::<Ipv6Hdr>(ctx, ip_offset)?;
-    let (src_port, dst_port) = parse_ports_ipv6(ctx, ip_offset, ip)?;
+    let (_, dst_port) = parse_ports_ipv6(ctx, ip_offset, ip)?;
     let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, ip.src_addr);
     let dst_id = lookup_ipv6_id(&DST_IPV6_ID_MAP, ip.dst_addr);
-    apply_acl_policy(
+    let action = acl_policy_action(
         src_id,
         dst_id,
         ip.next_hdr as u8,
-        src_port,
         dst_port,
         pkt_len,
-    )
+        DIRECTION_INGRESS,
+    );
+    Ok(if action == ACTION_DROP { XDP_DROP } else { XDP_PASS })
 }
 
 #[inline(always)]
-fn apply_acl_policy(
+fn try_tc_egress_acl_ipv4(
+    ctx: &TcContext,
+    pkt_len: u64,
+    ip_offset: usize,
+) -> Result<i32, u64> {
+    let ip = ptr_at_tc::<Ipv4Hdr>(ctx, ip_offset)?;
+    let (_, dst_port) = parse_ports_ipv4_tc(ctx, ip_offset, ip)?;
+    let src_id = lookup_ipv4_id(&SRC_IPV4_ID_MAP, u32::from_be_bytes(ip.src_addr));
+    let dst_id = lookup_ipv4_id(&DST_IPV4_ID_MAP, u32::from_be_bytes(ip.dst_addr));
+    let action = acl_policy_action(
+        src_id,
+        dst_id,
+        ip.proto as u8,
+        dst_port,
+        pkt_len,
+        DIRECTION_EGRESS,
+    );
+    Ok(if action == ACTION_DROP {
+        TC_ACT_SHOT
+    } else {
+        TC_ACT_OK
+    })
+}
+
+#[inline(always)]
+fn try_tc_egress_acl_ipv6(
+    ctx: &TcContext,
+    pkt_len: u64,
+    ip_offset: usize,
+) -> Result<i32, u64> {
+    let ip = ptr_at_tc::<Ipv6Hdr>(ctx, ip_offset)?;
+    let (_, dst_port) = parse_ports_ipv6_tc(ctx, ip_offset, ip)?;
+    let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, ip.src_addr);
+    let dst_id = lookup_ipv6_id(&DST_IPV6_ID_MAP, ip.dst_addr);
+    let action = acl_policy_action(
+        src_id,
+        dst_id,
+        ip.next_hdr as u8,
+        dst_port,
+        pkt_len,
+        DIRECTION_EGRESS,
+    );
+    Ok(if action == ACTION_DROP {
+        TC_ACT_SHOT
+    } else {
+        TC_ACT_OK
+    })
+}
+
+#[inline(always)]
+fn acl_policy_action(
     src_id: u32,
     dst_id: u32,
     proto: u8,
-    _src_port: u16,
     dst_port: u16,
     pkt_len: u64,
-) -> Result<u32, u64> {
+    direction: u8,
+) -> u8 {
     if let Some((key, policy)) = lookup_policy(
         TAP_ID_UNASSIGNED,
         src_id,
         dst_id,
         proto,
-        DIRECTION_INGRESS,
+        direction,
     ) {
         let action = policy_action(TAP_ID_UNASSIGNED, policy, dst_port);
         update_rule_stats(&key, pkt_len, action == ACTION_DROP);
-        return Ok(if action == ACTION_DROP {
-            XDP_DROP
-        } else {
-            XDP_PASS
-        });
+        return action;
     }
 
-    Ok(XDP_PASS)
+    ACTION_ALLOW
 }
 
 fn acl_enabled(tap_id: u32) -> bool {
@@ -396,8 +497,57 @@ fn parse_ports_ipv6(ctx: &XdpContext, ip_offset: usize, ip: &Ipv6Hdr) -> Result<
     }
 }
 
+fn parse_ports_ipv4_tc(
+    ctx: &TcContext,
+    ip_offset: usize,
+    ip: &Ipv4Hdr,
+) -> Result<(u16, u16), u64> {
+    match IpProto::from(ip.proto) {
+        IpProto::Tcp => {
+            let tcp = ptr_at_tc::<TcpHdr>(ctx, ip_offset + Ipv4Hdr::LEN)?;
+            Ok((u16::from_be_bytes(tcp.source), u16::from_be_bytes(tcp.dest)))
+        }
+        IpProto::Udp => {
+            let udp = ptr_at_tc::<UdpHdr>(ctx, ip_offset + Ipv4Hdr::LEN)?;
+            Ok((u16::from_be_bytes(udp.src), u16::from_be_bytes(udp.dst)))
+        }
+        _ => Ok((0, 0)),
+    }
+}
+
+fn parse_ports_ipv6_tc(
+    ctx: &TcContext,
+    ip_offset: usize,
+    ip: &Ipv6Hdr,
+) -> Result<(u16, u16), u64> {
+    match IpProto::from(ip.next_hdr) {
+        IpProto::Tcp => {
+            let tcp = ptr_at_tc::<TcpHdr>(ctx, ip_offset + Ipv6Hdr::LEN)?;
+            Ok((u16::from_be_bytes(tcp.source), u16::from_be_bytes(tcp.dest)))
+        }
+        IpProto::Udp => {
+            let udp = ptr_at_tc::<UdpHdr>(ctx, ip_offset + Ipv6Hdr::LEN)?;
+            Ok((u16::from_be_bytes(udp.src), u16::from_be_bytes(udp.dst)))
+        }
+        _ => Ok((0, 0)),
+    }
+}
+
 #[inline(always)]
 fn ptr_at<T>(ctx: &XdpContext, offset: usize) -> Result<&T, u64> {
+    let start = ctx.data();
+    let end = ctx.data_end();
+    let len = core::mem::size_of::<T>();
+
+    if start + offset + len > end {
+        return Err(0);
+    }
+
+    Ok(unsafe { &*((start + offset) as *const T) })
+}
+
+#[inline(always)]
+fn ptr_at_tc<T>(ctx: &TcContext, offset: usize) -> Result<&T, u64> {
     let start = ctx.data();
     let end = ctx.data_end();
     let len = core::mem::size_of::<T>();

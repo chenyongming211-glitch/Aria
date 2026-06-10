@@ -240,7 +240,13 @@ impl UnifiedAgent {
             .load(qos_bytes)?;
         tracing::info!("Step 18: QoS eBPF loaded into memory");
         
-        tracing::info!("Step 19: Loading TC ingress and egress programs...");
+        tracing::info!("Step 19: Loading TC ACL/QoS programs...");
+        {
+            let program: &mut SchedClassifier = acl_ebpf.program_mut("tc_egress_acl")
+                .context("TC egress ACL program not found")?
+                .try_into()?;
+            program.load()?;
+        }
         {
             let program: &mut SchedClassifier = qos_ebpf.program_mut("tc_ingress_qos")
                 .context("TC ingress program not found")?
@@ -274,6 +280,12 @@ impl UnifiedAgent {
         tracing::info!("Step 24: clsact qdisc added");
         
         tracing::info!("Step 25: Attaching TC programs to {} ingress/egress...", interface);
+        {
+            let program: &mut SchedClassifier = acl_ebpf.program_mut("tc_egress_acl")
+                .context("TC egress ACL program not found")?
+                .try_into()?;
+            Self::attach_tc_program(program, interface, TcAttachType::Egress)?;
+        }
         {
             let program: &mut SchedClassifier = qos_ebpf.program_mut("tc_ingress_qos")
                 .context("TC ingress program not found")?
@@ -330,6 +342,12 @@ impl UnifiedAgent {
         let qos_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/qos"));
         let mut qos_ebpf = EbpfLoader::new().load(qos_bytes)?;
         {
+            let tc_program: &mut SchedClassifier = acl_ebpf.program_mut("tc_egress_acl")
+                .context("TC egress ACL program not found")?
+                .try_into()?;
+            tc_program.load()?;
+        }
+        {
             let tc_program: &mut SchedClassifier = qos_ebpf.program_mut("tc_ingress_qos")
                 .context("TC ingress program not found")?
                 .try_into()?;
@@ -351,6 +369,12 @@ impl UnifiedAgent {
                 .args(&["qdisc", "del", "dev", iface, "clsact"])
                 .output();
             tc::qdisc_add_clsact(iface)?;
+            {
+                let tc_program: &mut SchedClassifier = acl_ebpf.program_mut("tc_egress_acl")
+                    .context("TC egress ACL program not found")?
+                    .try_into()?;
+                Self::attach_tc_program(tc_program, iface, TcAttachType::Egress)?;
+            }
             {
                 let tc_program: &mut SchedClassifier = qos_ebpf.program_mut("tc_ingress_qos")
                     .context("TC ingress program not found")?
@@ -398,6 +422,8 @@ impl UnifiedAgent {
         for iface in interfaces {
             Self::verify_xdp_attachment(iface)
                 .with_context(|| format!("XDP ACL attachment verification failed for {}", iface))?;
+            Self::verify_tc_attachment(iface, "egress", "tc_egress_acl")
+                .with_context(|| format!("TC egress ACL attachment verification failed for {}", iface))?;
             Self::verify_tc_attachment(iface, "ingress", "tc_ingress_qos")
                 .with_context(|| format!("TC ingress QoS attachment verification failed for {}", iface))?;
             Self::verify_tc_attachment(iface, "egress", "tc_egress_qos")
@@ -460,7 +486,7 @@ impl UnifiedAgent {
             ));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if !stdout.contains(program_name) && !stdout.contains("bpf") {
+        if !stdout.contains(program_name) {
             return Err(anyhow::anyhow!(
                 "{} is not attached to {} {}; tc output: {}",
                 program_name,

@@ -24,6 +24,14 @@ The Controller remains responsible for SaaS tenant isolation and compiles
 tenant/node QoS policy records into an Agent-local snapshot. The Agent does not
 evaluate tenant ids; it only applies the snapshot for its own node.
 
+ACL uses the same node-scoped snapshot boundary. Its data-plane direction is
+explicit:
+
+- `ingress` rules are enforced by `xdp_ingress_acl`.
+- `egress` rules are enforced by `tc_egress_acl`.
+- `both` rules are expanded into one ingress rule and one egress rule by the
+  Agent runtime before writing eBPF maps.
+
 ## Implementation Guidance
 
 Legacy names such as `QoSCategoryService`, `QoSCategoryPeers`, `QoSCategoryIP`,
@@ -40,3 +48,10 @@ The only valid northbound QoS route shape is node-scoped:
 
 Future work should keep Controller, Agent, frontend, docs, and tests on the
 unified rule model above.
+
+Runtime verification should check both ACL and QoS attachment points:
+
+```bash
+bpftool net
+tc filter show dev aria0 egress
+```
