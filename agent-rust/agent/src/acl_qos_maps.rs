@@ -319,6 +319,17 @@ pub fn add_qos_rule_to_maps(
         .qos_config
         .insert(key, config, 0)
         .map_err(|e| format!("QOS_CONFIG insert: {:?}", e))?;
+    let bucket = TokenBucket {
+        lock: 0,
+        pad: 0,
+        tokens: burst_bytes,
+        last_refill_ns: 0,
+        last_edt: 0,
+    };
+    handles
+        .qos_token_bucket
+        .insert(key, bucket, 0)
+        .map_err(|e| format!("QOS_TOKEN_BUCKET insert: {:?}", e))?;
     handles
         .qos_stats
         .insert(key, zero_per_cpu_values::<QosStatsValue>()?, 0)

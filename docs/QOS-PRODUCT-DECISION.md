@@ -32,6 +32,13 @@ explicit:
 - `both` rules are expanded into one ingress rule and one egress rule by the
   Agent runtime before writing eBPF maps.
 
+QoS is also enforced at node scope. The Agent writes one shared
+`QOS_TOKEN_BUCKET` entry per compiled QoS rule, and all attached aria interfaces
+consume that same bucket. This means bandwidth is interpreted as node total
+bandwidth for the matching rule, not as independent per-interface bandwidth.
+Runtime packet counters stay in `QOS_STATS` as per-cpu stats and are aggregated
+by the Agent when reported to the Controller/UI.
+
 ## Implementation Guidance
 
 Legacy names such as `QoSCategoryService`, `QoSCategoryPeers`, `QoSCategoryIP`,
