@@ -434,7 +434,14 @@ func (s *Storage) Migrate() error {
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		`CREATE TABLE IF NOT EXISTS node_policy_stats (
+			node_id UUID PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
+			tenant_id UUID NOT NULL REFERENCES tenants(id),
+			stats JSONB NOT NULL DEFAULT '{}'::jsonb,
+			updated_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_node_control_states_unique_node ON node_control_states(node_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_node_policy_stats_tenant_node ON node_policy_stats(tenant_id, node_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_commands_node_status ON agent_commands(node_public_key, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_commands_created_at ON agent_commands(created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_policy_deliveries_tenant_node_domain_ref ON policy_deliveries(tenant_id, node_id, policy_domain, policy_ref)`,
@@ -550,8 +557,8 @@ type Node struct {
 func (s *Storage) GetOrCreateTenant(name string) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := s.db.QueryRow(
-		`INSERT INTO tenants (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name = $1 RETURNING id`,
-		name,
+		`INSERT INTO tenants (code, name) VALUES ($1, $2) ON CONFLICT (code) DO UPDATE SET name = $2 RETURNING id`,
+		name, name,
 	).Scan(&id)
 	return id, err
 }

@@ -106,6 +106,41 @@ func TestRegisterUsesHandlerIssuedRuntimeIdentity(t *testing.T) {
 	}
 }
 
+func TestPolicyStatsFromCustomMetricsIncludesRuleStats(t *testing.T) {
+	aclID := uuid.New().String()
+	qosID := uuid.New().String()
+
+	stats := policyStatsFromCustomMetrics(map[string]float64{
+		"acl_packets":                            12,
+		"acl_rule." + aclID + ".packets":         10,
+		"acl_rule." + aclID + ".bytes":           2048,
+		"acl_rule." + aclID + ".dropped_packets": 2,
+		"acl_rule." + aclID + ".dropped_bytes":   512,
+		"qos_passed_bytes":                       4096,
+		"qos_rule." + qosID + ".passed_bytes":    3000,
+		"qos_rule." + qosID + ".dropped_bytes":   1000,
+		"qos_rule." + qosID + ".shaped_bytes":    96,
+	})
+
+	aclRules, ok := stats["acl_rules"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected acl_rules stats, got %#v", stats["acl_rules"])
+	}
+	aclStats, ok := aclRules[aclID].(map[string]interface{})
+	if !ok || aclStats["packets"] != float64(10) || aclStats["dropped_bytes"] != float64(512) {
+		t.Fatalf("unexpected ACL rule stats: %#v", aclRules[aclID])
+	}
+
+	qosRules, ok := stats["qos_rules"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected qos_rules stats, got %#v", stats["qos_rules"])
+	}
+	qosStats, ok := qosRules[qosID].(map[string]interface{})
+	if !ok || qosStats["passed_bytes"] != float64(3000) || qosStats["shaped_bytes"] != float64(96) {
+		t.Fatalf("unexpected QoS rule stats: %#v", qosRules[qosID])
+	}
+}
+
 func TestSyncResponseIncludesSnapshotMetadata(t *testing.T) {
 	auth.SetRuntimeSecret("phase1-runtime-secret")
 	t.Cleanup(func() { auth.SetRuntimeSecret("") })

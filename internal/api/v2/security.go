@@ -108,6 +108,10 @@ func (r *Router) listTenantNodeACLs(w http.ResponseWriter, tenantID, nodeID uuid
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to list ACL rules: "+err.Error(), nil)
 		return
 	}
+	if err := r.attachACLRuleStats(tenantID, nodeID, rules); err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load ACL stats: "+err.Error(), nil)
+		return
+	}
 	apibase.WriteSuccess(w, rules, fmt.Sprintf("%d rules retrieved", len(rules)))
 }
 
@@ -534,7 +538,49 @@ func (r *Router) listTenantNodeQoS(w http.ResponseWriter, tenantID, nodeID uuid.
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to list QoS rules: "+err.Error(), nil)
 		return
 	}
+	if err := r.attachQoSRuleStats(tenantID, nodeID, rules); err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load QoS stats: "+err.Error(), nil)
+		return
+	}
 	apibase.WriteSuccess(w, rules, fmt.Sprintf("%d QoS rules retrieved", len(rules)))
+}
+
+func (r *Router) attachACLRuleStats(tenantID, nodeID uuid.UUID, rules []*controllerstorage.ACLRuleRecord) error {
+	policyStats, err := r.store.GetNodePolicyStats(tenantID, nodeID)
+	if err != nil {
+		return err
+	}
+	if policyStats == nil {
+		return nil
+	}
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		if stats := policyStats.ACLRuleStats(rule.ID); stats != nil {
+			rule.Stats = stats
+		}
+	}
+	return nil
+}
+
+func (r *Router) attachQoSRuleStats(tenantID, nodeID uuid.UUID, rules []*controllerstorage.QoSRuleRecord) error {
+	policyStats, err := r.store.GetNodePolicyStats(tenantID, nodeID)
+	if err != nil {
+		return err
+	}
+	if policyStats == nil {
+		return nil
+	}
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		if stats := policyStats.QoSRuleStats(rule.ID); stats != nil {
+			rule.Stats = stats
+		}
+	}
+	return nil
 }
 
 func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node) {

@@ -365,11 +365,105 @@ func (s *ControllerServer) ReportMetrics(ctx context.Context, req *agentpb.Metri
 		fmt.Printf("[ERROR] Failed to update node heartbeat: %v\n", err)
 		return &agentpb.MetricsReportResponse{Success: false, Message: "Failed to persist metrics"}, fmt.Errorf("failed to persist metrics: %w", err)
 	}
+	if stats := policyStatsFromCustomMetrics(req.CustomMetrics); len(stats) > 0 {
+		if err := s.store.UpsertNodePolicyStats(node.TenantID, node.ID, stats); err != nil {
+			fmt.Printf("[ERROR] Failed to update node policy stats: %v\n", err)
+			return &agentpb.MetricsReportResponse{Success: false, Message: "Failed to persist policy stats"}, fmt.Errorf("failed to persist policy stats: %w", err)
+		}
+	}
 
 	return &agentpb.MetricsReportResponse{
 		Success: true,
 		Message: "Metrics reported successfully",
 	}, nil
+}
+
+func policyStatsFromCustomMetrics(metrics map[string]float64) map[string]interface{} {
+	if len(metrics) == 0 {
+		return nil
+	}
+	keys := []string{
+		"acl_packets",
+		"acl_bytes",
+		"acl_dropped_packets",
+		"acl_dropped_bytes",
+		"qos_passed_bytes",
+		"qos_dropped_bytes",
+		"qos_shaped_bytes",
+	}
+	stats := make(map[string]interface{}, len(keys))
+	for _, key := range keys {
+		if value, ok := metrics[key]; ok {
+			stats[key] = value
+		}
+	}
+	aclRules := make(map[string]map[string]interface{})
+	qosRules := make(map[string]map[string]interface{})
+	for key, value := range metrics {
+		parts := strings.Split(key, ".")
+		if len(parts) != 3 {
+			continue
+		}
+		domain, ruleID, metric := parts[0], parts[1], parts[2]
+		if strings.TrimSpace(ruleID) == "" {
+			continue
+		}
+		switch domain {
+		case "acl_rule":
+			if !allowedACLRuleStatMetric(metric) {
+				continue
+			}
+			if aclRules[ruleID] == nil {
+				aclRules[ruleID] = make(map[string]interface{})
+			}
+			aclRules[ruleID][metric] = value
+		case "qos_rule":
+			if !allowedQoSRuleStatMetric(metric) {
+				continue
+			}
+			if qosRules[ruleID] == nil {
+				qosRules[ruleID] = make(map[string]interface{})
+			}
+			qosRules[ruleID][metric] = value
+		}
+	}
+	if len(aclRules) > 0 {
+		stats["acl_rules"] = mapStringRuleStats(aclRules)
+	}
+	if len(qosRules) > 0 {
+		stats["qos_rules"] = mapStringRuleStats(qosRules)
+	}
+	if len(stats) == 0 {
+		return nil
+	}
+	stats["reported_at"] = time.Now().UTC().Format(time.RFC3339)
+	return stats
+}
+
+func allowedACLRuleStatMetric(metric string) bool {
+	switch metric {
+	case "packets", "bytes", "dropped_packets", "dropped_bytes":
+		return true
+	default:
+		return false
+	}
+}
+
+func allowedQoSRuleStatMetric(metric string) bool {
+	switch metric {
+	case "passed_bytes", "dropped_bytes", "shaped_bytes":
+		return true
+	default:
+		return false
+	}
+}
+
+func mapStringRuleStats(input map[string]map[string]interface{}) map[string]interface{} {
+	output := make(map[string]interface{}, len(input))
+	for ruleID, stats := range input {
+		output[ruleID] = stats
+	}
+	return output
 }
 
 func generateRuntimeTokenForNode(node *controllerstorage.Node) (string, int64, error) {
@@ -716,6 +810,7 @@ func (s *ControllerServer) getQoSRules(ctx context.Context, publicKey string) ([
 
 	for _, rule := range rules {
 		qosRules = append(qosRules, &agentpb.QoSRule{
+			Id:            rule.ID.String(),
 			SrcIp:         rule.SrcCIDR,
 			DstIp:         rule.DstCIDR,
 			SrcPort:       uint32(rule.SrcPort),

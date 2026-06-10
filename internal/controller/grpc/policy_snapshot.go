@@ -69,6 +69,7 @@ func aclRulesFromLegacyPayload(payload interface{}) ([]*agentpb.ACLRule, error) 
 	rules := make([]*agentpb.ACLRule, 0, len(ruleList))
 	for _, raw := range ruleList {
 		rules = append(rules, &agentpb.ACLRule{
+			Id:        getString(raw, "id"),
 			SrcNet:    getString(raw, "src_net"),
 			DstNet:    getString(raw, "dst_net"),
 			Protocol:  getUint32(raw, "protocol"),
@@ -119,6 +120,7 @@ func compileACLRule(rule *agentpb.ACLRule) ([]*agentpb.ACLRule, error) {
 	compiled := make([]*agentpb.ACLRule, 0, len(protocols))
 	for _, proto := range protocols {
 		compiled = append(compiled, &agentpb.ACLRule{
+			Id:        rule.GetId(),
 			SrcNet:    cidrOrAny(rule.GetSrcNet()),
 			DstNet:    cidrOrAny(rule.GetDstNet()),
 			Protocol:  proto,
@@ -202,6 +204,7 @@ func compileQoSRule(rule *agentpb.QoSRule) (*agentpb.QoSRule, error) {
 	}
 
 	compiled := &agentpb.QoSRule{
+		Id:            rule.GetId(),
 		Protocol:      rule.GetProtocol(),
 		BandwidthMbps: rule.GetBandwidthMbps(),
 		Direction:     direction,

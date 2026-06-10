@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::metadata::{Ascii, MetadataValue};
@@ -288,6 +288,7 @@ impl GrpcClient {
             assigned_ip: resp.assigned_ip,
             desired_state_version: resp.desired_state_version,
             acl_rules: resp.acl_rules.into_iter().map(|r| AclRule {
+                id: r.id,
                 src_net: r.src_net,
                 dst_net: r.dst_net,
                 protocol: r.protocol,
@@ -298,6 +299,7 @@ impl GrpcClient {
                 ports: r.ports,
             }).collect(),
             qos_rules: resp.qos_rules.into_iter().map(|r| QoSRule {
+                id: r.id,
                 src_ip: r.src_ip,
                 dst_ip: r.dst_ip,
                 src_port: r.src_port,
@@ -320,6 +322,58 @@ impl GrpcClient {
             snapshot_complete: resp.snapshot_complete,
             domain_versions: resp.domain_versions,
         })
+    }
+
+    pub async fn report_metrics(
+        &self,
+        node_id: Option<String>,
+        public_key: String,
+        custom_metrics: HashMap<String, f64>,
+        runtime_token: Option<String>,
+    ) -> Result<()> {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let mut request = tonic::Request::new(aria::MetricsReportRequest {
+            agent_id: public_key.clone(),
+            timestamp,
+            cpu_usage: 0.0,
+            memory_usage: 0.0,
+            memory_total: 0,
+            memory_used: 0,
+            disk_usage: 0.0,
+            disk_total: 0,
+            disk_used: 0,
+            network_tx_bytes: 0,
+            network_rx_bytes: 0,
+            network_tx_packets: 0,
+            network_rx_packets: 0,
+            network_tx_errors: 0,
+            network_rx_errors: 0,
+            wg_tx_bytes: 0,
+            wg_rx_bytes: 0,
+            wg_peer_count: 0,
+            wg_active_peers: 0,
+            custom_metrics,
+            node_id: node_id.unwrap_or_default(),
+            public_key,
+        });
+
+        if let Some(token) = &runtime_token {
+            request
+                .metadata_mut()
+                .insert("authorization", authorization_metadata_value(token)?);
+        }
+        apply_unary_timeout(&mut request);
+
+        let mut client = ControllerServiceClient::new(self.channel.clone());
+        let response = client.report_metrics(request).await?.into_inner();
+        if response.success {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("metrics report rejected: {}", response.message))
+        }
     }
 
     pub async fn connect_command_stream(
@@ -442,6 +496,7 @@ pub struct PeerInfo {
 /// ACL 规则
 #[derive(Debug, Clone)]
 pub struct AclRule {
+    pub id: String,
     pub src_net: String,
     pub dst_net: String,
     pub protocol: u32,
@@ -456,6 +511,7 @@ pub struct AclRule {
 /// QoS 规则
 #[derive(Debug, Clone)]
 pub struct QoSRule {
+    pub id: String,
     pub src_ip: String,
     pub dst_ip: String,
     pub src_port: u32,
@@ -478,6 +534,7 @@ pub struct BlacklistRule {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentAclPolicy {
+    pub id: String,
     pub src_group: String,
     pub dst_group: String,
     pub proto: u8,
@@ -488,6 +545,7 @@ pub struct AgentAclPolicy {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentQosPolicy {
+    pub id: String,
     pub group: String,
     pub direction: u8,
     pub rate_bps: u64,
@@ -504,6 +562,7 @@ pub fn acl_policy_from_sync_rule(rule: &AclRule) -> Result<AgentAclPolicy> {
     validate_acl_ports(proto, ports.as_deref())?;
 
     Ok(AgentAclPolicy {
+        id: rule.id.clone(),
         src_group: cidr_or_any(&rule.src_net),
         dst_group: cidr_or_any(&rule.dst_net),
         proto,
@@ -530,6 +589,7 @@ pub fn qos_policy_from_sync_rule(rule: &QoSRule) -> Result<AgentQosPolicy> {
     let mode = qos_mode_from_string(&rule.mode)?;
 
     Ok(AgentQosPolicy {
+        id: rule.id.clone(),
         group,
         direction,
         rate_bps,
@@ -692,6 +752,7 @@ mod tests {
     #[test]
     fn acl_sync_rule_keeps_port_range_as_policy_ports() {
         let policy = acl_policy_from_sync_rule(&AclRule {
+            id: "acl-1".to_string(),
             src_net: "10.0.0.0/24".to_string(),
             dst_net: "192.0.2.0/24".to_string(),
             protocol: 6,
@@ -714,6 +775,7 @@ mod tests {
     #[test]
     fn acl_sync_rule_rejects_port_filter_with_any_protocol() {
         let result = acl_policy_from_sync_rule(&AclRule {
+            id: "acl-2".to_string(),
             src_net: "10.0.0.0/24".to_string(),
             dst_net: "192.0.2.0/24".to_string(),
             protocol: 0,
@@ -730,6 +792,7 @@ mod tests {
     #[test]
     fn qos_sync_rule_prefers_explicit_runtime_fields() {
         let policy = qos_policy_from_sync_rule(&QoSRule {
+            id: "qos-1".to_string(),
             src_ip: "10.0.0.0/24".to_string(),
             dst_ip: "192.0.2.0/24".to_string(),
             src_port: 0,

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use aya::Ebpf;
@@ -27,6 +28,7 @@ pub enum AclQosError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AclRuleSpec {
+    pub id: String,
     pub src_group: String,
     pub dst_group: String,
     pub proto: u8,
@@ -37,6 +39,7 @@ pub struct AclRuleSpec {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QosRuleSpec {
+    pub id: String,
     pub group: String,
     pub direction: u8,
     pub rate_bps: u64,
@@ -62,6 +65,23 @@ pub struct AclQosManager {
     interfaces: Vec<String>,
     _acl_ebpf: Ebpf,
     _qos_ebpf: Ebpf,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AclRuleRuntimeStats {
+    pub id: String,
+    pub packets: u64,
+    pub bytes: u64,
+    pub dropped_packets: u64,
+    pub dropped_bytes: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct QosRuleRuntimeStats {
+    pub id: String,
+    pub passed_bytes: u64,
+    pub dropped_bytes: u64,
+    pub shaped_bytes: u64,
 }
 
 impl AclQosManager {
@@ -160,6 +180,53 @@ impl AclQosManager {
             .collect())
     }
 
+    pub fn get_acl_rule_runtime_stats(&self) -> Result<Vec<AclRuleRuntimeStats>, AclQosError> {
+        let stats = get_rule_stats(&self.maps, self.runtime).map_err(AclQosError::Kernel)?;
+        let stats_by_key: HashMap<(u32, u32, u8, u8), _> = stats
+            .into_iter()
+            .map(|stat| {
+                (
+                    (
+                        stat.key.src_id,
+                        stat.key.dst_id,
+                        stat.key.proto,
+                        stat.key.direction,
+                    ),
+                    stat,
+                )
+            })
+            .collect();
+
+        let Some(snapshot) = &self.last_snapshot else {
+            return Ok(Vec::new());
+        };
+
+        let mut result = Vec::new();
+        for rule in &snapshot.acl_rules {
+            if rule.id.trim().is_empty() {
+                continue;
+            }
+            let Some(src_group) = self.state.groups.get(&normalize_group_name(&rule.src_group)) else {
+                continue;
+            };
+            let Some(dst_group) = self.state.groups.get(&normalize_group_name(&rule.dst_group)) else {
+                continue;
+            };
+            let key = (src_group.id, dst_group.id, rule.proto, rule.direction);
+            let Some(stat) = stats_by_key.get(&key) else {
+                continue;
+            };
+            result.push(AclRuleRuntimeStats {
+                id: rule.id.clone(),
+                packets: stat.packets,
+                bytes: stat.bytes,
+                dropped_packets: stat.dropped_packets,
+                dropped_bytes: stat.dropped_bytes,
+            });
+        }
+        Ok(result)
+    }
+
     pub fn get_all_qos_stats(&self) -> Result<Vec<(&'static str, u32, u64, u64)>, AclQosError> {
         let stats = get_qos_stats(&self.maps, self.runtime).map_err(AclQosError::Kernel)?;
         Ok(stats
@@ -173,6 +240,39 @@ impl AclQosManager {
                 )
             })
             .collect())
+    }
+
+    pub fn get_qos_rule_runtime_stats(&self) -> Result<Vec<QosRuleRuntimeStats>, AclQosError> {
+        let stats = get_qos_stats(&self.maps, self.runtime).map_err(AclQosError::Kernel)?;
+        let stats_by_key: HashMap<(u32, u8), _> = stats
+            .into_iter()
+            .map(|stat| ((stat.key.group_id, stat.key.direction), stat))
+            .collect();
+
+        let Some(snapshot) = &self.last_snapshot else {
+            return Ok(Vec::new());
+        };
+
+        let mut result = Vec::new();
+        for rule in &snapshot.qos_rules {
+            if rule.id.trim().is_empty() {
+                continue;
+            }
+            let Some(group) = self.state.groups.get(&normalize_group_name(&rule.group)) else {
+                continue;
+            };
+            let key = (group.id, rule.direction);
+            let Some(stat) = stats_by_key.get(&key) else {
+                continue;
+            };
+            result.push(QosRuleRuntimeStats {
+                id: rule.id.clone(),
+                passed_bytes: stat.passed_bytes,
+                dropped_bytes: stat.dropped_bytes,
+                shaped_bytes: stat.shaped_bytes,
+            });
+        }
+        Ok(result)
     }
 
     fn apply_policy_by_group(

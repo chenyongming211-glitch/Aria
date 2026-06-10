@@ -115,6 +115,7 @@ message PeerInfo {
 }
 
 message ACLRule {
+  string id = 9;                      // Controller policy rule ID
   string src_net = 1;                 // 源 CIDR（如 "10.0.0.0/8"）
   string dst_net = 2;                 // 目标 CIDR（如 "192.168.0.0/16"）
   uint32 protocol = 3;                // IP 协议（6=TCP, 17=UDP, 0=any）
@@ -126,6 +127,7 @@ message ACLRule {
 }
 
 message QoSRule {
+  string id = 12;                     // Controller policy rule ID
   string src_ip = 1;                  // 源 IP
   string dst_ip = 2;                  // 目标 IP
   uint32 src_port = 3;                // 源端口

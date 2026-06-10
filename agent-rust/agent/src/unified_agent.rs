@@ -1380,6 +1380,7 @@ impl UnifiedAgent {
             let policy = acl_policy_from_sync_rule(rule)?;
             for direction in requested_directions(policy.direction) {
                 snapshot.acl_rules.push(AclRuleSpec {
+                    id: policy.id.clone(),
                     src_group: policy.src_group.clone(),
                     dst_group: policy.dst_group.clone(),
                     proto: policy.proto,
@@ -1393,6 +1394,7 @@ impl UnifiedAgent {
         for rule in blacklist_rules {
             match rule.scope.as_str() {
                 "src" if !rule.cidr.is_empty() => snapshot.acl_rules.push(AclRuleSpec {
+                    id: String::new(),
                     src_group: rule.cidr.clone(),
                     dst_group: "any".to_string(),
                     proto: 0,
@@ -1401,6 +1403,7 @@ impl UnifiedAgent {
                     ports: None,
                 }),
                 "dst" if !rule.cidr.is_empty() => snapshot.acl_rules.push(AclRuleSpec {
+                    id: String::new(),
                     src_group: "any".to_string(),
                     dst_group: rule.cidr.clone(),
                     proto: 0,
@@ -1412,6 +1415,7 @@ impl UnifiedAgent {
                     let ports = rule.port.to_string();
                     for proto in [6u8, 17u8] {
                         snapshot.acl_rules.push(AclRuleSpec {
+                            id: String::new(),
                             src_group: "any".to_string(),
                             dst_group: "any".to_string(),
                             proto,
@@ -1432,6 +1436,7 @@ impl UnifiedAgent {
             }
             for direction in requested_directions(policy.direction) {
                 snapshot.qos_rules.push(QosRuleSpec {
+                    id: policy.id.clone(),
                     group: policy.group.clone(),
                     direction,
                     rate_bps: policy.rate_bps,
@@ -1797,14 +1802,92 @@ impl UnifiedAgent {
                     );
                 }
                 
+                let mut custom_metrics = HashMap::new();
+                let mut acl_packets = 0_u64;
+                let mut acl_bytes = 0_u64;
+                let mut acl_dropped_packets = 0_u64;
+                let mut acl_dropped_bytes = 0_u64;
+
                 // ACL metrics
-                for (rule_id, action, packets, bytes) in acl_stats {
-                    metrics::record_acl_rule_stats(rule_id, action, packets, bytes);
+                for (rule_id, action, packets, bytes) in &acl_stats {
+                    metrics::record_acl_rule_stats(*rule_id, *action, *packets, *bytes);
+                    if *action == "drop" {
+                        acl_dropped_packets = acl_dropped_packets.saturating_add(*packets);
+                        acl_dropped_bytes = acl_dropped_bytes.saturating_add(*bytes);
+                    } else {
+                        acl_packets = acl_packets.saturating_add(*packets);
+                        acl_bytes = acl_bytes.saturating_add(*bytes);
+                    }
                 }
                 
+                let mut qos_passed_bytes = 0_u64;
+                let mut qos_dropped_bytes = 0_u64;
                 // QoS metrics
-                for (rule_type, rule_id, passed, dropped) in qos_stats {
-                    metrics::record_qos_rule_stats(rule_type, rule_id, passed, dropped);
+                for (rule_type, rule_id, passed, dropped) in &qos_stats {
+                    metrics::record_qos_rule_stats(rule_type, *rule_id, *passed, *dropped);
+                    qos_passed_bytes = qos_passed_bytes.saturating_add(*passed);
+                    qos_dropped_bytes = qos_dropped_bytes.saturating_add(*dropped);
+                }
+
+                let acl_qos_mgr = self.acl_qos_mgr.clone();
+                let rule_stats = tokio::task::spawn_blocking(move || {
+                    let mgr = acl_qos_mgr.blocking_lock();
+                    let acl = mgr
+                        .get_acl_rule_runtime_stats()
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                    let qos = mgr
+                        .get_qos_rule_runtime_stats()
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                    Ok::<_, anyhow::Error>((acl, qos))
+                })
+                .await??;
+                for stat in rule_stats.0 {
+                    custom_metrics.insert(format!("acl_rule.{}.packets", stat.id), stat.packets as f64);
+                    custom_metrics.insert(format!("acl_rule.{}.bytes", stat.id), stat.bytes as f64);
+                    custom_metrics.insert(
+                        format!("acl_rule.{}.dropped_packets", stat.id),
+                        stat.dropped_packets as f64,
+                    );
+                    custom_metrics.insert(
+                        format!("acl_rule.{}.dropped_bytes", stat.id),
+                        stat.dropped_bytes as f64,
+                    );
+                }
+                for stat in rule_stats.1 {
+                    custom_metrics.insert(
+                        format!("qos_rule.{}.passed_bytes", stat.id),
+                        stat.passed_bytes as f64,
+                    );
+                    custom_metrics.insert(
+                        format!("qos_rule.{}.dropped_bytes", stat.id),
+                        stat.dropped_bytes as f64,
+                    );
+                    custom_metrics.insert(
+                        format!("qos_rule.{}.shaped_bytes", stat.id),
+                        stat.shaped_bytes as f64,
+                    );
+                }
+
+                custom_metrics.insert("acl_packets".to_string(), acl_packets as f64);
+                custom_metrics.insert("acl_bytes".to_string(), acl_bytes as f64);
+                custom_metrics.insert("acl_dropped_packets".to_string(), acl_dropped_packets as f64);
+                custom_metrics.insert("acl_dropped_bytes".to_string(), acl_dropped_bytes as f64);
+                custom_metrics.insert("qos_passed_bytes".to_string(), qos_passed_bytes as f64);
+                custom_metrics.insert("qos_dropped_bytes".to_string(), qos_dropped_bytes as f64);
+                custom_metrics.insert("qos_shaped_bytes".to_string(), 0.0);
+
+                let runtime_token = self.runtime_credential.snapshot().await;
+                if let Err(e) = self
+                    .grpc_client
+                    .report_metrics(
+                        self.config.node_id.clone(),
+                        self.config.public_key.clone(),
+                        custom_metrics,
+                        runtime_token,
+                    )
+                    .await
+                {
+                    tracing::warn!("Failed to report policy metrics: {:?}", e);
                 }
             }
             Err(e) => {

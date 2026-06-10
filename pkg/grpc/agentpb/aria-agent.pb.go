@@ -596,6 +596,7 @@ func (x *PeerInfo) GetAdvertisedRoutes() []string {
 
 type ACLRule struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,9,opt,name=id,proto3" json:"id,omitempty"`                           // Controller policy rule ID
 	SrcNet        string                 `protobuf:"bytes,1,opt,name=src_net,json=srcNet,proto3" json:"src_net,omitempty"`     // 源 CIDR（如 "10.0.0.0/8"）
 	DstNet        string                 `protobuf:"bytes,2,opt,name=dst_net,json=dstNet,proto3" json:"dst_net,omitempty"`     // 目标 CIDR（如 "192.168.0.0/16"）
 	Protocol      uint32                 `protobuf:"varint,3,opt,name=protocol,proto3" json:"protocol,omitempty"`              // IP 协议（6=TCP, 17=UDP, 0=any）
@@ -636,6 +637,13 @@ func (x *ACLRule) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ACLRule.ProtoReflect.Descriptor instead.
 func (*ACLRule) Descriptor() ([]byte, []int) {
 	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ACLRule) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
 }
 
 func (x *ACLRule) GetSrcNet() string {
@@ -696,6 +704,7 @@ func (x *ACLRule) GetPorts() string {
 
 type QoSRule struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,12,opt,name=id,proto3" json:"id,omitempty"`                                            // Controller policy rule ID
 	SrcIp         string                 `protobuf:"bytes,1,opt,name=src_ip,json=srcIp,proto3" json:"src_ip,omitempty"`                          // 源 IP
 	DstIp         string                 `protobuf:"bytes,2,opt,name=dst_ip,json=dstIp,proto3" json:"dst_ip,omitempty"`                          // 目标 IP
 	SrcPort       uint32                 `protobuf:"varint,3,opt,name=src_port,json=srcPort,proto3" json:"src_port,omitempty"`                   // 源端口
@@ -739,6 +748,13 @@ func (x *QoSRule) ProtoReflect() protoreflect.Message {
 // Deprecated: Use QoSRule.ProtoReflect.Descriptor instead.
 func (*QoSRule) Descriptor() ([]byte, []int) {
 	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *QoSRule) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
 }
 
 func (x *QoSRule) GetSrcIp() string {
@@ -1869,8 +1885,9 @@ const file_pkg_grpc_agentpb_aria_agent_proto_rawDesc = "" +
 	"assignedIp\x12\x12\n" +
 	"\x04role\x18\t \x01(\tR\x04role\x12+\n" +
 	"\x11advertised_routes\x18\n" +
-	" \x03(\tR\x10advertisedRoutes\"\xd9\x01\n" +
-	"\aACLRule\x12\x17\n" +
+	" \x03(\tR\x10advertisedRoutes\"\xe9\x01\n" +
+	"\aACLRule\x12\x0e\n" +
+	"\x02id\x18\t \x01(\tR\x02id\x12\x17\n" +
 	"\asrc_net\x18\x01 \x01(\tR\x06srcNet\x12\x17\n" +
 	"\adst_net\x18\x02 \x01(\tR\x06dstNet\x12\x1a\n" +
 	"\bprotocol\x18\x03 \x01(\rR\bprotocol\x12\x19\n" +
@@ -1878,8 +1895,9 @@ const file_pkg_grpc_agentpb_aria_agent_proto_rawDesc = "" +
 	"\bmax_port\x18\x05 \x01(\rR\amaxPort\x12\x16\n" +
 	"\x06action\x18\x06 \x01(\tR\x06action\x12\x1c\n" +
 	"\tdirection\x18\a \x01(\tR\tdirection\x12\x14\n" +
-	"\x05ports\x18\b \x01(\tR\x05ports\"\xba\x02\n" +
-	"\aQoSRule\x12\x15\n" +
+	"\x05ports\x18\b \x01(\tR\x05ports\"\xca\x02\n" +
+	"\aQoSRule\x12\x0e\n" +
+	"\x02id\x18\f \x01(\tR\x02id\x12\x15\n" +
 	"\x06src_ip\x18\x01 \x01(\tR\x05srcIp\x12\x15\n" +
 	"\x06dst_ip\x18\x02 \x01(\tR\x05dstIp\x12\x19\n" +
 	"\bsrc_port\x18\x03 \x01(\rR\asrcPort\x12\x19\n" +

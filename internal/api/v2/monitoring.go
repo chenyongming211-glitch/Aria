@@ -116,6 +116,19 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 		data["state_convergence"] = "idle"
 	}
 
+	policyStats, err := r.store.GetNodePolicyStats(tenantID, node.ID)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to get policy stats: "+err.Error(), nil)
+		return
+	}
+	if policyStats != nil {
+		data["policy_stats"] = policyStats.Stats
+		data["policy_stats_updated_at"] = policyStats.UpdatedAt
+	} else {
+		data["policy_stats"] = map[string]interface{}{}
+		data["policy_stats_updated_at"] = nil
+	}
+
 	certificate, err := r.store.GetNodeCertificate(node.ID)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to get node certificate: "+err.Error(), nil)

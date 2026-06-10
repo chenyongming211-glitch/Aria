@@ -213,14 +213,15 @@ func newRegistrationAuthError(status int, message string, err error) *registrati
 
 // ACLRuleJSON represents an ACL rule in API responses.
 type ACLRuleJSON struct {
-	SrcNet    string `json:"src_net"`   // Source CIDR
-	DstNet    string `json:"dst_net"`   // Destination CIDR
-	Protocol  uint8  `json:"protocol"`  // IP protocol (6=TCP, 17=UDP, 0=any)
-	MinPort   uint16 `json:"min_port"`  // Min port (0=any)
-	MaxPort   uint16 `json:"max_port"`  // Max port (65535=any)
-	Action    string `json:"action"`    // allow or deny
-	Direction string `json:"direction"` // ingress, egress, or both
-	Ports     string `json:"ports"`     // port bitmap rule string
+	ID        string `json:"id,omitempty"` // Controller policy rule ID
+	SrcNet    string `json:"src_net"`      // Source CIDR
+	DstNet    string `json:"dst_net"`      // Destination CIDR
+	Protocol  uint8  `json:"protocol"`     // IP protocol (6=TCP, 17=UDP, 0=any)
+	MinPort   uint16 `json:"min_port"`     // Min port (0=any)
+	MaxPort   uint16 `json:"max_port"`     // Max port (65535=any)
+	Action    string `json:"action"`       // allow or deny
+	Direction string `json:"direction"`    // ingress, egress, or both
+	Ports     string `json:"ports"`        // port bitmap rule string
 }
 
 func runControllerServe(cmd *cobra.Command, args []string) error {
@@ -1980,6 +1981,7 @@ func aclRuleRecordsForSync(rules []*controllerstorage.ACLRuleRecord) []ACLRuleJS
 func aclRuleRecordForSync(rule *controllerstorage.ACLRuleRecord) ACLRuleJSON {
 	minPort, maxPort := aclPortsForSync(rule)
 	return ACLRuleJSON{
+		ID:        rule.ID.String(),
 		SrcNet:    rule.SrcCIDR,
 		DstNet:    rule.DstCIDR,
 		Protocol:  uint8(rule.Protocol),

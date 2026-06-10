@@ -16,43 +16,45 @@ const (
 )
 
 type QoSRuleRecord struct {
-	ID            uuid.UUID `json:"id"`
-	TenantID      uuid.UUID `json:"tenant_id"`
-	NodeID        uuid.UUID `json:"node_id"`
-	SrcCIDR       string    `json:"src_cidr"`
-	DstCIDR       string    `json:"dst_cidr"`
-	SrcPort       int       `json:"src_port"`
-	DstPort       int       `json:"dst_port"`
-	Protocol      int       `json:"protocol"`
-	BandwidthMbps int       `json:"bandwidth_mbps"`
-	Direction     string    `json:"direction"`
-	RateBps       uint64    `json:"rate_bps"`
-	BurstBytes    uint64    `json:"burst_bytes"`
-	Priority      int       `json:"priority"`
-	Mode          string    `json:"mode"`
-	Enabled       bool      `json:"enabled"`
-	Description   string    `json:"description"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            uuid.UUID              `json:"id"`
+	TenantID      uuid.UUID              `json:"tenant_id"`
+	NodeID        uuid.UUID              `json:"node_id"`
+	SrcCIDR       string                 `json:"src_cidr"`
+	DstCIDR       string                 `json:"dst_cidr"`
+	SrcPort       int                    `json:"src_port"`
+	DstPort       int                    `json:"dst_port"`
+	Protocol      int                    `json:"protocol"`
+	BandwidthMbps int                    `json:"bandwidth_mbps"`
+	Direction     string                 `json:"direction"`
+	RateBps       uint64                 `json:"rate_bps"`
+	BurstBytes    uint64                 `json:"burst_bytes"`
+	Priority      int                    `json:"priority"`
+	Mode          string                 `json:"mode"`
+	Enabled       bool                   `json:"enabled"`
+	Description   string                 `json:"description"`
+	Stats         map[string]interface{} `json:"stats,omitempty"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
 }
 
 type ACLRuleRecord struct {
-	ID          uuid.UUID `json:"id"`
-	TenantID    uuid.UUID `json:"tenant_id"`
-	NodeID      uuid.UUID `json:"node_id"`
-	Name        string    `json:"name"`
-	Action      string    `json:"action"` // "allow", "deny"
-	SrcCIDR     string    `json:"src_cidr"`
-	DstCIDR     string    `json:"dst_cidr"`
-	DstPort     int       `json:"dst_port"`
-	Protocol    int       `json:"protocol"`
-	Direction   string    `json:"direction"`
-	Ports       string    `json:"ports"`
-	Priority    int       `json:"priority"`
-	Enabled     bool      `json:"enabled"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          uuid.UUID              `json:"id"`
+	TenantID    uuid.UUID              `json:"tenant_id"`
+	NodeID      uuid.UUID              `json:"node_id"`
+	Name        string                 `json:"name"`
+	Action      string                 `json:"action"` // "allow", "deny"
+	SrcCIDR     string                 `json:"src_cidr"`
+	DstCIDR     string                 `json:"dst_cidr"`
+	DstPort     int                    `json:"dst_port"`
+	Protocol    int                    `json:"protocol"`
+	Direction   string                 `json:"direction"`
+	Ports       string                 `json:"ports"`
+	Priority    int                    `json:"priority"`
+	Enabled     bool                   `json:"enabled"`
+	Description string                 `json:"description"`
+	Stats       map[string]interface{} `json:"stats,omitempty"`
+	CreatedAt   time.Time              `json:"created_at"`
+	UpdatedAt   time.Time              `json:"updated_at"`
 }
 
 type BlacklistRuleRecord struct {
