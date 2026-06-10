@@ -548,7 +548,7 @@ func (r *Router) listTenantNodeQoS(w http.ResponseWriter, tenantID, nodeID uuid.
 func (r *Router) attachACLRuleStats(tenantID, nodeID uuid.UUID, rules []*controllerstorage.ACLRuleRecord) error {
 	policyStats, err := r.store.GetNodePolicyStats(tenantID, nodeID)
 	if err != nil {
-		return err
+		return nil
 	}
 	if policyStats == nil {
 		return nil
@@ -567,7 +567,7 @@ func (r *Router) attachACLRuleStats(tenantID, nodeID uuid.UUID, rules []*control
 func (r *Router) attachQoSRuleStats(tenantID, nodeID uuid.UUID, rules []*controllerstorage.QoSRuleRecord) error {
 	policyStats, err := r.store.GetNodePolicyStats(tenantID, nodeID)
 	if err != nil {
-		return err
+		return nil
 	}
 	if policyStats == nil {
 		return nil
