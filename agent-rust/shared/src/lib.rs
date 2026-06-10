@@ -151,8 +151,6 @@ unsafe impl aya::Pod for QosConfig {}
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TokenBucket {
-    pub lock: u32,
-    pub pad: u32,
     pub tokens: u64,
     pub last_refill_ns: u64,
     pub last_edt: u64,
@@ -235,7 +233,7 @@ mod tests {
         assert_eq!(core::mem::size_of::<PortKey>(), 12);
         assert_eq!(core::mem::size_of::<QosKey>(), 12);
         assert_eq!(core::mem::size_of::<QosConfig>(), 24);
-        assert_eq!(core::mem::size_of::<TokenBucket>(), 32);
+        assert_eq!(core::mem::size_of::<TokenBucket>(), 24);
         assert_eq!(core::mem::size_of::<RuleStatsValue>(), 32);
         assert_eq!(core::mem::size_of::<QosStatsValue>(), 48);
         assert_eq!(core::mem::size_of::<FirewallConfig>(), 10);

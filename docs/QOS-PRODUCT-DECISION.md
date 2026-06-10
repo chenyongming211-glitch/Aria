@@ -32,17 +32,18 @@ explicit:
 - `both` rules are expanded into one ingress rule and one egress rule by the
   Agent runtime before writing eBPF maps.
 
-QoS is also enforced at node scope. The Agent writes one shared
-`QOS_TOKEN_BUCKET` entry per compiled QoS rule, and all attached aria interfaces
-consume that same bucket. This means bandwidth is interpreted as node total
-bandwidth for the matching rule, not as independent per-interface bandwidth.
-Runtime packet counters stay in `QOS_STATS` as per-cpu stats and are aggregated
-by the Agent when reported to the Controller/UI.
+QoS is also enforced at node scope. All attached aria interfaces consume the
+same `QOS_TOKEN_BUCKET` entry for a compiled QoS rule. This means bandwidth is
+interpreted as node total bandwidth for the matching rule, not as independent
+per-interface bandwidth. Runtime packet counters stay in `QOS_STATS` as per-cpu
+stats and are aggregated by the Agent when reported to the Controller/UI.
 
-Because the shared QoS bucket uses `bpf_spin_lock`, the `aria-ebpf` object must
-keep BTF metadata in release builds. Do not strip the eBPF object; otherwise the
-kernel verifier rejects `QOS_TOKEN_BUCKET` with `has to have BTF in order to use
-bpf_spin_lock`.
+The preferred long-term QoS bucket implementation is a shared locked bucket.
+However, Linux requires BTF-style maps for `bpf_spin_lock`, while the current
+Aya map macro emits legacy map definitions. Attempting to use `bpf_spin_lock`
+with `QOS_TOKEN_BUCKET` is rejected by the kernel verifier with `has to have BTF
+in order to use bpf_spin_lock`. Do not reintroduce `bpf_spin_lock` until the
+Agent eBPF toolchain supports BTF-style maps or a verified equivalent.
 
 ## Implementation Guidance
 

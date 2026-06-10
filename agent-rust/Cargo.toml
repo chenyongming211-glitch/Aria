@@ -28,7 +28,3 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
-
-[profile.release.package.aria-ebpf]
-debug = 2
-strip = false
