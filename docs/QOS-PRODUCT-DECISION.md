@@ -39,6 +39,11 @@ bandwidth for the matching rule, not as independent per-interface bandwidth.
 Runtime packet counters stay in `QOS_STATS` as per-cpu stats and are aggregated
 by the Agent when reported to the Controller/UI.
 
+Because the shared QoS bucket uses `bpf_spin_lock`, the `aria-ebpf` object must
+keep BTF metadata in release builds. Do not strip the eBPF object; otherwise the
+kernel verifier rejects `QOS_TOKEN_BUCKET` with `has to have BTF in order to use
+bpf_spin_lock`.
+
 ## Implementation Guidance
 
 Legacy names such as `QoSCategoryService`, `QoSCategoryPeers`, `QoSCategoryIP`,
