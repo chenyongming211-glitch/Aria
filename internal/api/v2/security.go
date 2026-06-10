@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"aria/internal/api/apibase"
 	"aria/internal/api/middleware"
@@ -13,6 +14,39 @@ import (
 
 	"github.com/google/uuid"
 )
+
+func validatePolicyByteField(field string, value int) error {
+	if value < 0 || value > 255 {
+		return fmt.Errorf("%s must be between 0 and 255", field)
+	}
+	return nil
+}
+
+func validatePolicyDirectionField(value string) error {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "ingress", "in", "egress", "out", "both", "all":
+		return nil
+	default:
+		return fmt.Errorf("direction must be ingress, egress, or both")
+	}
+}
+
+func validateQoSModeField(value string) error {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "policing", "shaping":
+		return nil
+	default:
+		return fmt.Errorf("mode must be policing or shaping")
+	}
+}
+
+func writePolicyValidationError(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
+	return true
+}
 
 // handleTenantNodeSecurity 调度安全相关的请求 (ACLs, Blacklist)
 func (r *Router) handleTenantNodeSecurity(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node, parts []string) {
@@ -116,6 +150,12 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 	// 基础验证
 	if body.Action != "allow" && body.Action != "deny" {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Action must be 'allow' or 'deny'", nil)
+		return
+	}
+	if writePolicyValidationError(w, validatePolicyByteField("protocol", body.Protocol)) {
+		return
+	}
+	if writePolicyValidationError(w, validatePolicyDirectionField(body.Direction)) {
 		return
 	}
 
@@ -246,6 +286,12 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 	}
 	if body.Enabled != nil {
 		rule.Enabled = *body.Enabled
+	}
+	if writePolicyValidationError(w, validatePolicyByteField("protocol", rule.Protocol)) {
+		return
+	}
+	if writePolicyValidationError(w, validatePolicyDirectionField(rule.Direction)) {
+		return
 	}
 
 	updated, err := r.store.UpdateTenantNodeACLRule(tenantID, node.ID, ruleID, &rule)
@@ -515,6 +561,18 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "bandwidth_mbps must be greater than 0", nil)
 		return
 	}
+	if writePolicyValidationError(w, validatePolicyByteField("protocol", body.Protocol)) {
+		return
+	}
+	if writePolicyValidationError(w, validatePolicyByteField("priority", body.Priority)) {
+		return
+	}
+	if writePolicyValidationError(w, validatePolicyDirectionField(body.Direction)) {
+		return
+	}
+	if writePolicyValidationError(w, validateQoSModeField(body.Mode)) {
+		return
+	}
 
 	rule := &controllerstorage.QoSRuleRecord{
 		TenantID:      tenantID,
@@ -645,6 +703,18 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	}
 	if body.Enabled != nil {
 		rule.Enabled = *body.Enabled
+	}
+	if writePolicyValidationError(w, validatePolicyByteField("protocol", rule.Protocol)) {
+		return
+	}
+	if writePolicyValidationError(w, validatePolicyByteField("priority", rule.Priority)) {
+		return
+	}
+	if writePolicyValidationError(w, validatePolicyDirectionField(rule.Direction)) {
+		return
+	}
+	if writePolicyValidationError(w, validateQoSModeField(rule.Mode)) {
+		return
 	}
 
 	updated, err := r.store.UpdateTenantNodeQoSRule(tenantID, node.ID, ruleID, &rule)

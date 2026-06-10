@@ -1140,6 +1140,58 @@ func TestACLUpdatePreservesOmittedFields(t *testing.T) {
 	}
 }
 
+func TestACLWriteRejectsRuntimeCompilerInvalidFields(t *testing.T) {
+	t.Setenv("RBAC_ENFORCEMENT", "enforce")
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/security/acls"
+
+	cases := []struct {
+		name    string
+		payload string
+	}{
+		{
+			name:    "protocol exceeds uint8",
+			payload: `{"name":"bad-acl","action":"deny","src_cidr":"10.0.0.0/24","protocol":300}`,
+		},
+		{
+			name:    "invalid direction",
+			payload: `{"name":"bad-acl","action":"deny","src_cidr":"10.0.0.0/24","protocol":6,"direction":"sideways"}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New failed: %v", err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+
+			expectNodeLookup(mock, tenantID, nodeID, "{}")
+			expectTenantStatusActive(mock, tenantID)
+			expectPermissionLookup(mock, tenantID, "admin", []string{"acls:write"})
+
+			router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+			req := withAuthContext(httptest.NewRequest(
+				http.MethodPost,
+				path,
+				strings.NewReader(tc.payload),
+			), "admin", tenantID)
+			rr := httptest.NewRecorder()
+			router.HandleTenantScoped(rr, req)
+
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected status %d, got %d, body=%s", http.StatusBadRequest, rr.Code, rr.Body.String())
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("unmet sql expectations: %v", err)
+			}
+		})
+	}
+}
+
 func TestRBACHandlerMatrix_QoSWrite(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
@@ -1264,5 +1316,65 @@ func TestQoSWriteRejectsZeroBandwidth(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestQoSWriteRejectsRuntimeCompilerInvalidFields(t *testing.T) {
+	t.Setenv("RBAC_ENFORCEMENT", "enforce")
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/qos"
+
+	cases := []struct {
+		name    string
+		payload string
+	}{
+		{
+			name:    "priority exceeds uint8",
+			payload: `{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":1,"priority":65000}`,
+		},
+		{
+			name:    "protocol exceeds uint8",
+			payload: `{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":1,"protocol":300}`,
+		},
+		{
+			name:    "invalid direction",
+			payload: `{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":1,"direction":"sideways"}`,
+		},
+		{
+			name:    "invalid mode",
+			payload: `{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":1,"mode":"burst-only"}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New failed: %v", err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+
+			expectNodeLookup(mock, tenantID, nodeID, "{}")
+			expectTenantStatusActive(mock, tenantID)
+			expectPermissionLookup(mock, tenantID, "admin", []string{"qos:write"})
+
+			router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+			req := withAuthContext(httptest.NewRequest(
+				http.MethodPost,
+				path,
+				strings.NewReader(tc.payload),
+			), "admin", tenantID)
+			rr := httptest.NewRecorder()
+			router.HandleTenantScoped(rr, req)
+
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected status %d, got %d, body=%s", http.StatusBadRequest, rr.Code, rr.Body.String())
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("unmet sql expectations: %v", err)
+			}
+		})
 	}
 }
