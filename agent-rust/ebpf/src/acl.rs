@@ -15,6 +15,7 @@ use network_types::{
 
 const XDP_PASS: u32 = 2;
 const XDP_DROP: u32 = 1;
+const TC_ACT_UNSPEC: i32 = -1;
 const TC_ACT_OK: i32 = 0;
 const TC_ACT_SHOT: i32 = 2;
 const ETH_P_IP: u16 = 0x0800;
@@ -138,7 +139,7 @@ pub fn xdp_ingress_acl(ctx: XdpContext) -> u32 {
 pub fn tc_egress_acl(ctx: TcContext) -> i32 {
     match try_tc_egress_acl(ctx) {
         Ok(ret) => ret,
-        Err(_) => TC_ACT_OK,
+        Err(_) => TC_ACT_UNSPEC,
     }
 }
 
@@ -176,7 +177,7 @@ fn try_xdp_ingress_acl(ctx: XdpContext) -> Result<u32, u64> {
 fn try_tc_egress_acl(ctx: TcContext) -> Result<i32, u64> {
     let tap_id = TAP_ID_UNASSIGNED;
     if !acl_enabled(tap_id) {
-        return Ok(TC_ACT_OK);
+        return Ok(TC_ACT_UNSPEC);
     }
 
     let pkt_len = ctx.skb.len() as u64;
@@ -201,7 +202,7 @@ fn try_tc_egress_acl(ctx: TcContext) -> Result<i32, u64> {
         }
     }
 
-    Ok(TC_ACT_OK)
+    Ok(TC_ACT_UNSPEC)
 }
 
 #[inline(always)]
@@ -271,7 +272,7 @@ fn try_tc_egress_acl_ipv4(
     Ok(if action == ACTION_DROP {
         TC_ACT_SHOT
     } else {
-        TC_ACT_OK
+        TC_ACT_UNSPEC
     })
 }
 
@@ -296,7 +297,7 @@ fn try_tc_egress_acl_ipv6(
     Ok(if action == ACTION_DROP {
         TC_ACT_SHOT
     } else {
-        TC_ACT_OK
+        TC_ACT_UNSPEC
     })
 }
 
