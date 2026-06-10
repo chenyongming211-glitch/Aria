@@ -25,7 +25,7 @@ pub enum AclQosError {
     Lock,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AclRuleSpec {
     pub src_group: String,
     pub dst_group: String,
@@ -35,7 +35,7 @@ pub struct AclRuleSpec {
     pub ports: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QosRuleSpec {
     pub group: String,
     pub direction: u8,
@@ -45,7 +45,7 @@ pub struct QosRuleSpec {
     pub mode: u8,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AclQosSnapshot {
     pub acl_rules: Vec<AclRuleSpec>,
     pub qos_rules: Vec<QosRuleSpec>,
@@ -57,6 +57,7 @@ pub struct AclQosManager {
     maps: AclQosMapHandles,
     identity_mgr: Arc<StdMutex<IdentityManager>>,
     state: FirewallState,
+    last_snapshot: Option<AclQosSnapshot>,
     runtime: TapMapRuntime,
     interfaces: Vec<String>,
     _acl_ebpf: Ebpf,
@@ -75,6 +76,7 @@ impl AclQosManager {
                 .map_err(AclQosError::Kernel)?,
             identity_mgr,
             state: FirewallState::default(),
+            last_snapshot: None,
             runtime: TapMapRuntime::default(),
             interfaces,
             _acl_ebpf: acl_ebpf,
@@ -86,6 +88,11 @@ impl AclQosManager {
     }
 
     pub fn apply_snapshot(&mut self, snapshot: AclQosSnapshot) -> Result<(), AclQosError> {
+        if self.last_snapshot.as_ref() == Some(&snapshot) {
+            return Ok(());
+        }
+
+        let snapshot_cache = snapshot.clone();
         self.clear_all_acl_rules()?;
         self.clear_all_qos_rules()?;
 
@@ -135,7 +142,10 @@ impl AclQosManager {
             Some(snapshot.acl_enabled),
             Some(qos_enabled),
         )
-        .map_err(AclQosError::Kernel)
+        .map_err(AclQosError::Kernel)?;
+
+        self.last_snapshot = Some(snapshot_cache);
+        Ok(())
     }
 
     pub fn get_all_rule_stats(&self) -> Result<Vec<(u32, &'static str, u64, u64)>, AclQosError> {
