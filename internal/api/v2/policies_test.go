@@ -21,7 +21,7 @@ func TestBuildTenantNodeQoSPoliciesReturnsRuntimeErrors(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, category, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
 		        bandwidth_mbps, COALESCE(direction, 'egress'),
 		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
@@ -29,9 +29,9 @@ func TestBuildTenantNodeQoSPoliciesReturnsRuntimeErrors(t *testing.T) {
 		        COALESCE(priority, 0), COALESCE(mode, 'policing'),
 		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
-		  WHERE tenant_id = $1 AND node_id = $2 AND category = $3
+		  WHERE tenant_id = $1 AND node_id = $2
 		  ORDER BY priority ASC, created_at DESC`)).
-		WithArgs(tenantID, nodeID, controllerstorage.QoSCategoryRuntime).
+		WithArgs(tenantID, nodeID).
 		WillReturnError(errors.New("qos query failed"))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}

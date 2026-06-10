@@ -42,7 +42,7 @@
 - `SYNC-002`: sync peers must exclude deleted/suspended nodes.
 - `ACL-002`: ACL region filtering must use tenant-scoped node data.
 - `BL-001`: blacklist mutations must bump desired state version.
-- `POLICY-002`: QoS policy list must surface category load errors.
+- `POLICY-002`: QoS policy list must surface rule load errors.
 
 **Files:**
 - Modify: `pkg/controllerstorage/network_policy.go`

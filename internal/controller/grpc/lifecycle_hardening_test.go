@@ -257,10 +257,10 @@ func nodeControlStateRowsFor(tenantID, nodeID uuid.UUID, desiredVersion string, 
 }
 
 func expectEmptyQoSRules(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
-	mock.ExpectQuery(`(?s)SELECT id, tenant_id, node_id, category.*FROM qos_rules.*WHERE tenant_id = \$1 AND node_id = \$2 AND enabled = true`).
+	mock.ExpectQuery(`(?s)SELECT id, tenant_id, node_id, COALESCE\(src_cidr::text, ''\).*FROM qos_rules.*WHERE tenant_id = \$1 AND node_id = \$2 AND enabled = true`).
 		WithArgs(tenantID, nodeID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "category", "src_cidr", "dst_cidr",
+			"id", "tenant_id", "node_id", "src_cidr", "dst_cidr",
 			"src_port", "dst_port", "protocol", "bandwidth_mbps", "direction",
 			"rate_bps", "burst_bytes", "priority", "mode", "enabled", "description",
 			"created_at", "updated_at",

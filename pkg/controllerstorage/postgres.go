@@ -289,7 +289,6 @@ func (s *Storage) Migrate() error {
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			tenant_id UUID NOT NULL REFERENCES tenants(id),
 			node_id UUID NOT NULL REFERENCES nodes(id),
-			category VARCHAR(16) NOT NULL DEFAULT 'runtime',
 			src_cidr CIDR,
 			dst_cidr CIDR,
 			src_port INTEGER,
@@ -299,8 +298,7 @@ func (s *Storage) Migrate() error {
 			enabled BOOLEAN DEFAULT true,
 			description TEXT,
 			created_at TIMESTAMPTZ DEFAULT NOW(),
-			updated_at TIMESTAMPTZ DEFAULT NOW(),
-			CHECK (category = 'runtime')
+			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
 
 		`CREATE TABLE IF NOT EXISTS blacklist_rules (
@@ -356,12 +354,11 @@ func (s *Storage) Migrate() error {
 		// Add indexes for tenant isolation
 		`CREATE INDEX IF NOT EXISTS idx_tokens_tenant_id ON tokens(tenant_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_tenant_id ON acl_rules(tenant_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_qos_rules_tenant_node_category ON qos_rules(tenant_id, node_id, category)`,
-		`CREATE INDEX IF NOT EXISTS idx_qos_rules_enabled ON qos_rules(enabled)`,
-		`ALTER TABLE qos_rules ALTER COLUMN category SET DEFAULT 'runtime'`,
-		`DELETE FROM qos_rules WHERE category IS DISTINCT FROM 'runtime'`,
+		`DROP INDEX IF EXISTS idx_qos_rules_tenant_node_category`,
 		`ALTER TABLE qos_rules DROP CONSTRAINT IF EXISTS qos_rules_category_check`,
-		`ALTER TABLE qos_rules ADD CONSTRAINT qos_rules_category_check CHECK (category = 'runtime')`,
+		`ALTER TABLE qos_rules DROP COLUMN IF EXISTS category`,
+		`CREATE INDEX IF NOT EXISTS idx_qos_rules_tenant_node ON qos_rules(tenant_id, node_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_qos_rules_enabled ON qos_rules(enabled)`,
 		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS direction VARCHAR(16) DEFAULT 'egress'`,
 		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS rate_bps BIGINT`,
 		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS burst_bytes BIGINT`,

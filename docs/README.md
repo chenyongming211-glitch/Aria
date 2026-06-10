@@ -12,6 +12,7 @@
 - `docs/TEST-COVERAGE-STATUS.md`：测试覆盖现状与 CI 接入状态。
 - `docs/CERT-AUTO-ISSUANCE-DESIGN.md`：自动证书签发方案（第一阶段设计）。
 - `docs/V0.1.0-PRODUCT-BLUEPRINT.md`：v0.1.0 产品蓝图与后续 6 周实施基线，定义前端导航、后端分层、节点接入、策略与运维闭环。
+- `docs/QOS-PRODUCT-DECISION.md`：QoS 产品决策；明确取消旧的“三级 QoS”/`service / peers / ip` 分类模型，统一为节点级匹配规则。
 - `docs/RBAC-DESIGN.md`：高级 RBAC 设计与落地进度（含 audit/enforce 模式）。
 - `docs/ARCHITECTURE-REFACTOR.md`：Go Controller + Rust Agent 的当前职责拆分与接口连接方式。
 - `docs/DEPLOYMENT.md`：整体部署参考。

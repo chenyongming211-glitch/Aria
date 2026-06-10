@@ -34,7 +34,7 @@ var backupExportTables = []struct {
 	{Name: "tokens", Query: `SELECT id, token, tag, tenant_id, max_uses, used_count, expires_at, created_at, created_by, status, last_used_at, last_used_by FROM tokens ORDER BY created_at ASC`},
 	{Name: "nodes", Query: `SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, runtime_mode, kernel_version, has_aesni, status, offline_since, advertised_routes, enrolled_with_token, created_at, updated_at FROM nodes ORDER BY created_at ASC`},
 	{Name: "acl_rules", Query: `SELECT id, tenant_id, node_id, name, action, src_cidr, dst_cidr, dst_port, protocol, direction, ports, priority, enabled, description, created_at, updated_at FROM acl_rules ORDER BY created_at ASC`},
-	{Name: "qos_rules", Query: `SELECT id, tenant_id, node_id, category, src_cidr, dst_cidr, src_port, dst_port, protocol, bandwidth_mbps, direction, rate_bps, burst_bytes, priority, mode, enabled, description, created_at, updated_at FROM qos_rules ORDER BY created_at ASC`},
+	{Name: "qos_rules", Query: `SELECT id, tenant_id, node_id, src_cidr, dst_cidr, src_port, dst_port, protocol, bandwidth_mbps, direction, rate_bps, burst_bytes, priority, mode, enabled, description, created_at, updated_at FROM qos_rules ORDER BY created_at ASC`},
 	{Name: "blacklist_rules", Query: `SELECT id, tenant_id, node_id, scope, cidr, port, enabled, description, created_at, updated_at FROM blacklist_rules ORDER BY created_at ASC`},
 }
 
@@ -71,7 +71,7 @@ var backupRestoreTables = []backupTableSpec{
 	{Name: "tokens", Columns: []string{"id", "token", "tag", "tenant_id", "max_uses", "used_count", "expires_at", "created_at", "created_by", "status", "last_used_at", "last_used_by"}},
 	{Name: "nodes", Columns: []string{"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset", "last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token", "created_at", "updated_at"}},
 	{Name: "acl_rules", Columns: []string{"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at"}},
-	{Name: "qos_rules", Columns: []string{"id", "tenant_id", "node_id", "category", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at"}},
+	{Name: "qos_rules", Columns: []string{"id", "tenant_id", "node_id", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at"}},
 	{Name: "blacklist_rules", Columns: []string{"id", "tenant_id", "node_id", "scope", "cidr", "port", "enabled", "description", "created_at", "updated_at"}},
 }
 

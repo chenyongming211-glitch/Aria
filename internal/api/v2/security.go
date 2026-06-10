@@ -519,7 +519,6 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	rule := &controllerstorage.QoSRuleRecord{
 		TenantID:      tenantID,
 		NodeID:        node.ID,
-		Category:      controllerstorage.QoSCategoryRuntime,
 		SrcCIDR:       body.SrcCIDR,
 		DstCIDR:       body.DstCIDR,
 		SrcPort:       body.SrcPort,

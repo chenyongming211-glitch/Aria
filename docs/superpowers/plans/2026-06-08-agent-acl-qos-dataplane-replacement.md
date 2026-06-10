@@ -557,7 +557,7 @@ Every frontend call remains under:
 
 ```text
 /api/v2/tenants/{tenant_id}/nodes/{node_id}/security/acls
-/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/{category}
+/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos
 ```
 
 - [ ] **Step 4: Push and wait for GitHub Actions**
@@ -666,7 +666,7 @@ Deployment order:
 - **Risk:** Controller snapshot-local group ids shift between syncs.
   - **Mitigation:** deterministic group ordering by normalized group name.
 - **Risk:** frontend exposes unsupported legacy category semantics.
-  - **Mitigation:** keep category only as UI grouping; actual Agent model is group + direction.
+  - **Mitigation:** do not keep category as a UI or API grouping; the Agent model is group + direction.
 
 ## Execution Rule
 

@@ -1,0 +1,42 @@
+# QoS Product Decision
+
+Last updated: 2026-06-10
+
+Aria SD-WAN no longer uses the old "three-tier QoS" model. Do not describe QoS
+as `service / peers / ip`, and do not introduce new UI, API, Controller, or
+Agent behavior around those categories.
+
+## Current Model
+
+QoS is a unified node-scoped rule model. A rule matches traffic by fields such as:
+
+- direction: `ingress`, `egress`, or `both`
+- source CIDR
+- destination CIDR
+- protocol
+- source or destination port
+- bandwidth
+- burst
+- mode: `policing` or `shaping`
+- priority
+
+The Controller remains responsible for SaaS tenant isolation and compiles
+tenant/node QoS policy records into an Agent-local snapshot. The Agent does not
+evaluate tenant ids; it only applies the snapshot for its own node.
+
+## Implementation Guidance
+
+Legacy names such as `QoSCategoryService`, `QoSCategoryPeers`, `QoSCategoryIP`,
+`/qos/{category}`, `service QoS`, `peer QoS`, or `IP QoS` are stale product
+language. If they still exist in code, they are migration residue or
+compatibility plumbing, not the product model.
+
+The only valid northbound QoS route shape is node-scoped:
+
+```text
+/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos
+/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/{rule_id}
+```
+
+Future work should keep Controller, Agent, frontend, docs, and tests on the
+unified rule model above.
