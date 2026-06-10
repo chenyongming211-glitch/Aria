@@ -43,6 +43,8 @@ use crate::grpc_client::{
 
 const BPF_FS_PATH: &str = "/sys/fs/bpf/aria";
 const CERTIFICATE_RENEW_CHECK_INTERVAL: Duration = Duration::from_secs(30 * 60);
+const TC_PRIORITY_ACL_EGRESS: u16 = 100;
+const TC_PRIORITY_QOS: u16 = 200;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UnixRequest {
@@ -284,19 +286,24 @@ impl UnifiedAgent {
             let program: &mut SchedClassifier = acl_ebpf.program_mut("tc_egress_acl")
                 .context("TC egress ACL program not found")?
                 .try_into()?;
-            Self::attach_tc_program(program, interface, TcAttachType::Egress)?;
+            Self::attach_tc_program(
+                program,
+                interface,
+                TcAttachType::Egress,
+                TC_PRIORITY_ACL_EGRESS,
+            )?;
         }
         {
             let program: &mut SchedClassifier = qos_ebpf.program_mut("tc_ingress_qos")
                 .context("TC ingress program not found")?
                 .try_into()?;
-            Self::attach_tc_program(program, interface, TcAttachType::Ingress)?;
+            Self::attach_tc_program(program, interface, TcAttachType::Ingress, TC_PRIORITY_QOS)?;
         }
         {
             let program: &mut SchedClassifier = qos_ebpf.program_mut("tc_egress_qos")
                 .context("TC egress program not found")?
                 .try_into()?;
-            Self::attach_tc_program(program, interface, TcAttachType::Egress)?;
+            Self::attach_tc_program(program, interface, TcAttachType::Egress, TC_PRIORITY_QOS)?;
         }
         tracing::info!("Step 26: TC programs attached");
         
@@ -373,19 +380,24 @@ impl UnifiedAgent {
                 let tc_program: &mut SchedClassifier = acl_ebpf.program_mut("tc_egress_acl")
                     .context("TC egress ACL program not found")?
                     .try_into()?;
-                Self::attach_tc_program(tc_program, iface, TcAttachType::Egress)?;
+                Self::attach_tc_program(
+                    tc_program,
+                    iface,
+                    TcAttachType::Egress,
+                    TC_PRIORITY_ACL_EGRESS,
+                )?;
             }
             {
                 let tc_program: &mut SchedClassifier = qos_ebpf.program_mut("tc_ingress_qos")
                     .context("TC ingress program not found")?
                     .try_into()?;
-                Self::attach_tc_program(tc_program, iface, TcAttachType::Ingress)?;
+                Self::attach_tc_program(tc_program, iface, TcAttachType::Ingress, TC_PRIORITY_QOS)?;
             }
             {
                 let tc_program: &mut SchedClassifier = qos_ebpf.program_mut("tc_egress_qos")
                     .context("TC egress program not found")?
                     .try_into()?;
-                Self::attach_tc_program(tc_program, iface, TcAttachType::Egress)?;
+                Self::attach_tc_program(tc_program, iface, TcAttachType::Egress, TC_PRIORITY_QOS)?;
             }
             tracing::info!("✅ TC ingress/egress attached to {}", iface);
         }
@@ -406,6 +418,7 @@ impl UnifiedAgent {
         program: &mut SchedClassifier,
         interface: &str,
         attach_type: TcAttachType,
+        priority: u16,
     ) -> Result<()> {
         // Aya 0.13 uses TCX by default on Linux >= 6.6. That path is valid, but it is
         // not visible through `tc filter show`. Use netlink clsact attach so runtime
@@ -413,7 +426,10 @@ impl UnifiedAgent {
         program.attach_with_options(
             interface,
             attach_type,
-            TcAttachOptions::Netlink(NlOptions::default()),
+            TcAttachOptions::Netlink(NlOptions {
+                priority,
+                handle: 0,
+            }),
         )?;
         Ok(())
     }
