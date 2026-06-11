@@ -103,7 +103,7 @@ func TestCompilePolicySnapshotNormalizesQoSForAgentGroups(t *testing.T) {
 		ingress.GetDstIp() != "" ||
 		ingress.GetRateBps() != 250_000_000 ||
 		ingress.GetBurstBytes() != 4_000_000 ||
-		ingress.GetMode() != "shaping" {
+		ingress.GetMode() != "policing" {
 		t.Fatalf("unexpected ingress QoS rule: %#v", ingress)
 	}
 }
