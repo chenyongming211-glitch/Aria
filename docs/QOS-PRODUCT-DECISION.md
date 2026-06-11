@@ -13,12 +13,14 @@ QoS is a unified node-scoped rule model. A rule matches traffic by fields such a
 - direction: `ingress`, `egress`, or `both`
 - source CIDR
 - destination CIDR
-- protocol
-- source or destination port
 - bandwidth
 - burst
-- mode: `policing` or `shaping`
-- priority
+- mode: `policing`
+
+The current northbound API intentionally rejects protocol matching, source or
+destination port matching, and `shaping` mode. Those fields may remain in older
+database rows, protobuf structs, or eBPF structs for compatibility and future
+work, but they are not current product capabilities.
 
 The Controller remains responsible for SaaS tenant isolation and compiles
 tenant/node QoS policy records into an Agent-local snapshot. The Agent does not

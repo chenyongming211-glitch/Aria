@@ -84,6 +84,48 @@ pub struct QosRuleRuntimeStats {
     pub shaped_bytes: u64,
 }
 
+fn merge_acl_rule_runtime_stats(
+    stats_by_id: &mut HashMap<String, AclRuleRuntimeStats>,
+    ordered_ids: &mut Vec<String>,
+    id: &str,
+    packets: u64,
+    bytes: u64,
+    dropped_packets: u64,
+    dropped_bytes: u64,
+) {
+    let entry = stats_by_id.entry(id.to_string()).or_insert_with(|| {
+        ordered_ids.push(id.to_string());
+        AclRuleRuntimeStats {
+            id: id.to_string(),
+            ..Default::default()
+        }
+    });
+    entry.packets = entry.packets.saturating_add(packets);
+    entry.bytes = entry.bytes.saturating_add(bytes);
+    entry.dropped_packets = entry.dropped_packets.saturating_add(dropped_packets);
+    entry.dropped_bytes = entry.dropped_bytes.saturating_add(dropped_bytes);
+}
+
+fn merge_qos_rule_runtime_stats(
+    stats_by_id: &mut HashMap<String, QosRuleRuntimeStats>,
+    ordered_ids: &mut Vec<String>,
+    id: &str,
+    passed_bytes: u64,
+    dropped_bytes: u64,
+    shaped_bytes: u64,
+) {
+    let entry = stats_by_id.entry(id.to_string()).or_insert_with(|| {
+        ordered_ids.push(id.to_string());
+        QosRuleRuntimeStats {
+            id: id.to_string(),
+            ..Default::default()
+        }
+    });
+    entry.passed_bytes = entry.passed_bytes.saturating_add(passed_bytes);
+    entry.dropped_bytes = entry.dropped_bytes.saturating_add(dropped_bytes);
+    entry.shaped_bytes = entry.shaped_bytes.saturating_add(shaped_bytes);
+}
+
 impl AclQosManager {
     pub fn new(
         mut acl_ebpf: Ebpf,
@@ -201,7 +243,8 @@ impl AclQosManager {
             return Ok(Vec::new());
         };
 
-        let mut result = Vec::new();
+        let mut result_by_id: HashMap<String, AclRuleRuntimeStats> = HashMap::new();
+        let mut ordered_ids = Vec::new();
         for rule in &snapshot.acl_rules {
             if rule.id.trim().is_empty() {
                 continue;
@@ -216,15 +259,20 @@ impl AclQosManager {
             let Some(stat) = stats_by_key.get(&key) else {
                 continue;
             };
-            result.push(AclRuleRuntimeStats {
-                id: rule.id.clone(),
-                packets: stat.packets,
-                bytes: stat.bytes,
-                dropped_packets: stat.dropped_packets,
-                dropped_bytes: stat.dropped_bytes,
-            });
+            merge_acl_rule_runtime_stats(
+                &mut result_by_id,
+                &mut ordered_ids,
+                &rule.id,
+                stat.packets,
+                stat.bytes,
+                stat.dropped_packets,
+                stat.dropped_bytes,
+            );
         }
-        Ok(result)
+        Ok(ordered_ids
+            .into_iter()
+            .filter_map(|id| result_by_id.remove(&id))
+            .collect())
     }
 
     pub fn get_all_qos_stats(&self) -> Result<Vec<(&'static str, u32, u64, u64)>, AclQosError> {
@@ -253,7 +301,8 @@ impl AclQosManager {
             return Ok(Vec::new());
         };
 
-        let mut result = Vec::new();
+        let mut result_by_id: HashMap<String, QosRuleRuntimeStats> = HashMap::new();
+        let mut ordered_ids = Vec::new();
         for rule in &snapshot.qos_rules {
             if rule.id.trim().is_empty() {
                 continue;
@@ -265,14 +314,19 @@ impl AclQosManager {
             let Some(stat) = stats_by_key.get(&key) else {
                 continue;
             };
-            result.push(QosRuleRuntimeStats {
-                id: rule.id.clone(),
-                passed_bytes: stat.passed_bytes,
-                dropped_bytes: stat.dropped_bytes,
-                shaped_bytes: stat.shaped_bytes,
-            });
+            merge_qos_rule_runtime_stats(
+                &mut result_by_id,
+                &mut ordered_ids,
+                &rule.id,
+                stat.passed_bytes,
+                stat.dropped_bytes,
+                stat.shaped_bytes,
+            );
         }
-        Ok(result)
+        Ok(ordered_ids
+            .into_iter()
+            .filter_map(|id| result_by_id.remove(&id))
+            .collect())
     }
 
     fn apply_policy_by_group(
@@ -445,4 +499,41 @@ fn normalize_cidr(raw: &str) -> Result<String, AclQosError> {
     }
     let entry = parse_single_ip(&name)?;
     Ok(format!("{}/{}", entry.network, entry.prefix_len))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn acl_runtime_stats_merge_by_rule_id() {
+        let mut stats = HashMap::new();
+        let mut ordered_ids = Vec::new();
+
+        merge_acl_rule_runtime_stats(&mut stats, &mut ordered_ids, "rule-a", 10, 1000, 2, 200);
+        merge_acl_rule_runtime_stats(&mut stats, &mut ordered_ids, "rule-b", 1, 100, 0, 0);
+        merge_acl_rule_runtime_stats(&mut stats, &mut ordered_ids, "rule-a", 5, 500, 1, 50);
+
+        assert_eq!(ordered_ids, vec!["rule-a".to_string(), "rule-b".to_string()]);
+        let merged = stats.get("rule-a").expect("rule-a stats");
+        assert_eq!(merged.packets, 15);
+        assert_eq!(merged.bytes, 1500);
+        assert_eq!(merged.dropped_packets, 3);
+        assert_eq!(merged.dropped_bytes, 250);
+    }
+
+    #[test]
+    fn qos_runtime_stats_merge_by_rule_id() {
+        let mut stats = HashMap::new();
+        let mut ordered_ids = Vec::new();
+
+        merge_qos_rule_runtime_stats(&mut stats, &mut ordered_ids, "qos-a", 1000, 100, 10);
+        merge_qos_rule_runtime_stats(&mut stats, &mut ordered_ids, "qos-a", 500, 50, 5);
+
+        assert_eq!(ordered_ids, vec!["qos-a".to_string()]);
+        let merged = stats.get("qos-a").expect("qos-a stats");
+        assert_eq!(merged.passed_bytes, 1500);
+        assert_eq!(merged.dropped_bytes, 150);
+        assert_eq!(merged.shaped_bytes, 15);
+    }
 }
