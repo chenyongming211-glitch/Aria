@@ -3,6 +3,8 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"strings"
 	"time"
 
 	"aria/pkg/controllerstorage"
@@ -68,7 +70,7 @@ func NewDiagnoseConnectivityTool(store *controllerstorage.Storage) Tool {
 			// 1. 在线状态检查
 			isSrcOnline := time.Now().Unix()-srcNode.LastSeen <= 60
 			isDstOnline := time.Now().Unix()-dstNode.LastSeen <= 60
-			
+
 			if !isSrcOnline {
 				results = append(results, fmt.Sprintf("❌ 源节点 [%s] 离线 (最后上线: %v)", srcNode.Hostname, time.Unix(srcNode.LastSeen, 0)))
 			} else {
@@ -103,18 +105,29 @@ func NewDiagnoseConnectivityTool(store *controllerstorage.Storage) Tool {
 				}
 			}
 
-			// 3. ACL 规则检查
-			aclRules, _ := store.GetACLRulesByTenant(srcNode.TenantID)
+			// 3. ACL 规则检查：节点级 ACL 只检查源节点出站和目标节点入站。
+			srcRules, srcACLScanErr := store.GetEnabledTenantNodeACLRules(srcNode.TenantID, srcNode.ID)
+			dstRules, dstACLScanErr := store.GetEnabledTenantNodeACLRules(dstNode.TenantID, dstNode.ID)
+			if srcACLScanErr != nil || dstACLScanErr != nil {
+				results = append(results, fmt.Sprintf("⚠️ ACL 规则读取失败: source=%v target=%v", srcACLScanErr, dstACLScanErr))
+			}
+
 			blocked := false
-			for _, rule := range aclRules {
-				if !rule.Enabled || rule.Action != "deny" {
+			for _, rule := range srcRules {
+				if !aclDirectionApplies(rule.Direction, "egress") || !aclDenyRuleMatchesPath(rule, srcNode.AssignedIP, dstNode.AssignedIP) {
 					continue
 				}
-				// 使用真实的字段：SrcNode 和 DstNode 进行匹配
-				if (rule.SrcNode == srcNode.Hostname || rule.SrcNet == srcNode.AssignedIP+"/32") &&
-					(rule.DstNode == dstNode.Hostname || rule.DstNet == dstNode.AssignedIP+"/32") {
+				blocked = true
+				results = append(results, fmt.Sprintf("❌ 发现源节点出站拦截规则: ACL ID %s (%s) 禁止了从 %s 到 %s 的访问", rule.ID, rule.Name, srcNode.Hostname, dstNode.Hostname))
+				break
+			}
+			if !blocked {
+				for _, rule := range dstRules {
+					if !aclDirectionApplies(rule.Direction, "ingress") || !aclDenyRuleMatchesPath(rule, srcNode.AssignedIP, dstNode.AssignedIP) {
+						continue
+					}
 					blocked = true
-					results = append(results, fmt.Sprintf("❌ 发现拦截规则: ACL ID %d (%s) 禁止了从 %s 到 %s 的访问", rule.ID, rule.Name, srcNode.Hostname, dstNode.Hostname))
+					results = append(results, fmt.Sprintf("❌ 发现目标节点入站拦截规则: ACL ID %s (%s) 禁止了从 %s 到 %s 的访问", rule.ID, rule.Name, srcNode.Hostname, dstNode.Hostname))
 					break
 				}
 			}
@@ -133,4 +146,42 @@ func NewDiagnoseConnectivityTool(store *controllerstorage.Storage) Tool {
 			return string(data), nil
 		},
 	}
+}
+
+func aclDirectionApplies(direction, want string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(direction))
+	switch normalized {
+	case "", "both", "all":
+		return true
+	case "in":
+		return want == "ingress"
+	case "out":
+		return want == "egress"
+	default:
+		return normalized == want
+	}
+}
+
+func aclDenyRuleMatchesPath(rule *controllerstorage.ACLRuleRecord, srcIP, dstIP string) bool {
+	if rule == nil || !rule.Enabled || strings.ToLower(strings.TrimSpace(rule.Action)) != "deny" {
+		return false
+	}
+	return aclCIDRMatchesIP(rule.SrcCIDR, srcIP) && aclCIDRMatchesIP(rule.DstCIDR, dstIP)
+}
+
+func aclCIDRMatchesIP(cidr, ip string) bool {
+	cidr = strings.TrimSpace(cidr)
+	if cidr == "" || strings.EqualFold(cidr, "any") || cidr == "0.0.0.0/0" || cidr == "::/0" {
+		return true
+	}
+	parsedIP := net.ParseIP(strings.TrimSpace(ip))
+	if parsedIP == nil {
+		return false
+	}
+	if strings.Contains(cidr, "/") {
+		_, network, err := net.ParseCIDR(cidr)
+		return err == nil && network.Contains(parsedIP)
+	}
+	ruleIP := net.ParseIP(cidr)
+	return ruleIP != nil && ruleIP.Equal(parsedIP)
 }
