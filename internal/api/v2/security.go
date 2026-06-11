@@ -33,11 +33,23 @@ func validatePolicyDirectionField(value string) error {
 
 func validateQoSModeField(value string) error {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "policing", "shaping":
+	case "", "policing":
 		return nil
+	case "shaping":
+		return fmt.Errorf("mode shaping is not supported yet; use policing")
 	default:
-		return fmt.Errorf("mode must be policing or shaping")
+		return fmt.Errorf("mode must be policing")
 	}
+}
+
+func validateQoSMatchFields(protocol, srcPort, dstPort int) error {
+	if protocol != 0 {
+		return fmt.Errorf("qos protocol matching is not supported yet")
+	}
+	if srcPort != 0 || dstPort != 0 {
+		return fmt.Errorf("qos port matching is not supported yet")
+	}
+	return nil
 }
 
 func writePolicyValidationError(w http.ResponseWriter, err error) bool {
@@ -718,6 +730,9 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	if writePolicyValidationError(w, validatePolicyByteField("protocol", body.Protocol)) {
 		return
 	}
+	if writePolicyValidationError(w, validateQoSMatchFields(body.Protocol, body.SrcPort, body.DstPort)) {
+		return
+	}
 	if writePolicyValidationError(w, validatePolicyByteField("priority", body.Priority)) {
 		return
 	}
@@ -859,6 +874,9 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		rule.Enabled = *body.Enabled
 	}
 	if writePolicyValidationError(w, validatePolicyByteField("protocol", rule.Protocol)) {
+		return
+	}
+	if writePolicyValidationError(w, validateQoSMatchFields(rule.Protocol, rule.SrcPort, rule.DstPort)) {
 		return
 	}
 	if writePolicyValidationError(w, validatePolicyByteField("priority", rule.Priority)) {

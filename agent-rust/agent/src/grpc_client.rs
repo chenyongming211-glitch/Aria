@@ -723,10 +723,9 @@ fn default_qos_burst(rate_bps: u64) -> u64 {
 
 fn qos_mode_from_string(mode: &str) -> Result<u8> {
     match mode.trim().to_ascii_lowercase().as_str() {
-        "" | "policing" => Ok(0),
-        "shaping" => Ok(1),
+        "" | "policing" | "shaping" => Ok(0),
         other => Err(anyhow::anyhow!(
-            "invalid QoS mode '{}': must be policing or shaping",
+            "invalid QoS mode '{}': must be policing",
             other
         )),
     }
@@ -812,6 +811,6 @@ mod tests {
         assert_eq!(policy.rate_bps, 250_000_000);
         assert_eq!(policy.burst_bytes, 4_000_000);
         assert_eq!(policy.priority, 7);
-        assert_eq!(policy.mode, 1);
+        assert_eq!(policy.mode, 0);
     }
 }

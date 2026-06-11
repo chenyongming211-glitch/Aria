@@ -48,11 +48,6 @@ func NewAIService(store *controllerstorage.Storage) AIService {
 	myAgent.RegisterTool(tools.NewGetNodeRoutesTool(store))
 	myAgent.RegisterTool(tools.NewListAllRoutesTool(store))
 
-	// 策略管理（ACL）
-	myAgent.RegisterTool(tools.NewListPoliciesTool(store))
-	myAgent.RegisterTool(tools.NewCreatePolicyTool(store))
-	myAgent.RegisterTool(tools.NewDeletePolicyTool(store))
-
 	// 监控与诊断
 	myAgent.RegisterTool(tools.NewGetMonitorStatsTool(store))
 	myAgent.RegisterTool(tools.NewDiagnoseConnectivityTool(store))

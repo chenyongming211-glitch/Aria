@@ -1822,6 +1822,7 @@ impl UnifiedAgent {
                 
                 let mut qos_passed_bytes = 0_u64;
                 let mut qos_dropped_bytes = 0_u64;
+                let mut qos_shaped_bytes = 0_u64;
                 // QoS metrics
                 for (rule_type, rule_id, passed, dropped) in &qos_stats {
                     metrics::record_qos_rule_stats(rule_type, *rule_id, *passed, *dropped);
@@ -1854,6 +1855,7 @@ impl UnifiedAgent {
                     );
                 }
                 for stat in rule_stats.1 {
+                    qos_shaped_bytes = qos_shaped_bytes.saturating_add(stat.shaped_bytes);
                     custom_metrics.insert(
                         format!("qos_rule.{}.passed_bytes", stat.id),
                         stat.passed_bytes as f64,
@@ -1874,7 +1876,7 @@ impl UnifiedAgent {
                 custom_metrics.insert("acl_dropped_bytes".to_string(), acl_dropped_bytes as f64);
                 custom_metrics.insert("qos_passed_bytes".to_string(), qos_passed_bytes as f64);
                 custom_metrics.insert("qos_dropped_bytes".to_string(), qos_dropped_bytes as f64);
-                custom_metrics.insert("qos_shaped_bytes".to_string(), 0.0);
+                custom_metrics.insert("qos_shaped_bytes".to_string(), qos_shaped_bytes as f64);
 
                 let runtime_token = self.runtime_credential.snapshot().await;
                 if let Err(e) = self

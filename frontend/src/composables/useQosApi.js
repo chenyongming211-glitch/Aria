@@ -21,6 +21,14 @@ function normalizeMode(rule) {
   return value === 'shaping' ? 'shaping' : 'policing'
 }
 
+function normalizePayloadMode(rule) {
+  const value = String(rule.mode || '').trim().toLowerCase()
+  if (value && value !== 'policing') {
+    throw new Error('当前 QoS 只支持 policing 模式')
+  }
+  return 'policing'
+}
+
 function normalizeRateBps(rule, bandwidthMbps) {
   const value = Number(rule.rate_bps || 0)
   if (Number.isFinite(value) && value > 0) return value
@@ -73,7 +81,7 @@ function normalizeRulePayload(rule) {
     rate_bps: rateBps,
     burst_bytes: normalizeBurstBytes(rule, rateBps),
     priority: Number(rule.priority || 0),
-    mode: normalizeMode(rule),
+    mode: normalizePayloadMode(rule),
     description: rule.description || '',
     enabled: rule.enabled !== false
   }

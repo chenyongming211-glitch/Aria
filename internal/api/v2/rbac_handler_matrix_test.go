@@ -1355,12 +1355,24 @@ func TestQoSWriteRejectsRuntimeCompilerInvalidFields(t *testing.T) {
 			payload: `{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":1,"protocol":300}`,
 		},
 		{
+			name:    "protocol matching unsupported",
+			payload: `{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":1,"protocol":6}`,
+		},
+		{
+			name:    "port matching unsupported",
+			payload: `{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":1,"dst_port":443}`,
+		},
+		{
 			name:    "invalid direction",
 			payload: `{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":1,"direction":"sideways"}`,
 		},
 		{
 			name:    "invalid mode",
 			payload: `{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":1,"mode":"burst-only"}`,
+		},
+		{
+			name:    "shaping unsupported",
+			payload: `{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":1,"mode":"shaping"}`,
 		},
 	}
 

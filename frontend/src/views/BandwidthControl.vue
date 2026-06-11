@@ -41,13 +41,13 @@
       <el-alert
         title="Agent QoS 运行模型"
         type="warning"
-        description="每条 QoS 规则直接下发为 group + direction + rate_bps + burst_bytes + mode。Group 可以是 CIDR，也可以是 any；不再按旧分类建模。"
+        description="每条 QoS 规则直接下发为 group + direction + rate_bps + burst_bytes。Group 可以是 CIDR，也可以是 any；当前只支持 policing。"
         :closable="false"
         show-icon
         style="margin-bottom: 20px;"
       />
 
-      <el-table :data="rules" stripe v-loading="loading">
+      <el-table :data="rules" stripe v-loading="loading" :empty-text="qosEmptyText">
         <el-table-column prop="description" label="描述" min-width="160" />
         <el-table-column label="Group" min-width="180">
           <template #default="{ row }">
@@ -75,12 +75,11 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="priority" label="优先级" width="90" />
         <el-table-column label="Stats" width="180">
           <template #default="{ row }">
             <div class="qos-runtime-cell">
               <span>pass {{ formatBytes(row.stats?.passed_bytes) }}</span>
-              <small>drop {{ formatBytes(row.stats?.dropped_bytes) }} / shape {{ formatBytes(row.stats?.shaped_bytes) }}</small>
+              <small>drop {{ formatBytes(row.stats?.dropped_bytes) }}</small>
             </div>
           </template>
         </el-table-column>
@@ -129,17 +128,12 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="模式" prop="mode">
-              <el-select v-model="form.mode" style="width: 100%">
+              <el-select v-model="form.mode" style="width: 100%" disabled>
                 <el-option label="Policing" value="policing" />
-                <el-option label="Shaping" value="shaping" />
               </el-select>
             </el-form-item>
           </el-col>
         </el-row>
-
-        <el-form-item label="优先级" prop="priority">
-          <el-input-number v-model="form.priority" :min="0" :max="255" style="width: 100%" />
-        </el-form-item>
 
         <el-row :gutter="16">
           <el-col :span="12">
@@ -163,7 +157,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useQosApi } from '@/composables/useQosApi'
@@ -180,6 +174,14 @@ const selectedNodeId = ref('')
 const tenantNodes = ref([])
 const rules = ref([])
 const formRef = ref(null)
+const selectedNodeName = computed(() => {
+  const node = tenantNodes.value.find(item => item.id === selectedNodeId.value)
+  return node?.hostname || node?.id || ''
+})
+const qosEmptyText = computed(() => {
+  if (!selectedNodeId.value) return '请选择节点'
+  return `${selectedNodeName.value || '当前节点'} 暂无 QoS 规则`
+})
 
 const form = reactive({
   description: '',
@@ -188,7 +190,7 @@ const form = reactive({
   direction: 'egress',
   rate_bps: 0,
   burst_bytes: 0,
-  priority: 100,
+  priority: 0,
   mode: 'policing'
 })
 
@@ -246,7 +248,7 @@ const formatDirection = (direction) => {
 }
 
 const formatMode = (mode) => {
-  const map = { policing: 'Policing', shaping: 'Shaping' }
+  const map = { policing: 'Policing', shaping: 'Shaping(未启用)' }
   return map[mode] || mode || 'Policing'
 }
 
@@ -277,7 +279,7 @@ const resetForm = () => {
     direction: 'egress',
     rate_bps: 0,
     burst_bytes: 0,
-    priority: 100,
+    priority: 0,
     mode: 'policing'
   })
   if (formRef.value) formRef.value.resetFields()

@@ -312,10 +312,8 @@ func qosGroupForDirection(rule *agentpb.QoSRule, direction string) string {
 
 func normalizeQoSMode(mode string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "", "policing":
+	case "", "policing", "shaping":
 		return "policing", nil
-	case "shaping":
-		return "shaping", nil
 	default:
 		return "", fmt.Errorf("invalid QoS mode %q", mode)
 	}
