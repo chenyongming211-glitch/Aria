@@ -17,10 +17,10 @@
 | Area | Files |
 |------|-------|
 | Controller capability API | `internal/api/v2/setup.go`, `internal/api/v2/platform.go`, `internal/api/v2/platform_test.go` |
-| gRPC protocol | `pkg/grpc/agentpb/aria-agent.proto`, `agent-rust/proto/aria-agent.proto`, generated `pkg/grpc/agentpb/*.pb.go` |
+| gRPC protocol | `pkg/grpc/agentpb/aria_agent.proto`, `agent-rust/proto/aria_agent.proto`, generated `pkg/grpc/agentpb/*.pb.go` |
 | gRPC server | `internal/controller/grpc/server.go`, `internal/controller/grpc/*_test.go` |
 | REST southbound sync | `internal/cli/controller_serve.go`, `internal/cli/controller_sync_test.go` |
-| Rust Agent | `agent-rust/agent/src/grpc_client.rs`, `agent-rust/agent/src/unified_agent.rs`, `agent-rust/tests/test_grpc_sync.rs` |
+| Rust Agent | `agent-rust/agent/src/grpc_client.rs`, `agent-rust/agent/src/agent_runtime.rs`, `agent-rust/tests/test_grpc_sync.rs` |
 | Audit storage | `pkg/controllerstorage/audit_events.go`, `pkg/controllerstorage/postgres.go`, related controller tests |
 | Docs | `docs/aria-control-plane-synthesis.md` |
 
@@ -166,10 +166,10 @@ Expected: PASS.
 ## Task 2: Extend SyncResponse Protocol
 
 **Files:**
-- Modify: `pkg/grpc/agentpb/aria-agent.proto`
-- Modify: `agent-rust/proto/aria-agent.proto`
-- Regenerate: `pkg/grpc/agentpb/aria-agent.pb.go`
-- Regenerate: `pkg/grpc/agentpb/aria-agent_grpc.pb.go` if generator output changes
+- Modify: `pkg/grpc/agentpb/aria_agent.proto`
+- Modify: `agent-rust/proto/aria_agent.proto`
+- Regenerate: `pkg/grpc/agentpb/aria_agent.pb.go`
+- Regenerate: `pkg/grpc/agentpb/aria_agent_grpc.pb.go` if generator output changes
 
 - [ ] **Step 1: Add backwards-compatible fields**
 
@@ -197,7 +197,7 @@ message SyncResponse {
 Run the repo's established protobuf generation command. If no script exists, use:
 
 ```bash
-protoc --go_out=. --go-grpc_out=. pkg/grpc/agentpb/aria-agent.proto
+protoc --go_out=. --go-grpc_out=. pkg/grpc/agentpb/aria_agent.proto
 ```
 
 Expected: Go stubs expose `GetSnapshotComplete()` and `GetDomainVersions()`.
@@ -301,7 +301,7 @@ Expected: PASS.
 
 **Files:**
 - Modify: `agent-rust/agent/src/grpc_client.rs`
-- Modify: `agent-rust/agent/src/unified_agent.rs`
+- Modify: `agent-rust/agent/src/agent_runtime.rs`
 - Test: `agent-rust/tests/test_grpc_sync.rs`
 
 - [ ] **Step 1: Extend `SyncResult`**
@@ -324,7 +324,7 @@ domain_versions: resp.domain_versions,
 
 - [ ] **Step 3: Store latest domain versions**
 
-In `unified_agent`, add a small in-memory field or config-compatible storage for latest domain versions. Phase 1 only records the map; it does not skip full Sync yet.
+In `agent_runtime`, add a small in-memory field or config-compatible storage for latest domain versions. Phase 1 only records the map; it does not skip full Sync yet.
 
 - [ ] **Step 4: Add Rust regression test**
 

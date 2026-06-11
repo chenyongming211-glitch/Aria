@@ -10,7 +10,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v4.25.3
-// source: pkg/grpc/agentpb/aria-agent.proto
+// source: pkg/grpc/agentpb/aria_agent.proto
 
 package agentpb
 
@@ -242,7 +242,7 @@ var ControllerService_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "pkg/grpc/agentpb/aria-agent.proto",
+	Metadata: "pkg/grpc/agentpb/aria_agent.proto",
 }
 
 const (
@@ -426,5 +426,5 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "pkg/grpc/agentpb/aria-agent.proto",
+	Metadata: "pkg/grpc/agentpb/aria_agent.proto",
 }

@@ -105,7 +105,7 @@
 ### BUG-20: Rust Agent 硬编码 `eth0` 物理接口
 
 - **状态**: ✅ FIXED
-- **文件**: `agent-rust/agent/src/unified_agent.rs`
+- **文件**: `agent-rust/agent/src/agent_runtime.rs`
 - **说明**: 当前会先探测非回环、非 `aria*` 的物理接口，再传给系统优化模块
 
 ---

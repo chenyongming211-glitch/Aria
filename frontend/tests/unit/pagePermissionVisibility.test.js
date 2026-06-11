@@ -214,7 +214,7 @@ import Nodes from '@/views/Nodes.vue'
 import Routing from '@/views/Routing.vue'
 import BandwidthControl from '@/views/BandwidthControl.vue'
 import Monitoring from '@/views/Monitoring.vue'
-import Layout from '@/components/Layout/Layout.vue'
+import Layout from '@/components/layout/Layout.vue'
 
 const elementStubs = {
   'router-view': { template: '<div></div>' },

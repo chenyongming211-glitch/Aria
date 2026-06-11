@@ -319,9 +319,9 @@ graph LR
 |------|----------|
 | Controller API | `internal/api/v2/setup.go`、新增或扩展 `internal/api/v2/platform.go` |
 | Controller southbound | `internal/cli/controller_serve.go` |
-| gRPC protocol | `pkg/grpc/agentpb/aria-agent.proto`、`agent-rust/proto/aria-agent.proto` |
+| gRPC protocol | `pkg/grpc/agentpb/aria_agent.proto`、`agent-rust/proto/aria_agent.proto` |
 | Generated stubs | `pkg/grpc/agentpb/*.pb.go`、Rust tonic generated output（按现有 build 流程生成） |
-| Rust Agent | `agent-rust/agent/src/grpc_client.rs`、`agent-rust/agent/src/unified_agent.rs` |
+| Rust Agent | `agent-rust/agent/src/grpc_client.rs`、`agent-rust/agent/src/agent_runtime.rs` |
 | Storage / audit | `pkg/controllerstorage/audit_events.go`、`pkg/controllerstorage/postgres.go` |
 
 | 交付 | 内容 | 成功标准 |
@@ -359,7 +359,7 @@ map<string, string> domain_versions = 12;
 
 4. Agent 读取并保存 Sync 元信息
    - Rust `SyncResult` 增加 `snapshot_complete: bool` 和 `domain_versions: HashMap<String, String>`。
-   - `unified_agent` 保存最近一次 domain versions；Phase 1 不要求真正跳过全量，只记录和上报。
+   - `agent_runtime` 保存最近一次 domain versions；Phase 1 不要求真正跳过全量，只记录和上报。
    - 测试：解析新字段、老 Controller 缺字段、空 map 三种场景。
 
 5. append-only audit 增强

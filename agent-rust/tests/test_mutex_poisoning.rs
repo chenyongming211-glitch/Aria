@@ -32,7 +32,7 @@ fn test_std_mutex_poisoning_causes_cascade_failure() {
     let _ = handle1.join();
     
     // 第二个线程：尝试获取锁（应该会因为 Mutex 中毒而 panic）
-    // 这模拟了 unified_agent.rs 中的其他代码路径尝试访问 last_sync_peers
+    // 这模拟了 agent_runtime.rs 中的其他代码路径尝试访问 last_sync_peers
     let data_clone = shared_data.clone();
     let handle2 = std::thread::spawn(move || {
         // 这个 .lock().unwrap() 会 panic，因为 Mutex 已经中毒
@@ -79,9 +79,9 @@ async fn test_tokio_mutex_does_not_poison() {
     handle2.await.expect("Should successfully access mutex after panic");
 }
 
-/// 测试 3: 模拟 unified_agent.rs 中的实际场景
+/// 测试 3: 模拟 agent_runtime.rs 中的实际场景
 /// 
-/// 这个测试模拟 unified_agent.rs 中多个代码路径并发访问 last_sync_peers 的场景
+/// 这个测试模拟 agent_runtime.rs 中多个代码路径并发访问 last_sync_peers 的场景
 #[test]
 fn test_concurrent_access_with_std_mutex_poisoning() {
     let shared_peers: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(vec![]));

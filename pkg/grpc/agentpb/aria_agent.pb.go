@@ -10,7 +10,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v4.25.3
-// source: pkg/grpc/agentpb/aria-agent.proto
+// source: pkg/grpc/agentpb/aria_agent.proto
 
 package agentpb
 
@@ -1814,7 +1814,7 @@ var File_pkg_grpc_agentpb_aria_agent_proto protoreflect.FileDescriptor
 
 const file_pkg_grpc_agentpb_aria_agent_proto_rawDesc = "" +
 	"\n" +
-	"!pkg/grpc/agentpb/aria-agent.proto\x12\n" +
+	"!pkg/grpc/agentpb/aria_agent.proto\x12\n" +
 	"aria.agent\"\xcb\x03\n" +
 	"\x0fRegisterRequest\x12\x1d\n" +
 	"\n" +

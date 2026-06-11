@@ -27,11 +27,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 生成 gRPC 代码
-    println!("cargo:rerun-if-changed=../proto/aria-agent.proto");
+    println!("cargo:rerun-if-changed=../proto/aria_agent.proto");
     tonic_build::configure()
         .build_server(false)
         .build_client(true)
-        .compile_protos(&["../proto/aria-agent.proto"], &["../proto"])?;
+        .compile_protos(&["../proto/aria_agent.proto"], &["../proto"])?;
 
     if env::var("SKIP_EBPF_BUILD").is_ok() {
         println!("cargo:warning=Skipping eBPF build");

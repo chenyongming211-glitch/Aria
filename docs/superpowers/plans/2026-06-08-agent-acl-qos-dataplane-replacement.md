@@ -50,12 +50,12 @@
   - Agent-facing manager that owns state, identity/group ids, map runtime, snapshot apply, rollback, and observability.
 - Modify `agent-rust/agent/src/grpc_client.rs`
   - Keep parsing `SyncResponse.acl_rules` and `SyncResponse.qos_rules`, but convert to target group/direction structures rather than old source/pair/service targets.
-- Modify `agent-rust/agent/src/unified_agent.rs`
+- Modify `agent-rust/agent/src/agent_runtime.rs`
   - Replace `AclManager` and `QoSManager` fields with one `AclQosManager`.
   - Replace `sync_acl_rules()` and `sync_qos_rules()` with a single authoritative `sync_acl_qos_snapshot()`.
 - Modify `agent-rust/agent/src/main.rs` and `agent-rust/agent/src/lib.rs`
   - Register new modules, remove old module exports.
-- Modify `pkg/grpc/agentpb/aria-agent.proto` and generated files if group ids/names are added to the sync contract.
+- Modify `pkg/grpc/agentpb/aria_agent.proto` and generated files if group ids/names are added to the sync contract.
   - Prefer adding optional fields while preserving existing `src_net/dst_net` and `src_ip/dst_ip` until frontend/backend are migrated.
 - Modify `internal/controller/grpc/server.go`
   - Build Agent snapshot from tenant/node ACL/QoS records into group-based sync objects.
@@ -319,7 +319,7 @@ Expected: GitHub Actions green before Batch 3.
 - Create: `agent-rust/agent/src/acl_qos_manager.rs`
 - Modify: `agent-rust/agent/src/lib.rs`
 - Modify: `agent-rust/agent/src/main.rs`
-- Modify: `agent-rust/agent/src/unified_agent.rs`
+- Modify: `agent-rust/agent/src/agent_runtime.rs`
 
 - [ ] **Step 1: Add userspace map operations**
 
@@ -386,7 +386,7 @@ impl AclQosManager {
 }
 ```
 
-- [ ] **Step 4: Modify UnifiedAgent**
+- [ ] **Step 4: Modify AgentRuntime**
 
 Replace:
 
@@ -424,8 +424,8 @@ Expected: GitHub Actions green before Batch 4.
 ## Batch 4: Controller Snapshot Compiler
 
 **Files:**
-- Modify: `pkg/grpc/agentpb/aria-agent.proto`
-- Regenerate: `pkg/grpc/agentpb/aria-agent.pb.go`, `pkg/grpc/agentpb/aria-agent_grpc.pb.go`, `agent-rust/proto/aria-agent.proto` if workflow expects checked-in generated code
+- Modify: `pkg/grpc/agentpb/aria_agent.proto`
+- Regenerate: `pkg/grpc/agentpb/aria_agent.pb.go`, `pkg/grpc/agentpb/aria_agent_grpc.pb.go`, `agent-rust/proto/aria_agent.proto` if workflow expects checked-in generated code
 - Modify: `internal/controller/grpc/server.go`
 - Modify: `pkg/controllerstorage/network_policy.go`
 - Modify: `internal/api/v2/security.go`
@@ -574,8 +574,8 @@ Expected: GitHub Actions green before Batch 6.
 
 **Files:**
 - Remove old code references across `agent-rust`, `internal`, `pkg`, `frontend`
-- Modify: `docs/DEPLOYMENT.md` if deployment artifact paths changed
-- Modify: `docs/CONFIRMED-BUGS.md` if it references old ACL/QoS bugs
+- Modify: `docs/deployment.md` if deployment artifact paths changed
+- Modify: `docs/confirmed-bugs.md` if it references old ACL/QoS bugs
 
 - [ ] **Step 1: Prove old Agent map names are gone**
 

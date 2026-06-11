@@ -71,7 +71,7 @@ fn current_unix_timestamp() -> i64 {
         .as_secs() as i64
 }
 
-pub struct UnifiedAgent {
+pub struct AgentRuntime {
     config: AgentConfig,
     config_path: String,
 
@@ -92,14 +92,14 @@ pub struct UnifiedAgent {
     current_log_level: Arc<StdMutex<String>>,
 }
 
-impl UnifiedAgent {
+impl AgentRuntime {
     pub async fn new(
         config: AgentConfig,
         config_path: String,
         _interface: &str,
         log_handle: Arc<StdMutex<Option<reload::Handle<EnvFilter, Registry>>>>,
     ) -> Result<Self> {
-        tracing::info!("Creating UnifiedAgent...");
+        tracing::info!("Creating AgentRuntime...");
 
         // Create ALL WireGuard interfaces BEFORE loading eBPF
         // (eBPF XDP/TC attaches to the interfaces, so they must exist first)
@@ -515,7 +515,7 @@ impl UnifiedAgent {
     }
     
     pub async fn start(&mut self) -> Result<()> {
-        tracing::info!("Starting UnifiedAgent...");
+        tracing::info!("Starting AgentRuntime...");
 
         // ========================================
         // 系统优化（P0 + P1）- 接口已由 new() 创建

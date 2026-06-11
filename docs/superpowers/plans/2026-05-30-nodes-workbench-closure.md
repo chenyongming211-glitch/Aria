@@ -46,8 +46,8 @@
 ### Task 4: Documentation And CI
 
 **Files:**
-- Modify: `docs/KNOWN-ISSUES-STATUS.md`
-- Modify: `docs/V0.1.0-PRODUCT-BLUEPRINT.md`
+- Modify: `docs/known-issues-status.md`
+- Modify: `docs/v0.1.0-product-blueprint.md`
 
 - [ ] Update docs to state that Nodes workbench has first-stage closure when tests pass.
 - [ ] Push branch and trigger GitHub Actions.

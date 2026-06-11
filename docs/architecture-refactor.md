@@ -36,7 +36,7 @@ aria-controller (Go)                 aria-agent (Rust)
 ### Agent（Rust）
 
 - 工作区位于 `agent-rust/`
-- 统一运行期核心在 `agent-rust/agent/src/unified_agent.rs`
+- 统一运行期核心在 `agent-rust/agent/src/agent_runtime.rs`
 - 负责：
   - WireGuard 接口创建与 peer 管理
   - eBPF ACL / QoS 挂载与更新

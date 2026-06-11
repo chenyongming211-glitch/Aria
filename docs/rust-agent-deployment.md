@@ -377,9 +377,9 @@ A: 不会。NOTRACK 只影响 WireGuard 端口，sysctl 优化是全局的但都
 
 ## 参考资料
 
-- eBPF 文档：`docs/EBPF-QOS-DESIGN.md`
-- 系统优化详细说明：`docs/SYSTEM-OPTIMIZATION.md`
-- API 文档：`docs/API-REFERENCE.md`
+- eBPF 文档：`docs/ebpf-qos-design.md`
+- 系统优化详细说明：`docs/system-optimization.md`
+- API 文档：`docs/api-reference.md`
 QOS-DESIGN.md`
-- 系统优化详细说明：`docs/SYSTEM-OPTIMIZATION.md`
-- API 文档：`docs/API-REFERENCE.md`
+- 系统优化详细说明：`docs/system-optimization.md`
+- API 文档：`docs/api-reference.md`

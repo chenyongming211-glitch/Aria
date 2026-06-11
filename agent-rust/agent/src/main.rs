@@ -20,7 +20,7 @@ use tracing_subscriber::{
 mod identity;
 mod config;
 mod metrics;
-mod unified_agent;
+mod agent_runtime;
 mod grpc_client;
 mod certificate_client;
 mod wireguard;
@@ -121,7 +121,7 @@ fn main() -> Result<()> {
         Commands::Up { interface, log_level, metrics_addr, config } => {
             let rt = tokio::runtime::Runtime::new()
                 .context("Failed to create tokio runtime")?;
-            rt.block_on(run_unified_agent(&interface, &log_level, &metrics_addr, config.as_deref()))?;
+            rt.block_on(run_agent_runtime(&interface, &log_level, &metrics_addr, config.as_deref()))?;
         }
         Commands::Init {
             server,
@@ -847,9 +847,9 @@ fn send_down_command() -> Result<()> {
     Ok(())
 }
 
-// ==================== UnifiedAgent 启动函数 ====================
+// ==================== AgentRuntime 启动函数 ====================
 
-async fn run_unified_agent(
+async fn run_agent_runtime(
     interface: &str,
     log_level: &str,
     metrics_addr: &str,
@@ -891,7 +891,7 @@ async fn run_unified_agent(
     }
 
     let config = config::AgentConfig::from_parts(bootstrap, state);
-    let mut agent = unified_agent::UnifiedAgent::new(
+    let mut agent = agent_runtime::AgentRuntime::new(
         config,
         config_path.to_string(),
         interface,
@@ -902,8 +902,8 @@ async fn run_unified_agent(
 
 // ==================== 辅助函数 ====================
 
-// Unix Socket 服务器已集成到 unified_agent.rs 中的 UnifiedAgent
-// 使用 UnifiedAgent::start_unix_socket_server() 启动
+// Unix Socket 服务器已集成到 agent_runtime.rs 中的 AgentRuntime
+// 使用 AgentRuntime::start_unix_socket_server() 启动
 
 #[cfg(test)]
 mod tests {

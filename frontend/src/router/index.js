@@ -3,7 +3,7 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import { getActivePinia } from 'pinia'
 import useUserStore, { permissionsForRole, tokenRequiresPasswordChange } from '@/stores/user'
 import { clearSession, isIdleSessionExpired } from '@/utils/session'
-import Layout from '@/components/Layout/Layout.vue'
+import Layout from '@/components/layout/Layout.vue'
 
 const routes = [
   {

@@ -189,7 +189,7 @@ go install github.com/bojand/ghz/cmd/ghz@latest
 
 # 测试 Sync API 性能
 ghz --insecure \
-  --proto pkg/grpc/agentpb/aria-agent.proto \
+  --proto pkg/grpc/agentpb/aria_agent.proto \
   --call aria.agent.ControllerService/Sync \
   -d '{"public_key":"test123"}' \
   -n 1000 \

@@ -146,7 +146,7 @@ Aria/
 ## 文档索引
 
 - `docs/README.md` - 主要技术文档导航
-- `frontend/DESIGN-SYSTEM.md` - 前端设计规范
+- `frontend/design-system.md` - 前端设计规范
 
 ## 监控
 

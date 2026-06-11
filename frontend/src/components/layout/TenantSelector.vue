@@ -1,4 +1,4 @@
-<!-- src/components/Layout/TenantSelector.vue -->
+<!-- src/components/layout/TenantSelector.vue -->
 <template>
   <el-dropdown
     trigger="click"

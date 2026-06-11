@@ -78,7 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Rust Agent (agent-rust/)
 
-- `unified_agent.rs` - 统一 Agent 核心
+- `agent_runtime.rs` - 统一 Agent 核心
   - 整合 eBPF + gRPC + WireGuard
   - 主控制循环
   - Metrics 采集
@@ -150,7 +150,7 @@ aria-controller admin list                               # 查看所有 Agent
 
 ### 📚 文档
 
-- 新增 `docs/ARCHITECTURE-REFACTOR.md` - 架构重构说明
+- 新增 `docs/architecture-refactor.md` - 架构重构说明
 - 新增 `agent-rust/config/agent.yaml.example` - 配置示例
 - 更新部署文档
 

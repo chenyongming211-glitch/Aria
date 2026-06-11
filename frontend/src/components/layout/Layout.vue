@@ -1,4 +1,4 @@
-<!-- src/components/Layout/Layout.vue - 深色侧边栏 + 浅色内容区 -->
+<!-- src/components/layout/Layout.vue - 深色侧边栏 + 浅色内容区 -->
 <template>
   <el-container class="layout-container">
     <!-- 侧边栏（深色） -->
