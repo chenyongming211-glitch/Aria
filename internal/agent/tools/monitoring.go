@@ -10,25 +10,40 @@ import (
 // NewGetMonitorStatsTool 创建查询监控统计工具
 func NewGetMonitorStatsTool(store *controllerstorage.Storage) Tool {
 	return Tool{
-		Name:        "get_monitor_stats",
-		Description: "查询系统监控统计信息，包括节点总数、在线节点数、离线节点数、按 Region 分组统计等",
+		Name:               "get_monitor_stats",
+		Description:        "查询当前租户监控统计信息，包括节点总数、在线节点数、离线节点数、按 Region 分组统计等",
+		RequiredPermission: "monitoring:read",
+		TenantScoped:       true,
 		Parameters: map[string]interface{}{
 			"type":       "object",
 			"properties": map[string]interface{}{},
 		},
 		Run: func(args string) (string, error) {
+			var req map[string]interface{}
+			if err := json.Unmarshal([]byte(args), &req); err != nil {
+				return "", fmt.Errorf("参数解析失败: %v", err)
+			}
+			tenantID, tenantScoped, err := parseOptionalTenantID(req)
+			if err != nil {
+				return "", err
+			}
+			if !tenantScoped {
+				return "", fmt.Errorf("tenant_id is required")
+			}
+
 			nodes, err := store.GetAllNodes()
 			if err != nil {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
+			nodes = filterNodesByTenant(nodes, tenantID, tenantScoped)
 
 			// 统计数据
 			stats := map[string]interface{}{
-				"total_nodes":  len(nodes),
-				"online_nodes": 0,
+				"total_nodes":   len(nodes),
+				"online_nodes":  0,
 				"offline_nodes": 0,
-				"by_region":    make(map[string]int),
-				"by_status":    make(map[string]int),
+				"by_region":     make(map[string]int),
+				"by_status":     make(map[string]int),
 			}
 
 			byRegion := stats["by_region"].(map[string]int)

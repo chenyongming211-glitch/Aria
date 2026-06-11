@@ -52,6 +52,106 @@ func validateQoSMatchFields(protocol, srcPort, dstPort int) error {
 	return nil
 }
 
+var errACLRuntimeKeyConflict = errors.New("acl runtime key conflict")
+
+type aclRuntimeKey struct {
+	src       string
+	dst       string
+	proto     int
+	direction string
+}
+
+func validateACLRuntimeKeyAvailable(existing []*controllerstorage.ACLRuleRecord, candidate *controllerstorage.ACLRuleRecord, candidateID uuid.UUID) error {
+	if candidate == nil || !candidate.Enabled {
+		return nil
+	}
+
+	candidateKeys := aclRuntimeKeysForRule(candidate)
+	for _, existingRule := range existing {
+		if existingRule == nil || !existingRule.Enabled {
+			continue
+		}
+		if candidateID != uuid.Nil && existingRule.ID == candidateID {
+			continue
+		}
+		existingKeys := aclRuntimeKeysForRule(existingRule)
+		for _, existingKey := range existingKeys {
+			for _, candidateKey := range candidateKeys {
+				if existingKey == candidateKey {
+					return fmt.Errorf("%w: rule %s conflicts on %s %s -> %s proto %d",
+						errACLRuntimeKeyConflict,
+						existingRule.ID.String(),
+						candidateKey.direction,
+						candidateKey.src,
+						candidateKey.dst,
+						candidateKey.proto,
+					)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func aclRuntimeKeysForRule(rule *controllerstorage.ACLRuleRecord) []aclRuntimeKey {
+	directions := aclRuntimeDirections(rule.Direction)
+	protocols := aclRuntimeProtocols(rule.Protocol, rule.Ports, rule.DstPort)
+	keys := make([]aclRuntimeKey, 0, len(directions)*len(protocols))
+	for _, direction := range directions {
+		for _, proto := range protocols {
+			keys = append(keys, aclRuntimeKey{
+				src:       normalizeACLRuntimeCIDR(rule.SrcCIDR),
+				dst:       normalizeACLRuntimeCIDR(rule.DstCIDR),
+				proto:     proto,
+				direction: direction,
+			})
+		}
+	}
+	return keys
+}
+
+func aclRuntimeDirections(direction string) []string {
+	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case "egress", "out":
+		return []string{"egress"}
+	case "both", "all":
+		return []string{"ingress", "egress"}
+	default:
+		return []string{"ingress"}
+	}
+}
+
+func aclRuntimeProtocols(protocol int, ports string, dstPort int) []int {
+	if protocol != 0 {
+		return []int{protocol}
+	}
+	if strings.TrimSpace(ports) != "" || dstPort != 0 {
+		return []int{6, 17}
+	}
+	return []int{0}
+}
+
+func normalizeACLRuntimeCIDR(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "", "0", "any", "0.0.0.0/0", "::/0":
+		return "any"
+	default:
+		return normalized
+	}
+}
+
+func (r *Router) ensureACLRuntimeKeyAvailable(tenantID, nodeID uuid.UUID, candidateID uuid.UUID, candidate *controllerstorage.ACLRuleRecord) error {
+	if candidate == nil || !candidate.Enabled {
+		return nil
+	}
+	existing, err := r.store.ListTenantNodeACLRules(tenantID, nodeID)
+	if err != nil {
+		return fmt.Errorf("load ACL rules for runtime conflict check: %w", err)
+	}
+	return validateACLRuntimeKeyAvailable(existing, candidate, candidateID)
+}
+
 func writePolicyValidationError(w http.ResponseWriter, err error) bool {
 	if err == nil {
 		return false
@@ -195,6 +295,15 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		Description: body.Description,
 	}
 
+	if err := r.ensureACLRuntimeKeyAvailable(tenantID, node.ID, uuid.Nil, rule); err != nil {
+		if errors.Is(err, errACLRuntimeKeyConflict) {
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
+			return
+		}
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, err.Error(), nil)
+		return
+	}
+
 	created, err := r.store.CreateTenantNodeACLRule(rule)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to create ACL rule: "+err.Error(), nil)
@@ -311,6 +420,15 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		return
 	}
 	if writePolicyValidationError(w, validatePolicyDirectionField(rule.Direction)) {
+		return
+	}
+
+	if err := r.ensureACLRuntimeKeyAvailable(tenantID, node.ID, ruleID, &rule); err != nil {
+		if errors.Is(err, errACLRuntimeKeyConflict) {
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
+			return
+		}
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, err.Error(), nil)
 		return
 	}
 

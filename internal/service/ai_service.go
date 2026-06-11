@@ -3,12 +3,17 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"aria/internal/agent/brain"
 	"aria/internal/agent/tools"
+	"aria/internal/api/middleware"
 	"aria/pkg/controllerstorage"
+
+	"github.com/google/uuid"
 )
 
 // AIService 定义 AI 相关的业务接口
@@ -21,6 +26,7 @@ type AIService interface {
 // aiServiceImpl 是具体实现
 type aiServiceImpl struct {
 	agent     *brain.Agent
+	store     *controllerstorage.Storage
 	history   sync.Map // chatID -> []brain.Message
 	maxTokens int      // 历史记录限制
 }
@@ -54,12 +60,13 @@ func NewAIService(store *controllerstorage.Storage) AIService {
 
 	return &aiServiceImpl{
 		agent:     myAgent,
+		store:     store,
 		maxTokens: 20,
 	}
 }
 
 func (s *aiServiceImpl) Chat(ctx context.Context, sessionID, prompt string) (string, error) {
-	return s.agent.Think(ctx, prompt)
+	return s.agent.ThinkWithTools(ctx, prompt, s.scopedTools(ctx))
 }
 
 // ChatWithContext 带上下文的聊天（用于飞书等需要会话的场景）
@@ -71,7 +78,7 @@ func (s *aiServiceImpl) ChatWithContext(ctx context.Context, chatID, prompt stri
 	}
 
 	// 执行对话
-	answer, err := s.agent.ThinkWithHistory(ctx, prompt, history)
+	answer, err := s.agent.ThinkWithHistoryTools(ctx, prompt, history, s.scopedTools(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -107,7 +114,7 @@ func (s *aiServiceImpl) ExecuteTool(ctx context.Context, sessionID, toolName str
 
 	// 查找工具
 	var selectedTool tools.Tool
-	for _, t := range s.agent.GetTools() {
+	for _, t := range s.scopedTools(ctx) {
 		if t.Name == toolName {
 			selectedTool = t
 			break
@@ -137,4 +144,91 @@ func (s *aiServiceImpl) ExecuteTool(ctx context.Context, sessionID, toolName str
 		},
 		"tool_name": toolName,
 	}, nil
+}
+
+func (s *aiServiceImpl) scopedTools(ctx context.Context) []tools.Tool {
+	rawTools := s.agent.GetTools()
+	scoped := make([]tools.Tool, 0, len(rawTools))
+	for _, raw := range rawTools {
+		toolCopy := raw
+		run := raw.Run
+		toolCopy.Run = func(args string) (string, error) {
+			return s.runScopedTool(ctx, toolCopy, run, args)
+		}
+		scoped = append(scoped, toolCopy)
+	}
+	return scoped
+}
+
+func (s *aiServiceImpl) runScopedTool(ctx context.Context, tool tools.Tool, run tools.ToolFunc, args string) (string, error) {
+	if err := s.authorizeTool(ctx, tool.RequiredPermission); err != nil {
+		return "", err
+	}
+
+	if tool.TenantScoped {
+		tenantID, ok := middleware.GetTenantID(ctx)
+		if !ok || tenantID == uuid.Nil {
+			return "", errors.New("tenant context is required for this AI tool")
+		}
+		scopedArgs, err := injectTenantIDArg(args, tenantID)
+		if err != nil {
+			return "", err
+		}
+		args = scopedArgs
+	}
+
+	return run(args)
+}
+
+func (s *aiServiceImpl) authorizeTool(ctx context.Context, permission string) error {
+	if permission == "" {
+		return nil
+	}
+
+	role, ok := middleware.GetUserRole(ctx)
+	if !ok {
+		return errors.New("user role is required for AI tool execution")
+	}
+	roleName := controllerstorage.NormalizeRoleName(role)
+	if roleName == "super_admin" {
+		return nil
+	}
+
+	tenantID, ok := middleware.GetTenantID(ctx)
+	if !ok || tenantID == uuid.Nil {
+		return errors.New("tenant context is required for AI tool authorization")
+	}
+
+	permissions, err := s.store.GetRolePermissions(tenantID, roleName)
+	if err != nil {
+		return fmt.Errorf("AI tool permission lookup failed: %w", err)
+	}
+	if !containsPermission(permissions, permission) {
+		return fmt.Errorf("AI tool requires permission %s", permission)
+	}
+	return nil
+}
+
+func injectTenantIDArg(args string, tenantID uuid.UUID) (string, error) {
+	params := map[string]interface{}{}
+	if strings.TrimSpace(args) != "" {
+		if err := json.Unmarshal([]byte(args), &params); err != nil {
+			return "", fmt.Errorf("invalid tool params: %w", err)
+		}
+	}
+	params["tenant_id"] = tenantID.String()
+	out, err := json.Marshal(params)
+	if err != nil {
+		return "", fmt.Errorf("invalid tool params: %w", err)
+	}
+	return string(out), nil
+}
+
+func containsPermission(permissions []string, permission string) bool {
+	for _, p := range permissions {
+		if p == permission {
+			return true
+		}
+	}
+	return false
 }

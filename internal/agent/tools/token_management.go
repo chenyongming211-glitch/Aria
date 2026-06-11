@@ -13,13 +13,27 @@ import (
 // NewListTokensTool 创建查询 Token 列表工具
 func NewListTokensTool(store *controllerstorage.Storage) Tool {
 	return Tool{
-		Name:        "list_tokens",
-		Description: "查询所有 Token 的列表，包括 tag、状态、使用次数等信息",
+		Name:               "list_tokens",
+		Description:        "查询当前租户 Token 的列表，包括 tag、状态、使用次数等信息",
+		RequiredPermission: "tokens:read",
+		TenantScoped:       true,
 		Parameters: map[string]interface{}{
 			"type":       "object",
 			"properties": map[string]interface{}{},
 		},
 		Run: func(args string) (string, error) {
+			var req map[string]interface{}
+			if err := json.Unmarshal([]byte(args), &req); err != nil {
+				return "", fmt.Errorf("参数解析失败: %v", err)
+			}
+			tenantID, tenantScoped, err := parseOptionalTenantID(req)
+			if err != nil {
+				return "", err
+			}
+			if !tenantScoped {
+				return "", fmt.Errorf("tenant_id is required")
+			}
+
 			tokenStore := token.NewStore(store.DB())
 			tokens, err := tokenStore.List("")
 			if err != nil {
@@ -27,7 +41,11 @@ func NewListTokensTool(store *controllerstorage.Storage) Tool {
 			}
 
 			// 更新状态
+			filtered := make([]*token.Token, 0, len(tokens))
 			for _, t := range tokens {
+				if t.TenantID != tenantID.String() {
+					continue
+				}
 				if t.Status == token.StatusActive {
 					if t.IsExpired() {
 						t.Status = token.StatusExpired
@@ -35,9 +53,10 @@ func NewListTokensTool(store *controllerstorage.Storage) Tool {
 						t.Status = token.StatusExhausted
 					}
 				}
+				filtered = append(filtered, t)
 			}
 
-			data, err := json.Marshal(tokens)
+			data, err := json.Marshal(filtered)
 			if err != nil {
 				return "", fmt.Errorf("数据序列化失败: %v", err)
 			}
@@ -50,8 +69,10 @@ func NewListTokensTool(store *controllerstorage.Storage) Tool {
 // NewGetTokenDetailTool 创建查询 Token 详情工具
 func NewGetTokenDetailTool(store *controllerstorage.Storage) Tool {
 	return Tool{
-		Name:        "get_token_detail",
-		Description: "根据 token 查询详细信息，包括哪些节点使用了该 token",
+		Name:               "get_token_detail",
+		Description:        "根据 token 查询当前租户内的详细信息，包括哪些节点使用了该 token",
+		RequiredPermission: "tokens:read",
+		TenantScoped:       true,
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -73,10 +94,20 @@ func NewGetTokenDetailTool(store *controllerstorage.Storage) Tool {
 			if !ok || tokenStr == "" {
 				return "", fmt.Errorf("缺少必需参数: token")
 			}
+			tenantID, tenantScoped, err := parseOptionalTenantID(req)
+			if err != nil {
+				return "", err
+			}
+			if !tenantScoped {
+				return "", fmt.Errorf("tenant_id is required")
+			}
 
 			tokenStore := token.NewStore(store.DB())
 			tkn, err := tokenStore.GetByToken(tokenStr)
 			if err != nil || tkn == nil {
+				return fmt.Sprintf("Token [%s] 不存在", tokenStr), nil
+			}
+			if tkn.TenantID != tenantID.String() {
 				return fmt.Sprintf("Token [%s] 不存在", tokenStr), nil
 			}
 
@@ -95,6 +126,7 @@ func NewGetTokenDetailTool(store *controllerstorage.Storage) Tool {
 			if err != nil {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
+			allNodes = filterNodesByTenant(allNodes, tenantID, tenantScoped)
 
 			var usedByNodes []map[string]interface{}
 			for _, node := range allNodes {
@@ -132,8 +164,10 @@ func NewGetTokenDetailTool(store *controllerstorage.Storage) Tool {
 // NewCreateTokenTool 创建 Token 工具
 func NewCreateTokenTool(store *controllerstorage.Storage) Tool {
 	return Tool{
-		Name:        "create_token",
-		Description: "创建新的注册 Token。参数：tag（标签）、max_uses（最大使用次数，默认1）、ttl（有效期，默认24小时，如 '1h', '24h', '7d'）",
+		Name:               "create_token",
+		Description:        "为当前租户创建新的注册 Token。参数：tag（标签）、max_uses（最大使用次数，默认1）、ttl（有效期，默认24小时，如 '1h', '24h', '7d'）",
+		RequiredPermission: "tokens:write",
+		TenantScoped:       true,
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -163,6 +197,13 @@ func NewCreateTokenTool(store *controllerstorage.Storage) Tool {
 			if !ok || tag == "" {
 				return "", fmt.Errorf("缺少必需参数: tag")
 			}
+			tenantID, tenantScoped, err := parseOptionalTenantID(req)
+			if err != nil {
+				return "", err
+			}
+			if !tenantScoped {
+				return "", fmt.Errorf("tenant_id is required")
+			}
 
 			maxUses := 1
 			if mu, ok := req["max_uses"].(float64); ok {
@@ -183,6 +224,7 @@ func NewCreateTokenTool(store *controllerstorage.Storage) Tool {
 			tkn := &token.Token{
 				Token:     newToken,
 				Tag:       tag,
+				TenantID:  tenantID.String(),
 				MaxUses:   maxUses,
 				UsedCount: 0,
 				ExpiresAt: time.Now().Add(tokenDuration),

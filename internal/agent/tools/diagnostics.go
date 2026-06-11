@@ -13,8 +13,10 @@ import (
 // NewDiagnoseConnectivityTool 创建连接诊断工具
 func NewDiagnoseConnectivityTool(store *controllerstorage.Storage) Tool {
 	return Tool{
-		Name:        "diagnose_connectivity",
-		Description: "诊断两个节点之间的连接问题。分析 ACL 规则、版本收敛状态和在线情况。",
+		Name:               "diagnose_connectivity",
+		Description:        "诊断当前租户内两个节点之间的连接问题。分析 ACL 规则、版本收敛状态和在线情况。",
+		RequiredPermission: "monitoring:read",
+		TenantScoped:       true,
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -33,9 +35,18 @@ func NewDiagnoseConnectivityTool(store *controllerstorage.Storage) Tool {
 			var req struct {
 				SourceHostname string `json:"source_hostname"`
 				TargetHostname string `json:"target_hostname"`
+				TenantID       string `json:"tenant_id"`
 			}
 			if err := json.Unmarshal([]byte(args), &req); err != nil {
 				return "", fmt.Errorf("参数解析失败: %v", err)
+			}
+			reqMap := map[string]interface{}{"tenant_id": req.TenantID}
+			tenantID, tenantScoped, err := parseOptionalTenantID(reqMap)
+			if err != nil {
+				return "", err
+			}
+			if !tenantScoped {
+				return "", fmt.Errorf("tenant_id is required")
 			}
 
 			// 查找节点
@@ -43,6 +54,7 @@ func NewDiagnoseConnectivityTool(store *controllerstorage.Storage) Tool {
 			if err != nil {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
+			allNodes = filterNodesByTenant(allNodes, tenantID, tenantScoped)
 
 			var srcNode, dstNode *controllerstorage.Node
 			for _, n := range allNodes {

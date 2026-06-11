@@ -10,8 +10,9 @@ import (
 // NewGetNetworkConfigTool 创建查询网络配置工具
 func NewGetNetworkConfigTool(store *controllerstorage.Storage) Tool {
 	return Tool{
-		Name:        "get_network_config",
-		Description: "查询网络基础配置，包括 base_ip 和 cidr",
+		Name:               "get_network_config",
+		Description:        "查询网络基础配置，包括 base_ip 和 cidr",
+		RequiredPermission: "routes:read",
 		Parameters: map[string]interface{}{
 			"type":       "object",
 			"properties": map[string]interface{}{},

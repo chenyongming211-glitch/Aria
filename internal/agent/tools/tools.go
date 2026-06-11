@@ -12,10 +12,12 @@ type ToolFunc func(args string) (string, error)
 
 // Tool 定义一个工具
 type Tool struct {
-	Name        string
-	Description string
-	Parameters  map[string]interface{} // OpenAI Function Calling 参数定义
-	Run         ToolFunc
+	Name               string
+	Description        string
+	Parameters         map[string]interface{} // OpenAI Function Calling 参数定义
+	RequiredPermission string
+	TenantScoped       bool
+	Run                ToolFunc
 }
 
 // NewListNodesTool 创建一个查询节点工具（使用模拟数据）
@@ -48,8 +50,10 @@ func NewListNodesTool() Tool {
 // NewListNodesToolWithStore 创建一个查询节点工具（使用真实数据）
 func NewListNodesToolWithStore(store *controllerstorage.Storage) Tool {
 	return Tool{
-		Name:        "list_nodes",
-		Description: "查询当前系统中所有 WireGuard 节点的列表、状态和 IP 地址。支持按区域过滤，如只查询北京区域节点",
+		Name:               "list_nodes",
+		Description:        "查询当前系统中所有 WireGuard 节点的列表、状态和 IP 地址。支持按区域过滤，如只查询北京区域节点",
+		RequiredPermission: "nodes:read",
+		TenantScoped:       true,
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -70,6 +74,10 @@ func NewListNodesToolWithStore(store *controllerstorage.Storage) Tool {
 					fmt.Printf("[Tool:list_nodes] Filter by region: %s\n", filterRegion)
 				}
 			}
+			tenantID, tenantScoped, tenantErr := parseOptionalTenantID(req)
+			if tenantErr != nil {
+				return "", tenantErr
+			}
 
 			// 从真实数据库获取节点
 			fmt.Printf("[Tool:list_nodes] Calling store.GetAllNodes()...\n")
@@ -79,6 +87,7 @@ func NewListNodesToolWithStore(store *controllerstorage.Storage) Tool {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
 			fmt.Printf("[Tool:list_nodes] Got %d nodes from database\n", len(nodes))
+			nodes = filterNodesByTenant(nodes, tenantID, tenantScoped)
 
 			// 如果指定了区域，过滤节点
 			var filteredNodes []*controllerstorage.Node
@@ -166,8 +175,10 @@ func NewListNodesToolWithStore(store *controllerstorage.Storage) Tool {
 // NewGetNodeDetailTool 创建一个查询节点详情工具（支持参数）
 func NewGetNodeDetailTool(store *controllerstorage.Storage) Tool {
 	return Tool{
-		Name:        "get_node_detail",
-		Description: "根据节点名称查询节点的详细信息，包括 IP、地区、状态、配置路由等。hostname 在多个租户中重复时需提供 tenant_id。",
+		Name:               "get_node_detail",
+		Description:        "根据节点名称查询节点的详细信息，包括 IP、地区、状态、配置路由等。hostname 在多个租户中重复时需提供 tenant_id。",
+		RequiredPermission: "nodes:read",
+		TenantScoped:       true,
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

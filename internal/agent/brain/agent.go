@@ -7,16 +7,16 @@ import (
 	"regexp"
 	"strings"
 
+	"aria/internal/agent/tools"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/openai"
-	"aria/internal/agent/tools"
 )
 
 // Agent AI 智能助手
 type Agent struct {
-	llm         llms.Model
+	llm          llms.Model
 	systemPrompt string
-	tools       []tools.Tool
+	tools        []tools.Tool
 }
 
 // NewAgent 初始化 Agent
@@ -95,16 +95,9 @@ func CleanLLMResponse(raw string) string {
 	return cleaned
 }
 
-// Think 让 Agent 思考并回答问题（支持 Function Calling）
-func (a *Agent) Think(ctx context.Context, prompt string) (string, error) {
-	if a.llm == nil {
-		// LLM 未初始化，返回提示
-		return "AI 服务未正确配置，请检查 DEEPSEEK_API_KEY 环境变量", nil
-	}
-
-	// 1. 将 Go 工具转换为 LLM 可理解的定义
-	var llmTools []llms.Tool
-	for _, t := range a.tools {
+func toolDefinitions(toolList []tools.Tool) []llms.Tool {
+	llmTools := make([]llms.Tool, 0, len(toolList))
+	for _, t := range toolList {
 		llmTools = append(llmTools, llms.Tool{
 			Type: "function",
 			Function: &llms.FunctionDefinition{
@@ -114,8 +107,35 @@ func (a *Agent) Think(ctx context.Context, prompt string) (string, error) {
 			},
 		})
 	}
+	return llmTools
+}
 
-	// 2. 第一次调用 LLM (Round 1)
+func runTool(toolList []tools.Tool, name, args string) (string, bool) {
+	for _, t := range toolList {
+		if t.Name == name {
+			res, err := t.Run(args)
+			if err != nil {
+				return fmt.Sprintf("Tool Error: %v", err), true
+			}
+			return res, true
+		}
+	}
+	return "Error: Tool not found", false
+}
+
+// Think 让 Agent 思考并回答问题（支持 Function Calling）
+func (a *Agent) Think(ctx context.Context, prompt string) (string, error) {
+	return a.ThinkWithTools(ctx, prompt, a.tools)
+}
+
+// ThinkWithTools 使用调用方提供的工具列表思考并回答问题。
+func (a *Agent) ThinkWithTools(ctx context.Context, prompt string, toolList []tools.Tool) (string, error) {
+	if a.llm == nil {
+		// LLM 未初始化，返回提示
+		return "AI 服务未正确配置，请检查 DEEPSEEK_API_KEY 环境变量", nil
+	}
+
+	llmTools := toolDefinitions(toolList)
 	// 告诉它：用户说了啥，以及你有啥工具
 	fmt.Printf("🤖 Agent 思考中... 用户Prompt: %s\n", prompt)
 	resp, err := a.llm.GenerateContent(ctx,
@@ -140,26 +160,7 @@ func (a *Agent) Think(ctx context.Context, prompt string) (string, error) {
 		cleanedArgs := CleanLLMResponse(toolCall.FunctionCall.Arguments)
 		fmt.Printf("🔧 参数清洗: 原始=%s -> 清洗后=%s\n", toolCall.FunctionCall.Arguments, cleanedArgs)
 
-		// 4. 在本地查找并执行 Go 函数
-		var executionResult string
-		toolFound := false
-		for _, t := range a.tools {
-			if t.Name == toolCall.FunctionCall.Name {
-				// 执行！
-				res, err := t.Run(cleanedArgs)
-				if err != nil {
-					executionResult = fmt.Sprintf("Tool Error: %v", err)
-				} else {
-					executionResult = res
-				}
-				toolFound = true
-				break
-			}
-		}
-
-		if !toolFound {
-			executionResult = "Error: Tool not found"
-		}
+		executionResult, _ := runTool(toolList, toolCall.FunctionCall.Name, cleanedArgs)
 
 		fmt.Printf("✅ 工具执行结果: %s\n", executionResult)
 
@@ -210,29 +211,22 @@ func (a *Agent) Think(ctx context.Context, prompt string) (string, error) {
 
 // ThinkWithHistory 带历史记录的思考方法
 func (a *Agent) ThinkWithHistory(ctx context.Context, prompt string, history []Message) (string, error) {
+	return a.ThinkWithHistoryTools(ctx, prompt, history, a.tools)
+}
+
+// ThinkWithHistoryTools 使用调用方提供的工具列表进行带历史记录的思考。
+func (a *Agent) ThinkWithHistoryTools(ctx context.Context, prompt string, history []Message, toolList []tools.Tool) (string, error) {
 	if a.llm == nil {
 		// LLM 未初始化，返回提示
 		return "AI 服务未正确配置，请检查 DEEPSEEK_API_KEY 环境变量", nil
 	}
 
-	// 1. 将 Go 工具转换为 LLM 可理解的定义
-	var llmTools []llms.Tool
-	for _, t := range a.tools {
-		llmTools = append(llmTools, llms.Tool{
-			Type: "function",
-			Function: &llms.FunctionDefinition{
-				Name:        t.Name,
-				Description: t.Description,
-				Parameters:  t.Parameters,
-			},
-		})
-	}
-
-	return a.thinkWithHistory(ctx, prompt, history, llmTools)
+	return a.thinkWithHistory(ctx, prompt, history, toolList)
 }
 
 // thinkWithHistory 内部实现
-func (a *Agent) thinkWithHistory(ctx context.Context, prompt string, history []Message, llmTools []llms.Tool) (string, error) {
+func (a *Agent) thinkWithHistory(ctx context.Context, prompt string, history []Message, toolList []tools.Tool) (string, error) {
+	llmTools := toolDefinitions(toolList)
 	// 构建消息列表
 	messages := []llms.MessageContent{
 		llms.TextParts(llms.ChatMessageTypeSystem, a.systemPrompt),
@@ -268,26 +262,7 @@ func (a *Agent) thinkWithHistory(ctx context.Context, prompt string, history []M
 		cleanedArgs := CleanLLMResponse(toolCall.FunctionCall.Arguments)
 		fmt.Printf("🔧 参数清洗: 原始=%s -> 清洗后=%s\n", toolCall.FunctionCall.Arguments, cleanedArgs)
 
-		// 在本地查找并执行 Go 函数
-		var executionResult string
-		toolFound := false
-		for _, t := range a.tools {
-			if t.Name == toolCall.FunctionCall.Name {
-				// 执行！
-				res, err := t.Run(cleanedArgs)
-				if err != nil {
-					executionResult = fmt.Sprintf("Tool Error: %v", err)
-				} else {
-					executionResult = res
-				}
-				toolFound = true
-				break
-			}
-		}
-
-		if !toolFound {
-			executionResult = "Error: Tool not found"
-		}
+		executionResult, _ := runTool(toolList, toolCall.FunctionCall.Name, cleanedArgs)
 
 		fmt.Printf("✅ 工具执行结果: %s\n", executionResult)
 

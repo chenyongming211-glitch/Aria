@@ -126,6 +126,27 @@ fn merge_qos_rule_runtime_stats(
     entry.shaped_bytes = entry.shaped_bytes.saturating_add(shaped_bytes);
 }
 
+fn validate_acl_runtime_keys(rules: &[AclRuleSpec]) -> Result<(), AclQosError> {
+    let mut seen: HashMap<(String, String, u8, u8), String> = HashMap::new();
+    for rule in rules {
+        for direction in requested_directions(rule.direction) {
+            let key = (
+                normalize_group_name(&rule.src_group),
+                normalize_group_name(&rule.dst_group),
+                rule.proto,
+                direction,
+            );
+            if let Some(existing_id) = seen.insert(key.clone(), rule.id.clone()) {
+                return Err(AclQosError::Validation(format!(
+                    "duplicate ACL runtime key for rules '{}' and '{}' (src={}, dst={}, proto={}, direction={})",
+                    existing_id, rule.id, key.0, key.1, key.2, key.3
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 impl AclQosManager {
     pub fn new(
         mut acl_ebpf: Ebpf,
@@ -153,6 +174,7 @@ impl AclQosManager {
         if self.last_snapshot.as_ref() == Some(&snapshot) {
             return Ok(());
         }
+        validate_acl_runtime_keys(&snapshot.acl_rules)?;
 
         let snapshot_cache = snapshot.clone();
         self.clear_all_acl_rules()?;
@@ -535,5 +557,59 @@ mod tests {
         assert_eq!(merged.passed_bytes, 1500);
         assert_eq!(merged.dropped_bytes, 150);
         assert_eq!(merged.shaped_bytes, 15);
+    }
+
+    #[test]
+    fn duplicate_acl_runtime_keys_are_rejected() {
+        let rules = vec![
+            AclRuleSpec {
+                id: "rule-80".to_string(),
+                src_group: "100.64.0.2/32".to_string(),
+                dst_group: "100.64.0.3/32".to_string(),
+                proto: 6,
+                action: 1,
+                direction: 1,
+                ports: Some("80:1".to_string()),
+            },
+            AclRuleSpec {
+                id: "rule-443".to_string(),
+                src_group: "100.64.0.2/32".to_string(),
+                dst_group: "100.64.0.3/32".to_string(),
+                proto: 6,
+                action: 1,
+                direction: 1,
+                ports: Some("443:1".to_string()),
+            },
+        ];
+
+        let err = validate_acl_runtime_keys(&rules).expect_err("duplicate runtime key");
+        assert!(err.to_string().contains("duplicate ACL runtime key"));
+    }
+
+    #[test]
+    fn acl_runtime_keys_expand_both_direction() {
+        let rules = vec![
+            AclRuleSpec {
+                id: "egress".to_string(),
+                src_group: "any".to_string(),
+                dst_group: "100.64.0.3/32".to_string(),
+                proto: 1,
+                action: 1,
+                direction: 1,
+                ports: None,
+            },
+            AclRuleSpec {
+                id: "both".to_string(),
+                src_group: "".to_string(),
+                dst_group: "100.64.0.3/32".to_string(),
+                proto: 1,
+                action: 1,
+                direction: 2,
+                ports: None,
+            },
+        ];
+
+        let err = validate_acl_runtime_keys(&rules).expect_err("both should conflict with egress");
+        assert!(err.to_string().contains("duplicate ACL runtime key"));
     }
 }

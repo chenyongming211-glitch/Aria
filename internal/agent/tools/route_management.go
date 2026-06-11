@@ -11,8 +11,10 @@ import (
 // NewAddRouteTool 创建添加路由工具
 func NewAddRouteTool(store *controllerstorage.Storage) Tool {
 	return Tool{
-		Name:        "add_route",
-		Description: "为指定节点添加路由（Site-to-Site VPN）。参数：hostname（节点名称）、cidr（网段，如 192.168.1.0/24）、tenant_id（可选，租户 ID）",
+		Name:               "add_route",
+		Description:        "为指定节点添加路由（Site-to-Site VPN）。参数：hostname（节点名称）、cidr（网段，如 192.168.1.0/24）、tenant_id（可选，租户 ID）",
+		RequiredPermission: "routes:write",
+		TenantScoped:       true,
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -129,8 +131,10 @@ func NewAddRouteTool(store *controllerstorage.Storage) Tool {
 // NewRemoveRouteTool 创建删除路由工具
 func NewRemoveRouteTool(store *controllerstorage.Storage) Tool {
 	return Tool{
-		Name:        "remove_route",
-		Description: "从指定节点删除路由。参数：hostname（节点名称）、cidr（网段）、tenant_id（可选，租户 ID）",
+		Name:               "remove_route",
+		Description:        "从指定节点删除路由。参数：hostname（节点名称）、cidr（网段）、tenant_id（可选，租户 ID）",
+		RequiredPermission: "routes:write",
+		TenantScoped:       true,
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -225,8 +229,10 @@ func NewRemoveRouteTool(store *controllerstorage.Storage) Tool {
 // NewGetNodeRoutesTool 创建查询节点路由工具
 func NewGetNodeRoutesTool(store *controllerstorage.Storage) Tool {
 	return Tool{
-		Name:        "get_node_routes",
-		Description: "查询指定节点的所有路由（Site-to-Site VPN）。参数：hostname（节点名称）、tenant_id（可选，租户 ID）",
+		Name:               "get_node_routes",
+		Description:        "查询指定节点的所有路由（Site-to-Site VPN）。参数：hostname（节点名称）、tenant_id（可选，租户 ID）",
+		RequiredPermission: "routes:read",
+		TenantScoped:       true,
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -301,8 +307,10 @@ func cidrsOverlap(a, b *net.IPNet) bool {
 // NewListAllRoutesTool 创建查询所有节点路由工具
 func NewListAllRoutesTool(store *controllerstorage.Storage) Tool {
 	return Tool{
-		Name:        "list_all_routes",
-		Description: "查询所有节点及其路由情况（Site-to-Site VPN）。支持按区域过滤，如只查询北京（bj）或上海（sh）区域的节点路由",
+		Name:               "list_all_routes",
+		Description:        "查询所有节点及其路由情况（Site-to-Site VPN）。支持按区域过滤，如只查询北京（bj）或上海（sh）区域的节点路由",
+		RequiredPermission: "routes:read",
+		TenantScoped:       true,
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -323,12 +331,17 @@ func NewListAllRoutesTool(store *controllerstorage.Storage) Tool {
 					fmt.Printf("[Tool:list_all_routes] Filter by region: %s\n", filterRegion)
 				}
 			}
+			tenantID, tenantScoped, err := parseOptionalTenantID(req)
+			if err != nil {
+				return "", err
+			}
 
 			// 查询所有节点
 			nodes, err := store.GetAllNodes()
 			if err != nil {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
+			nodes = filterNodesByTenant(nodes, tenantID, tenantScoped)
 
 			// 如果指定了区域，过滤节点
 			var filteredNodes []*controllerstorage.Node
