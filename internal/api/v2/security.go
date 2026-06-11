@@ -112,6 +112,10 @@ func (r *Router) listTenantNodeACLs(w http.ResponseWriter, tenantID, nodeID uuid
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load ACL stats: "+err.Error(), nil)
 		return
 	}
+	if err := r.attachACLRuleDeliveryStatus(tenantID, nodeID, rules); err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load ACL delivery status: "+err.Error(), nil)
+		return
+	}
 	apibase.WriteSuccess(w, rules, fmt.Sprintf("%d rules retrieved", len(rules)))
 }
 
@@ -542,6 +546,10 @@ func (r *Router) listTenantNodeQoS(w http.ResponseWriter, tenantID, nodeID uuid.
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load QoS stats: "+err.Error(), nil)
 		return
 	}
+	if err := r.attachQoSRuleDeliveryStatus(tenantID, nodeID, rules); err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load QoS delivery status: "+err.Error(), nil)
+		return
+	}
 	apibase.WriteSuccess(w, rules, fmt.Sprintf("%d QoS rules retrieved", len(rules)))
 }
 
@@ -581,6 +589,106 @@ func (r *Router) attachQoSRuleStats(tenantID, nodeID uuid.UUID, rules []*control
 		}
 	}
 	return nil
+}
+
+func (r *Router) attachACLRuleDeliveryStatus(tenantID, nodeID uuid.UUID, rules []*controllerstorage.ACLRuleRecord) error {
+	statusByRef, err := r.loadPolicyDeliveryStatusByRef(tenantID, nodeID, "acl")
+	if err != nil {
+		return err
+	}
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		fields := statusByRef[rule.ID.String()]
+		applyPolicyDeliveryFields(&rule.PolicyStatus, &rule.PendingCmds, &rule.LastDelivery, &rule.DeliveryHistory, &rule.LastDeliveryError, fields)
+	}
+	return nil
+}
+
+func (r *Router) attachQoSRuleDeliveryStatus(tenantID, nodeID uuid.UUID, rules []*controllerstorage.QoSRuleRecord) error {
+	statusByRef, err := r.loadPolicyDeliveryStatusByRef(tenantID, nodeID, "qos")
+	if err != nil {
+		return err
+	}
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		fields := statusByRef[rule.ID.String()]
+		applyPolicyDeliveryFields(&rule.PolicyStatus, &rule.PendingCmds, &rule.LastDelivery, &rule.DeliveryHistory, &rule.LastDeliveryError, fields)
+	}
+	return nil
+}
+
+type policyDeliveryFields struct {
+	status    string
+	pending   int
+	last      map[string]interface{}
+	history   []map[string]interface{}
+	lastError string
+}
+
+func (r *Router) loadPolicyDeliveryStatusByRef(tenantID, nodeID uuid.UUID, domain string) (map[string]policyDeliveryFields, error) {
+	const limit = 100
+	deliveries, err := r.store.ListPolicyDeliveriesByNodeAndDomain(tenantID, nodeID, domain, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	historyByRef := make(map[string][]*controllerstorage.PolicyDelivery, len(deliveries))
+	for _, delivery := range deliveries {
+		if delivery == nil {
+			continue
+		}
+		ref := strings.TrimSpace(delivery.PolicyRef)
+		if ref == "" {
+			continue
+		}
+		historyByRef[ref] = append(historyByRef[ref], delivery)
+	}
+
+	result := make(map[string]policyDeliveryFields, len(historyByRef))
+	for ref, history := range historyByRef {
+		if len(history) == 0 {
+			continue
+		}
+		serializedHistory := make([]map[string]interface{}, 0, len(history))
+		pendingCount := 0
+		for _, delivery := range history {
+			serializedHistory = append(serializedHistory, policyDeliveryToMap(delivery))
+			pendingCount += pendingCountForCommandStatus(delivery.CommandStatus)
+		}
+		result[ref] = policyDeliveryFields{
+			status:    mapCommandStatusToPolicyStatus(history[0].CommandStatus),
+			pending:   pendingCount,
+			last:      serializedHistory[0],
+			history:   serializedHistory,
+			lastError: history[0].LastError,
+		}
+	}
+	return result, nil
+}
+
+func applyPolicyDeliveryFields(
+	status *string,
+	pending *int,
+	last *map[string]interface{},
+	history *[]map[string]interface{},
+	lastError *string,
+	fields policyDeliveryFields,
+) {
+	if fields.status == "" {
+		*status = "idle"
+		*pending = 0
+		*history = []map[string]interface{}{}
+		return
+	}
+	*status = fields.status
+	*pending = fields.pending
+	*last = fields.last
+	*history = fields.history
+	*lastError = fields.lastError
 }
 
 func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node) {

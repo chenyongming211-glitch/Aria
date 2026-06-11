@@ -273,6 +273,7 @@ func expectACLListSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
 		}).AddRow(uuid.New(), tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, "ingress", "443", 100, true, "allow web", now, now))
+	expectPolicyDeliveryListEmpty(mock, tenantID, nodeID, "acl")
 }
 
 func expectQoSListSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
@@ -291,6 +292,21 @@ func expectQoSListSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at",
 		}).AddRow(uuid.New(), tenantID, nodeID, "", "10.0.0.0/24", 0, 0, 0, 200, "egress", uint64(200000000), uint64(2500000), 0, "policing", true, "https limit", now, now))
+	expectPolicyDeliveryListEmpty(mock, tenantID, nodeID, "qos")
+}
+
+func expectPolicyDeliveryListEmpty(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, domain string) {
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, policy_domain, policy_ref, COALESCE(policy_name, ''), action, command_id, command_status,
+		       COALESCE(last_error, ''), metadata, created_at, updated_at, completed_at
+		FROM policy_deliveries
+		WHERE tenant_id = $1 AND node_id = $2 AND policy_domain = $3
+		ORDER BY created_at DESC
+		LIMIT $4`)).
+		WithArgs(tenantID, nodeID, domain, 100).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "policy_domain", "policy_ref", "policy_name",
+			"action", "command_id", "command_status", "last_error", "metadata", "created_at", "updated_at", "completed_at",
+		}))
 }
 
 func expectRolesCreateSuccess(mock sqlmock.Sqlmock, tenantID uuid.UUID) {
