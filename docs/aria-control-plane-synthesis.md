@@ -2,7 +2,7 @@
 
 > 统一整理：身份分层、Nostr 借鉴边界、ACE 事件模型、Sync 语义、工程前置、落地路线图、审查状态。  
 > 最后更新：2026-06-06
-> 相关：[V0.1.0-PRODUCT-BLUEPRINT.md](./V0.1.0-PRODUCT-BLUEPRINT.md)、[code-review-findings.md](./code-review-findings.md)、[Phase 1 implementation plan](./superpowers/plans/2026-06-03-control-plane-phase1.md)
+> 相关：[v0.1.0-product-blueprint.md](./v0.1.0-product-blueprint.md)、[code-review-findings.md](./code-review-findings.md)、[Phase 1 implementation plan](./superpowers/plans/2026-06-03-control-plane-phase1.md)
 
 ---
 

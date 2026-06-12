@@ -1,11 +1,11 @@
 ---
-# 全局变量（包含敏感信息，仅用于测试）
+# 全局变量；敏感值必须通过 Ansible vault、GitHub Secrets 或服务器 secret 注入
 
 # -------------------- 数据库配置 --------------------
 vault_postgres_host: aria-postgres
 vault_postgres_port: 5432
 vault_postgres_user: aria
-vault_postgres_password: aria-local-password
+vault_postgres_password: ""
 vault_postgres_database: aria
 
 # Redis
@@ -13,16 +13,16 @@ vault_redis_addr: aria-redis:6379
 vault_redis_password: ""
 
 # DeepSeek AI
-vault_deepseek_api_key: sk-44fc7def9839422390f8d2018967081f
+vault_deepseek_api_key: ""
 vault_deepseek_base_url: https://api.deepseek.com
 vault_deepseek_model: deepseek-chat
 vault_deepseek_system_prompt: "You are Aria's intelligent operations assistant."
 
 # 飞书
-vault_feishu_app_id: cli_a9f4b69ae5b8dbb3
-vault_feishu_app_secret: TSbiUWpalWbbIZ7t6Je3IfUgcqtWOBvF
+vault_feishu_app_id: ""
+vault_feishu_app_secret: ""
 vault_feishu_encrypt_key: ""
-vault_feishu_verify_token: X12NiE0nKEQltttec2p7ynlNHrBkjDvx
+vault_feishu_verify_token: ""
 
 # Agent 证书路径
 vault_ca_cert_path: /etc/aria/certs/ca/ca.crt

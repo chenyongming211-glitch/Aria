@@ -98,7 +98,7 @@ storage:
     host: "postgres"
     port: 5432
     user: "aria"
-    password: "aria-local-password"
+    password: ""
     database: "aria"
     sslmode: "disable"
   redis:
@@ -142,7 +142,7 @@ services:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_USER=aria
-      - POSTGRES_PASSWORD=aria-local-password
+      - POSTGRES_PASSWORD=
       - POSTGRES_DATABASE=aria
       - REDIS_ADDR=redis:6379
     depends_on:
@@ -159,7 +159,7 @@ services:
     restart: unless-stopped
     environment:
       - POSTGRES_USER=aria
-      - POSTGRES_PASSWORD=aria-local-password
+      - POSTGRES_PASSWORD=
       - POSTGRES_DB=aria
     volumes:
       - postgres-data:/var/lib/postgresql/data
