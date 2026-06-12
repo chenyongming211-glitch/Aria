@@ -273,6 +273,7 @@ func expectACLListSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
 		}).AddRow(uuid.New(), tenantID, nodeID, "allow-web", "allow", "10.0.0.0/24", "0.0.0.0/0", 443, 6, "ingress", "443", 100, true, "allow web", now, now))
+	expectNoPolicyStats(mock, tenantID, nodeID)
 	expectPolicyDeliveryListEmpty(mock, tenantID, nodeID, "acl")
 }
 
@@ -307,7 +308,16 @@ func expectQoSListSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at",
 		}).AddRow(uuid.New(), tenantID, nodeID, "", "10.0.0.0/24", 0, 0, 0, 200, "egress", uint64(200000000), uint64(2500000), 0, "policing", true, "https limit", now, now))
+	expectNoPolicyStats(mock, tenantID, nodeID)
 	expectPolicyDeliveryListEmpty(mock, tenantID, nodeID, "qos")
+}
+
+func expectNoPolicyStats(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT tenant_id, node_id, stats, updated_at
+			FROM node_policy_stats
+			WHERE tenant_id = $1 AND node_id = $2`)).
+		WithArgs(tenantID, nodeID).
+		WillReturnError(sql.ErrNoRows)
 }
 
 func expectPolicyDeliveryListEmpty(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, domain string) {
@@ -348,7 +358,9 @@ func expectACLCreateSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 
 func expectACLCreateSuccessWithEnabled(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, enabled bool) {
 	now := time.Now()
-	expectACLRuntimeConflictCheckEmpty(mock, tenantID, nodeID)
+	if enabled {
+		expectACLRuntimeConflictCheckEmpty(mock, tenantID, nodeID)
+	}
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO acl_rules (tenant_id, node_id, name, action, src_cidr, dst_cidr, dst_port, protocol, direction, ports, priority, enabled, description, src_net, dst_net, min_port, max_port)
 			 VALUES ($1, $2, $3, $4, NULLIF($5, '')::cidr, NULLIF($6, '')::cidr, $7, $8, $9, $10, $11, $12, $13, $14::cidr, $15::cidr, $16, $17)
 			 RETURNING id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
