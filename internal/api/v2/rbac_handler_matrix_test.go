@@ -489,6 +489,8 @@ func expectPolicyDispatchPostCommitSummary(mock sqlmock.Sqlmock, tenantID, nodeI
 	now := time.Now()
 	commandParams := []byte(`{}`)
 
+	expectPolicyDispatchAuditEvents(mock, tenantID, nodeID, now)
+
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*)
 		FROM agent_commands
 		WHERE node_public_key = $1
@@ -516,6 +518,20 @@ func expectPolicyDispatchPostCommitSummary(mock sqlmock.Sqlmock, tenantID, nodeI
 		WHERE tenant_id = $1 AND node_id = $2`)).
 		WithArgs(tenantID, nodeID).
 		WillReturnError(sql.ErrNoRows)
+}
+
+func expectPolicyDispatchAuditEvents(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, now time.Time) {
+	auditColumns := []string{
+		"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at",
+	}
+
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)`)).
+		WithArgs(tenantID, sqlmock.AnyArg(), controllerstorage.AuditCommandQueued, "controller", "Command queued: sync", sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows(auditColumns).AddRow(uuid.New(), tenantID, nodeID.String(), controllerstorage.AuditCommandQueued, "controller", "Command queued: sync", []byte(`{}`), now))
+
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)`)).
+		WithArgs(tenantID, sqlmock.AnyArg(), controllerstorage.AuditPolicyChanged, "user", "Policy changed", sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows(auditColumns).AddRow(uuid.New(), tenantID, nodeID.String(), controllerstorage.AuditPolicyChanged, "user", "Policy changed", []byte(`{}`), now))
 }
 
 func TestRBACHandlerMatrix_TokensRead(t *testing.T) {
