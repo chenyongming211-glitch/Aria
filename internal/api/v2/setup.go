@@ -205,8 +205,18 @@ func (r *Router) handleSingleTenant(w http.ResponseWriter, req *http.Request, te
 			apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Access denied: super_admin only", nil)
 			return
 		}
-		if _, err := r.store.DB().Exec(`UPDATE tenants SET status = 'deleted', updated_at = NOW() WHERE id = $1`, tenantID); err != nil {
+		result, err := r.store.DB().Exec(`UPDATE tenants SET status = 'deleted', updated_at = NOW() WHERE id = $1`, tenantID)
+		if err != nil {
 			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeDeleteTokenFailed, "Failed to delete tenant: "+err.Error(), nil)
+			return
+		}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeDeleteTokenFailed, "Failed to delete tenant: "+err.Error(), nil)
+			return
+		}
+		if rowsAffected == 0 {
+			apibase.WriteError(w, http.StatusNotFound, apibase.CodeTenantNotFound, "Tenant not found", nil)
 			return
 		}
 		apibase.WriteSuccess(w, map[string]string{"id": tenantID.String(), "status": "deleted"}, "Tenant deleted successfully")
@@ -479,8 +489,18 @@ func (r *Router) updateTenant(w http.ResponseWriter, req *http.Request, tenantID
 		    resource_quota = CASE WHEN $4 = '' THEN resource_quota ELSE $4 END,
 		    updated_at = NOW()
 		WHERE id = $5`
-	if _, err := r.store.DB().Exec(query, body.Name, body.Code, body.Status, resourceQuota, tenantID); err != nil {
+	result, err := r.store.DB().Exec(query, body.Name, body.Code, body.Status, resourceQuota, tenantID)
+	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeCreateTenantFailed, "Failed to update tenant: "+err.Error(), nil)
+		return
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeCreateTenantFailed, "Failed to update tenant: "+err.Error(), nil)
+		return
+	}
+	if rowsAffected == 0 {
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeTenantNotFound, "Tenant not found", nil)
 		return
 	}
 

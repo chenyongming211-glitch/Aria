@@ -52,6 +52,13 @@ func validateQoSMatchFields(protocol, srcPort, dstPort int) error {
 	return nil
 }
 
+func boolValueOrDefault(value *bool, defaultValue bool) bool {
+	if value == nil {
+		return defaultValue
+	}
+	return *value
+}
+
 var errACLRuntimeKeyConflict = errors.New("acl runtime key conflict")
 
 type aclRuntimeKey struct {
@@ -245,6 +252,7 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		Direction   string `json:"direction"`
 		Ports       string `json:"ports"`
 		Priority    int    `json:"priority"`
+		Enabled     *bool  `json:"enabled"`
 		Description string `json:"description"`
 	}
 
@@ -291,7 +299,7 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		Direction:   body.Direction,
 		Ports:       body.Ports,
 		Priority:    body.Priority,
-		Enabled:     true,
+		Enabled:     boolValueOrDefault(body.Enabled, true),
 		Description: body.Description,
 	}
 
@@ -468,6 +476,10 @@ func (r *Router) deleteTenantNodeACL(w http.ResponseWriter, tenantID uuid.UUID, 
 	}
 
 	if err := r.store.DeleteTenantNodeACLRuleByID(tenantID, node.ID, ruleID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			apibase.WriteError(w, http.StatusNotFound, apibase.CodeNotFound, "ACL rule not found", nil)
+			return
+		}
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to delete ACL rule: "+err.Error(), nil)
 		return
 	}
@@ -595,6 +607,10 @@ func (r *Router) deleteTenantNodeBlacklistRule(w http.ResponseWriter, tenantID u
 	}
 
 	if err := r.store.DeleteTenantNodeBlacklistRuleByID(tenantID, node.ID, scope, ruleID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			apibase.WriteError(w, http.StatusNotFound, apibase.CodeNotFound, "Blacklist rule not found", nil)
+			return
+		}
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to delete blacklist rule: "+err.Error(), nil)
 		return
 	}
@@ -686,7 +702,10 @@ func (r *Router) listTenantNodeQoS(w http.ResponseWriter, tenantID, nodeID uuid.
 func (r *Router) attachACLRuleStats(tenantID, nodeID uuid.UUID, rules []*controllerstorage.ACLRuleRecord) error {
 	policyStats, err := r.store.GetNodePolicyStats(tenantID, nodeID)
 	if err != nil {
-		return nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
 	}
 	if policyStats == nil {
 		return nil
@@ -705,7 +724,10 @@ func (r *Router) attachACLRuleStats(tenantID, nodeID uuid.UUID, rules []*control
 func (r *Router) attachQoSRuleStats(tenantID, nodeID uuid.UUID, rules []*controllerstorage.QoSRuleRecord) error {
 	policyStats, err := r.store.GetNodePolicyStats(tenantID, nodeID)
 	if err != nil {
-		return nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
 	}
 	if policyStats == nil {
 		return nil
@@ -834,6 +856,7 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		BurstBytes    uint64 `json:"burst_bytes"`
 		Priority      int    `json:"priority"`
 		Mode          string `json:"mode"`
+		Enabled       *bool  `json:"enabled"`
 		Description   string `json:"description"`
 	}
 
@@ -875,7 +898,7 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		BurstBytes:    body.BurstBytes,
 		Priority:      body.Priority,
 		Mode:          body.Mode,
-		Enabled:       true,
+		Enabled:       boolValueOrDefault(body.Enabled, true),
 		Description:   body.Description,
 	}
 
@@ -1044,6 +1067,10 @@ func (r *Router) deleteTenantNodeQoS(w http.ResponseWriter, tenantID uuid.UUID, 
 	}
 
 	if err := r.store.DeleteTenantNodeQoSRule(tenantID, node.ID, ruleID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			apibase.WriteError(w, http.StatusNotFound, apibase.CodeNotFound, "QoS rule not found", nil)
+			return
+		}
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to delete QoS rule: "+err.Error(), nil)
 		return
 	}

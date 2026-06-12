@@ -3,6 +3,7 @@ package v2
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -101,6 +102,178 @@ func TestListTenantNodeQoSIncludesCompletedDeliveryStatus(t *testing.T) {
 
 	assertPolicyStatusResponse(t, rr, ruleID.String(), commandID)
 
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestListTenantNodeACLsReturnsStatsLoadError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	now := time.Now().UTC()
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	ruleID := uuid.New()
+	statsErr := errors.New("stats json decode failed")
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+				        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
+				        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+				        priority, enabled, COALESCE(description, ''),
+				        created_at, updated_at
+				   FROM acl_rules
+				  WHERE tenant_id = $1 AND node_id = $2
+			  ORDER BY priority DESC, created_at DESC`)).
+		WithArgs(tenantID, nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(ruleID, tenantID, nodeID, "allow-icmp", "allow", "100.64.0.27/32", "100.64.0.2/32", 0, 1, "egress", "", 10, true, "allow icmp", now, now))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT tenant_id, node_id, stats, updated_at
+			FROM node_policy_stats
+			WHERE tenant_id = $1 AND node_id = $2`)).
+		WithArgs(tenantID, nodeID).
+		WillReturnError(statsErr)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	rr := httptest.NewRecorder()
+	router.listTenantNodeACLs(rr, tenantID, nodeID)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestListTenantNodeQoSReturnsStatsLoadError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	now := time.Now().UTC()
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	ruleID := uuid.New()
+	statsErr := errors.New("stats query failed")
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+			        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
+			        bandwidth_mbps, COALESCE(direction, 'egress'),
+			        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
+			        COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
+			        COALESCE(priority, 0), COALESCE(mode, 'policing'),
+			        enabled, COALESCE(description, ''), created_at, updated_at
+			   FROM qos_rules
+			  WHERE tenant_id = $1 AND node_id = $2
+			  ORDER BY priority ASC, created_at DESC`)).
+		WithArgs(tenantID, nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(ruleID, tenantID, nodeID, "100.64.0.27/32", "100.64.0.2/32", 0, 0, 0, 1, "egress", uint64(1000000), uint64(125000), 10, "policing", true, "tcp limit", now, now))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT tenant_id, node_id, stats, updated_at
+			FROM node_policy_stats
+			WHERE tenant_id = $1 AND node_id = $2`)).
+		WithArgs(tenantID, nodeID).
+		WillReturnError(statsErr)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	rr := httptest.NewRecorder()
+	router.listTenantNodeQoS(rr, tenantID, nodeID)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestDeleteTenantNodeACLReturnsNotFoundWhenRuleMissing(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	ruleID := uuid.New()
+	node := &controllerstorage.Node{ID: nodeID, TenantID: tenantID, PublicKey: "pub-key-1"}
+
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM acl_rules WHERE id = $1 AND tenant_id = $2 AND node_id = $3`)).
+		WithArgs(ruleID, tenantID, nodeID).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	rr := httptest.NewRecorder()
+	router.deleteTenantNodeACL(rr, tenantID, node, ruleID.String())
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestDeleteTenantNodeQoSReturnsNotFoundWhenRuleMissing(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	ruleID := uuid.New()
+	node := &controllerstorage.Node{ID: nodeID, TenantID: tenantID, PublicKey: "pub-key-1"}
+
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM qos_rules WHERE id = $1 AND tenant_id = $2 AND node_id = $3`)).
+		WithArgs(ruleID, tenantID, nodeID).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	rr := httptest.NewRecorder()
+	router.deleteTenantNodeQoS(rr, tenantID, node, ruleID.String())
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestDeleteTenantNodeBlacklistReturnsNotFoundWhenRuleMissing(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	ruleID := uuid.New()
+	node := &controllerstorage.Node{ID: nodeID, TenantID: tenantID, PublicKey: "pub-key-1"}
+
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM blacklist_rules WHERE id = $1 AND tenant_id = $2 AND node_id = $3 AND scope = $4`)).
+		WithArgs(ruleID, tenantID, nodeID, controllerstorage.BlacklistScopeSrc).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	rr := httptest.NewRecorder()
+	router.deleteTenantNodeBlacklistRule(rr, tenantID, node, controllerstorage.BlacklistScopeSrc, ruleID.String())
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}

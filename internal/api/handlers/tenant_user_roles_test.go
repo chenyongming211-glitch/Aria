@@ -15,12 +15,26 @@ import (
 	"github.com/google/uuid"
 )
 
-const tenantRoleExistsQuery = `SELECT EXISTS (SELECT 1 FROM roles WHERE tenant_id = $1 AND name = $2)`
+const tenantRoleExistsQuery = `SELECT name
+		   FROM roles
+		  WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
+		  ORDER BY CASE WHEN name = $2 THEN 0 ELSE 1 END, name
+		  LIMIT 1`
 
 func expectTenantRoleExists(mock sqlmock.Sqlmock, tenantID uuid.UUID, role string, exists bool) {
+	rows := sqlmock.NewRows([]string{"name"})
+	if exists {
+		rows.AddRow(role)
+	}
 	mock.ExpectQuery(regexp.QuoteMeta(tenantRoleExistsQuery)).
 		WithArgs(tenantID, role).
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(exists))
+		WillReturnRows(rows)
+}
+
+func expectCanonicalTenantRole(mock sqlmock.Sqlmock, tenantID uuid.UUID, requestedRole string, canonicalRole string) {
+	mock.ExpectQuery(regexp.QuoteMeta(tenantRoleExistsQuery)).
+		WithArgs(tenantID, requestedRole).
+		WillReturnRows(sqlmock.NewRows([]string{"name"}).AddRow(canonicalRole))
 }
 
 func TestCreateUserRejectsSuperAdminRole(t *testing.T) {
@@ -144,6 +158,37 @@ func TestCreateUserAllowsCustomTenantRole(t *testing.T) {
 	}
 }
 
+func TestCreateUserStoresCanonicalCustomTenantRole(t *testing.T) {
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectCanonicalTenantRole(mock, tenantID, "opsrole", "OpsRole")
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO users (id, username, password_hash, tenant_id, role, email, created_at)`)).
+		WithArgs(sqlmock.AnyArg(), "ops-user", sqlmock.AnyArg(), tenantID, "OpsRole", "").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	api := NewTenantAPI(controllerstorage.NewStorageWithDB(db))
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v2/tenants/"+tenantID.String()+"/users",
+		bytes.NewReader([]byte(`{"username":"ops-user","password":"Secret123!","role":"opsrole"}`)),
+	)
+	rr := httptest.NewRecorder()
+
+	api.CreateUser(rr, req, tenantID)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestUpdateUserRejectsSuperAdminRole(t *testing.T) {
 	tenantID := uuid.New()
 	userID := uuid.New()
@@ -251,6 +296,38 @@ func TestUpdateUserAllowsCustomTenantRole(t *testing.T) {
 		http.MethodPut,
 		"/api/v2/tenants/"+tenantID.String()+"/users/"+userID.String(),
 		bytes.NewReader([]byte(`{"role":"support"}`)),
+	)
+	rr := httptest.NewRecorder()
+
+	api.UpdateUser(rr, req, tenantID, userID.String())
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestUpdateUserStoresCanonicalCustomTenantRole(t *testing.T) {
+	tenantID := uuid.New()
+	userID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectCanonicalTenantRole(mock, tenantID, "opsrole", "OpsRole")
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET role = COALESCE(NULLIF($1, ''), role), email = COALESCE(NULLIF($2, ''), email), updated_at = NOW() WHERE id = $3 AND tenant_id = $4`)).
+		WithArgs("OpsRole", "", userID, tenantID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	api := NewTenantAPI(controllerstorage.NewStorageWithDB(db))
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v2/tenants/"+tenantID.String()+"/users/"+userID.String(),
+		bytes.NewReader([]byte(`{"role":"opsrole"}`)),
 	)
 	rr := httptest.NewRecorder()
 

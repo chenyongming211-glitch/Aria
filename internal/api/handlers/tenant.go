@@ -327,7 +327,7 @@ func (t *TenantAPI) normalizeAssignableTenantUserRole(tenantID uuid.UUID, role s
 		return normalizedRole, nil
 	}
 
-	exists, err := t.tenantRoleExists(tenantID, normalizedRole)
+	canonicalRole, exists, err := t.canonicalTenantRoleName(tenantID, normalizedRole)
 	if err != nil {
 		return "", fmt.Errorf("failed to validate tenant role: %w", err)
 	}
@@ -335,17 +335,27 @@ func (t *TenantAPI) normalizeAssignableTenantUserRole(tenantID uuid.UUID, role s
 		return "", fmt.Errorf("%w: %s", errTenantRoleNotAssignable, normalizedRole)
 	}
 
-	return normalizedRole, nil
+	return canonicalRole, nil
 }
 
-func (t *TenantAPI) tenantRoleExists(tenantID uuid.UUID, role string) (bool, error) {
-	var exists bool
+func (t *TenantAPI) canonicalTenantRoleName(tenantID uuid.UUID, role string) (string, bool, error) {
+	var canonicalRole string
 	err := t.store.DB().QueryRow(
-		`SELECT EXISTS (SELECT 1 FROM roles WHERE tenant_id = $1 AND name = $2)`,
+		`SELECT name
+		   FROM roles
+		  WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
+		  ORDER BY CASE WHEN name = $2 THEN 0 ELSE 1 END, name
+		  LIMIT 1`,
 		tenantID,
 		role,
-	).Scan(&exists)
-	return exists, err
+	).Scan(&canonicalRole)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return canonicalRole, true, nil
 }
 
 func (t *TenantAPI) CreateUser(w http.ResponseWriter, r *http.Request, tenantID uuid.UUID) {
