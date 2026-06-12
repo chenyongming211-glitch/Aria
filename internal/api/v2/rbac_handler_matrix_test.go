@@ -358,9 +358,6 @@ func expectACLCreateSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 
 func expectACLCreateSuccessWithEnabled(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, enabled bool) {
 	now := time.Now()
-	if enabled {
-		expectACLRuntimeConflictCheckEmpty(mock, tenantID, nodeID)
-	}
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO acl_rules (tenant_id, node_id, name, action, src_cidr, dst_cidr, dst_port, protocol, direction, ports, priority, enabled, description, src_net, dst_net, min_port, max_port)
 			 VALUES ($1, $2, $3, $4, NULLIF($5, '')::cidr, NULLIF($6, '')::cidr, $7, $8, $9, $10, $11, $12, $13, $14::cidr, $15::cidr, $16, $17)
 			 RETURNING id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
@@ -1140,6 +1137,7 @@ func TestRBACHandlerMatrix_ACLsWrite(t *testing.T) {
 				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
 			}
 			if tc.expectStatus == http.StatusOK {
+				expectACLRuntimeConflictCheckEmpty(mock, tenantID, nodeID)
 				mock.ExpectBegin()
 				expectACLCreateSuccess(mock, tenantID, nodeID)
 				expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
