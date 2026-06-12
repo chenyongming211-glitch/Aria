@@ -312,32 +312,33 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		return
 	}
 
-	created, err := r.store.CreateTenantNodeACLRule(rule)
-	if err != nil {
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to create ACL rule: "+err.Error(), nil)
-		return
+	metadata := map[string]interface{}{
+		"node_id": node.ID.String(),
 	}
-
-	r.writePolicyMutationSuccess(w, node, "acl", "create", map[string]interface{}{
-		"id":          created.ID.String(),
-		"node_id":     node.ID.String(),
-		"name":        created.Name,
-		"action":      created.Action,
-		"src_cidr":    created.SrcCIDR,
-		"dst_cidr":    created.DstCIDR,
-		"dst_port":    created.DstPort,
-		"protocol":    created.Protocol,
-		"direction":   created.Direction,
-		"ports":       created.Ports,
-		"priority":    created.Priority,
-		"enabled":     created.Enabled,
-		"description": created.Description,
-		"created_at":  created.CreatedAt,
-		"updated_at":  created.UpdatedAt,
-	}, "ACL rule created successfully", map[string]interface{}{
-		"node_id":     node.ID.String(),
-		"rule_id":     created.ID.String(),
-		"description": created.Description,
+	r.writeTransactionalPolicyMutationSuccess(w, node, "acl", "create", "ACL rule created successfully", metadata, func(tx *controllerstorage.PolicyMutationTx) (map[string]interface{}, error) {
+		created, err := tx.CreateTenantNodeACLRule(rule)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create ACL rule: %w", err)
+		}
+		metadata["rule_id"] = created.ID.String()
+		metadata["description"] = created.Description
+		return map[string]interface{}{
+			"id":          created.ID.String(),
+			"node_id":     node.ID.String(),
+			"name":        created.Name,
+			"action":      created.Action,
+			"src_cidr":    created.SrcCIDR,
+			"dst_cidr":    created.DstCIDR,
+			"dst_port":    created.DstPort,
+			"protocol":    created.Protocol,
+			"direction":   created.Direction,
+			"ports":       created.Ports,
+			"priority":    created.Priority,
+			"enabled":     created.Enabled,
+			"description": created.Description,
+			"created_at":  created.CreatedAt,
+			"updated_at":  created.UpdatedAt,
+		}, nil
 	})
 }
 
@@ -440,31 +441,33 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		return
 	}
 
-	updated, err := r.store.UpdateTenantNodeACLRule(tenantID, node.ID, ruleID, &rule)
-	if err != nil {
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to update ACL rule: "+err.Error(), nil)
-		return
-	}
-
-	r.writePolicyMutationSuccess(w, node, "acl", "update", map[string]interface{}{
-		"id":          ruleID.String(),
-		"node_id":     node.ID.String(),
-		"name":        updated.Name,
-		"action":      updated.Action,
-		"src_cidr":    updated.SrcCIDR,
-		"dst_cidr":    updated.DstCIDR,
-		"dst_port":    updated.DstPort,
-		"protocol":    updated.Protocol,
-		"direction":   updated.Direction,
-		"ports":       updated.Ports,
-		"priority":    updated.Priority,
-		"enabled":     updated.Enabled,
-		"description": updated.Description,
-		"updated_at":  updated.UpdatedAt,
-	}, "ACL rule updated successfully", map[string]interface{}{
+	metadata := map[string]interface{}{
 		"node_id":     node.ID.String(),
 		"rule_id":     ruleID.String(),
-		"description": updated.Description,
+		"description": rule.Description,
+	}
+	r.writeTransactionalPolicyMutationSuccess(w, node, "acl", "update", "ACL rule updated successfully", metadata, func(tx *controllerstorage.PolicyMutationTx) (map[string]interface{}, error) {
+		updated, err := tx.UpdateTenantNodeACLRule(tenantID, node.ID, ruleID, &rule)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update ACL rule: %w", err)
+		}
+		metadata["description"] = updated.Description
+		return map[string]interface{}{
+			"id":          ruleID.String(),
+			"node_id":     node.ID.String(),
+			"name":        updated.Name,
+			"action":      updated.Action,
+			"src_cidr":    updated.SrcCIDR,
+			"dst_cidr":    updated.DstCIDR,
+			"dst_port":    updated.DstPort,
+			"protocol":    updated.Protocol,
+			"direction":   updated.Direction,
+			"ports":       updated.Ports,
+			"priority":    updated.Priority,
+			"enabled":     updated.Enabled,
+			"description": updated.Description,
+			"updated_at":  updated.UpdatedAt,
+		}, nil
 	})
 }
 
@@ -475,22 +478,21 @@ func (r *Router) deleteTenantNodeACL(w http.ResponseWriter, tenantID uuid.UUID, 
 		return
 	}
 
-	if err := r.store.DeleteTenantNodeACLRuleByID(tenantID, node.ID, ruleID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			apibase.WriteError(w, http.StatusNotFound, apibase.CodeNotFound, "ACL rule not found", nil)
-			return
-		}
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to delete ACL rule: "+err.Error(), nil)
-		return
-	}
-
-	r.writePolicyMutationSuccess(w, node, "acl", "delete", map[string]interface{}{
-		"id":      ruleIDStr,
-		"node_id": node.ID.String(),
-		"status":  "deleted",
-	}, "ACL rule deleted successfully", map[string]interface{}{
+	r.writeTransactionalPolicyMutationSuccess(w, node, "acl", "delete", "ACL rule deleted successfully", map[string]interface{}{
 		"node_id": node.ID.String(),
 		"rule_id": ruleIDStr,
+	}, func(tx *controllerstorage.PolicyMutationTx) (map[string]interface{}, error) {
+		if err := tx.DeleteTenantNodeACLRuleByID(tenantID, node.ID, ruleID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, fmt.Errorf("ACL rule not found: %w", err)
+			}
+			return nil, fmt.Errorf("failed to delete ACL rule: %w", err)
+		}
+		return map[string]interface{}{
+			"id":      ruleIDStr,
+			"node_id": node.ID.String(),
+			"status":  "deleted",
+		}, nil
 	})
 }
 
@@ -576,26 +578,28 @@ func (r *Router) createTenantNodeBlacklistRule(w http.ResponseWriter, req *http.
 		Description: body.Description,
 	}
 
-	created, err := r.store.CreateTenantNodeBlacklistRule(rule)
-	if err != nil {
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to create blacklist rule: "+err.Error(), nil)
-		return
-	}
-
-	r.writePolicyMutationSuccess(w, node, "blacklist", "create", map[string]interface{}{
-		"id":          created.ID.String(),
-		"node_id":     node.ID.String(),
-		"scope":       created.Scope,
-		"cidr":        created.CIDR,
-		"port":        created.Port,
-		"enabled":     created.Enabled,
-		"description": created.Description,
-		"created_at":  created.CreatedAt,
-		"updated_at":  created.UpdatedAt,
-	}, "Blacklist rule created successfully", map[string]interface{}{
+	metadata := map[string]interface{}{
 		"node_id": node.ID.String(),
-		"rule_id": created.ID.String(),
-		"scope":   created.Scope,
+		"scope":   scope,
+	}
+	r.writeTransactionalPolicyMutationSuccess(w, node, "blacklist", "create", "Blacklist rule created successfully", metadata, func(tx *controllerstorage.PolicyMutationTx) (map[string]interface{}, error) {
+		created, err := tx.CreateTenantNodeBlacklistRule(rule)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create blacklist rule: %w", err)
+		}
+		metadata["rule_id"] = created.ID.String()
+		metadata["scope"] = created.Scope
+		return map[string]interface{}{
+			"id":          created.ID.String(),
+			"node_id":     node.ID.String(),
+			"scope":       created.Scope,
+			"cidr":        created.CIDR,
+			"port":        created.Port,
+			"enabled":     created.Enabled,
+			"description": created.Description,
+			"created_at":  created.CreatedAt,
+			"updated_at":  created.UpdatedAt,
+		}, nil
 	})
 }
 
@@ -606,24 +610,23 @@ func (r *Router) deleteTenantNodeBlacklistRule(w http.ResponseWriter, tenantID u
 		return
 	}
 
-	if err := r.store.DeleteTenantNodeBlacklistRuleByID(tenantID, node.ID, scope, ruleID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			apibase.WriteError(w, http.StatusNotFound, apibase.CodeNotFound, "Blacklist rule not found", nil)
-			return
-		}
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to delete blacklist rule: "+err.Error(), nil)
-		return
-	}
-
-	r.writePolicyMutationSuccess(w, node, "blacklist", "delete", map[string]interface{}{
-		"id":      ruleIDStr,
-		"node_id": node.ID.String(),
-		"scope":   scope,
-		"status":  "deleted",
-	}, "Blacklist rule deleted successfully", map[string]interface{}{
+	r.writeTransactionalPolicyMutationSuccess(w, node, "blacklist", "delete", "Blacklist rule deleted successfully", map[string]interface{}{
 		"node_id": node.ID.String(),
 		"rule_id": ruleIDStr,
 		"scope":   scope,
+	}, func(tx *controllerstorage.PolicyMutationTx) (map[string]interface{}, error) {
+		if err := tx.DeleteTenantNodeBlacklistRuleByID(tenantID, node.ID, scope, ruleID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, fmt.Errorf("blacklist rule not found: %w", err)
+			}
+			return nil, fmt.Errorf("failed to delete blacklist rule: %w", err)
+		}
+		return map[string]interface{}{
+			"id":      ruleIDStr,
+			"node_id": node.ID.String(),
+			"scope":   scope,
+			"status":  "deleted",
+		}, nil
 	})
 }
 
@@ -902,33 +905,34 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		Description:   body.Description,
 	}
 
-	created, err := r.store.CreateTenantNodeQoSRule(rule)
-	if err != nil {
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to create QoS rule: "+err.Error(), nil)
-		return
-	}
-
-	r.writePolicyMutationSuccess(w, node, "qos", "create", map[string]interface{}{
-		"id":             created.ID.String(),
-		"node_id":        node.ID.String(),
-		"src_cidr":       created.SrcCIDR,
-		"dst_cidr":       created.DstCIDR,
-		"src_port":       created.SrcPort,
-		"dst_port":       created.DstPort,
-		"protocol":       created.Protocol,
-		"bandwidth_mbps": created.BandwidthMbps,
-		"direction":      created.Direction,
-		"rate_bps":       created.RateBps,
-		"burst_bytes":    created.BurstBytes,
-		"priority":       created.Priority,
-		"mode":           created.Mode,
-		"enabled":        created.Enabled,
-		"description":    created.Description,
-		"created_at":     created.CreatedAt,
-		"updated_at":     created.UpdatedAt,
-	}, "QoS rule created successfully", map[string]interface{}{
+	metadata := map[string]interface{}{
 		"node_id": node.ID.String(),
-		"rule_id": created.ID.String(),
+	}
+	r.writeTransactionalPolicyMutationSuccess(w, node, "qos", "create", "QoS rule created successfully", metadata, func(tx *controllerstorage.PolicyMutationTx) (map[string]interface{}, error) {
+		created, err := tx.CreateTenantNodeQoSRule(rule)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create QoS rule: %w", err)
+		}
+		metadata["rule_id"] = created.ID.String()
+		return map[string]interface{}{
+			"id":             created.ID.String(),
+			"node_id":        node.ID.String(),
+			"src_cidr":       created.SrcCIDR,
+			"dst_cidr":       created.DstCIDR,
+			"src_port":       created.SrcPort,
+			"dst_port":       created.DstPort,
+			"protocol":       created.Protocol,
+			"bandwidth_mbps": created.BandwidthMbps,
+			"direction":      created.Direction,
+			"rate_bps":       created.RateBps,
+			"burst_bytes":    created.BurstBytes,
+			"priority":       created.Priority,
+			"mode":           created.Mode,
+			"enabled":        created.Enabled,
+			"description":    created.Description,
+			"created_at":     created.CreatedAt,
+			"updated_at":     created.UpdatedAt,
+		}, nil
 	})
 }
 
@@ -1030,32 +1034,32 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		return
 	}
 
-	updated, err := r.store.UpdateTenantNodeQoSRule(tenantID, node.ID, ruleID, &rule)
-	if err != nil {
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to update QoS rule: "+err.Error(), nil)
-		return
-	}
-
-	r.writePolicyMutationSuccess(w, node, "qos", "update", map[string]interface{}{
-		"id":             ruleID.String(),
-		"node_id":        node.ID.String(),
-		"src_cidr":       updated.SrcCIDR,
-		"dst_cidr":       updated.DstCIDR,
-		"src_port":       updated.SrcPort,
-		"dst_port":       updated.DstPort,
-		"protocol":       updated.Protocol,
-		"bandwidth_mbps": updated.BandwidthMbps,
-		"direction":      updated.Direction,
-		"rate_bps":       updated.RateBps,
-		"burst_bytes":    updated.BurstBytes,
-		"priority":       updated.Priority,
-		"mode":           updated.Mode,
-		"enabled":        updated.Enabled,
-		"description":    updated.Description,
-		"updated_at":     updated.UpdatedAt,
-	}, "QoS rule updated successfully", map[string]interface{}{
+	r.writeTransactionalPolicyMutationSuccess(w, node, "qos", "update", "QoS rule updated successfully", map[string]interface{}{
 		"node_id": node.ID.String(),
 		"rule_id": ruleID.String(),
+	}, func(tx *controllerstorage.PolicyMutationTx) (map[string]interface{}, error) {
+		updated, err := tx.UpdateTenantNodeQoSRule(tenantID, node.ID, ruleID, &rule)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update QoS rule: %w", err)
+		}
+		return map[string]interface{}{
+			"id":             ruleID.String(),
+			"node_id":        node.ID.String(),
+			"src_cidr":       updated.SrcCIDR,
+			"dst_cidr":       updated.DstCIDR,
+			"src_port":       updated.SrcPort,
+			"dst_port":       updated.DstPort,
+			"protocol":       updated.Protocol,
+			"bandwidth_mbps": updated.BandwidthMbps,
+			"direction":      updated.Direction,
+			"rate_bps":       updated.RateBps,
+			"burst_bytes":    updated.BurstBytes,
+			"priority":       updated.Priority,
+			"mode":           updated.Mode,
+			"enabled":        updated.Enabled,
+			"description":    updated.Description,
+			"updated_at":     updated.UpdatedAt,
+		}, nil
 	})
 }
 
@@ -1066,21 +1070,20 @@ func (r *Router) deleteTenantNodeQoS(w http.ResponseWriter, tenantID uuid.UUID, 
 		return
 	}
 
-	if err := r.store.DeleteTenantNodeQoSRule(tenantID, node.ID, ruleID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			apibase.WriteError(w, http.StatusNotFound, apibase.CodeNotFound, "QoS rule not found", nil)
-			return
-		}
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to delete QoS rule: "+err.Error(), nil)
-		return
-	}
-
-	r.writePolicyMutationSuccess(w, node, "qos", "delete", map[string]interface{}{
-		"id":      ruleIDStr,
-		"node_id": node.ID.String(),
-		"status":  "deleted",
-	}, "QoS rule deleted successfully", map[string]interface{}{
+	r.writeTransactionalPolicyMutationSuccess(w, node, "qos", "delete", "QoS rule deleted successfully", map[string]interface{}{
 		"node_id": node.ID.String(),
 		"rule_id": ruleIDStr,
+	}, func(tx *controllerstorage.PolicyMutationTx) (map[string]interface{}, error) {
+		if err := tx.DeleteTenantNodeQoSRule(tenantID, node.ID, ruleID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, fmt.Errorf("QoS rule not found: %w", err)
+			}
+			return nil, fmt.Errorf("failed to delete QoS rule: %w", err)
+		}
+		return map[string]interface{}{
+			"id":      ruleIDStr,
+			"node_id": node.ID.String(),
+			"status":  "deleted",
+		}, nil
 	})
 }

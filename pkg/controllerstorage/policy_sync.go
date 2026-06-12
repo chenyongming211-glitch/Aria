@@ -1,12 +1,14 @@
 package controllerstorage
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type PolicySyncRequest struct {
@@ -32,7 +34,122 @@ type PolicySyncResult struct {
 	Delivery            *PolicyDelivery
 }
 
+type PolicyMutationTx struct {
+	tx *sql.Tx
+}
+
+func (m *PolicyMutationTx) CreateTenantNodeACLRule(rule *ACLRuleRecord) (*ACLRuleRecord, error) {
+	return createTenantNodeACLRule(m.tx, rule, false)
+}
+
+func (m *PolicyMutationTx) UpdateTenantNodeACLRule(tenantID, nodeID, ruleID uuid.UUID, rule *ACLRuleRecord) (*ACLRuleRecord, error) {
+	return updateTenantNodeACLRule(m.tx, tenantID, nodeID, ruleID, rule, false)
+}
+
+func (m *PolicyMutationTx) DeleteTenantNodeACLRuleByID(tenantID, nodeID, ruleID uuid.UUID) error {
+	return deleteTenantNodeACLRuleByID(m.tx, tenantID, nodeID, ruleID, false)
+}
+
+func (m *PolicyMutationTx) CreateTenantNodeQoSRule(rule *QoSRuleRecord) (*QoSRuleRecord, error) {
+	return createTenantNodeQoSRule(m.tx, rule, false)
+}
+
+func (m *PolicyMutationTx) UpdateTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, rule *QoSRuleRecord) (*QoSRuleRecord, error) {
+	return updateTenantNodeQoSRule(m.tx, tenantID, nodeID, ruleID, rule, false)
+}
+
+func (m *PolicyMutationTx) DeleteTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID) error {
+	return deleteTenantNodeQoSRule(m.tx, tenantID, nodeID, ruleID, false)
+}
+
+func (m *PolicyMutationTx) CreateTenantNodeBlacklistRule(rule *BlacklistRuleRecord) (*BlacklistRuleRecord, error) {
+	return createTenantNodeBlacklistRule(m.tx, rule, false)
+}
+
+func (m *PolicyMutationTx) DeleteTenantNodeBlacklistRuleByID(tenantID, nodeID uuid.UUID, scope string, ruleID uuid.UUID) error {
+	return deleteTenantNodeBlacklistRuleByID(m.tx, tenantID, nodeID, scope, ruleID, false)
+}
+
+func (m *PolicyMutationTx) UpdateTenantNodeRoutes(nodeID uuid.UUID, tenantID uuid.UUID, routes []string) error {
+	result, err := m.tx.Exec(
+		`UPDATE nodes SET advertised_routes = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+		pq.Array(routes), nodeID, tenantID,
+	)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Storage) MutatePolicyAndQueueSync(mutate func(*PolicyMutationTx) (PolicySyncRequest, error)) (*PolicySyncResult, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	req, err := mutate(&PolicyMutationTx{tx: tx})
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := s.queuePolicySyncTx(tx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	committed = true
+
+	s.recordCommandQueuedAudit(req, result.Command)
+	return result, nil
+}
+
 func (s *Storage) QueuePolicySync(req PolicySyncRequest) (*PolicySyncResult, error) {
+	if err := normalizePolicySyncRequest(&req); err != nil {
+		return nil, err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	result, err := s.queuePolicySyncTx(tx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	committed = true
+
+	s.recordCommandQueuedAudit(req, result.Command)
+	return result, nil
+}
+
+func normalizePolicySyncRequest(req *PolicySyncRequest) error {
 	req.NodePublicKey = strings.TrimSpace(req.NodePublicKey)
 	req.Domain = strings.TrimSpace(req.Domain)
 	req.Action = strings.TrimSpace(req.Action)
@@ -41,19 +158,19 @@ func (s *Storage) QueuePolicySync(req PolicySyncRequest) (*PolicySyncResult, err
 	req.DesiredStateVersion = strings.TrimSpace(req.DesiredStateVersion)
 
 	if req.TenantID == uuid.Nil {
-		return nil, errors.New("tenant id is required")
+		return errors.New("tenant id is required")
 	}
 	if req.NodeID == uuid.Nil {
-		return nil, errors.New("node id is required")
+		return errors.New("node id is required")
 	}
 	if req.NodePublicKey == "" {
-		return nil, errors.New("node public key is required")
+		return errors.New("node public key is required")
 	}
 	if req.Domain == "" {
-		return nil, errors.New("policy domain is required")
+		return errors.New("policy domain is required")
 	}
 	if req.Action == "" {
-		return nil, errors.New("policy action is required")
+		return errors.New("policy action is required")
 	}
 	if req.DesiredStateVersion == "" {
 		req.DesiredStateVersion = NewDesiredStateVersion()
@@ -67,17 +184,13 @@ func (s *Storage) QueuePolicySync(req PolicySyncRequest) (*PolicySyncResult, err
 	if req.DeliveryMetadata == nil {
 		req.DeliveryMetadata = map[string]interface{}{}
 	}
+	return nil
+}
 
-	tx, err := s.db.Begin()
-	if err != nil {
+func (s *Storage) queuePolicySyncTx(tx *sql.Tx, req PolicySyncRequest) (*PolicySyncResult, error) {
+	if err := normalizePolicySyncRequest(&req); err != nil {
 		return nil, err
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
 
 	state, err := s.upsertNodeDesiredState(tx, req.TenantID, req.NodeID, req.DesiredStateVersion, req.DesiredMetadata)
 	if err != nil {
@@ -106,13 +219,6 @@ func (s *Storage) QueuePolicySync(req PolicySyncRequest) (*PolicySyncResult, err
 			return nil, err
 		}
 	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	committed = true
-
-	s.recordCommandQueuedAudit(req, cmd)
 
 	return &PolicySyncResult{
 		DesiredStateVersion: req.DesiredStateVersion,

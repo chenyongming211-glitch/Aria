@@ -80,6 +80,11 @@ type BlacklistRuleRecord struct {
 	UpdatedAt   time.Time
 }
 
+type policyMutationExecutor interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+	QueryRow(query string, args ...interface{}) *sql.Row
+}
+
 func (s *Storage) ListTenantNodeQoSRules(tenantID, nodeID uuid.UUID) ([]*QoSRuleRecord, error) {
 	rows, err := s.db.Query(
 		`SELECT id, tenant_id, node_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
@@ -111,9 +116,13 @@ func (s *Storage) ListTenantNodeQoSRules(tenantID, nodeID uuid.UUID) ([]*QoSRule
 }
 
 func (s *Storage) CreateTenantNodeQoSRule(rule *QoSRuleRecord) (*QoSRuleRecord, error) {
+	return createTenantNodeQoSRule(s.db, rule, true)
+}
+
+func createTenantNodeQoSRule(q policyMutationExecutor, rule *QoSRuleRecord, bumpDesiredVersion bool) (*QoSRuleRecord, error) {
 	created := &QoSRuleRecord{}
 	normalizeQoSRuntimeFields(rule)
-	err := s.db.QueryRow(
+	err := q.QueryRow(
 		`INSERT INTO qos_rules (tenant_id, node_id, src_cidr, dst_cidr, src_port, dst_port, protocol, bandwidth_mbps, direction, rate_bps, burst_bytes, priority, mode, enabled, description)
 		 VALUES ($1, $2, NULLIF($3, '')::cidr, NULLIF($4, '')::cidr, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		 RETURNING id, tenant_id, node_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
@@ -162,16 +171,21 @@ func (s *Storage) CreateTenantNodeQoSRule(rule *QoSRuleRecord) (*QoSRuleRecord, 
 		return nil, err
 	}
 
-	// 自动提升版本
-	if err := s.bumpNodeDesiredVersion(rule.TenantID, rule.NodeID); err != nil {
-		return nil, err
+	if bumpDesiredVersion {
+		if err := bumpNodeDesiredVersionWith(q, rule.TenantID, rule.NodeID); err != nil {
+			return nil, err
+		}
 	}
 
 	return created, nil
 }
 
 func (s *Storage) DeleteTenantNodeQoSRule(tenantID, nodeID uuid.UUID, ruleID uuid.UUID) error {
-	result, err := s.db.Exec(
+	return deleteTenantNodeQoSRule(s.db, tenantID, nodeID, ruleID, true)
+}
+
+func deleteTenantNodeQoSRule(q policyMutationExecutor, tenantID, nodeID uuid.UUID, ruleID uuid.UUID, bumpDesiredVersion bool) error {
+	result, err := q.Exec(
 		`DELETE FROM qos_rules WHERE id = $1 AND tenant_id = $2 AND node_id = $3`,
 		ruleID, tenantID, nodeID,
 	)
@@ -186,9 +200,10 @@ func (s *Storage) DeleteTenantNodeQoSRule(tenantID, nodeID uuid.UUID, ruleID uui
 		return sql.ErrNoRows
 	}
 
-	// 自动提升版本
-	if err := s.bumpNodeDesiredVersion(tenantID, nodeID); err != nil {
-		return err
+	if bumpDesiredVersion {
+		if err := bumpNodeDesiredVersionWith(q, tenantID, nodeID); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -214,8 +229,12 @@ func (s *Storage) GetTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID) (*QoS
 }
 
 func (s *Storage) UpdateTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, rule *QoSRuleRecord) (*QoSRuleRecord, error) {
+	return updateTenantNodeQoSRule(s.db, tenantID, nodeID, ruleID, rule, true)
+}
+
+func updateTenantNodeQoSRule(q policyMutationExecutor, tenantID, nodeID, ruleID uuid.UUID, rule *QoSRuleRecord, bumpDesiredVersion bool) (*QoSRuleRecord, error) {
 	normalizeQoSRuntimeFields(rule)
-	result, err := s.db.Exec(
+	result, err := q.Exec(
 		`UPDATE qos_rules SET
 			src_cidr = NULLIF($4, '')::cidr, dst_cidr = NULLIF($5, '')::cidr,
 			src_port = $6, dst_port = $7, protocol = $8,
@@ -240,8 +259,10 @@ func (s *Storage) UpdateTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID, ru
 		return nil, sql.ErrNoRows
 	}
 
-	if err := s.bumpNodeDesiredVersion(tenantID, nodeID); err != nil {
-		return nil, err
+	if bumpDesiredVersion {
+		if err := bumpNodeDesiredVersionWith(q, tenantID, nodeID); err != nil {
+			return nil, err
+		}
 	}
 
 	rule.ID = ruleID
@@ -288,13 +309,17 @@ func (s *Storage) ListTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRule
 }
 
 func (s *Storage) CreateTenantNodeACLRule(rule *ACLRuleRecord) (*ACLRuleRecord, error) {
+	return createTenantNodeACLRule(s.db, rule, true)
+}
+
+func createTenantNodeACLRule(q policyMutationExecutor, rule *ACLRuleRecord, bumpDesiredVersion bool) (*ACLRuleRecord, error) {
 	created := &ACLRuleRecord{}
 	srcNet := aclNetworkForSync(rule.SrcCIDR)
 	dstNet := aclNetworkForSync(rule.DstCIDR)
 	minPort, maxPort := aclPortRangeForSync(rule.DstPort)
 	normalizeACLRuntimeFields(rule)
 
-	err := s.db.QueryRow(
+	err := q.QueryRow(
 		`INSERT INTO acl_rules (tenant_id, node_id, name, action, src_cidr, dst_cidr, dst_port, protocol, direction, ports, priority, enabled, description, src_net, dst_net, min_port, max_port)
 		 VALUES ($1, $2, $3, $4, NULLIF($5, '')::cidr, NULLIF($6, '')::cidr, $7, $8, $9, $10, $11, $12, $13, $14::cidr, $15::cidr, $16, $17)
 		 RETURNING id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
@@ -316,14 +341,20 @@ func (s *Storage) CreateTenantNodeACLRule(rule *ACLRuleRecord) (*ACLRuleRecord, 
 		return nil, err
 	}
 
-	if err := s.bumpNodeDesiredVersion(rule.TenantID, rule.NodeID); err != nil {
-		return nil, err
+	if bumpDesiredVersion {
+		if err := bumpNodeDesiredVersionWith(q, rule.TenantID, rule.NodeID); err != nil {
+			return nil, err
+		}
 	}
 	return created, nil
 }
 
 func (s *Storage) DeleteTenantNodeACLRuleByID(tenantID, nodeID uuid.UUID, ruleID uuid.UUID) error {
-	result, err := s.db.Exec(
+	return deleteTenantNodeACLRuleByID(s.db, tenantID, nodeID, ruleID, true)
+}
+
+func deleteTenantNodeACLRuleByID(q policyMutationExecutor, tenantID, nodeID uuid.UUID, ruleID uuid.UUID, bumpDesiredVersion bool) error {
+	result, err := q.Exec(
 		`DELETE FROM acl_rules WHERE id = $1 AND tenant_id = $2 AND node_id = $3`,
 		ruleID, tenantID, nodeID,
 	)
@@ -338,8 +369,10 @@ func (s *Storage) DeleteTenantNodeACLRuleByID(tenantID, nodeID uuid.UUID, ruleID
 		return sql.ErrNoRows
 	}
 
-	if err := s.bumpNodeDesiredVersion(tenantID, nodeID); err != nil {
-		return err
+	if bumpDesiredVersion {
+		if err := bumpNodeDesiredVersionWith(q, tenantID, nodeID); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -362,12 +395,16 @@ func (s *Storage) GetTenantNodeACLRule(tenantID, nodeID, ruleID uuid.UUID) (*ACL
 }
 
 func (s *Storage) UpdateTenantNodeACLRule(tenantID, nodeID, ruleID uuid.UUID, rule *ACLRuleRecord) (*ACLRuleRecord, error) {
+	return updateTenantNodeACLRule(s.db, tenantID, nodeID, ruleID, rule, true)
+}
+
+func updateTenantNodeACLRule(q policyMutationExecutor, tenantID, nodeID, ruleID uuid.UUID, rule *ACLRuleRecord, bumpDesiredVersion bool) (*ACLRuleRecord, error) {
 	srcNet := aclNetworkForSync(rule.SrcCIDR)
 	dstNet := aclNetworkForSync(rule.DstCIDR)
 	minPort, maxPort := aclPortRangeForSync(rule.DstPort)
 	normalizeACLRuntimeFields(rule)
 
-	result, err := s.db.Exec(
+	result, err := q.Exec(
 		`UPDATE acl_rules SET
 			name = $4, action = $5, src_cidr = NULLIF($6, '')::cidr, dst_cidr = NULLIF($7, '')::cidr,
 			dst_port = $8, protocol = $9, direction = $10, ports = $11, priority = $12, description = $13,
@@ -389,8 +426,10 @@ func (s *Storage) UpdateTenantNodeACLRule(tenantID, nodeID, ruleID uuid.UUID, ru
 		return nil, sql.ErrNoRows
 	}
 
-	if err := s.bumpNodeDesiredVersion(tenantID, nodeID); err != nil {
-		return nil, err
+	if bumpDesiredVersion {
+		if err := bumpNodeDesiredVersionWith(q, tenantID, nodeID); err != nil {
+			return nil, err
+		}
 	}
 
 	rule.ID = ruleID
@@ -442,8 +481,12 @@ func (s *Storage) ListTenantNodeBlacklistRules(tenantID, nodeID uuid.UUID, scope
 }
 
 func (s *Storage) CreateTenantNodeBlacklistRule(rule *BlacklistRuleRecord) (*BlacklistRuleRecord, error) {
+	return createTenantNodeBlacklistRule(s.db, rule, true)
+}
+
+func createTenantNodeBlacklistRule(q policyMutationExecutor, rule *BlacklistRuleRecord, bumpDesiredVersion bool) (*BlacklistRuleRecord, error) {
 	created := &BlacklistRuleRecord{}
-	err := s.db.QueryRow(
+	err := q.QueryRow(
 		`INSERT INTO blacklist_rules (tenant_id, node_id, scope, cidr, port, enabled, description)
 		 VALUES ($1, $2, $3, NULLIF($4, '')::cidr, $5, $6, $7)
 		 RETURNING id, tenant_id, node_id, scope, COALESCE(cidr::text, ''), COALESCE(port, 0), enabled, COALESCE(description, ''), created_at, updated_at`,
@@ -469,14 +512,20 @@ func (s *Storage) CreateTenantNodeBlacklistRule(rule *BlacklistRuleRecord) (*Bla
 	if err != nil {
 		return nil, err
 	}
-	if err := s.bumpNodeDesiredVersion(rule.TenantID, rule.NodeID); err != nil {
-		return nil, err
+	if bumpDesiredVersion {
+		if err := bumpNodeDesiredVersionWith(q, rule.TenantID, rule.NodeID); err != nil {
+			return nil, err
+		}
 	}
 	return created, nil
 }
 
 func (s *Storage) DeleteTenantNodeBlacklistRuleByID(tenantID, nodeID uuid.UUID, scope string, ruleID uuid.UUID) error {
-	result, err := s.db.Exec(
+	return deleteTenantNodeBlacklistRuleByID(s.db, tenantID, nodeID, scope, ruleID, true)
+}
+
+func deleteTenantNodeBlacklistRuleByID(q policyMutationExecutor, tenantID, nodeID uuid.UUID, scope string, ruleID uuid.UUID, bumpDesiredVersion bool) error {
+	result, err := q.Exec(
 		`DELETE FROM blacklist_rules WHERE id = $1 AND tenant_id = $2 AND node_id = $3 AND scope = $4`,
 		ruleID, tenantID, nodeID, scope,
 	)
@@ -490,8 +539,10 @@ func (s *Storage) DeleteTenantNodeBlacklistRuleByID(tenantID, nodeID uuid.UUID, 
 	if rowsAffected == 0 {
 		return sql.ErrNoRows
 	}
-	if err := s.bumpNodeDesiredVersion(tenantID, nodeID); err != nil {
-		return err
+	if bumpDesiredVersion {
+		if err := bumpNodeDesiredVersionWith(q, tenantID, nodeID); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -740,10 +791,16 @@ func aclPortRangeForSync(dstPort int) (int, int) {
 }
 
 func (s *Storage) bumpNodeDesiredVersion(tenantID, nodeID uuid.UUID) error {
+	return bumpNodeDesiredVersionWith(s.db, tenantID, nodeID)
+}
+
+func bumpNodeDesiredVersionWith(q interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+}, tenantID, nodeID uuid.UUID) error {
 	newVersion := uuid.New().String()
-	_, err := s.db.Exec(
+	_, err := q.Exec(
 		`INSERT INTO node_control_states (tenant_id, node_id, desired_state_version, desired_state_updated_at, updated_at)
-		 VALUES ($1, $2, $3, NOW(), NOW())
+	 VALUES ($1, $2, $3, NOW(), NOW())
 		 ON CONFLICT (node_id) DO UPDATE SET
 		    desired_state_version = EXCLUDED.desired_state_version,
 		    desired_state_updated_at = NOW(),

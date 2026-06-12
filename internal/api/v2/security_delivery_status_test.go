@@ -207,9 +207,11 @@ func TestDeleteTenantNodeACLReturnsNotFoundWhenRuleMissing(t *testing.T) {
 	ruleID := uuid.New()
 	node := &controllerstorage.Node{ID: nodeID, TenantID: tenantID, PublicKey: "pub-key-1"}
 
+	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM acl_rules WHERE id = $1 AND tenant_id = $2 AND node_id = $3`)).
 		WithArgs(ruleID, tenantID, nodeID).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectRollback()
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	rr := httptest.NewRecorder()
@@ -235,9 +237,11 @@ func TestDeleteTenantNodeQoSReturnsNotFoundWhenRuleMissing(t *testing.T) {
 	ruleID := uuid.New()
 	node := &controllerstorage.Node{ID: nodeID, TenantID: tenantID, PublicKey: "pub-key-1"}
 
+	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM qos_rules WHERE id = $1 AND tenant_id = $2 AND node_id = $3`)).
 		WithArgs(ruleID, tenantID, nodeID).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectRollback()
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	rr := httptest.NewRecorder()
@@ -263,9 +267,11 @@ func TestDeleteTenantNodeBlacklistReturnsNotFoundWhenRuleMissing(t *testing.T) {
 	ruleID := uuid.New()
 	node := &controllerstorage.Node{ID: nodeID, TenantID: tenantID, PublicKey: "pub-key-1"}
 
+	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM blacklist_rules WHERE id = $1 AND tenant_id = $2 AND node_id = $3 AND scope = $4`)).
 		WithArgs(ruleID, tenantID, nodeID, controllerstorage.BlacklistScopeSrc).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectRollback()
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	rr := httptest.NewRecorder()

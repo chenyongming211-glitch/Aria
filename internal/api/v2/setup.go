@@ -781,18 +781,18 @@ func (r *Router) addTenantNodeRoute(w http.ResponseWriter, req *http.Request, te
 		return
 	}
 
-	if err := r.updateTenantNodeRoutes(node.ID, tenantID, normalized); err != nil {
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeUpdateNodeFailed, "Failed to add route", nil)
-		return
-	}
-
-	r.writePolicyMutationSuccess(w, node, "route", "create", map[string]interface{}{
-		"id":      route,
-		"cidr":    route,
-		"node_id": node.ID.String(),
-	}, "Route created successfully", map[string]interface{}{
+	r.writeTransactionalPolicyMutationSuccess(w, node, "route", "create", "Route created successfully", map[string]interface{}{
 		"node_id": node.ID.String(),
 		"route":   route,
+	}, func(tx *controllerstorage.PolicyMutationTx) (map[string]interface{}, error) {
+		if err := tx.UpdateTenantNodeRoutes(node.ID, tenantID, normalized); err != nil {
+			return nil, fmt.Errorf("failed to add route: %w", err)
+		}
+		return map[string]interface{}{
+			"id":      route,
+			"cidr":    route,
+			"node_id": node.ID.String(),
+		}, nil
 	})
 }
 
@@ -832,20 +832,20 @@ func (r *Router) replaceTenantNodeRoute(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	if err := r.updateTenantNodeRoutes(node.ID, tenantID, normalized); err != nil {
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeUpdateNodeFailed, "Failed to update route", nil)
-		return
-	}
-
-	r.writePolicyMutationSuccess(w, node, "route", "update", map[string]interface{}{
-		"id":       newRoute,
-		"cidr":     newRoute,
-		"node_id":  node.ID.String(),
-		"previous": routeID,
-	}, "Route updated successfully", map[string]interface{}{
+	r.writeTransactionalPolicyMutationSuccess(w, node, "route", "update", "Route updated successfully", map[string]interface{}{
 		"node_id":   node.ID.String(),
 		"new_route": newRoute,
 		"old_route": routeID,
+	}, func(tx *controllerstorage.PolicyMutationTx) (map[string]interface{}, error) {
+		if err := tx.UpdateTenantNodeRoutes(node.ID, tenantID, normalized); err != nil {
+			return nil, fmt.Errorf("failed to update route: %w", err)
+		}
+		return map[string]interface{}{
+			"id":       newRoute,
+			"cidr":     newRoute,
+			"node_id":  node.ID.String(),
+			"previous": routeID,
+		}, nil
 	})
 }
 
@@ -868,18 +868,18 @@ func (r *Router) deleteTenantNodeRoute(w http.ResponseWriter, tenantID uuid.UUID
 		}
 	}
 
-	if err := r.updateTenantNodeRoutes(node.ID, tenantID, updated); err != nil {
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeUpdateNodeFailed, "Failed to delete route", nil)
-		return
-	}
-
-	r.writePolicyMutationSuccess(w, node, "route", "delete", map[string]interface{}{
-		"id":      routeID,
-		"status":  "deleted",
-		"node_id": node.ID.String(),
-	}, "Route deleted successfully", map[string]interface{}{
+	r.writeTransactionalPolicyMutationSuccess(w, node, "route", "delete", "Route deleted successfully", map[string]interface{}{
 		"node_id": node.ID.String(),
 		"route":   routeID,
+	}, func(tx *controllerstorage.PolicyMutationTx) (map[string]interface{}, error) {
+		if err := tx.UpdateTenantNodeRoutes(node.ID, tenantID, updated); err != nil {
+			return nil, fmt.Errorf("failed to delete route: %w", err)
+		}
+		return map[string]interface{}{
+			"id":      routeID,
+			"status":  "deleted",
+			"node_id": node.ID.String(),
+		}, nil
 	})
 }
 
@@ -924,6 +924,21 @@ func (r *Router) queueNodePolicySync(
 	policyName string,
 	metadata map[string]interface{},
 ) (map[string]interface{}, *controllerstorage.PolicyDelivery, error) {
+	result, err := r.store.QueuePolicySync(r.buildPolicySyncRequest(node, domain, action, policyRef, policyName, metadata))
+	if err != nil {
+		return nil, nil, err
+	}
+	return policySyncDispatch(result), result.Delivery, nil
+}
+
+func (r *Router) buildPolicySyncRequest(
+	node *controllerstorage.Node,
+	domain string,
+	action string,
+	policyRef string,
+	policyName string,
+	metadata map[string]interface{},
+) controllerstorage.PolicySyncRequest {
 	desiredVersion := controllerstorage.NewDesiredStateVersion()
 	desiredMetadata := clonePolicyMetadata(metadata)
 	desiredMetadata["domain"] = domain
@@ -952,7 +967,7 @@ func (r *Router) queueNodePolicySync(
 	deliveryMetadata["command"] = "sync"
 	deliveryMetadata["desired_state_version"] = desiredVersion
 
-	result, err := r.store.QueuePolicySync(controllerstorage.PolicySyncRequest{
+	return controllerstorage.PolicySyncRequest{
 		TenantID:            node.TenantID,
 		NodeID:              node.ID,
 		NodePublicKey:       node.PublicKey,
@@ -966,11 +981,10 @@ func (r *Router) queueNodePolicySync(
 		DeliveryMetadata:    deliveryMetadata,
 		Priority:            1,
 		TimeoutSeconds:      60,
-	})
-	if err != nil {
-		return nil, nil, err
 	}
+}
 
+func policySyncDispatch(result *controllerstorage.PolicySyncResult) map[string]interface{} {
 	dispatch := map[string]interface{}{
 		"command_id":            result.Command.ID,
 		"status":                result.Command.Status,
@@ -986,7 +1000,7 @@ func (r *Router) queueNodePolicySync(
 		dispatch["last_delivery"] = policyDeliveryToMap(result.Delivery)
 	}
 
-	return dispatch, result.Delivery, nil
+	return dispatch
 }
 
 func (r *Router) writePolicyMutationSuccess(
@@ -1015,6 +1029,58 @@ func (r *Router) writePolicyMutationSuccess(
 	if delivery != nil {
 		data["last_delivery"] = policyDeliveryToMap(delivery)
 		data["delivery_history"] = []map[string]interface{}{policyDeliveryToMap(delivery)}
+	}
+	r.recordPolicyChangedAudit(node, domain, action, policyRef, policyName, dispatch)
+
+	if summary, err := r.buildNodeOperationsSummary(node); err == nil {
+		data["last_command"] = summary["last_command"]
+		data["last_command_status"] = summary["last_command_status"]
+		data["last_command_error"] = summary["last_command_error"]
+	}
+
+	apibase.WriteSuccess(w, data, message)
+}
+
+func (r *Router) writeTransactionalPolicyMutationSuccess(
+	w http.ResponseWriter,
+	node *controllerstorage.Node,
+	domain string,
+	action string,
+	message string,
+	metadata map[string]interface{},
+	mutate func(*controllerstorage.PolicyMutationTx) (map[string]interface{}, error),
+) {
+	var data map[string]interface{}
+	var policyRef string
+	var policyName string
+	result, err := r.store.MutatePolicyAndQueueSync(func(tx *controllerstorage.PolicyMutationTx) (controllerstorage.PolicySyncRequest, error) {
+		var mutateErr error
+		data, mutateErr = mutate(tx)
+		if mutateErr != nil {
+			return controllerstorage.PolicySyncRequest{}, mutateErr
+		}
+		if data == nil {
+			data = map[string]interface{}{}
+		}
+		policyRef, policyName = inferPolicyDeliveryIdentity(domain, data, metadata)
+		return r.buildPolicySyncRequest(node, domain, action, policyRef, policyName, metadata), nil
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			apibase.WriteError(w, http.StatusNotFound, apibase.CodeNotFound, "Policy item not found", nil)
+			return
+		}
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, message+": policy dispatch failed", map[string]string{
+			"dispatch_error": err.Error(),
+		})
+		return
+	}
+
+	dispatch := policySyncDispatch(result)
+	data["dispatch"] = dispatch
+	if result.Delivery != nil {
+		data["last_delivery"] = policyDeliveryToMap(result.Delivery)
+		data["delivery_history"] = []map[string]interface{}{policyDeliveryToMap(result.Delivery)}
 	}
 	r.recordPolicyChangedAudit(node, domain, action, policyRef, policyName, dispatch)
 
@@ -1510,14 +1576,6 @@ func (r *Router) buildTenantNodeRoutePolicies(tenantID uuid.UUID, node *controll
 	}
 
 	return items, nil
-}
-
-func (r *Router) updateTenantNodeRoutes(nodeID uuid.UUID, tenantID uuid.UUID, routes []string) error {
-	_, err := r.store.DB().Exec(
-		`UPDATE nodes SET advertised_routes = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
-		pq.Array(routes), nodeID, tenantID,
-	)
-	return err
 }
 
 func attachNodeSummaryToPolicyItems(items []map[string]interface{}, summary map[string]interface{}) {

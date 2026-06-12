@@ -449,18 +449,13 @@ func expectQoSUpdatePreservingExistingFields(mock sqlmock.Sqlmock, tenantID, nod
 		WillReturnResult(sqlmock.NewResult(0, 1))
 }
 
-func expectBumpDesiredState(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO node_control_states (tenant_id, node_id, desired_state_version, desired_state_updated_at, updated_at)
-		 VALUES ($1, $2, $3, NOW(), NOW())
-		 ON CONFLICT (node_id) DO UPDATE SET
-		    desired_state_version = EXCLUDED.desired_state_version,
-		    desired_state_updated_at = NOW(),
-		    updated_at = NOW()`)).
-		WithArgs(tenantID, nodeID, sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, 1))
+func expectPolicyDispatchSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
+	mock.ExpectBegin()
+	expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
+	mock.ExpectCommit()
 }
 
-func expectPolicyDispatchSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
+func expectPolicyDispatchSuccessInOpenTx(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 	now := time.Now()
 	desiredMetadata := []byte(`{}`)
 	commandParams := []byte(`{}`)
@@ -470,7 +465,6 @@ func expectPolicyDispatchSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUI
 		"last_sync_at", "last_sync_error", "created_at", "updated_at",
 	}
 
-	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO node_control_states (`)).
 		WithArgs(tenantID, nodeID, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows(controlStateColumns).AddRow(
@@ -489,7 +483,6 @@ func expectPolicyDispatchSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUI
 			"id", "tenant_id", "node_id", "policy_domain", "policy_ref", "policy_name", "action", "command_id", "command_status",
 			"last_error", "metadata", "created_at", "updated_at", "completed_at",
 		}).AddRow(uuid.New(), tenantID, nodeID, "acl", "rule-ref", "rule-name", "create", "cmd-1", controllerstorage.AgentCommandStatusPending, "", []byte(`{}`), now, now, nil))
-	mock.ExpectCommit()
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*)
 		FROM agent_commands
@@ -1126,9 +1119,10 @@ func TestRBACHandlerMatrix_ACLsWrite(t *testing.T) {
 				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
 			}
 			if tc.expectStatus == http.StatusOK {
+				mock.ExpectBegin()
 				expectACLCreateSuccess(mock, tenantID, nodeID)
-				expectBumpDesiredState(mock, tenantID, nodeID)
-				expectPolicyDispatchSuccess(mock, tenantID, nodeID)
+				expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
+				mock.ExpectCommit()
 			}
 
 			router := &Router{store: controllerstorage.NewStorageWithDB(db)}
@@ -1169,9 +1163,10 @@ func TestACLCreateHonorsDisabledPayload(t *testing.T) {
 	expectNodeLookup(mock, tenantID, nodeID, "{}")
 	expectTenantStatusActive(mock, tenantID)
 	expectPermissionLookup(mock, tenantID, "admin", []string{"acls:write"})
+	mock.ExpectBegin()
 	expectACLCreateSuccessWithEnabled(mock, tenantID, nodeID, false)
-	expectBumpDesiredState(mock, tenantID, nodeID)
-	expectPolicyDispatchSuccess(mock, tenantID, nodeID)
+	expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
+	mock.ExpectCommit()
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withAuthContext(httptest.NewRequest(
@@ -1208,9 +1203,10 @@ func TestACLUpdatePreservesOmittedFields(t *testing.T) {
 	expectTenantStatusActive(mock, tenantID)
 	expectPermissionLookup(mock, tenantID, "admin", []string{"acls:write"})
 	expectACLGetForUpdate(mock, tenantID, nodeID, ruleID)
+	mock.ExpectBegin()
 	expectACLUpdatePreservingExistingFields(mock, tenantID, nodeID, ruleID)
-	expectBumpDesiredState(mock, tenantID, nodeID)
-	expectPolicyDispatchSuccess(mock, tenantID, nodeID)
+	expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
+	mock.ExpectCommit()
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withAuthContext(httptest.NewRequest(
@@ -1310,9 +1306,10 @@ func TestRBACHandlerMatrix_QoSWrite(t *testing.T) {
 				expectPermissionLookup(mock, tenantID, tc.role, tc.permissions)
 			}
 			if tc.expectStatus == http.StatusOK {
+				mock.ExpectBegin()
 				expectQoSCreateSuccess(mock, tenantID, nodeID)
-				expectBumpDesiredState(mock, tenantID, nodeID)
-				expectPolicyDispatchSuccess(mock, tenantID, nodeID)
+				expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
+				mock.ExpectCommit()
 			}
 
 			router := &Router{store: controllerstorage.NewStorageWithDB(db)}
@@ -1353,9 +1350,10 @@ func TestQoSCreateHonorsDisabledPayload(t *testing.T) {
 	expectNodeLookup(mock, tenantID, nodeID, "{}")
 	expectTenantStatusActive(mock, tenantID)
 	expectPermissionLookup(mock, tenantID, "admin", []string{"qos:write"})
+	mock.ExpectBegin()
 	expectQoSCreateSuccessWithEnabled(mock, tenantID, nodeID, false)
-	expectBumpDesiredState(mock, tenantID, nodeID)
-	expectPolicyDispatchSuccess(mock, tenantID, nodeID)
+	expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
+	mock.ExpectCommit()
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withAuthContext(httptest.NewRequest(
@@ -1392,9 +1390,10 @@ func TestQoSUpdatePreservesOmittedFields(t *testing.T) {
 	expectTenantStatusActive(mock, tenantID)
 	expectPermissionLookup(mock, tenantID, "admin", []string{"qos:write"})
 	expectQoSGetForUpdate(mock, tenantID, nodeID, ruleID)
+	mock.ExpectBegin()
 	expectQoSUpdatePreservingExistingFields(mock, tenantID, nodeID, ruleID)
-	expectBumpDesiredState(mock, tenantID, nodeID)
-	expectPolicyDispatchSuccess(mock, tenantID, nodeID)
+	expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
+	mock.ExpectCommit()
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withAuthContext(httptest.NewRequest(
