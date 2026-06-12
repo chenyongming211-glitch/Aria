@@ -25,8 +25,6 @@ const ID_WILDCARD: u32 = 0;
 const DIRECTION_INGRESS: u8 = 0;
 const DIRECTION_EGRESS: u8 = 1;
 const QOS_MODE_SHAPING: u8 = 1;
-const BPF_FUNC_SPIN_LOCK: usize = 93;
-const BPF_FUNC_SPIN_UNLOCK: usize = 94;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -49,16 +47,7 @@ pub struct QosConfig {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(non_camel_case_types)]
-pub struct bpf_spin_lock {
-    pub val: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TokenBucket {
-    pub lock: bpf_spin_lock,
-    pub pad: u32,
     pub tokens: u64,
     pub last_refill_ns: u64,
     pub last_edt: u64,
@@ -263,79 +252,58 @@ fn lookup_qos_config(tap_id: u32, group_id: u32, direction: u8) -> Option<(QosKe
 
 fn apply_qos_bucket(key: &QosKey, config: QosConfig, pkt_len: u64, direction: u8) -> bool {
     let now = unsafe { bpf_ktime_get_ns() };
-    let bucket_ptr = match QOS_TOKEN_BUCKET.get_ptr_mut(key) {
-        Some(ptr) => ptr,
-        None => {
-            update_qos_stats(key, pkt_len, false, false);
-            return true;
-        }
+    let mut bucket = match unsafe { QOS_TOKEN_BUCKET.get(key) } {
+        Some(existing) => *existing,
+        None => TokenBucket {
+            tokens: config.burst_bytes,
+            last_refill_ns: now,
+            last_edt: now,
+        },
     };
 
+    let elapsed = if now > bucket.last_refill_ns {
+        now - bucket.last_refill_ns
+    } else {
+        0
+    };
+    let elapsed = if elapsed > NS_PER_SEC {
+        NS_PER_SEC
+    } else {
+        elapsed
+    };
     let rate_bytes_per_sec = config.rate_bps / 8;
-    if rate_bytes_per_sec == 0 {
-        update_qos_stats(key, pkt_len, false, false);
+    let refill = mul_div(elapsed, rate_bytes_per_sec, NS_PER_SEC);
+    let tokens = bucket.tokens.saturating_add(refill);
+    bucket.tokens = if tokens > config.burst_bytes {
+        config.burst_bytes
+    } else {
+        tokens
+    };
+    bucket.last_refill_ns = now;
+
+    if bucket.tokens >= pkt_len {
+        bucket.tokens -= pkt_len;
+        if config.mode == QOS_MODE_SHAPING && direction == DIRECTION_EGRESS {
+            bucket.last_edt = now;
+            let _ = QOS_TOKEN_BUCKET.insert(key, &bucket, 0);
+            update_qos_stats(key, pkt_len, false, true);
+        } else {
+            let _ = QOS_TOKEN_BUCKET.insert(key, &bucket, 0);
+            update_qos_stats(key, pkt_len, false, false);
+        }
         return true;
     }
 
-    let bucket = unsafe { &mut *bucket_ptr };
-    let (passed, dropped, shaped) = {
-        let lock = &mut bucket.lock as *mut bpf_spin_lock;
-        unsafe { call_bpf_spin_lock(lock) };
+    if config.mode == QOS_MODE_SHAPING && direction == DIRECTION_EGRESS {
+        bucket.last_edt = next_edt(bucket.last_edt, now, pkt_len, rate_bytes_per_sec);
+        let _ = QOS_TOKEN_BUCKET.insert(key, &bucket, 0);
+        update_qos_stats(key, pkt_len, false, true);
+        return true;
+    }
 
-        let elapsed = if now > bucket.last_refill_ns {
-            now - bucket.last_refill_ns
-        } else {
-            0
-        };
-        let elapsed = if elapsed > NS_PER_SEC {
-            NS_PER_SEC
-        } else {
-            elapsed
-        };
-        let refill = mul_div(elapsed, rate_bytes_per_sec, NS_PER_SEC);
-        let tokens = bucket.tokens.saturating_add(refill);
-        bucket.tokens = if tokens > config.burst_bytes {
-            config.burst_bytes
-        } else {
-            tokens
-        };
-        bucket.last_refill_ns = now;
-
-        let result = if bucket.tokens >= pkt_len {
-            bucket.tokens -= pkt_len;
-            if config.mode == QOS_MODE_SHAPING && direction == DIRECTION_EGRESS {
-                bucket.last_edt = now;
-                (true, false, true)
-            } else {
-                (true, false, false)
-            }
-        } else if config.mode == QOS_MODE_SHAPING && direction == DIRECTION_EGRESS {
-            bucket.last_edt = next_edt(bucket.last_edt, now, pkt_len, rate_bytes_per_sec);
-            (true, false, true)
-        } else {
-            (false, true, false)
-        };
-
-        unsafe { call_bpf_spin_unlock(lock) };
-        result
-    };
-
-    update_qos_stats(key, pkt_len, dropped, shaped);
-    passed
-}
-
-#[inline(always)]
-unsafe fn call_bpf_spin_lock(lock: *mut bpf_spin_lock) {
-    let helper: unsafe extern "C" fn(*mut bpf_spin_lock) =
-        core::mem::transmute(BPF_FUNC_SPIN_LOCK);
-    helper(lock)
-}
-
-#[inline(always)]
-unsafe fn call_bpf_spin_unlock(lock: *mut bpf_spin_lock) {
-    let helper: unsafe extern "C" fn(*mut bpf_spin_lock) =
-        core::mem::transmute(BPF_FUNC_SPIN_UNLOCK);
-    helper(lock)
+    let _ = QOS_TOKEN_BUCKET.insert(key, &bucket, 0);
+    update_qos_stats(key, pkt_len, true, false);
+    false
 }
 
 fn update_qos_stats(key: &QosKey, pkt_len: u64, dropped: bool, shaped: bool) {
