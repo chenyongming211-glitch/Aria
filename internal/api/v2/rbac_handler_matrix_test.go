@@ -453,12 +453,12 @@ func expectPolicyDispatchSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUI
 	mock.ExpectBegin()
 	expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
 	mock.ExpectCommit()
+	expectPolicyDispatchPostCommitSummary(mock, tenantID, nodeID)
 }
 
 func expectPolicyDispatchSuccessInOpenTx(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 	now := time.Now()
 	desiredMetadata := []byte(`{}`)
-	commandParams := []byte(`{}`)
 	controlStateColumns := []string{
 		"tenant_id", "node_id", "desired_state_version", "desired_state_metadata", "desired_state_updated_at",
 		"applied_state_version", "applied_state_updated_at", "observed_state", "observed_message", "observed_at",
@@ -483,6 +483,11 @@ func expectPolicyDispatchSuccessInOpenTx(mock sqlmock.Sqlmock, tenantID, nodeID 
 			"id", "tenant_id", "node_id", "policy_domain", "policy_ref", "policy_name", "action", "command_id", "command_status",
 			"last_error", "metadata", "created_at", "updated_at", "completed_at",
 		}).AddRow(uuid.New(), tenantID, nodeID, "acl", "rule-ref", "rule-name", "create", "cmd-1", controllerstorage.AgentCommandStatusPending, "", []byte(`{}`), now, now, nil))
+}
+
+func expectPolicyDispatchPostCommitSummary(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
+	now := time.Now()
+	commandParams := []byte(`{}`)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*)
 		FROM agent_commands
@@ -1123,6 +1128,7 @@ func TestRBACHandlerMatrix_ACLsWrite(t *testing.T) {
 				expectACLCreateSuccess(mock, tenantID, nodeID)
 				expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
 				mock.ExpectCommit()
+				expectPolicyDispatchPostCommitSummary(mock, tenantID, nodeID)
 			}
 
 			router := &Router{store: controllerstorage.NewStorageWithDB(db)}
@@ -1167,6 +1173,7 @@ func TestACLCreateHonorsDisabledPayload(t *testing.T) {
 	expectACLCreateSuccessWithEnabled(mock, tenantID, nodeID, false)
 	expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
 	mock.ExpectCommit()
+	expectPolicyDispatchPostCommitSummary(mock, tenantID, nodeID)
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withAuthContext(httptest.NewRequest(
@@ -1207,6 +1214,7 @@ func TestACLUpdatePreservesOmittedFields(t *testing.T) {
 	expectACLUpdatePreservingExistingFields(mock, tenantID, nodeID, ruleID)
 	expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
 	mock.ExpectCommit()
+	expectPolicyDispatchPostCommitSummary(mock, tenantID, nodeID)
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withAuthContext(httptest.NewRequest(
@@ -1310,6 +1318,7 @@ func TestRBACHandlerMatrix_QoSWrite(t *testing.T) {
 				expectQoSCreateSuccess(mock, tenantID, nodeID)
 				expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
 				mock.ExpectCommit()
+				expectPolicyDispatchPostCommitSummary(mock, tenantID, nodeID)
 			}
 
 			router := &Router{store: controllerstorage.NewStorageWithDB(db)}
@@ -1354,6 +1363,7 @@ func TestQoSCreateHonorsDisabledPayload(t *testing.T) {
 	expectQoSCreateSuccessWithEnabled(mock, tenantID, nodeID, false)
 	expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
 	mock.ExpectCommit()
+	expectPolicyDispatchPostCommitSummary(mock, tenantID, nodeID)
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withAuthContext(httptest.NewRequest(
@@ -1394,6 +1404,7 @@ func TestQoSUpdatePreservesOmittedFields(t *testing.T) {
 	expectQoSUpdatePreservingExistingFields(mock, tenantID, nodeID, ruleID)
 	expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
 	mock.ExpectCommit()
+	expectPolicyDispatchPostCommitSummary(mock, tenantID, nodeID)
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withAuthContext(httptest.NewRequest(
