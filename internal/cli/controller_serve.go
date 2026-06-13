@@ -1507,6 +1507,10 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 		http.Error(w, fmt.Sprintf("Node %s not found", req.Hostname), http.StatusNotFound)
 		return
 	}
+	if networkManageInactiveNodeStatus(targetNode.Status) {
+		http.Error(w, fmt.Sprintf("node %s is not active: status '%s'", req.Hostname, targetNode.Status), http.StatusConflict)
+		return
+	}
 
 	// Modify advertised routes
 	if req.Action == "add" {
@@ -1583,6 +1587,15 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 		"cidr":     req.CIDR,
 		"action":   req.Action,
 	})
+}
+
+func networkManageInactiveNodeStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "deleted", "suspended", "banned":
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *Controller) authorizeJWTPermission(w http.ResponseWriter, r *http.Request, permission string) (*auth.Claims, bool) {
