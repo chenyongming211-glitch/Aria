@@ -203,6 +203,64 @@ func TestHandleNetworkManageRejectsInactiveTargetNode(t *testing.T) {
 	}
 }
 
+func TestHandleNetworkManagePreservesOfflineNodeStatus(t *testing.T) {
+	auth.SetSecret("network-jwt-secret")
+	t.Cleanup(func() { auth.SetSecret("") })
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT permissions FROM roles
+		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
+		ORDER BY CASE WHEN name = $2 THEN 0 ELSE 1 END
+		LIMIT 1
+	`)).
+		WithArgs(tenantID, controllerstorage.SystemRoleAdmin).
+		WillReturnRows(sqlmock.NewRows([]string{"permissions"}).AddRow("{routes:write}"))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND status != 'deleted' ORDER BY last_seen DESC`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+			"created_at", "updated_at",
+		}).AddRow(
+			nodeID, "offline-key", "machine-1", tenantID, "1.1.1.1:51820", "", "1.1.1.1", "sh", "vpc-1", "offline-host", "100.64.0.2", 2,
+			now.Add(-time.Hour).Unix(), now.Add(-24*time.Hour).Unix(), "member", "kernel", "6.0", true, "offline", int64(now.Add(-time.Hour).Unix()), "{}", "", now, now,
+		))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE nodes SET advertised_routes = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3 AND status NOT IN ('deleted', 'suspended', 'banned')`)).
+		WithArgs(sqlmock.AnyArg(), nodeID, tenantID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	token, err := auth.GenerateToken("user-1", "admin", controllerstorage.SystemRoleAdmin, tenantID.String())
+	if err != nil {
+		t.Fatalf("GenerateToken failed: %v", err)
+	}
+
+	controller := &Controller{
+		store:  controllerstorage.NewStorageWithDB(db),
+		logger: logging.GetLogger(),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/network", strings.NewReader(`{"hostname":"offline-host","cidr":"10.10.0.0/24","action":"add"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	controller.HandleNetworkManage(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 while preserving offline status, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestHandleNetworkManageSuperAdminRequiresTenantID(t *testing.T) {
 	auth.SetSecret("network-jwt-secret")
 	t.Cleanup(func() { auth.SetSecret("") })
