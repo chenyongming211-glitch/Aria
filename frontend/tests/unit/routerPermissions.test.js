@@ -10,7 +10,6 @@ const routePermissionCases = [
   ['ACLRules', 'acls:read'],
   ['BandwidthControl', 'qos:read'],
   ['Tokens', 'tokens:read'],
-  ['TenantManagement', 'users:read'],
   ['Roles', 'roles:read'],
   ['Monitoring', 'monitoring:read'],
   ['AiAssistant', 'ai:use']
@@ -41,6 +40,13 @@ describe('router RBAC metadata', () => {
   it('restricts Settings to super_admin role metadata', () => {
     const route = router.getRoutes().find((r) => r.name === 'Settings')
     expect(route, 'missing route Settings').toBeTruthy()
+    expect(route.meta.role).toBe('super_admin')
+    expect(route.meta.permission).toBeUndefined()
+  })
+
+  it('restricts TenantManagement to super_admin role metadata', () => {
+    const route = router.getRoutes().find((r) => r.name === 'TenantManagement')
+    expect(route, 'missing route TenantManagement').toBeTruthy()
     expect(route.meta.role).toBe('super_admin')
     expect(route.meta.permission).toBeUndefined()
   })
@@ -208,6 +214,20 @@ describe('router RBAC metadata', () => {
     await router.push('/dashboard')
     await router.isReady()
     await router.push('/platform/settings')
+
+    expect(router.currentRoute.value.path).toBe('/dashboard')
+  })
+
+  it('blocks TenantManagement navigation for non-super_admin users', async () => {
+    localStorage.setItem('aria_token', 'dummy-token')
+    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_last_activity', `${Date.now()}`)
+    localStorage.setItem('aria_permissions', JSON.stringify(['*']))
+    localStorage.setItem('aria_user', JSON.stringify({ role: 'admin' }))
+
+    await router.push('/dashboard')
+    await router.isReady()
+    await router.push('/platform/tenants')
 
     expect(router.currentRoute.value.path).toBe('/dashboard')
   })

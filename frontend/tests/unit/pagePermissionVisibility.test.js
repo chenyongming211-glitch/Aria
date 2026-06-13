@@ -455,6 +455,20 @@ describe('page-level RBAC button visibility', () => {
     expect(wrapper.find('.sidebar-menu').attributes('data-active')).toBe('/monitoring')
   })
 
+  it('hides tenant management menu from non-super_admin users', () => {
+    mockUserStore.user = { role: 'admin' }
+    permissionSet.add('*')
+
+    const denied = mountWithStubs(Layout)
+
+    expect(denied.find('[data-index="/platform/tenants"]').exists()).toBe(false)
+
+    mockUserStore.user = { role: 'super_admin' }
+    const allowed = mountWithStubs(Layout)
+
+    expect(allowed.find('[data-index="/platform/tenants"]').exists()).toBe(true)
+  })
+
   it('shows/hides Routing write actions based on routes:write', async () => {
     permissionSet.add('routes:write')
     const allowed = mountWithStubs(Routing)
