@@ -62,6 +62,22 @@ func (m *PolicyMutationTx) DeleteTenantNodeQoSRule(tenantID, nodeID, ruleID uuid
 	return deleteTenantNodeQoSRule(m.tx, tenantID, nodeID, ruleID, false)
 }
 
+func (m *PolicyMutationTx) ResolvePolicyGroupRef(tenantID uuid.UUID, explicit uuid.NullUUID, directCIDR string) (uuid.NullUUID, error) {
+	return resolvePolicyGroupRefWith(m.tx, tenantID, explicit, directCIDR)
+}
+
+func (m *PolicyMutationTx) GetIPGroup(tenantID, groupID uuid.UUID) (*IPGroupRecord, error) {
+	return getIPGroupWith(m.tx, tenantID, groupID)
+}
+
+func (m *PolicyMutationTx) ListTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRuleRecord, error) {
+	return listTenantNodeACLRules(m.tx, tenantID, nodeID, false)
+}
+
+func (m *PolicyMutationTx) ListTenantNodeQoSRules(tenantID, nodeID uuid.UUID) ([]*QoSRuleRecord, error) {
+	return listTenantNodeQoSRules(m.tx, tenantID, nodeID, false)
+}
+
 func (m *PolicyMutationTx) CreateTenantNodeBlacklistRule(rule *BlacklistRuleRecord) (*BlacklistRuleRecord, error) {
 	return createTenantNodeBlacklistRule(m.tx, rule, false)
 }

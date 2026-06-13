@@ -21,7 +21,7 @@ func TestBuildTenantNodeQoSPoliciesReturnsRuntimeErrors(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, group_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
 		        bandwidth_mbps, COALESCE(direction, 'egress'),
 		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),

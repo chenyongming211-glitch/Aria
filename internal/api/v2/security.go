@@ -23,6 +23,13 @@ func validatePolicyByteField(field string, value int) error {
 	return nil
 }
 
+func validateACLPriorityField(value int) error {
+	if value < 1 || value > 10000 {
+		return fmt.Errorf("priority must be between 1 and 10000")
+	}
+	return nil
+}
+
 func validatePolicyDirectionField(value string) error {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", "ingress", "in", "egress", "out", "both", "all":
@@ -154,6 +161,136 @@ func boolValueOrDefault(value *bool, defaultValue bool) bool {
 		return defaultValue
 	}
 	return *value
+}
+
+func intValueOrDefault(value *int, defaultValue int) int {
+	if value == nil {
+		return defaultValue
+	}
+	return *value
+}
+
+func nullUUIDFromPtr(value *uuid.UUID) uuid.NullUUID {
+	if value == nil || *value == uuid.Nil {
+		return uuid.NullUUID{}
+	}
+	return uuid.NullUUID{UUID: *value, Valid: true}
+}
+
+func aclRuleResponse(rule *controllerstorage.ACLRuleRecord, nodeID uuid.UUID) map[string]interface{} {
+	return map[string]interface{}{
+		"id":           rule.ID.String(),
+		"node_id":      nodeID.String(),
+		"name":         rule.Name,
+		"action":       rule.Action,
+		"src_group_id": nullableUUIDString(rule.SrcGroupID),
+		"dst_group_id": nullableUUIDString(rule.DstGroupID),
+		"src_cidr":     rule.SrcCIDR,
+		"dst_cidr":     rule.DstCIDR,
+		"dst_port":     rule.DstPort,
+		"protocol":     rule.Protocol,
+		"direction":    rule.Direction,
+		"ports":        rule.Ports,
+		"priority":     rule.Priority,
+		"enabled":      rule.Enabled,
+		"description":  rule.Description,
+		"created_at":   rule.CreatedAt,
+		"updated_at":   rule.UpdatedAt,
+	}
+}
+
+func qosRuleResponse(rule *controllerstorage.QoSRuleRecord, nodeID uuid.UUID) map[string]interface{} {
+	return map[string]interface{}{
+		"id":             rule.ID.String(),
+		"node_id":        nodeID.String(),
+		"group_id":       nullableUUIDString(rule.GroupID),
+		"src_cidr":       rule.SrcCIDR,
+		"dst_cidr":       rule.DstCIDR,
+		"src_port":       rule.SrcPort,
+		"dst_port":       rule.DstPort,
+		"protocol":       rule.Protocol,
+		"bandwidth_mbps": rule.BandwidthMbps,
+		"direction":      rule.Direction,
+		"rate_bps":       rule.RateBps,
+		"burst_bytes":    rule.BurstBytes,
+		"priority":       rule.Priority,
+		"mode":           rule.Mode,
+		"enabled":        rule.Enabled,
+		"description":    rule.Description,
+		"created_at":     rule.CreatedAt,
+		"updated_at":     rule.UpdatedAt,
+	}
+}
+
+func nullableUUIDString(value uuid.NullUUID) interface{} {
+	if value.Valid {
+		return value.UUID.String()
+	}
+	return nil
+}
+
+func qosDirectGroupCIDR(group string, srcCIDR string, dstCIDR string, direction string) string {
+	if strings.TrimSpace(group) != "" {
+		return group
+	}
+	if strings.EqualFold(strings.TrimSpace(direction), "ingress") && strings.TrimSpace(srcCIDR) != "" {
+		return srcCIDR
+	}
+	if strings.TrimSpace(dstCIDR) != "" {
+		return dstCIDR
+	}
+	return srcCIDR
+}
+
+func hydrateACLRuleGroups(tx *controllerstorage.PolicyMutationTx, tenantID uuid.UUID, rules []*controllerstorage.ACLRuleRecord) error {
+	cache := map[uuid.UUID]*controllerstorage.IPGroupRecord{}
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		if rule.SrcGroupID.Valid {
+			group, err := loadPolicyGroupCached(tx, tenantID, rule.SrcGroupID.UUID, cache)
+			if err != nil {
+				return fmt.Errorf("load ACL source IP group: %w", err)
+			}
+			rule.SrcGroup = group
+		}
+		if rule.DstGroupID.Valid {
+			group, err := loadPolicyGroupCached(tx, tenantID, rule.DstGroupID.UUID, cache)
+			if err != nil {
+				return fmt.Errorf("load ACL destination IP group: %w", err)
+			}
+			rule.DstGroup = group
+		}
+	}
+	return nil
+}
+
+func hydrateQoSRuleGroups(tx *controllerstorage.PolicyMutationTx, tenantID uuid.UUID, rules []*controllerstorage.QoSRuleRecord) error {
+	cache := map[uuid.UUID]*controllerstorage.IPGroupRecord{}
+	for _, rule := range rules {
+		if rule == nil || !rule.GroupID.Valid {
+			continue
+		}
+		group, err := loadPolicyGroupCached(tx, tenantID, rule.GroupID.UUID, cache)
+		if err != nil {
+			return fmt.Errorf("load QoS IP group: %w", err)
+		}
+		rule.Group = group
+	}
+	return nil
+}
+
+func loadPolicyGroupCached(tx *controllerstorage.PolicyMutationTx, tenantID uuid.UUID, groupID uuid.UUID, cache map[uuid.UUID]*controllerstorage.IPGroupRecord) (*controllerstorage.IPGroupRecord, error) {
+	if group, ok := cache[groupID]; ok {
+		return group, nil
+	}
+	group, err := tx.GetIPGroup(tenantID, groupID)
+	if err != nil {
+		return nil, err
+	}
+	cache[groupID] = group
+	return group, nil
 }
 
 var errACLRuntimeKeyConflict = errors.New("acl runtime key conflict")
@@ -337,20 +474,22 @@ func (r *Router) listTenantNodeACLs(w http.ResponseWriter, tenantID, nodeID uuid
 
 func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node) {
 	var body struct {
-		Name        string `json:"name"`
-		Action      string `json:"action"`
-		SrcCIDR     string `json:"src_cidr"`
-		DstCIDR     string `json:"dst_cidr"`
-		SrcNet      string `json:"src_net"` // 兼容前端
-		DstNet      string `json:"dst_net"` // 兼容前端
-		DstPort     int    `json:"dst_port"`
-		MaxPort     int    `json:"max_port"` // 兼容前端
-		Protocol    int    `json:"protocol"`
-		Direction   string `json:"direction"`
-		Ports       string `json:"ports"`
-		Priority    int    `json:"priority"`
-		Enabled     *bool  `json:"enabled"`
-		Description string `json:"description"`
+		Name        string     `json:"name"`
+		Action      string     `json:"action"`
+		SrcGroupID  *uuid.UUID `json:"src_group_id"`
+		DstGroupID  *uuid.UUID `json:"dst_group_id"`
+		SrcCIDR     string     `json:"src_cidr"`
+		DstCIDR     string     `json:"dst_cidr"`
+		SrcNet      string     `json:"src_net"` // 兼容前端
+		DstNet      string     `json:"dst_net"` // 兼容前端
+		DstPort     int        `json:"dst_port"`
+		MaxPort     int        `json:"max_port"` // 兼容前端
+		Protocol    int        `json:"protocol"`
+		Direction   string     `json:"direction"`
+		Ports       string     `json:"ports"`
+		Priority    *int       `json:"priority"`
+		Enabled     *bool      `json:"enabled"`
+		Description string     `json:"description"`
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
@@ -389,6 +528,9 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 	if writePolicyValidationError(w, validateACLPortFields(body.Protocol, body.Ports, port)) {
 		return
 	}
+	if writePolicyValidationError(w, validateACLPriorityField(intValueOrDefault(body.Priority, 100))) {
+		return
+	}
 
 	rule := &controllerstorage.ACLRuleRecord{
 		TenantID:    tenantID,
@@ -401,47 +543,64 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		Protocol:    body.Protocol,
 		Direction:   body.Direction,
 		Ports:       body.Ports,
-		Priority:    body.Priority,
+		Priority:    intValueOrDefault(body.Priority, 100),
 		Enabled:     boolValueOrDefault(body.Enabled, true),
 		Description: body.Description,
 	}
-
-	if err := r.ensureACLRuntimeKeyAvailable(tenantID, node.ID, uuid.Nil, rule); err != nil {
-		if errors.Is(err, errACLRuntimeKeyConflict) {
-			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
-			return
-		}
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, err.Error(), nil)
-		return
-	}
+	explicitSrcGroup := nullUUIDFromPtr(body.SrcGroupID)
+	explicitDstGroup := nullUUIDFromPtr(body.DstGroupID)
 
 	metadata := map[string]interface{}{
 		"node_id": node.ID.String(),
 	}
 	r.writeTransactionalPolicyMutationSuccess(w, node, "acl", "create", "ACL rule created successfully", metadata, func(tx *controllerstorage.PolicyMutationTx) (map[string]interface{}, error) {
-		created, err := tx.CreateTenantNodeACLRule(rule)
+		ruleForWrite := *rule
+		ruleForValidation := *rule
+		var err error
+		ruleForWrite.SrcGroupID, err = tx.ResolvePolicyGroupRef(tenantID, explicitSrcGroup, rule.SrcCIDR)
+		if err != nil {
+			return nil, fmt.Errorf("resolve source IP group: %w", err)
+		}
+		if ruleForWrite.SrcGroupID.Valid {
+			ruleForWrite.SrcCIDR = ""
+			ruleForValidation.SrcGroupID = ruleForWrite.SrcGroupID
+			if explicitSrcGroup.Valid {
+				if ruleForValidation.SrcGroup, err = tx.GetIPGroup(tenantID, ruleForWrite.SrcGroupID.UUID); err != nil {
+					return nil, fmt.Errorf("load source IP group: %w", err)
+				}
+			}
+		}
+		ruleForWrite.DstGroupID, err = tx.ResolvePolicyGroupRef(tenantID, explicitDstGroup, rule.DstCIDR)
+		if err != nil {
+			return nil, fmt.Errorf("resolve destination IP group: %w", err)
+		}
+		if ruleForWrite.DstGroupID.Valid {
+			ruleForWrite.DstCIDR = ""
+			ruleForValidation.DstGroupID = ruleForWrite.DstGroupID
+			if explicitDstGroup.Valid {
+				if ruleForValidation.DstGroup, err = tx.GetIPGroup(tenantID, ruleForWrite.DstGroupID.UUID); err != nil {
+					return nil, fmt.Errorf("load destination IP group: %w", err)
+				}
+			}
+		}
+		existing, err := tx.ListTenantNodeACLRules(tenantID, node.ID)
+		if err != nil {
+			return nil, fmt.Errorf("load ACL rules for conflict check: %w", err)
+		}
+		if err := hydrateACLRuleGroups(tx, tenantID, existing); err != nil {
+			return nil, err
+		}
+		if err := controllerstorage.DetectACLPolicyConflict(existing, &ruleForValidation, uuid.Nil); err != nil {
+			return nil, err
+		}
+
+		created, err := tx.CreateTenantNodeACLRule(&ruleForWrite)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create ACL rule: %w", err)
 		}
 		metadata["rule_id"] = created.ID.String()
 		metadata["description"] = created.Description
-		return map[string]interface{}{
-			"id":          created.ID.String(),
-			"node_id":     node.ID.String(),
-			"name":        created.Name,
-			"action":      created.Action,
-			"src_cidr":    created.SrcCIDR,
-			"dst_cidr":    created.DstCIDR,
-			"dst_port":    created.DstPort,
-			"protocol":    created.Protocol,
-			"direction":   created.Direction,
-			"ports":       created.Ports,
-			"priority":    created.Priority,
-			"enabled":     created.Enabled,
-			"description": created.Description,
-			"created_at":  created.CreatedAt,
-			"updated_at":  created.UpdatedAt,
-		}, nil
+		return aclRuleResponse(created, node.ID), nil
 	})
 }
 
@@ -453,20 +612,22 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 	}
 
 	var body struct {
-		Name        *string `json:"name"`
-		Action      *string `json:"action"`
-		SrcCIDR     *string `json:"src_cidr"`
-		DstCIDR     *string `json:"dst_cidr"`
-		SrcNet      *string `json:"src_net"`
-		DstNet      *string `json:"dst_net"`
-		DstPort     *int    `json:"dst_port"`
-		MaxPort     *int    `json:"max_port"`
-		Protocol    *int    `json:"protocol"`
-		Direction   *string `json:"direction"`
-		Ports       *string `json:"ports"`
-		Priority    *int    `json:"priority"`
-		Description *string `json:"description"`
-		Enabled     *bool   `json:"enabled"`
+		Name        *string    `json:"name"`
+		Action      *string    `json:"action"`
+		SrcGroupID  *uuid.UUID `json:"src_group_id"`
+		DstGroupID  *uuid.UUID `json:"dst_group_id"`
+		SrcCIDR     *string    `json:"src_cidr"`
+		DstCIDR     *string    `json:"dst_cidr"`
+		SrcNet      *string    `json:"src_net"`
+		DstNet      *string    `json:"dst_net"`
+		DstPort     *int       `json:"dst_port"`
+		MaxPort     *int       `json:"max_port"`
+		Protocol    *int       `json:"protocol"`
+		Direction   *string    `json:"direction"`
+		Ports       *string    `json:"ports"`
+		Priority    *int       `json:"priority"`
+		Description *string    `json:"description"`
+		Enabled     *bool      `json:"enabled"`
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
@@ -500,13 +661,23 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 	}
 	if body.SrcCIDR != nil {
 		rule.SrcCIDR = *body.SrcCIDR
+		rule.SrcGroupID = uuid.NullUUID{}
 	} else if body.SrcNet != nil {
 		rule.SrcCIDR = *body.SrcNet
+		rule.SrcGroupID = uuid.NullUUID{}
+	} else if body.SrcGroupID != nil {
+		rule.SrcCIDR = ""
+		rule.SrcGroupID = nullUUIDFromPtr(body.SrcGroupID)
 	}
 	if body.DstCIDR != nil {
 		rule.DstCIDR = *body.DstCIDR
+		rule.DstGroupID = uuid.NullUUID{}
 	} else if body.DstNet != nil {
 		rule.DstCIDR = *body.DstNet
+		rule.DstGroupID = uuid.NullUUID{}
+	} else if body.DstGroupID != nil {
+		rule.DstCIDR = ""
+		rule.DstGroupID = nullUUIDFromPtr(body.DstGroupID)
 	}
 	if body.DstPort != nil {
 		rule.DstPort = *body.DstPort
@@ -540,13 +711,7 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 	if writePolicyValidationError(w, validateACLPortFields(rule.Protocol, rule.Ports, rule.DstPort)) {
 		return
 	}
-
-	if err := r.ensureACLRuntimeKeyAvailable(tenantID, node.ID, ruleID, &rule); err != nil {
-		if errors.Is(err, errACLRuntimeKeyConflict) {
-			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
-			return
-		}
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, err.Error(), nil)
+	if writePolicyValidationError(w, validateACLPriorityField(rule.Priority)) {
 		return
 	}
 
@@ -556,27 +721,51 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		"description": rule.Description,
 	}
 	r.writeTransactionalPolicyMutationSuccess(w, node, "acl", "update", "ACL rule updated successfully", metadata, func(tx *controllerstorage.PolicyMutationTx) (map[string]interface{}, error) {
-		updated, err := tx.UpdateTenantNodeACLRule(tenantID, node.ID, ruleID, &rule)
+		ruleForWrite := rule
+		ruleForValidation := rule
+		var err error
+		ruleForWrite.SrcGroupID, err = tx.ResolvePolicyGroupRef(tenantID, rule.SrcGroupID, rule.SrcCIDR)
+		if err != nil {
+			return nil, fmt.Errorf("resolve source IP group: %w", err)
+		}
+		if ruleForWrite.SrcGroupID.Valid {
+			ruleForWrite.SrcCIDR = ""
+			ruleForValidation.SrcGroupID = ruleForWrite.SrcGroupID
+			if rule.SrcGroupID.Valid && strings.TrimSpace(rule.SrcCIDR) == "" {
+				if ruleForValidation.SrcGroup, err = tx.GetIPGroup(tenantID, ruleForWrite.SrcGroupID.UUID); err != nil {
+					return nil, fmt.Errorf("load source IP group: %w", err)
+				}
+			}
+		}
+		ruleForWrite.DstGroupID, err = tx.ResolvePolicyGroupRef(tenantID, rule.DstGroupID, rule.DstCIDR)
+		if err != nil {
+			return nil, fmt.Errorf("resolve destination IP group: %w", err)
+		}
+		if ruleForWrite.DstGroupID.Valid {
+			ruleForWrite.DstCIDR = ""
+			ruleForValidation.DstGroupID = ruleForWrite.DstGroupID
+			if rule.DstGroupID.Valid && strings.TrimSpace(rule.DstCIDR) == "" {
+				if ruleForValidation.DstGroup, err = tx.GetIPGroup(tenantID, ruleForWrite.DstGroupID.UUID); err != nil {
+					return nil, fmt.Errorf("load destination IP group: %w", err)
+				}
+			}
+		}
+		existingRules, err := tx.ListTenantNodeACLRules(tenantID, node.ID)
+		if err != nil {
+			return nil, fmt.Errorf("load ACL rules for conflict check: %w", err)
+		}
+		if err := hydrateACLRuleGroups(tx, tenantID, existingRules); err != nil {
+			return nil, err
+		}
+		if err := controllerstorage.DetectACLPolicyConflict(existingRules, &ruleForValidation, ruleID); err != nil {
+			return nil, err
+		}
+		updated, err := tx.UpdateTenantNodeACLRule(tenantID, node.ID, ruleID, &ruleForWrite)
 		if err != nil {
 			return nil, fmt.Errorf("failed to update ACL rule: %w", err)
 		}
 		metadata["description"] = updated.Description
-		return map[string]interface{}{
-			"id":          ruleID.String(),
-			"node_id":     node.ID.String(),
-			"name":        updated.Name,
-			"action":      updated.Action,
-			"src_cidr":    updated.SrcCIDR,
-			"dst_cidr":    updated.DstCIDR,
-			"dst_port":    updated.DstPort,
-			"protocol":    updated.Protocol,
-			"direction":   updated.Direction,
-			"ports":       updated.Ports,
-			"priority":    updated.Priority,
-			"enabled":     updated.Enabled,
-			"description": updated.Description,
-			"updated_at":  updated.UpdatedAt,
-		}, nil
+		return aclRuleResponse(updated, node.ID), nil
 	})
 }
 
@@ -966,19 +1155,21 @@ func applyPolicyDeliveryFields(
 
 func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, node *controllerstorage.Node) {
 	var body struct {
-		SrcCIDR       string `json:"src_cidr"`
-		DstCIDR       string `json:"dst_cidr"`
-		SrcPort       int    `json:"src_port"`
-		DstPort       int    `json:"dst_port"`
-		Protocol      int    `json:"protocol"`
-		BandwidthMbps int    `json:"bandwidth_mbps"`
-		Direction     string `json:"direction"`
-		RateBps       uint64 `json:"rate_bps"`
-		BurstBytes    uint64 `json:"burst_bytes"`
-		Priority      int    `json:"priority"`
-		Mode          string `json:"mode"`
-		Enabled       *bool  `json:"enabled"`
-		Description   string `json:"description"`
+		GroupID       *uuid.UUID `json:"group_id"`
+		Group         string     `json:"group"`
+		SrcCIDR       string     `json:"src_cidr"`
+		DstCIDR       string     `json:"dst_cidr"`
+		SrcPort       int        `json:"src_port"`
+		DstPort       int        `json:"dst_port"`
+		Protocol      int        `json:"protocol"`
+		BandwidthMbps int        `json:"bandwidth_mbps"`
+		Direction     string     `json:"direction"`
+		RateBps       uint64     `json:"rate_bps"`
+		BurstBytes    uint64     `json:"burst_bytes"`
+		Priority      *int       `json:"priority"`
+		Mode          string     `json:"mode"`
+		Enabled       *bool      `json:"enabled"`
+		Description   string     `json:"description"`
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
@@ -998,7 +1189,8 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	if writePolicyValidationError(w, validateQoSMatchFields(body.Protocol, body.SrcPort, body.DstPort)) {
 		return
 	}
-	if writePolicyValidationError(w, validatePolicyByteField("priority", body.Priority)) {
+	priority := intValueOrDefault(body.Priority, 100)
+	if writePolicyValidationError(w, validatePolicyByteField("priority", priority)) {
 		return
 	}
 	if writePolicyValidationError(w, validatePolicyDirectionField(body.Direction)) {
@@ -1020,40 +1212,61 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		Direction:     body.Direction,
 		RateBps:       body.RateBps,
 		BurstBytes:    body.BurstBytes,
-		Priority:      body.Priority,
+		Priority:      priority,
 		Mode:          body.Mode,
 		Enabled:       boolValueOrDefault(body.Enabled, true),
 		Description:   body.Description,
 	}
+	explicitGroup := nullUUIDFromPtr(body.GroupID)
+	directGroup := qosDirectGroupCIDR(body.Group, body.SrcCIDR, body.DstCIDR, body.Direction)
 
 	metadata := map[string]interface{}{
 		"node_id": node.ID.String(),
 	}
 	r.writeTransactionalPolicyMutationSuccess(w, node, "qos", "create", "QoS rule created successfully", metadata, func(tx *controllerstorage.PolicyMutationTx) (map[string]interface{}, error) {
-		created, err := tx.CreateTenantNodeQoSRule(rule)
+		ruleForWrite := *rule
+		ruleForValidation := *rule
+		var err error
+		ruleForWrite.GroupID, err = tx.ResolvePolicyGroupRef(tenantID, explicitGroup, directGroup)
+		if err != nil {
+			return nil, fmt.Errorf("resolve QoS IP group: %w", err)
+		}
+		if ruleForWrite.GroupID.Valid {
+			ruleForWrite.SrcCIDR = ""
+			ruleForWrite.DstCIDR = ""
+			ruleForValidation.GroupID = ruleForWrite.GroupID
+			if explicitGroup.Valid {
+				if ruleForValidation.Group, err = tx.GetIPGroup(tenantID, ruleForWrite.GroupID.UUID); err != nil {
+					return nil, fmt.Errorf("load QoS IP group: %w", err)
+				}
+			}
+			if strings.TrimSpace(directGroup) != "" {
+				if strings.EqualFold(strings.TrimSpace(ruleForValidation.Direction), "ingress") {
+					ruleForValidation.SrcCIDR = directGroup
+					ruleForValidation.DstCIDR = ""
+				} else {
+					ruleForValidation.DstCIDR = directGroup
+					ruleForValidation.SrcCIDR = ""
+				}
+			}
+		}
+		existing, err := tx.ListTenantNodeQoSRules(tenantID, node.ID)
+		if err != nil {
+			return nil, fmt.Errorf("load QoS rules for conflict check: %w", err)
+		}
+		if err := hydrateQoSRuleGroups(tx, tenantID, existing); err != nil {
+			return nil, err
+		}
+		if err := controllerstorage.DetectQoSPolicyConflict(existing, &ruleForValidation, uuid.Nil); err != nil {
+			return nil, err
+		}
+
+		created, err := tx.CreateTenantNodeQoSRule(&ruleForWrite)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create QoS rule: %w", err)
 		}
 		metadata["rule_id"] = created.ID.String()
-		return map[string]interface{}{
-			"id":             created.ID.String(),
-			"node_id":        node.ID.String(),
-			"src_cidr":       created.SrcCIDR,
-			"dst_cidr":       created.DstCIDR,
-			"src_port":       created.SrcPort,
-			"dst_port":       created.DstPort,
-			"protocol":       created.Protocol,
-			"bandwidth_mbps": created.BandwidthMbps,
-			"direction":      created.Direction,
-			"rate_bps":       created.RateBps,
-			"burst_bytes":    created.BurstBytes,
-			"priority":       created.Priority,
-			"mode":           created.Mode,
-			"enabled":        created.Enabled,
-			"description":    created.Description,
-			"created_at":     created.CreatedAt,
-			"updated_at":     created.UpdatedAt,
-		}, nil
+		return qosRuleResponse(created, node.ID), nil
 	})
 }
 
@@ -1065,19 +1278,21 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	}
 
 	var body struct {
-		SrcCIDR       *string `json:"src_cidr"`
-		DstCIDR       *string `json:"dst_cidr"`
-		SrcPort       *int    `json:"src_port"`
-		DstPort       *int    `json:"dst_port"`
-		Protocol      *int    `json:"protocol"`
-		BandwidthMbps *int    `json:"bandwidth_mbps"`
-		Direction     *string `json:"direction"`
-		RateBps       *uint64 `json:"rate_bps"`
-		BurstBytes    *uint64 `json:"burst_bytes"`
-		Priority      *int    `json:"priority"`
-		Mode          *string `json:"mode"`
-		Description   *string `json:"description"`
-		Enabled       *bool   `json:"enabled"`
+		GroupID       *uuid.UUID `json:"group_id"`
+		Group         *string    `json:"group"`
+		SrcCIDR       *string    `json:"src_cidr"`
+		DstCIDR       *string    `json:"dst_cidr"`
+		SrcPort       *int       `json:"src_port"`
+		DstPort       *int       `json:"dst_port"`
+		Protocol      *int       `json:"protocol"`
+		BandwidthMbps *int       `json:"bandwidth_mbps"`
+		Direction     *string    `json:"direction"`
+		RateBps       *uint64    `json:"rate_bps"`
+		BurstBytes    *uint64    `json:"burst_bytes"`
+		Priority      *int       `json:"priority"`
+		Mode          *string    `json:"mode"`
+		Description   *string    `json:"description"`
+		Enabled       *bool      `json:"enabled"`
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
@@ -1099,11 +1314,37 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	}
 
 	rule := *existing
+	directGroup := ""
+	explicitGroup := rule.GroupID
+	groupChanged := false
 	if body.SrcCIDR != nil {
 		rule.SrcCIDR = *body.SrcCIDR
+		rule.GroupID = uuid.NullUUID{}
+		explicitGroup = uuid.NullUUID{}
+		directGroup = *body.SrcCIDR
+		groupChanged = true
 	}
 	if body.DstCIDR != nil {
 		rule.DstCIDR = *body.DstCIDR
+		rule.GroupID = uuid.NullUUID{}
+		explicitGroup = uuid.NullUUID{}
+		directGroup = *body.DstCIDR
+		groupChanged = true
+	}
+	if body.Group != nil {
+		directGroup = *body.Group
+		rule.SrcCIDR = ""
+		rule.DstCIDR = ""
+		rule.GroupID = uuid.NullUUID{}
+		explicitGroup = uuid.NullUUID{}
+		groupChanged = true
+	}
+	if body.GroupID != nil {
+		explicitGroup = nullUUIDFromPtr(body.GroupID)
+		rule.GroupID = explicitGroup
+		rule.SrcCIDR = ""
+		rule.DstCIDR = ""
+		groupChanged = true
 	}
 	if body.SrcPort != nil {
 		rule.SrcPort = *body.SrcPort
@@ -1162,28 +1403,51 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		"node_id": node.ID.String(),
 		"rule_id": ruleID.String(),
 	}, func(tx *controllerstorage.PolicyMutationTx) (map[string]interface{}, error) {
-		updated, err := tx.UpdateTenantNodeQoSRule(tenantID, node.ID, ruleID, &rule)
+		ruleForWrite := rule
+		ruleForValidation := rule
+		var err error
+		if groupChanged {
+			ruleForWrite.GroupID, err = tx.ResolvePolicyGroupRef(tenantID, explicitGroup, directGroup)
+		} else {
+			ruleForWrite.GroupID, err = tx.ResolvePolicyGroupRef(tenantID, rule.GroupID, qosDirectGroupCIDR("", rule.SrcCIDR, rule.DstCIDR, rule.Direction))
+		}
+		if err != nil {
+			return nil, fmt.Errorf("resolve QoS IP group: %w", err)
+		}
+		if ruleForWrite.GroupID.Valid {
+			ruleForWrite.SrcCIDR = ""
+			ruleForWrite.DstCIDR = ""
+			ruleForValidation.GroupID = ruleForWrite.GroupID
+			if !groupChanged || body.GroupID != nil {
+				if ruleForValidation.Group, err = tx.GetIPGroup(tenantID, ruleForWrite.GroupID.UUID); err != nil {
+					return nil, fmt.Errorf("load QoS IP group: %w", err)
+				}
+			}
+			if strings.TrimSpace(directGroup) != "" {
+				if strings.EqualFold(strings.TrimSpace(ruleForValidation.Direction), "ingress") {
+					ruleForValidation.SrcCIDR = directGroup
+					ruleForValidation.DstCIDR = ""
+				} else {
+					ruleForValidation.DstCIDR = directGroup
+					ruleForValidation.SrcCIDR = ""
+				}
+			}
+		}
+		existingRules, err := tx.ListTenantNodeQoSRules(tenantID, node.ID)
+		if err != nil {
+			return nil, fmt.Errorf("load QoS rules for conflict check: %w", err)
+		}
+		if err := hydrateQoSRuleGroups(tx, tenantID, existingRules); err != nil {
+			return nil, err
+		}
+		if err := controllerstorage.DetectQoSPolicyConflict(existingRules, &ruleForValidation, ruleID); err != nil {
+			return nil, err
+		}
+		updated, err := tx.UpdateTenantNodeQoSRule(tenantID, node.ID, ruleID, &ruleForWrite)
 		if err != nil {
 			return nil, fmt.Errorf("failed to update QoS rule: %w", err)
 		}
-		return map[string]interface{}{
-			"id":             ruleID.String(),
-			"node_id":        node.ID.String(),
-			"src_cidr":       updated.SrcCIDR,
-			"dst_cidr":       updated.DstCIDR,
-			"src_port":       updated.SrcPort,
-			"dst_port":       updated.DstPort,
-			"protocol":       updated.Protocol,
-			"bandwidth_mbps": updated.BandwidthMbps,
-			"direction":      updated.Direction,
-			"rate_bps":       updated.RateBps,
-			"burst_bytes":    updated.BurstBytes,
-			"priority":       updated.Priority,
-			"mode":           updated.Mode,
-			"enabled":        updated.Enabled,
-			"description":    updated.Description,
-			"updated_at":     updated.UpdatedAt,
-		}, nil
+		return qosRuleResponse(updated, node.ID), nil
 	})
 }
 

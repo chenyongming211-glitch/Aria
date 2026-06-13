@@ -92,6 +92,7 @@ type IPGroupWarning struct {
 
 type ipGroupExecutor interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)
+	Query(query string, args ...interface{}) (*sql.Rows, error)
 	QueryRow(query string, args ...interface{}) *sql.Row
 }
 
@@ -174,7 +175,11 @@ func (s *Storage) ListIPGroups(tenantID uuid.UUID) ([]*IPGroupRecord, error) {
 }
 
 func (s *Storage) GetIPGroup(tenantID, groupID uuid.UUID) (*IPGroupRecord, error) {
-	group, err := scanIPGroup(s.db.QueryRow(
+	return getIPGroupWith(s.db, tenantID, groupID)
+}
+
+func getIPGroupWith(q ipGroupExecutor, tenantID, groupID uuid.UUID) (*IPGroupRecord, error) {
+	group, err := scanIPGroup(q.QueryRow(
 		`SELECT id, tenant_id, name, COALESCE(description, ''), kind, created_by, created_at, updated_at
 		   FROM ip_groups
 		  WHERE tenant_id = $1 AND id = $2`,
@@ -184,7 +189,7 @@ func (s *Storage) GetIPGroup(tenantID, groupID uuid.UUID) (*IPGroupRecord, error
 	if err != nil {
 		return nil, err
 	}
-	group.Members, err = s.listIPGroupMembers(tenantID, group.ID)
+	group.Members, err = listIPGroupMembersWith(q, tenantID, group.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -280,6 +285,45 @@ func (s *Storage) DeleteIPGroup(tenantID, groupID uuid.UUID) error {
 }
 
 func (s *Storage) EnsureInlineIPGroup(tenantID uuid.UUID, cidrs []string) (*IPGroupRecord, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer rollbackIfOpen(tx)
+
+	group, err := ensureInlineIPGroupWith(tx, tenantID, cidrs)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return group, nil
+}
+
+func (s *Storage) ResolvePolicyGroupRef(tenantID uuid.UUID, explicit uuid.NullUUID, directCIDR string) (uuid.NullUUID, error) {
+	return resolvePolicyGroupRefWith(s.db, tenantID, explicit, directCIDR)
+}
+
+func resolvePolicyGroupRefWith(q ipGroupExecutor, tenantID uuid.UUID, explicit uuid.NullUUID, directCIDR string) (uuid.NullUUID, error) {
+	if explicit.Valid {
+		var found uuid.UUID
+		if err := q.QueryRow(`SELECT id FROM ip_groups WHERE tenant_id = $1 AND id = $2`, tenantID, explicit.UUID).Scan(&found); err != nil {
+			return uuid.NullUUID{}, err
+		}
+		return uuid.NullUUID{UUID: found, Valid: true}, nil
+	}
+	if policyCIDRIsAny(directCIDR) {
+		return uuid.NullUUID{}, nil
+	}
+	group, err := ensureInlineIPGroupWith(q, tenantID, []string{directCIDR})
+	if err != nil {
+		return uuid.NullUUID{}, err
+	}
+	return uuid.NullUUID{UUID: group.ID, Valid: true}, nil
+}
+
+func ensureInlineIPGroupWith(q ipGroupExecutor, tenantID uuid.UUID, cidrs []string) (*IPGroupRecord, error) {
 	members := make([]IPGroupMemberRecord, 0, len(cidrs))
 	for _, cidr := range cidrs {
 		members = append(members, IPGroupMemberRecord{CIDR: cidr, Note: "inline"})
@@ -296,14 +340,8 @@ func (s *Storage) EnsureInlineIPGroup(tenantID uuid.UUID, cidrs []string) (*IPGr
 		normalizedCIDRs = append(normalizedCIDRs, member.CIDR)
 	}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer rollbackIfOpen(tx)
-
 	group := &IPGroupRecord{}
-	err = tx.QueryRow(
+	err = q.QueryRow(
 		upsertInlineIPGroupSQL,
 		tenantID,
 		inlineIPGroupName(normalizedCIDRs),
@@ -323,13 +361,10 @@ func (s *Storage) EnsureInlineIPGroup(tenantID uuid.UUID, cidrs []string) (*IPGr
 		return nil, err
 	}
 
-	if err := insertIPGroupMembers(tx, tenantID, group.ID, normalizedMembers, true); err != nil {
+	if err := insertIPGroupMembers(q, tenantID, group.ID, normalizedMembers, true); err != nil {
 		return nil, err
 	}
 	group.Members = withIPGroupID(normalizedMembers, group.ID)
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
 	return group, nil
 }
 
@@ -391,7 +426,11 @@ func (s *Storage) rejectExactDuplicateIPGroupMembers(tenantID, excludeGroupID uu
 }
 
 func (s *Storage) listIPGroupMembers(tenantID, groupID uuid.UUID) ([]IPGroupMemberRecord, error) {
-	rows, err := s.db.Query(
+	return listIPGroupMembersWith(s.db, tenantID, groupID)
+}
+
+func listIPGroupMembersWith(q ipGroupExecutor, tenantID, groupID uuid.UUID) ([]IPGroupMemberRecord, error) {
+	rows, err := q.Query(
 		`SELECT id, group_id, cidr::text, COALESCE(note, '')
 		   FROM ip_group_members
 		  WHERE tenant_id = $1 AND group_id = $2

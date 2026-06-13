@@ -796,7 +796,7 @@ func TestHandleRegister_CSRSuccessIncludesCertificateInSyncResponse(t *testing.T
 
 	// node-scoped ACL query returns empty rule list
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+		SELECT id, tenant_id, node_id, COALESCE(name, ''), action, src_group_id, dst_group_id, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
 		        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
 		        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
 		        priority, enabled, COALESCE(description, ''),
@@ -807,7 +807,7 @@ func TestHandleRegister_CSRSuccessIncludesCertificateInSyncResponse(t *testing.T
 	`)).
 		WithArgs(tenantID, persistedNodeID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
+			"id", "tenant_id", "node_id", "name", "action", "src_group_id", "dst_group_id", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
 		}))
 
 	expectSyncNodeControlState(mock, tenantID, persistedNodeID, "dsv-register-cert", now)

@@ -32,7 +32,7 @@ func TestListTenantNodeACLsIncludesCompletedDeliveryStatus(t *testing.T) {
 	deliveryID := uuid.New()
 	commandID := uuid.New().String()
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, src_group_id, dst_group_id, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
 			        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
 			        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
 			        priority, enabled, COALESCE(description, ''),
@@ -42,8 +42,8 @@ func TestListTenantNodeACLsIncludesCompletedDeliveryStatus(t *testing.T) {
 		  ORDER BY priority ASC, created_at ASC`)).
 		WithArgs(tenantID, nodeID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
-		}).AddRow(ruleID, tenantID, nodeID, "allow-icmp", "allow", "100.64.0.27/32", "100.64.0.2/32", 0, 1, "egress", "", 10, true, "allow icmp", now, now))
+			"id", "tenant_id", "node_id", "name", "action", "src_group_id", "dst_group_id", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(ruleID, tenantID, nodeID, "allow-icmp", "allow", nil, nil, "100.64.0.27/32", "100.64.0.2/32", 0, 1, "egress", "", 10, true, "allow icmp", now, now))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT tenant_id, node_id, stats, updated_at
 		FROM node_policy_stats
 		WHERE tenant_id = $1 AND node_id = $2`)).
@@ -76,7 +76,7 @@ func TestListTenantNodeQoSIncludesCompletedDeliveryStatus(t *testing.T) {
 	deliveryID := uuid.New()
 	commandID := uuid.New().String()
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, group_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
 		        bandwidth_mbps, COALESCE(direction, 'egress'),
 		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
@@ -88,8 +88,8 @@ func TestListTenantNodeQoSIncludesCompletedDeliveryStatus(t *testing.T) {
 		  ORDER BY priority ASC, created_at DESC`)).
 		WithArgs(tenantID, nodeID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at",
-		}).AddRow(ruleID, tenantID, nodeID, "100.64.0.27/32", "100.64.0.2/32", 0, 5201, 6, 1, "egress", uint64(1000000), uint64(125000), 10, "policing", true, "tcp limit", now, now))
+			"id", "tenant_id", "node_id", "group_id", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(ruleID, tenantID, nodeID, nil, "100.64.0.27/32", "100.64.0.2/32", 0, 5201, 6, 1, "egress", uint64(1000000), uint64(125000), 10, "policing", true, "tcp limit", now, now))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT tenant_id, node_id, stats, updated_at
 		FROM node_policy_stats
 		WHERE tenant_id = $1 AND node_id = $2`)).
@@ -121,7 +121,7 @@ func TestListTenantNodeACLsReturnsStatsLoadError(t *testing.T) {
 	ruleID := uuid.New()
 	statsErr := errors.New("stats json decode failed")
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, src_group_id, dst_group_id, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
 				        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
 				        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
 				        priority, enabled, COALESCE(description, ''),
@@ -131,8 +131,8 @@ func TestListTenantNodeACLsReturnsStatsLoadError(t *testing.T) {
 			  ORDER BY priority ASC, created_at ASC`)).
 		WithArgs(tenantID, nodeID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
-		}).AddRow(ruleID, tenantID, nodeID, "allow-icmp", "allow", "100.64.0.27/32", "100.64.0.2/32", 0, 1, "egress", "", 10, true, "allow icmp", now, now))
+			"id", "tenant_id", "node_id", "name", "action", "src_group_id", "dst_group_id", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(ruleID, tenantID, nodeID, "allow-icmp", "allow", nil, nil, "100.64.0.27/32", "100.64.0.2/32", 0, 1, "egress", "", 10, true, "allow icmp", now, now))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT tenant_id, node_id, stats, updated_at
 			FROM node_policy_stats
 			WHERE tenant_id = $1 AND node_id = $2`)).
@@ -164,7 +164,7 @@ func TestListTenantNodeQoSReturnsStatsLoadError(t *testing.T) {
 	ruleID := uuid.New()
 	statsErr := errors.New("stats query failed")
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, group_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 			        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
 			        bandwidth_mbps, COALESCE(direction, 'egress'),
 			        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
@@ -176,8 +176,8 @@ func TestListTenantNodeQoSReturnsStatsLoadError(t *testing.T) {
 			  ORDER BY priority ASC, created_at DESC`)).
 		WithArgs(tenantID, nodeID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at",
-		}).AddRow(ruleID, tenantID, nodeID, "100.64.0.27/32", "100.64.0.2/32", 0, 0, 0, 1, "egress", uint64(1000000), uint64(125000), 10, "policing", true, "tcp limit", now, now))
+			"id", "tenant_id", "node_id", "group_id", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(ruleID, tenantID, nodeID, nil, "100.64.0.27/32", "100.64.0.2/32", 0, 0, 0, 1, "egress", uint64(1000000), uint64(125000), 10, "policing", true, "tcp limit", now, now))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT tenant_id, node_id, stats, updated_at
 			FROM node_policy_stats
 			WHERE tenant_id = $1 AND node_id = $2`)).

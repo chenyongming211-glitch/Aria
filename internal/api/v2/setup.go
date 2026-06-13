@@ -1113,6 +1113,10 @@ func (r *Router) writeTransactionalPolicyMutationSuccess(
 			apibase.WriteError(w, http.StatusNotFound, apibase.CodeNotFound, "Policy item not found", nil)
 			return
 		}
+		if errors.Is(err, controllerstorage.ErrAmbiguousPolicyConflict) {
+			apibase.WriteError(w, http.StatusConflict, apibase.CodeConflict, err.Error(), nil)
+			return
+		}
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, message+": policy dispatch failed", map[string]string{
 			"dispatch_error": err.Error(),
 		})

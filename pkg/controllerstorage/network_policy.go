@@ -2,7 +2,10 @@ package controllerstorage
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"net/netip"
+	"strconv"
 	"strings"
 	"time"
 
@@ -88,12 +91,23 @@ type BlacklistRuleRecord struct {
 
 type policyMutationExecutor interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)
+	Query(query string, args ...interface{}) (*sql.Rows, error)
 	QueryRow(query string, args ...interface{}) *sql.Row
 }
 
+var ErrAmbiguousPolicyConflict = errors.New("ambiguous policy conflict")
+
 func (s *Storage) ListTenantNodeQoSRules(tenantID, nodeID uuid.UUID) ([]*QoSRuleRecord, error) {
-	rows, err := s.db.Query(
-		`SELECT id, tenant_id, node_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+	return listTenantNodeQoSRules(s.db, tenantID, nodeID, false)
+}
+
+func listTenantNodeQoSRules(q policyMutationExecutor, tenantID, nodeID uuid.UUID, enabledOnly bool) ([]*QoSRuleRecord, error) {
+	enabledClause := ""
+	if enabledOnly {
+		enabledClause = " AND enabled = true"
+	}
+	rows, err := q.Query(
+		`SELECT id, tenant_id, node_id, group_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
 		        bandwidth_mbps, COALESCE(direction, 'egress'),
 		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
@@ -101,7 +115,7 @@ func (s *Storage) ListTenantNodeQoSRules(tenantID, nodeID uuid.UUID) ([]*QoSRule
 		        COALESCE(priority, 0), COALESCE(mode, 'policing'),
 		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
-		  WHERE tenant_id = $1 AND node_id = $2
+		  WHERE tenant_id = $1 AND node_id = $2`+enabledClause+`
 		  ORDER BY priority ASC, created_at DESC`,
 		tenantID, nodeID,
 	)
@@ -129,9 +143,9 @@ func createTenantNodeQoSRule(q policyMutationExecutor, rule *QoSRuleRecord, bump
 	created := &QoSRuleRecord{}
 	normalizeQoSRuntimeFields(rule)
 	err := q.QueryRow(
-		`INSERT INTO qos_rules (tenant_id, node_id, src_cidr, dst_cidr, src_port, dst_port, protocol, bandwidth_mbps, direction, rate_bps, burst_bytes, priority, mode, enabled, description)
-		 VALUES ($1, $2, NULLIF($3, '')::cidr, NULLIF($4, '')::cidr, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-		 RETURNING id, tenant_id, node_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+		`INSERT INTO qos_rules (tenant_id, node_id, group_id, src_cidr, dst_cidr, src_port, dst_port, protocol, bandwidth_mbps, direction, rate_bps, burst_bytes, priority, mode, enabled, description)
+		 VALUES ($1, $2, $3, NULLIF($4, '')::cidr, NULLIF($5, '')::cidr, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		 RETURNING id, tenant_id, node_id, group_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		           COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
 		           bandwidth_mbps, COALESCE(direction, 'egress'),
 		           COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
@@ -140,6 +154,7 @@ func createTenantNodeQoSRule(q policyMutationExecutor, rule *QoSRuleRecord, bump
 		           enabled, COALESCE(description, ''), created_at, updated_at`,
 		rule.TenantID,
 		rule.NodeID,
+		nullableUUID(rule.GroupID),
 		strings.TrimSpace(rule.SrcCIDR),
 		strings.TrimSpace(rule.DstCIDR),
 		nullableInt(rule.SrcPort),
@@ -157,6 +172,7 @@ func createTenantNodeQoSRule(q policyMutationExecutor, rule *QoSRuleRecord, bump
 		&created.ID,
 		&created.TenantID,
 		&created.NodeID,
+		&created.GroupID,
 		&created.SrcCIDR,
 		&created.DstCIDR,
 		&created.SrcPort,
@@ -217,7 +233,7 @@ func deleteTenantNodeQoSRule(q policyMutationExecutor, tenantID, nodeID uuid.UUI
 
 func (s *Storage) GetTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID) (*QoSRuleRecord, error) {
 	rule, err := scanQoSRule(s.db.QueryRow(
-		`SELECT id, tenant_id, node_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+		`SELECT id, tenant_id, node_id, group_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
 		        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
 		        bandwidth_mbps, COALESCE(direction, 'egress'),
 		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
@@ -242,13 +258,14 @@ func updateTenantNodeQoSRule(q policyMutationExecutor, tenantID, nodeID, ruleID 
 	normalizeQoSRuntimeFields(rule)
 	result, err := q.Exec(
 		`UPDATE qos_rules SET
-			src_cidr = NULLIF($4, '')::cidr, dst_cidr = NULLIF($5, '')::cidr,
-			src_port = $6, dst_port = $7, protocol = $8,
-			bandwidth_mbps = $9, direction = $10, rate_bps = $11, burst_bytes = $12,
-			priority = $13, mode = $14, description = $15,
-			enabled = $16, updated_at = NOW()
+			group_id = $4, src_cidr = NULLIF($5, '')::cidr, dst_cidr = NULLIF($6, '')::cidr,
+			src_port = $7, dst_port = $8, protocol = $9,
+			bandwidth_mbps = $10, direction = $11, rate_bps = $12, burst_bytes = $13,
+			priority = $14, mode = $15, description = $16,
+			enabled = $17, updated_at = NOW()
 		 WHERE id = $1 AND tenant_id = $2 AND node_id = $3`,
 		ruleID, tenantID, nodeID,
+		nullableUUID(rule.GroupID),
 		rule.SrcCIDR, rule.DstCIDR,
 		rule.SrcPort, rule.DstPort, rule.Protocol,
 		rule.BandwidthMbps, rule.Direction, rule.RateBps, rule.BurstBytes,
@@ -281,14 +298,22 @@ func updateTenantNodeQoSRule(q policyMutationExecutor, tenantID, nodeID, ruleID 
 // ACL Methods
 
 func (s *Storage) ListTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRuleRecord, error) {
-	rows, err := s.db.Query(
-		`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+	return listTenantNodeACLRules(s.db, tenantID, nodeID, false)
+}
+
+func listTenantNodeACLRules(q policyMutationExecutor, tenantID, nodeID uuid.UUID, enabledOnly bool) ([]*ACLRuleRecord, error) {
+	enabledClause := ""
+	if enabledOnly {
+		enabledClause = " AND enabled = true"
+	}
+	rows, err := q.Query(
+		`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, src_group_id, dst_group_id, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
 		        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
 		        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
 		        priority, enabled, COALESCE(description, ''),
 		        created_at, updated_at
 		   FROM acl_rules
-		  WHERE tenant_id = $1 AND node_id = $2
+		  WHERE tenant_id = $1 AND node_id = $2`+enabledClause+`
 		  ORDER BY priority ASC, created_at ASC`,
 		tenantID, nodeID,
 	)
@@ -299,13 +324,7 @@ func (s *Storage) ListTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRule
 
 	rules := make([]*ACLRuleRecord, 0)
 	for rows.Next() {
-		rule := &ACLRuleRecord{}
-		err := rows.Scan(
-			&rule.ID, &rule.TenantID, &rule.NodeID, &rule.Name, &rule.Action, &rule.SrcCIDR, &rule.DstCIDR,
-			&rule.DstPort, &rule.Protocol, &rule.Direction, &rule.Ports,
-			&rule.Priority, &rule.Enabled, &rule.Description,
-			&rule.CreatedAt, &rule.UpdatedAt,
-		)
+		rule, err := scanACLRuleRecord(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -326,14 +345,15 @@ func createTenantNodeACLRule(q policyMutationExecutor, rule *ACLRuleRecord, bump
 	normalizeACLRuntimeFields(rule)
 
 	err := q.QueryRow(
-		`INSERT INTO acl_rules (tenant_id, node_id, name, action, src_cidr, dst_cidr, dst_port, protocol, direction, ports, priority, enabled, description, src_net, dst_net, min_port, max_port)
-		 VALUES ($1, $2, $3, $4, NULLIF($5, '')::cidr, NULLIF($6, '')::cidr, $7, $8, $9, $10, $11, $12, $13, $14::cidr, $15::cidr, $16, $17)
-		 RETURNING id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+		`INSERT INTO acl_rules (tenant_id, node_id, name, action, src_group_id, dst_group_id, src_cidr, dst_cidr, dst_port, protocol, direction, ports, priority, enabled, description, src_net, dst_net, min_port, max_port)
+		 VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, '')::cidr, NULLIF($8, '')::cidr, $9, $10, $11, $12, $13, $14, $15, $16::cidr, $17::cidr, $18, $19)
+		 RETURNING id, tenant_id, node_id, COALESCE(name, ''), action, src_group_id, dst_group_id, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
 		           COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
 		           COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
 		           priority, enabled, COALESCE(description, ''),
 		           created_at, updated_at`,
 		rule.TenantID, rule.NodeID, strings.TrimSpace(rule.Name), rule.Action,
+		nullableUUID(rule.SrcGroupID), nullableUUID(rule.DstGroupID),
 		strings.TrimSpace(rule.SrcCIDR), strings.TrimSpace(rule.DstCIDR),
 		nullableInt(rule.DstPort), rule.Protocol, rule.Direction, rule.Ports,
 		rule.Priority, rule.Enabled, strings.TrimSpace(rule.Description), srcNet, dstNet, minPort, maxPort,
@@ -385,7 +405,7 @@ func deleteTenantNodeACLRuleByID(q policyMutationExecutor, tenantID, nodeID uuid
 
 func (s *Storage) GetTenantNodeACLRule(tenantID, nodeID, ruleID uuid.UUID) (*ACLRuleRecord, error) {
 	rule, err := scanACLRuleRecord(s.db.QueryRow(
-		`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+		`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, src_group_id, dst_group_id, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
 		        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
 		        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
 		        priority, enabled, COALESCE(description, ''),
@@ -412,12 +432,12 @@ func updateTenantNodeACLRule(q policyMutationExecutor, tenantID, nodeID, ruleID 
 
 	result, err := q.Exec(
 		`UPDATE acl_rules SET
-			name = $4, action = $5, src_cidr = NULLIF($6, '')::cidr, dst_cidr = NULLIF($7, '')::cidr,
-			dst_port = $8, protocol = $9, direction = $10, ports = $11, priority = $12, description = $13,
-			enabled = $14, src_net = $15::cidr, dst_net = $16::cidr, min_port = $17, max_port = $18, updated_at = NOW()
+			name = $4, action = $5, src_group_id = $6, dst_group_id = $7, src_cidr = NULLIF($8, '')::cidr, dst_cidr = NULLIF($9, '')::cidr,
+			dst_port = $10, protocol = $11, direction = $12, ports = $13, priority = $14, description = $15,
+			enabled = $16, src_net = $17::cidr, dst_net = $18::cidr, min_port = $19, max_port = $20, updated_at = NOW()
 		 WHERE id = $1 AND tenant_id = $2 AND node_id = $3`,
 		ruleID, tenantID, nodeID,
-		strings.TrimSpace(rule.Name), rule.Action, rule.SrcCIDR, rule.DstCIDR,
+		strings.TrimSpace(rule.Name), rule.Action, nullableUUID(rule.SrcGroupID), nullableUUID(rule.DstGroupID), rule.SrcCIDR, rule.DstCIDR,
 		rule.DstPort, rule.Protocol, rule.Direction, rule.Ports, rule.Priority,
 		rule.Description, rule.Enabled, srcNet, dstNet, minPort, maxPort,
 	)
@@ -451,7 +471,7 @@ func scanACLRuleRecord(scanner interface {
 }) (*ACLRuleRecord, error) {
 	rule := &ACLRuleRecord{}
 	err := scanner.Scan(
-		&rule.ID, &rule.TenantID, &rule.NodeID, &rule.Name, &rule.Action, &rule.SrcCIDR, &rule.DstCIDR,
+		&rule.ID, &rule.TenantID, &rule.NodeID, &rule.Name, &rule.Action, &rule.SrcGroupID, &rule.DstGroupID, &rule.SrcCIDR, &rule.DstCIDR,
 		&rule.DstPort, &rule.Protocol, &rule.Direction, &rule.Ports,
 		&rule.Priority, &rule.Enabled, &rule.Description,
 		&rule.CreatedAt, &rule.UpdatedAt,
@@ -580,33 +600,7 @@ func (s *Storage) GetNodeQoSRulesByPublicKey(publicKey string) ([]*QoSRuleRecord
 		return nil, err
 	}
 
-	rows, err := s.db.Query(
-		`SELECT id, tenant_id, node_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
-		        COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
-		        bandwidth_mbps, COALESCE(direction, 'egress'),
-		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
-		        COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
-		        COALESCE(priority, 0), COALESCE(mode, 'policing'),
-		        enabled, COALESCE(description, ''), created_at, updated_at
-		   FROM qos_rules
-		  WHERE tenant_id = $1 AND node_id = $2 AND enabled = true
-		  ORDER BY priority ASC, created_at ASC`,
-		node.TenantID, node.ID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var rules []*QoSRuleRecord
-	for rows.Next() {
-		rule, err := scanQoSRule(rows)
-		if err != nil {
-			return nil, err
-		}
-		rules = append(rules, rule)
-	}
-	return rules, rows.Err()
+	return listTenantNodeQoSRules(s.db, node.TenantID, node.ID, true)
 }
 
 func (s *Storage) GetNodeACLRulesByPublicKey(publicKey string) ([]*ACLRuleRecord, error) {
@@ -618,31 +612,7 @@ func (s *Storage) GetNodeACLRulesByPublicKey(publicKey string) ([]*ACLRuleRecord
 }
 
 func (s *Storage) GetEnabledTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRuleRecord, error) {
-	rows, err := s.db.Query(
-		`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
-		        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
-		        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
-		        priority, enabled, COALESCE(description, ''),
-		        created_at, updated_at
-		   FROM acl_rules
-		  WHERE tenant_id = $1 AND node_id = $2 AND enabled = true
-		  ORDER BY priority ASC, created_at ASC`,
-		tenantID, nodeID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	rules := make([]*ACLRuleRecord, 0)
-	for rows.Next() {
-		rule, err := scanACLRuleRecord(rows)
-		if err != nil {
-			return nil, err
-		}
-		rules = append(rules, rule)
-	}
-	return rules, rows.Err()
+	return listTenantNodeACLRules(s.db, tenantID, nodeID, true)
 }
 
 func (s *Storage) GetNodeBlacklistRulesByPublicKey(publicKey string) ([]*BlacklistRuleRecord, error) {
@@ -682,6 +652,7 @@ func scanQoSRule(scanner interface {
 		&record.ID,
 		&record.TenantID,
 		&record.NodeID,
+		&record.GroupID,
 		&record.SrcCIDR,
 		&record.DstCIDR,
 		&record.SrcPort,
@@ -741,6 +712,328 @@ func defaultQoSBurst(rateBps uint64) uint64 {
 		return 1500
 	}
 	return burst
+}
+
+func nullableUUID(value uuid.NullUUID) interface{} {
+	if value.Valid {
+		return value.UUID
+	}
+	return nil
+}
+
+func DetectACLPolicyConflict(existing []*ACLRuleRecord, candidate *ACLRuleRecord, candidateID uuid.UUID) error {
+	if candidate == nil || !candidate.Enabled {
+		return nil
+	}
+	for _, rule := range existing {
+		if rule == nil || !rule.Enabled {
+			continue
+		}
+		if candidateID != uuid.Nil && rule.ID == candidateID {
+			continue
+		}
+		if rule.Priority != candidate.Priority {
+			continue
+		}
+		if !directionsOverlap(rule.Direction, candidate.Direction) {
+			continue
+		}
+		if !protocolsOverlap(rule.Protocol, candidate.Protocol) {
+			continue
+		}
+		if !portsOverlap(rule.Ports, rule.DstPort, candidate.Ports, candidate.DstPort) {
+			continue
+		}
+		for _, candidateSrc := range aclSourceCIDRs(candidate) {
+			for _, existingSrc := range aclSourceCIDRs(rule) {
+				srcRel, ok := cidrSpecificityRelation(candidateSrc, existingSrc)
+				if !ok {
+					continue
+				}
+				for _, candidateDst := range aclDestinationCIDRs(candidate) {
+					for _, existingDst := range aclDestinationCIDRs(rule) {
+						dstRel, ok := cidrSpecificityRelation(candidateDst, existingDst)
+						if !ok {
+							continue
+						}
+						if relationStrictlyMoreSpecific(srcRel, dstRel) || relationStrictlyLessSpecific(srcRel, dstRel) {
+							continue
+						}
+						return fmt.Errorf("%w: ACL rule overlaps rule %s at priority %d", ErrAmbiguousPolicyConflict, rule.ID.String(), candidate.Priority)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func DetectQoSPolicyConflict(existing []*QoSRuleRecord, candidate *QoSRuleRecord, candidateID uuid.UUID) error {
+	if candidate == nil || !candidate.Enabled {
+		return nil
+	}
+	for _, rule := range existing {
+		if rule == nil || !rule.Enabled {
+			continue
+		}
+		if candidateID != uuid.Nil && rule.ID == candidateID {
+			continue
+		}
+		if rule.Priority != candidate.Priority {
+			continue
+		}
+		if !directionsOverlap(rule.Direction, candidate.Direction) {
+			continue
+		}
+		for _, candidateCIDR := range qosPolicyCIDRs(candidate) {
+			for _, existingCIDR := range qosPolicyCIDRs(rule) {
+				rel, ok := cidrSpecificityRelation(candidateCIDR, existingCIDR)
+				if !ok {
+					continue
+				}
+				if rel.candidateStrict || rel.existingStrict {
+					continue
+				}
+				return fmt.Errorf("%w: QoS rule overlaps rule %s at priority %d", ErrAmbiguousPolicyConflict, rule.ID.String(), candidate.Priority)
+			}
+		}
+	}
+	return nil
+}
+
+type cidrRelation struct {
+	candidateStrict bool
+	existingStrict  bool
+}
+
+func relationStrictlyMoreSpecific(relations ...cidrRelation) bool {
+	strict := false
+	for _, rel := range relations {
+		if rel.existingStrict {
+			return false
+		}
+		if rel.candidateStrict {
+			strict = true
+		}
+	}
+	return strict
+}
+
+func relationStrictlyLessSpecific(relations ...cidrRelation) bool {
+	strict := false
+	for _, rel := range relations {
+		if rel.candidateStrict {
+			return false
+		}
+		if rel.existingStrict {
+			strict = true
+		}
+	}
+	return strict
+}
+
+func directionsOverlap(a, b string) bool {
+	for _, left := range policyDirections(a) {
+		for _, right := range policyDirections(b) {
+			if left == right {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func policyDirections(value string) []string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "egress", "out":
+		return []string{"egress"}
+	case "both", "all":
+		return []string{"ingress", "egress"}
+	default:
+		return []string{"ingress"}
+	}
+}
+
+func protocolsOverlap(a, b int) bool {
+	return a == 0 || b == 0 || a == b
+}
+
+type portInterval struct {
+	start int
+	end   int
+}
+
+func portsOverlap(leftPorts string, leftDstPort int, rightPorts string, rightDstPort int) bool {
+	left := policyPortIntervals(leftPorts, leftDstPort)
+	right := policyPortIntervals(rightPorts, rightDstPort)
+	for _, a := range left {
+		for _, b := range right {
+			if a.start <= b.end && b.start <= a.end {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func policyPortIntervals(ports string, dstPort int) []portInterval {
+	if strings.TrimSpace(ports) == "" || strings.EqualFold(strings.TrimSpace(ports), "all") {
+		if dstPort > 0 {
+			return []portInterval{{start: dstPort, end: dstPort}}
+		}
+		return []portInterval{{start: 0, end: 65535}}
+	}
+
+	intervals := make([]portInterval, 0)
+	for _, raw := range strings.Split(ports, ",") {
+		part := strings.TrimSpace(raw)
+		if part == "" {
+			continue
+		}
+		if actionIndex := strings.Index(part, ":"); actionIndex >= 0 {
+			part = strings.TrimSpace(part[:actionIndex])
+		}
+		if strings.Contains(part, "-") {
+			bounds := strings.SplitN(part, "-", 2)
+			start, startErr := strconv.Atoi(strings.TrimSpace(bounds[0]))
+			end, endErr := strconv.Atoi(strings.TrimSpace(bounds[1]))
+			if startErr == nil && endErr == nil && start <= end {
+				intervals = append(intervals, portInterval{start: clampPort(start), end: clampPort(end)})
+			}
+			continue
+		}
+		port, err := strconv.Atoi(part)
+		if err == nil {
+			port = clampPort(port)
+			intervals = append(intervals, portInterval{start: port, end: port})
+		}
+	}
+	if len(intervals) == 0 {
+		return []portInterval{{start: 0, end: 65535}}
+	}
+	return intervals
+}
+
+func clampPort(port int) int {
+	if port < 0 {
+		return 0
+	}
+	if port > 65535 {
+		return 65535
+	}
+	return port
+}
+
+func cidrSpecificityRelation(candidateCIDR, existingCIDR string) (cidrRelation, bool) {
+	candidate, candidateWildcard, candidateOK := parsePolicyPrefix(candidateCIDR)
+	existing, existingWildcard, existingOK := parsePolicyPrefix(existingCIDR)
+	if !candidateOK || !existingOK {
+		return cidrRelation{}, false
+	}
+	if candidateWildcard && existingWildcard {
+		return cidrRelation{}, true
+	}
+	if candidateWildcard {
+		return cidrRelation{existingStrict: true}, true
+	}
+	if existingWildcard {
+		return cidrRelation{candidateStrict: true}, true
+	}
+	if candidate.Addr().Is4() != existing.Addr().Is4() {
+		return cidrRelation{}, false
+	}
+	if !prefixesOverlap(candidate, existing) {
+		return cidrRelation{}, false
+	}
+	if prefixContains(existing, candidate) && candidate.Bits() > existing.Bits() {
+		return cidrRelation{candidateStrict: true}, true
+	}
+	if prefixContains(candidate, existing) && existing.Bits() > candidate.Bits() {
+		return cidrRelation{existingStrict: true}, true
+	}
+	return cidrRelation{}, true
+}
+
+func parsePolicyPrefix(value string) (netip.Prefix, bool, bool) {
+	trimmed := strings.TrimSpace(value)
+	if policyCIDRIsAny(trimmed) {
+		return netip.Prefix{}, true, true
+	}
+	prefix, err := netip.ParsePrefix(trimmed)
+	if err != nil {
+		addr, addrErr := netip.ParseAddr(trimmed)
+		if addrErr != nil {
+			return netip.Prefix{}, false, false
+		}
+		if addr.Is4() {
+			return netip.PrefixFrom(addr, 32), false, true
+		}
+		return netip.PrefixFrom(addr, 128), false, true
+	}
+	return prefix.Masked(), false, true
+}
+
+func policyCIDRIsAny(value string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	return trimmed == "" || trimmed == "any" || trimmed == "0" || trimmed == "0.0.0.0/0" || trimmed == "::/0"
+}
+
+func prefixesOverlap(left, right netip.Prefix) bool {
+	return prefixContains(left, right) || prefixContains(right, left)
+}
+
+func prefixContains(parent, child netip.Prefix) bool {
+	return parent.Contains(child.Addr()) && parent.Bits() <= child.Bits()
+}
+
+func aclSourceCIDRs(rule *ACLRuleRecord) []string {
+	if rule == nil {
+		return []string{""}
+	}
+	if rule.SrcGroup != nil && len(rule.SrcGroup.Members) > 0 {
+		return ipGroupMemberCIDRs(rule.SrcGroup.Members)
+	}
+	return []string{rule.SrcCIDR}
+}
+
+func aclDestinationCIDRs(rule *ACLRuleRecord) []string {
+	if rule == nil {
+		return []string{""}
+	}
+	if rule.DstGroup != nil && len(rule.DstGroup.Members) > 0 {
+		return ipGroupMemberCIDRs(rule.DstGroup.Members)
+	}
+	return []string{rule.DstCIDR}
+}
+
+func qosPolicyCIDRs(rule *QoSRuleRecord) []string {
+	if rule == nil {
+		return []string{""}
+	}
+	if rule.Group != nil && len(rule.Group.Members) > 0 {
+		return ipGroupMemberCIDRs(rule.Group.Members)
+	}
+	if strings.TrimSpace(rule.Direction) == "ingress" && strings.TrimSpace(rule.SrcCIDR) != "" {
+		return []string{rule.SrcCIDR}
+	}
+	if strings.TrimSpace(rule.DstCIDR) != "" {
+		return []string{rule.DstCIDR}
+	}
+	if strings.TrimSpace(rule.SrcCIDR) != "" {
+		return []string{rule.SrcCIDR}
+	}
+	return []string{""}
+}
+
+func ipGroupMemberCIDRs(members []IPGroupMemberRecord) []string {
+	cidrs := make([]string, 0, len(members))
+	for _, member := range members {
+		cidrs = append(cidrs, member.CIDR)
+	}
+	if len(cidrs) == 0 {
+		return []string{""}
+	}
+	return cidrs
 }
 
 func scanBlacklistRule(scanner interface {
