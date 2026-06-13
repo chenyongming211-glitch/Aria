@@ -3,7 +3,6 @@ package middleware
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	"github.com/google/uuid"
 
@@ -34,12 +33,7 @@ func (tm *TenantMiddleware) FromToken(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		var tokenStr string
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
-		} else {
-			tokenStr = authHeader
-		}
+		tokenStr := extractHTTPAuthorizationToken(authHeader)
 
 		// ✅ 修复：直接使用原生 SQL 查询，解除与其他隔离模块的循环依赖
 		var tenantID uuid.UUID

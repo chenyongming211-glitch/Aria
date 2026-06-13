@@ -32,6 +32,15 @@ func containsPath(paths []string, path string) bool {
 	return false
 }
 
+func extractHTTPAuthorizationToken(authHeader string) string {
+	trimmed := strings.TrimSpace(authHeader)
+	parts := strings.SplitN(trimmed, " ", 2)
+	if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+		return strings.TrimSpace(parts[1])
+	}
+	return trimmed
+}
+
 // JWTAuthMiddleware 创建JWT认证中间件
 func JWTAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -41,12 +50,7 @@ func JWTAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		var tokenString string
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
-		} else {
-			tokenString = authHeader
-		}
+		tokenString := extractHTTPAuthorizationToken(authHeader)
 
 		if tokenString == "" {
 			apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "Invalid token format", nil)
