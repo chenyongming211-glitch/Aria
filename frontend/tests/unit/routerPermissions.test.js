@@ -223,7 +223,7 @@ describe('router RBAC metadata', () => {
     localStorage.setItem('aria_token', 'dummy-token')
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
     localStorage.setItem('aria_last_activity', `${Date.now()}`)
-    localStorage.setItem('aria_permissions', JSON.stringify(['*']))
+    localStorage.setItem('aria_permissions', JSON.stringify(['monitoring:read']))
     localStorage.setItem('aria_user', JSON.stringify({ role: 'admin' }))
 
     await router.push('/dashboard')
@@ -237,7 +237,7 @@ describe('router RBAC metadata', () => {
     localStorage.setItem('aria_token', 'dummy-token')
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
     localStorage.setItem('aria_last_activity', `${Date.now()}`)
-    localStorage.setItem('aria_permissions', JSON.stringify(['*']))
+    localStorage.setItem('aria_permissions', JSON.stringify(['monitoring:read']))
     localStorage.setItem('aria_user', JSON.stringify({ role: 'admin' }))
 
     await router.push('/dashboard')
