@@ -954,20 +954,11 @@ func TestMonitoringAPI_NodeDetailPolicyStatsFailureReturnsInternalError(t *testi
 	t.Cleanup(func() { _ = db.Close() })
 
 	expectNodeLookup(mock, tenantID, nodeID, "{}")
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT tenant_id, node_id, COALESCE(desired_state_version, ''), desired_state_metadata, desired_state_updated_at,
-		       COALESCE(applied_state_version, ''), applied_state_updated_at, COALESCE(observed_state, ''),
-		       COALESCE(observed_message, ''), observed_at, last_sync_at, COALESCE(last_sync_error, ''),
-		       created_at, updated_at
-		FROM node_control_states
-		WHERE tenant_id = $1 AND node_id = $2
-	`)).
+	mock.ExpectQuery(`SELECT tenant_id, node_id, COALESCE\(desired_state_version, ''\), desired_state_metadata, desired_state_updated_at,\s+COALESCE\(applied_state_version, ''\), applied_state_updated_at, COALESCE\(observed_state, ''\),\s+COALESCE\(observed_message, ''\), observed_at, last_sync_at, COALESCE\(last_sync_error, ''\),\s+created_at, updated_at\s+FROM node_control_states\s+WHERE tenant_id = \$1 AND node_id = \$2`).
 		WithArgs(tenantID, nodeID).
 		WillReturnError(sql.ErrNoRows)
 	statsErr := errors.New("policy stats unavailable")
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT tenant_id, node_id, stats, updated_at
-		FROM node_policy_stats
-		WHERE tenant_id = $1 AND node_id = $2`)).
+	mock.ExpectQuery(`SELECT tenant_id, node_id, stats, updated_at\s+FROM node_policy_stats\s+WHERE tenant_id = \$1 AND node_id = \$2`).
 		WithArgs(tenantID, nodeID).
 		WillReturnError(statsErr)
 
