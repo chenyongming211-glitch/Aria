@@ -1927,10 +1927,12 @@ func (c *Controller) processSync(publicKey string) (interface{}, string, interfa
 	}
 
 	// Update last seen
-	node.LastSeen = time.Now().Unix()
-	if err := c.store.SaveNode(node); err != nil {
-		c.logger.Warn("Failed to update last seen for %s: %v", previewString(publicKey, 8), err)
+	lastSeen := time.Now().Unix()
+	if err := c.store.UpdateNodeHeartbeat(node.ID, lastSeen); err != nil {
+		c.logger.Warn("Failed to update heartbeat for %s: %v", previewString(publicKey, 8), err)
+		return nil, "", nil, uuid.Nil, fmt.Errorf("failed to update node heartbeat: %w", err)
 	}
+	node.LastSeen = lastSeen
 
 	tenantNodes, err := c.store.GetNodesByTenant(node.TenantID)
 	if err != nil {
