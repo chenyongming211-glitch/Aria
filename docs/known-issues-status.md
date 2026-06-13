@@ -45,12 +45,13 @@
 
 ### 5. ACL / Policies / Bandwidth 概念重叠
 
-**状态**: ⚠️ 代码字段已收敛，产品层仍有残余分裂
+**状态**: 🟢 IP Group 主模型已落地，页面仍可继续统一体验
 
 - 后端已经统一到节点级策略域，并具备版本提升与下发记录
-- ACL 前端已标准化发送 `src_cidr/dst_cidr/dst_port`，后端保留旧字段兼容
-- QoS 前端 API 与后端创建/更新接口均已拒绝 `bandwidth_mbps <= 0`
-- 仍需继续收口的是前端心智模型：`Policy Center`、`ACL`、`Bandwidth` 仍分散在多个页面
+- ACL 前端优先发送 `src_group_id/dst_group_id`，直接 CIDR 只作为 inline IP Group 快捷路径
+- QoS 前端优先发送 `group_id`，直接 CIDR 只作为 inline IP Group 快捷路径
+- Controller、Sync、Agent、eBPF runtime id 映射已经按 IP Group 模型收口
+- 仍可继续优化的是前端体验：`IP Group`、`ACL`、`Bandwidth` 仍是分页面管理，后续可以做成统一策略工作台
 
 ---
 

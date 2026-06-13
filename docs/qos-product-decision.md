@@ -53,15 +53,15 @@ The product model should be IP Group first, with direct CIDR input treated as a
 convenience and migration path. Users and the Controller reason about IP
 Groups; the Agent and eBPF datapath reason about local runtime group ids.
 
-The target northbound model is:
+The implemented northbound model is:
 
 - IP Group is a tenant-scoped resource with a stable product id, name, and one
   or more IPv4/IPv6 CIDR members.
 - ACL references `src_group_id` and `dst_group_id`.
 - QoS references `group_id`, `direction`, `rate_bps`, `burst_bytes`, `mode`, and
   `priority`.
-- The UI may still allow users to type a direct CIDR. Saving a direct CIDR
-  should create or reuse a system-managed inline group, so the stored product
+- The UI still allows users to type a direct CIDR. Saving a direct CIDR creates
+  or reuses a system-managed inline group, so the stored product
   model remains group-based.
 - The Controller expands IP Groups into CIDR members when compiling the
   node-scoped Agent snapshot.
@@ -78,9 +78,10 @@ map to the same product IP Group. In the eBPF datapath, those members are stored
 as multiple LPM entries that point to the same runtime group id.
 
 Overlapping IP Group members are allowed. The datapath semantics are longest
-prefix match: a more specific CIDR wins over a broader CIDR. The Controller or
-frontend should surface an overlap warning so operators understand which group
-will match a packet first, but overlap is not a hard validation failure.
+prefix match: a more specific CIDR wins over a broader CIDR. The Controller
+returns overlap warnings on IP Group detail/create/update responses, and the UI
+shows those warnings so operators understand which group will match a packet
+first. Overlap is not a hard validation failure.
 
 ## Policy Priority And Conflict Resolution
 
@@ -161,6 +162,31 @@ The only valid northbound QoS route shape is node-scoped:
 
 Future work should keep Controller, Agent, frontend, docs, and tests on the
 unified rule model above.
+
+## Current Implementation Status
+
+As of 2026-06-13, the IP Group model is implemented across Controller storage,
+v2 REST API, gRPC Sync snapshots, Agent runtime mapping, and Vue frontend:
+
+- Controller stores tenant-scoped `ip_groups` / `ip_group_members`.
+- ACL create/update accepts `src_group_id` / `dst_group_id` and direct
+  `src_cidr` / `dst_cidr` fallback.
+- QoS create/update accepts `group_id` and direct CIDR fallback.
+- Direct CIDR fallback is normalized into inline IP Groups before policy
+  compilation.
+- Sync snapshots include referenced IP Groups and product group ids.
+- Agent maps product group ids to local runtime group ids and writes all group
+  CIDRs into the LPM maps.
+- Frontend includes an IP Group management page, ACL source/destination group
+  selectors, and QoS group selector.
+
+Known remaining compatibility surface:
+
+- Existing rows may still carry legacy `src_cidr` / `dst_cidr` fields; they are
+  read as fallback and should be migrated out later.
+- QoS `priority` remains limited to `0..255` until the eBPF ABI is widened.
+- `bpf_spin_lock` remains intentionally out of scope for the current Aya map
+  layout.
 
 Runtime verification should check both ACL and QoS attachment points:
 

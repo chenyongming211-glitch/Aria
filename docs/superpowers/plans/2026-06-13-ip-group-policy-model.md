@@ -8,6 +8,11 @@
 
 **Tech Stack:** Go Controller, PostgreSQL schema bootstrap in `pkg/controllerstorage/postgres.go`, gRPC protobuf in `pkg/grpc/agentpb/aria_agent.proto` and `agent-rust/proto/aria_agent.proto`, Rust Agent with Aya eBPF maps, Vue 3 + Element Plus frontend, GitHub Actions for build/test verification.
 
+**Implementation status:** Completed on branch `codex/ip-group-policy-model`.
+Batch CI verification passed through GitHub Actions for Controller Go tests/build,
+frontend unit tests/build, Rust Agent tests/build, and Controller Docker image
+publish.
+
 ---
 
 ## Product Contract
@@ -134,7 +139,7 @@ Expected:
   - ACL create/update accepts `src_group_id`, `dst_group_id`, direct `src_cidr`, and direct `dst_cidr`.
   - QoS create/update accepts `group_id` and direct group/CIDR input.
   - Conflict validation uses resolved group ids, direction, protocol, ports, priority, and specificity.
-- Modify `pkg/controllerstorage/rbac.go`, `internal/api/middleware/permissions.go`, and `frontend/src/utils/permissions.js`
+- Modify `pkg/controllerstorage/rbac.go`, `internal/api/middleware/permissions.go`, and `frontend/src/stores/user.js`
   - Add `ip-groups:read` and `ip-groups:write`.
 
 ### Sync And Proto

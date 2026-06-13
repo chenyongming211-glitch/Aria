@@ -151,6 +151,25 @@ one runtime group id to an exact LPM key.
 | `PUT` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/security/acls/{rule_id}` | 租户管理员 |
 | `DELETE` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/security/acls/{rule_id}` | 租户管理员 |
 
+ACL 新建/更新优先使用 IP Group：
+
+```json
+{
+  "name": "allow-office",
+  "src_group_id": "0f7e9a87-5f59-4c2d-bb5f-d1f2b7bb0b45",
+  "dst_group_id": "58f14bb1-1a87-47f5-b2e8-40c2ff4cc8c0",
+  "direction": "egress",
+  "protocol": 6,
+  "dst_port": 443,
+  "action": "allow",
+  "priority": 100,
+  "enabled": true
+}
+```
+
+如果传 `src_cidr` / `dst_cidr` 而不传对应 group id，Controller 会创建或复用
+inline IP Group，然后按 group 模型下发给 Agent。
+
 ### 5.3 黑名单管理（匹配 eBPF `BLOCK_*_MAP`）
 
 | 方法 | URL | 业务说明 |
@@ -171,6 +190,23 @@ one runtime group id to an exact LPM key.
 | `GET/POST` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos` | `QOS_CONFIG` |
 | `PUT` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/{rule_id}` | `QOS_CONFIG` |
 | `DELETE` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/qos/{rule_id}` | - |
+
+QoS 新建/更新优先使用 IP Group：
+
+```json
+{
+  "group_id": "0f7e9a87-5f59-4c2d-bb5f-d1f2b7bb0b45",
+  "direction": "egress",
+  "bandwidth_mbps": 100,
+  "rate_bps": 100000000,
+  "burst_bytes": 1250000,
+  "mode": "policing",
+  "priority": 100,
+  "enabled": true
+}
+```
+
+直接 CIDR 兼容输入仍可用，但只作为 inline IP Group 快捷路径，不再是产品主模型。
 
 注：QoS 所有接口均需租户隔离，增删操作需 `admin` 权限。
 
