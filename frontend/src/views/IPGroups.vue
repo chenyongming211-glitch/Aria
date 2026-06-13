@@ -38,22 +38,22 @@
         <template #default="{ row }">
           <div class="cidr-list">
             <el-tag
-              v-for="member in row.members"
+              v-for="member in groupMembers(row)"
               :key="member.id || member.cidr"
               size="small"
               effect="plain"
             >
               {{ member.cidr }}
             </el-tag>
-            <span v-if="!row.members.length">-</span>
+            <span v-if="!groupMembers(row).length">-</span>
           </div>
         </template>
       </el-table-column>
       <el-table-column label="重叠提示" min-width="220">
         <template #default="{ row }">
-          <div v-if="row.warnings.length" class="warning-list">
+          <div v-if="groupWarnings(row).length" class="warning-list">
             <el-tag
-              v-for="warning in row.warnings"
+              v-for="warning in groupWarnings(row)"
               :key="warning.cidr + warning.overlaps_cidr"
               type="warning"
               size="small"
@@ -254,6 +254,10 @@ const formatKind = (kind) => {
   const map = { custom: '自定义', inline: '内联', system: '系统' }
   return map[kind] || kind
 }
+
+const groupMembers = (group) => Array.isArray(group?.members) ? group.members : []
+
+const groupWarnings = (group) => Array.isArray(group?.warnings) ? group.warnings : []
 
 onMounted(loadGroups)
 useTenantChangeReload(loadGroups)
