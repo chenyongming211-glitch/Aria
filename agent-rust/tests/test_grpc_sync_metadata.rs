@@ -11,6 +11,7 @@ fn sync_result_preserves_phase1_snapshot_metadata_shape() {
         peers: vec![],
         assigned_ip: "100.64.0.2".to_string(),
         desired_state_version: "dsv-phase1".to_string(),
+        ip_groups: vec![],
         acl_rules: vec![],
         qos_rules: vec![],
         blacklist_rules: vec![],

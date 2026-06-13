@@ -17,7 +17,7 @@ use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::{reload, EnvFilter, Registry};
 
-use crate::acl_qos_manager::{AclQosManager, AclQosSnapshot, AclRuleSpec, QosRuleSpec};
+use crate::acl_qos_manager::{AclQosManager, AclQosSnapshot, AclRuleSpec, IPGroupSpec, QosRuleSpec};
 use crate::acl_qos_state::{
     requested_directions, ACTION_DROP, DIRECTION_EGRESS, DIRECTION_INGRESS,
 };
@@ -26,7 +26,8 @@ use crate::config::{AgentConfig, ConfigManager};
 use crate::grpc_client::{acl_policy_from_sync_rule, qos_policy_from_sync_rule};
 use crate::grpc_client::{
     AclRule, BlacklistRule as GrpcBlacklistRule, GrpcClient, GrpcCommandRequest,
-    GrpcCommandResponse, PeerInfo as GrpcPeerInfo, QoSRule as GrpcQoSRule,
+    GrpcCommandResponse, IPGroup as GrpcIPGroup, PeerInfo as GrpcPeerInfo,
+    QoSRule as GrpcQoSRule,
 };
 use crate::identity::IdentityManager;
 use crate::metrics;
@@ -1435,6 +1436,7 @@ impl AgentRuntime {
                 &sync_result.acl_rules,
                 &sync_result.blacklist_rules,
                 &sync_result.qos_rules,
+                &sync_result.ip_groups,
             )
             .await
         {
@@ -1479,6 +1481,7 @@ impl AgentRuntime {
         acl_rules: &[AclRule],
         blacklist_rules: &[GrpcBlacklistRule],
         qos_rules: &[GrpcQoSRule],
+        ip_groups: &[GrpcIPGroup],
     ) -> Result<()> {
         tracing::info!(
             "Syncing ACL/QoS snapshot: {} ACL, {} blacklist, {} QoS rules",
@@ -1488,6 +1491,15 @@ impl AgentRuntime {
         );
 
         let mut snapshot = AclQosSnapshot {
+            ip_groups: ip_groups
+                .iter()
+                .map(|group| IPGroupSpec {
+                    id: group.id.clone(),
+                    name: group.name.clone(),
+                    cidrs: group.cidrs.clone(),
+                    kind: group.kind.clone(),
+                })
+                .collect(),
             acl_rules: Vec::new(),
             qos_rules: Vec::new(),
             acl_enabled: true,
@@ -1501,6 +1513,8 @@ impl AgentRuntime {
                     id: policy.id.clone(),
                     src_group: policy.src_group.clone(),
                     dst_group: policy.dst_group.clone(),
+                    src_group_id: policy.src_group_id.clone(),
+                    dst_group_id: policy.dst_group_id.clone(),
                     proto: policy.proto,
                     action: policy.action,
                     priority: controller_acl_order_priority(idx),
@@ -1516,6 +1530,8 @@ impl AgentRuntime {
                     id: String::new(),
                     src_group: rule.cidr.clone(),
                     dst_group: "any".to_string(),
+                    src_group_id: String::new(),
+                    dst_group_id: String::new(),
                     proto: 0,
                     action: ACTION_DROP,
                     priority: BLACKLIST_ACL_PRIORITY,
@@ -1526,6 +1542,8 @@ impl AgentRuntime {
                     id: String::new(),
                     src_group: "any".to_string(),
                     dst_group: rule.cidr.clone(),
+                    src_group_id: String::new(),
+                    dst_group_id: String::new(),
                     proto: 0,
                     action: ACTION_DROP,
                     priority: BLACKLIST_ACL_PRIORITY,
@@ -1539,6 +1557,8 @@ impl AgentRuntime {
                             id: String::new(),
                             src_group: "any".to_string(),
                             dst_group: "any".to_string(),
+                            src_group_id: String::new(),
+                            dst_group_id: String::new(),
                             proto,
                             action: ACTION_DROP,
                             priority: BLACKLIST_ACL_PRIORITY,
@@ -1560,6 +1580,7 @@ impl AgentRuntime {
                 snapshot.qos_rules.push(QosRuleSpec {
                     id: policy.id.clone(),
                     group: policy.group.clone(),
+                    group_id: policy.group_id.clone(),
                     direction,
                     rate_bps: policy.rate_bps,
                     burst_bytes: policy.burst_bytes,
@@ -2427,6 +2448,7 @@ mod tests {
             peers: Vec::new(),
             assigned_ip: String::new(),
             desired_state_version: String::new(),
+            ip_groups: Vec::new(),
             acl_rules: Vec::new(),
             qos_rules: Vec::new(),
             blacklist_rules: Vec::new(),
@@ -2455,6 +2477,7 @@ mod tests {
             peers: Vec::new(),
             assigned_ip: String::new(),
             desired_state_version: String::new(),
+            ip_groups: Vec::new(),
             acl_rules: Vec::new(),
             qos_rules: Vec::new(),
             blacklist_rules: Vec::new(),

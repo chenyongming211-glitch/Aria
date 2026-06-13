@@ -1,5 +1,6 @@
-use std::net::IpAddr;
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use aya::maps::LpmTrie as AyaLpmTrie;
@@ -43,6 +44,14 @@ pub struct IdentityManager {
     map_sets: Vec<IdentityMapSet>,
     cidr_to_id: HashMap<CidrEntry, u32>,
     id_to_cidr: HashMap<u32, CidrEntry>,
+    group_to_id: HashMap<String, u32>,
+    group_to_cidrs: HashMap<String, Vec<CidrEntry>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeIPGroup {
+    pub key: String,
+    pub cidrs: Vec<String>,
 }
 
 impl IdentityManager {
@@ -56,6 +65,8 @@ impl IdentityManager {
             map_sets,
             cidr_to_id: HashMap::new(),
             id_to_cidr: HashMap::new(),
+            group_to_id: HashMap::new(),
+            group_to_cidrs: HashMap::new(),
         })
     }
 
@@ -76,6 +87,114 @@ impl IdentityManager {
         self.id_to_cidr.insert(id, entry);
 
         Ok(id)
+    }
+
+    pub fn replace_groups(
+        &mut self,
+        groups: &[RuntimeIPGroup],
+    ) -> Result<HashMap<String, u32>, IdentityError> {
+        let mut normalized_groups = Vec::with_capacity(groups.len());
+        let mut seen_entries: HashMap<CidrEntry, String> = HashMap::new();
+        for group in groups {
+            let key = group.key.trim().to_string();
+            if key.is_empty() {
+                return Err(IdentityError::InvalidCidr("empty group key".to_string()));
+            }
+            let mut cidrs = normalize_group_cidrs(&group.cidrs)?;
+            cidrs.sort_by(|a, b| {
+                format!("{}/{}", a.network, a.prefix_len)
+                    .cmp(&format!("{}/{}", b.network, b.prefix_len))
+            });
+            cidrs.dedup();
+            for entry in &cidrs {
+                if let Some(existing_key) = seen_entries.get(entry) {
+                    if existing_key != &key {
+                        return Err(IdentityError::InvalidCidr(format!(
+                            "duplicate CIDR {}/{} in runtime groups {} and {}",
+                            entry.network, entry.prefix_len, existing_key, key
+                        )));
+                    }
+                }
+                seen_entries.insert(entry.clone(), key.clone());
+            }
+            normalized_groups.push((key, cidrs));
+        }
+
+        let desired_keys: HashSet<String> = normalized_groups
+            .iter()
+            .map(|(key, _)| key.clone())
+            .collect();
+        let stale_keys: Vec<String> = self
+            .group_to_id
+            .keys()
+            .filter(|key| !desired_keys.contains(*key))
+            .cloned()
+            .collect();
+        for key in stale_keys {
+            self.remove_group(&key);
+        }
+
+        let mut result = HashMap::new();
+        for (key, cidrs) in normalized_groups {
+            let id = self.assign_group_id(&key);
+            self.replace_group_cidrs(&key, id, &cidrs)?;
+            result.insert(key, id);
+        }
+        Ok(result)
+    }
+
+    fn assign_group_id(&mut self, key: &str) -> u32 {
+        if let Some(id) = self.group_to_id.get(key) {
+            return *id;
+        }
+        let id = ID_COUNTER.fetch_add(1, Ordering::SeqCst);
+        self.group_to_id.insert(key.to_string(), id);
+        id
+    }
+
+    fn replace_group_cidrs(
+        &mut self,
+        key: &str,
+        id: u32,
+        cidrs: &[CidrEntry],
+    ) -> Result<(), IdentityError> {
+        let old = self.group_to_cidrs.remove(key).unwrap_or_default();
+        for entry in &old {
+            if !cidrs.contains(entry) {
+                for map_set in &mut self.map_sets {
+                    map_set.remove(entry);
+                }
+                self.cidr_to_id.remove(entry);
+            }
+        }
+
+        for entry in cidrs {
+            if let Some(existing_id) = self.cidr_to_id.get(entry) {
+                if *existing_id != id {
+                    return Err(IdentityError::InvalidCidr(format!(
+                        "CIDR {}/{} already belongs to runtime group {}",
+                        entry.network, entry.prefix_len, existing_id
+                    )));
+                }
+            }
+            for map_set in &mut self.map_sets {
+                map_set.insert(entry, id)?;
+            }
+            self.cidr_to_id.insert(entry.clone(), id);
+        }
+        self.group_to_cidrs.insert(key.to_string(), cidrs.to_vec());
+        Ok(())
+    }
+
+    fn remove_group(&mut self, key: &str) {
+        let cidrs = self.group_to_cidrs.remove(key).unwrap_or_default();
+        for entry in &cidrs {
+            for map_set in &mut self.map_sets {
+                map_set.remove(entry);
+            }
+            self.cidr_to_id.remove(entry);
+        }
+        self.group_to_id.remove(key);
     }
 
     #[allow(dead_code)]
@@ -200,6 +319,23 @@ fn parse_cidr(cidr: &str) -> Result<CidrEntry, IdentityError> {
     }
 
     Ok(CidrEntry { network, prefix_len })
+}
+
+fn normalize_group_cidrs(cidrs: &[String]) -> Result<Vec<CidrEntry>, IdentityError> {
+    let mut entries = Vec::with_capacity(cidrs.len());
+    for cidr in cidrs {
+        let trimmed = cidr.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        entries.push(parse_cidr(trimmed)?);
+    }
+    if entries.is_empty() {
+        return Err(IdentityError::InvalidCidr(
+            "runtime IP group requires at least one CIDR".to_string(),
+        ));
+    }
+    Ok(entries)
 }
 
 pub fn parse_single_ip(ip: &str) -> Result<CidrEntry, IdentityError> {

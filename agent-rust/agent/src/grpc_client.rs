@@ -287,10 +287,18 @@ impl GrpcClient {
             }).collect(),
             assigned_ip: resp.assigned_ip,
             desired_state_version: resp.desired_state_version,
+            ip_groups: resp.ip_groups.into_iter().map(|g| IPGroup {
+                id: g.id,
+                name: g.name,
+                cidrs: g.cidrs,
+                kind: g.kind,
+            }).collect(),
             acl_rules: resp.acl_rules.into_iter().map(|r| AclRule {
                 id: r.id,
                 src_net: r.src_net,
                 dst_net: r.dst_net,
+                src_group_id: r.src_group_id,
+                dst_group_id: r.dst_group_id,
                 protocol: r.protocol,
                 min_port: r.min_port,
                 max_port: r.max_port,
@@ -302,6 +310,7 @@ impl GrpcClient {
                 id: r.id,
                 src_ip: r.src_ip,
                 dst_ip: r.dst_ip,
+                group_id: r.group_id,
                 src_port: r.src_port,
                 dst_port: r.dst_port,
                 protocol: r.protocol,
@@ -468,6 +477,7 @@ pub struct SyncResult {
     pub peers: Vec<PeerInfo>,
     pub assigned_ip: String,
     pub desired_state_version: String,
+    pub ip_groups: Vec<IPGroup>,
     pub acl_rules: Vec<AclRule>,
     pub qos_rules: Vec<QoSRule>,
     pub blacklist_rules: Vec<BlacklistRule>,
@@ -475,6 +485,14 @@ pub struct SyncResult {
     pub runtime_token_expires_at: Option<i64>,
     pub snapshot_complete: bool,
     pub domain_versions: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IPGroup {
+    pub id: String,
+    pub name: String,
+    pub cidrs: Vec<String>,
+    pub kind: String,
 }
 
 #[allow(dead_code)]
@@ -499,6 +517,8 @@ pub struct AclRule {
     pub id: String,
     pub src_net: String,
     pub dst_net: String,
+    pub src_group_id: String,
+    pub dst_group_id: String,
     pub protocol: u32,
     pub min_port: u32,
     pub max_port: u32,
@@ -514,6 +534,7 @@ pub struct QoSRule {
     pub id: String,
     pub src_ip: String,
     pub dst_ip: String,
+    pub group_id: String,
     pub src_port: u32,
     pub dst_port: u32,
     pub protocol: u32,
@@ -537,6 +558,8 @@ pub struct AgentAclPolicy {
     pub id: String,
     pub src_group: String,
     pub dst_group: String,
+    pub src_group_id: String,
+    pub dst_group_id: String,
     pub proto: u8,
     pub action: u8,
     pub direction: u8,
@@ -547,6 +570,7 @@ pub struct AgentAclPolicy {
 pub struct AgentQosPolicy {
     pub id: String,
     pub group: String,
+    pub group_id: String,
     pub direction: u8,
     pub rate_bps: u64,
     pub burst_bytes: u64,
@@ -563,8 +587,10 @@ pub fn acl_policy_from_sync_rule(rule: &AclRule) -> Result<AgentAclPolicy> {
 
     Ok(AgentAclPolicy {
         id: rule.id.clone(),
-        src_group: cidr_or_any(&rule.src_net),
-        dst_group: cidr_or_any(&rule.dst_net),
+        src_group: cidr_fallback_or_any(&rule.src_net, &rule.src_group_id),
+        dst_group: cidr_fallback_or_any(&rule.dst_net, &rule.dst_group_id),
+        src_group_id: rule.src_group_id.trim().to_string(),
+        dst_group_id: rule.dst_group_id.trim().to_string(),
         proto,
         action,
         direction,
@@ -591,6 +617,7 @@ pub fn qos_policy_from_sync_rule(rule: &QoSRule) -> Result<AgentQosPolicy> {
     Ok(AgentQosPolicy {
         id: rule.id.clone(),
         group,
+        group_id: rule.group_id.trim().to_string(),
         direction,
         rate_bps,
         burst_bytes,
@@ -609,6 +636,14 @@ fn cidr_or_any(value: &str) -> String {
         "any".to_string()
     } else {
         trimmed.to_string()
+    }
+}
+
+fn cidr_fallback_or_any(value: &str, group_id: &str) -> String {
+    if group_id.trim().is_empty() {
+        cidr_or_any(value)
+    } else {
+        value.trim().to_string()
     }
 }
 
@@ -692,6 +727,9 @@ fn inferred_qos_direction(rule: &QoSRule) -> u8 {
 }
 
 fn qos_group_for_direction(rule: &QoSRule, direction: u8) -> String {
+    if !rule.group_id.trim().is_empty() {
+        return qos_group_fallback_for_direction(rule, direction);
+    }
     match direction {
         0 => cidr_or_any(&rule.src_ip),
         1 => {
@@ -708,6 +746,20 @@ fn qos_group_for_direction(rule: &QoSRule, direction: u8) -> String {
                 cidr_or_any(&rule.src_ip)
             } else {
                 dst
+            }
+        }
+    }
+}
+
+fn qos_group_fallback_for_direction(rule: &QoSRule, direction: u8) -> String {
+    match direction {
+        0 => rule.src_ip.trim().to_string(),
+        _ => {
+            let dst = rule.dst_ip.trim();
+            if dst.is_empty() {
+                rule.src_ip.trim().to_string()
+            } else {
+                dst.to_string()
             }
         }
     }
@@ -754,6 +806,8 @@ mod tests {
             id: "acl-1".to_string(),
             src_net: "10.0.0.0/24".to_string(),
             dst_net: "192.0.2.0/24".to_string(),
+            src_group_id: String::new(),
+            dst_group_id: String::new(),
             protocol: 6,
             min_port: 80,
             max_port: 82,
@@ -777,6 +831,8 @@ mod tests {
             id: "acl-2".to_string(),
             src_net: "10.0.0.0/24".to_string(),
             dst_net: "192.0.2.0/24".to_string(),
+            src_group_id: String::new(),
+            dst_group_id: String::new(),
             protocol: 0,
             min_port: 443,
             max_port: 443,
@@ -789,11 +845,35 @@ mod tests {
     }
 
     #[test]
+    fn acl_sync_rule_preserves_product_group_ids() {
+        let policy = acl_policy_from_sync_rule(&AclRule {
+            id: "acl-group".to_string(),
+            src_net: String::new(),
+            dst_net: String::new(),
+            src_group_id: "src-group".to_string(),
+            dst_group_id: "dst-group".to_string(),
+            protocol: 1,
+            min_port: 0,
+            max_port: 0,
+            action: "deny".to_string(),
+            direction: "egress".to_string(),
+            ports: String::new(),
+        })
+        .expect("valid ACL group rule");
+
+        assert_eq!(policy.src_group_id, "src-group");
+        assert_eq!(policy.dst_group_id, "dst-group");
+        assert_eq!(policy.src_group, "");
+        assert_eq!(policy.dst_group, "");
+    }
+
+    #[test]
     fn qos_sync_rule_prefers_explicit_runtime_fields() {
         let policy = qos_policy_from_sync_rule(&QoSRule {
             id: "qos-1".to_string(),
             src_ip: "10.0.0.0/24".to_string(),
             dst_ip: "192.0.2.0/24".to_string(),
+            group_id: String::new(),
             src_port: 0,
             dst_port: 0,
             protocol: 0,
@@ -812,5 +892,28 @@ mod tests {
         assert_eq!(policy.burst_bytes, 4_000_000);
         assert_eq!(policy.priority, 7);
         assert_eq!(policy.mode, 0);
+    }
+
+    #[test]
+    fn qos_sync_rule_preserves_product_group_id() {
+        let policy = qos_policy_from_sync_rule(&QoSRule {
+            id: "qos-group".to_string(),
+            src_ip: String::new(),
+            dst_ip: String::new(),
+            group_id: "office-group".to_string(),
+            src_port: 0,
+            dst_port: 0,
+            protocol: 0,
+            bandwidth_mbps: 10,
+            direction: "egress".to_string(),
+            rate_bps: 10_000_000,
+            burst_bytes: 1500,
+            priority: 7,
+            mode: "policing".to_string(),
+        })
+        .expect("valid QoS group rule");
+
+        assert_eq!(policy.group_id, "office-group");
+        assert_eq!(policy.group, "");
     }
 }
