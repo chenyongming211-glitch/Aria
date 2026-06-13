@@ -34,7 +34,8 @@ describe('usePermission', () => {
     expect(hasAnyPermission(['nodes:read', 'settings:write'])).toBe(false)
   })
 
-  it('grants wildcard permissions', () => {
+  it('grants wildcard permissions to super_admin users', () => {
+    mockUserStore.user = { role: 'super_admin' }
     mockUserStore.permissions = ['*']
     const { hasPermission, hasAllPermissions } = usePermission()
     expect(hasPermission('tokens:write')).toBe(true)

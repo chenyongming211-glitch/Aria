@@ -246,7 +246,6 @@ const hasRoutePermission = async (to) => {
   if (user?.role === 'super_admin') return true
 
   const permissions = await loadRoutePermissions(user)
-  if (permissions.includes('*')) return true
 
   if (Array.isArray(required)) {
     return required.some((p) => permissions.includes(p))
