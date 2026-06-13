@@ -118,7 +118,8 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 
 	policyStats, err := r.store.GetNodePolicyStats(tenantID, node.ID)
 	if err != nil {
-		policyStats = nil
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to get policy stats: "+err.Error(), nil)
+		return
 	}
 	if policyStats != nil {
 		data["policy_stats"] = policyStats.Stats
