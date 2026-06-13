@@ -70,6 +70,42 @@ func expectTenantNodesQuery(mock sqlmock.Sqlmock, tenantID uuid.UUID) *sqlmock.E
 	)).WithArgs(tenantID)
 }
 
+func expectNodeLookupWithStatus(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, routes, status string) {
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE id = $1`)).
+		WithArgs(nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+			"created_at", "updated_at",
+		}).AddRow(
+			nodeID,
+			"pub-key-1",
+			"machine-1",
+			tenantID,
+			"1.1.1.1:51820",
+			"10.0.0.1",
+			"1.1.1.1",
+			"sh",
+			"vpc-1",
+			"node-1",
+			"10.0.0.10",
+			10,
+			time.Now().Unix(),
+			time.Now().Add(-time.Hour).Unix(),
+			"member",
+			"kernel",
+			"6.0",
+			true,
+			status,
+			int64(0),
+			routes,
+			"",
+			now,
+			now,
+		))
+}
+
 func TestNodesAPI_ListSuccessWithEmptyData(t *testing.T) {
 	tenantID := uuid.New()
 	db, mock, err := sqlmock.New()
@@ -147,6 +183,35 @@ func TestNodesAPI_InvalidNodeIDReturnsBadRequest(t *testing.T) {
 	}
 	if resp.Code != apibase.CodeInvalidRequest {
 		t.Fatalf("expected code %s, got %s", apibase.CodeInvalidRequest, resp.Code)
+	}
+}
+
+func TestNodesAPI_DeletedNodeIDReturnsNotFound(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookupWithStatus(mock, tenantID, nodeID, "{}", "deleted")
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/nodes/"+nodeID.String(), nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if resp.Code != apibase.CodeNodeNotFound {
+		t.Fatalf("expected code %s, got %s", apibase.CodeNodeNotFound, resp.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
 
