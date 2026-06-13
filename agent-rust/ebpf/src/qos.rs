@@ -110,8 +110,7 @@ static QOS_CONFIG: HashMap<QosKey, QosConfig> = HashMap::with_max_entries(65536,
 static QOS_TOKEN_BUCKET: HashMap<QosKey, TokenBucket> = HashMap::with_max_entries(65536, 0);
 
 #[map(name = "QOS_STATS", pin)]
-static QOS_STATS: PerCpuHashMap<QosKey, QosStatsValue> =
-    PerCpuHashMap::with_max_entries(65536, 0);
+static QOS_STATS: PerCpuHashMap<QosKey, QosStatsValue> = PerCpuHashMap::with_max_entries(65536, 0);
 
 #[map(name = "FIREWALL_CONFIG", pin)]
 static FIREWALL_CONFIG: HashMap<u32, FirewallConfig> = HashMap::with_max_entries(1, 0);
@@ -193,12 +192,7 @@ fn try_tc_qos_ipv6(
 }
 
 #[inline(always)]
-fn apply_qos_for_ids(
-    src_id: u32,
-    dst_id: u32,
-    direction: u8,
-    pkt_len: u64,
-) -> Result<i32, u64> {
+fn apply_qos_for_ids(src_id: u32, dst_id: u32, direction: u8, pkt_len: u64) -> Result<i32, u64> {
     let group_id = if direction == DIRECTION_EGRESS {
         dst_id
     } else {
@@ -227,6 +221,7 @@ fn qos_enabled(tap_id: u32) -> bool {
 }
 
 fn lookup_qos_config(tap_id: u32, group_id: u32, direction: u8) -> Option<(QosKey, QosConfig)> {
+    let mut best: Option<(QosKey, QosConfig)> = None;
     let exact_key = QosKey {
         tap_id,
         group_id,
@@ -234,7 +229,7 @@ fn lookup_qos_config(tap_id: u32, group_id: u32, direction: u8) -> Option<(QosKe
         pad: [0; 3],
     };
     if let Some(config) = unsafe { QOS_CONFIG.get(&exact_key) } {
-        return Some((exact_key, *config));
+        best = choose_qos_config(best, (exact_key, *config));
     }
 
     let fallback_key = QosKey {
@@ -244,10 +239,20 @@ fn lookup_qos_config(tap_id: u32, group_id: u32, direction: u8) -> Option<(QosKe
         pad: [0; 3],
     };
     if let Some(config) = unsafe { QOS_CONFIG.get(&fallback_key) } {
-        return Some((fallback_key, *config));
+        best = choose_qos_config(best, (fallback_key, *config));
     }
 
-    None
+    best
+}
+
+fn choose_qos_config(
+    current: Option<(QosKey, QosConfig)>,
+    candidate: (QosKey, QosConfig),
+) -> Option<(QosKey, QosConfig)> {
+    match current {
+        Some(existing) if existing.1.priority <= candidate.1.priority => Some(existing),
+        _ => Some(candidate),
+    }
 }
 
 fn apply_qos_bucket(key: &QosKey, config: QosConfig, pkt_len: u64, direction: u8) -> bool {

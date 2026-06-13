@@ -17,11 +17,14 @@ pub struct GroupInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RuleInfo {
-    pub name: Option<String>,
+    #[serde(default)]
+    pub rule_id: String,
     pub src_group_id: u32,
     pub dst_group_id: u32,
     pub proto: u8,
     pub action: u8,
+    #[serde(default)]
+    pub priority: u16,
     pub ports: Option<String>,
     pub bitmap_idx: Option<u32>,
     #[serde(default)]
@@ -30,6 +33,8 @@ pub struct RuleInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct QosRuleInfo {
+    #[serde(default)]
+    pub rule_id: String,
     pub group_name: String,
     pub group_id: u32,
     pub direction: u8,
@@ -225,10 +230,12 @@ fn release_port_set(
 impl FirewallState {
     pub fn apply_add_rule(
         &mut self,
+        rule_id: &str,
         src_group_id: u32,
         dst_group_id: u32,
         proto: u8,
         action: u8,
+        priority: u16,
         ports: Option<&str>,
         direction: u8,
     ) -> Result<AddRuleResult, String> {
@@ -314,16 +321,19 @@ impl FirewallState {
                     }
                 }
             }
+            existing.rule_id = rule_id.to_string();
             existing.action = action;
+            existing.priority = priority;
             existing.ports = stored_ports;
             existing.bitmap_idx = bitmap_idx;
         } else {
             self.rules.push(RuleInfo {
-                name: None,
+                rule_id: rule_id.to_string(),
                 src_group_id,
                 dst_group_id,
                 proto,
                 action,
+                priority,
                 ports: stored_ports,
                 bitmap_idx,
                 direction,
@@ -345,10 +355,28 @@ mod tests {
         let mut state = FirewallState::default();
 
         let first = state
-            .apply_add_rule(1, 2, 6, ACTION_DROP, Some("80-82,443:0"), DIRECTION_INGRESS)
+            .apply_add_rule(
+                "first",
+                1,
+                2,
+                6,
+                ACTION_DROP,
+                10,
+                Some("80-82,443:0"),
+                DIRECTION_INGRESS,
+            )
             .expect("first rule");
         let second = state
-            .apply_add_rule(3, 4, 6, ACTION_DROP, Some("443:0,80-82:1"), DIRECTION_INGRESS)
+            .apply_add_rule(
+                "second",
+                3,
+                4,
+                6,
+                ACTION_DROP,
+                20,
+                Some("443:0,80-82:1"),
+                DIRECTION_INGRESS,
+            )
             .expect("second rule");
 
         assert_eq!(first.bitmap_idx, second.bitmap_idx);
@@ -367,5 +395,4 @@ mod tests {
             vec![DIRECTION_INGRESS, DIRECTION_EGRESS]
         );
     }
-
 }

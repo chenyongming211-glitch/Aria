@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use aya::Ebpf;
@@ -9,9 +10,7 @@ use crate::acl_qos_maps::{
     delete_port_set_from_maps, delete_qos_rule_from_maps, ensure_fq_qdisc, get_qos_stats,
     get_rule_stats, sync_runtime_config, AclQosMapHandles, TapMapRuntime,
 };
-use crate::acl_qos_state::{
-    requested_directions, FirewallState, GroupInfo, QosRuleInfo,
-};
+use crate::acl_qos_state::{requested_directions, FirewallState, GroupInfo, QosRuleInfo};
 use crate::identity::{parse_single_ip, IdentityManager, ID_WILDCARD};
 
 #[derive(Error, Debug)]
@@ -33,6 +32,7 @@ pub struct AclRuleSpec {
     pub dst_group: String,
     pub proto: u8,
     pub action: u8,
+    pub priority: u16,
     pub direction: u8,
     pub ports: Option<String>,
 }
@@ -54,6 +54,32 @@ pub struct AclQosSnapshot {
     pub qos_rules: Vec<QosRuleSpec>,
     pub acl_enabled: bool,
     pub qos_enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CompiledAclRule {
+    rule_id: String,
+    src_group_id: u32,
+    dst_group_id: u32,
+    proto: u8,
+    action: u8,
+    priority: u16,
+    direction: u8,
+    ports: Option<String>,
+    order: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CompiledQosRule {
+    rule_id: String,
+    group_name: String,
+    group_id: u32,
+    direction: u8,
+    rate_bps: u64,
+    burst_bytes: u64,
+    priority: u8,
+    mode: u8,
+    order: usize,
 }
 
 pub struct AclQosManager {
@@ -126,25 +152,201 @@ fn merge_qos_rule_runtime_stats(
     entry.shaped_bytes = entry.shaped_bytes.saturating_add(shaped_bytes);
 }
 
-fn validate_acl_runtime_keys(rules: &[AclRuleSpec]) -> Result<(), AclQosError> {
-    let mut seen: HashMap<(String, String, u8, u8), String> = HashMap::new();
-    for rule in rules {
+fn compile_acl_rules_for_groups(
+    rules: &[AclRuleSpec],
+    groups: &HashMap<String, GroupInfo>,
+) -> Result<Vec<CompiledAclRule>, AclQosError> {
+    let mut selected: HashMap<(u32, u32, u8, u8), CompiledAclRule> = HashMap::new();
+
+    for (order, rule) in rules.iter().enumerate() {
+        let src_groups = matching_groups(groups, &rule.src_group)?;
+        let dst_groups = matching_groups(groups, &rule.dst_group)?;
         for direction in requested_directions(rule.direction) {
-            let key = (
-                normalize_group_name(&rule.src_group),
-                normalize_group_name(&rule.dst_group),
-                rule.proto,
-                direction,
-            );
-            if let Some(existing_id) = seen.insert(key.clone(), rule.id.clone()) {
-                return Err(AclQosError::Validation(format!(
-                    "duplicate ACL runtime key for rules '{}' and '{}' (src={}, dst={}, proto={}, direction={})",
-                    existing_id, rule.id, key.0, key.1, key.2, key.3
-                )));
+            for (_, src_group_id) in &src_groups {
+                for (_, dst_group_id) in &dst_groups {
+                    let candidate = CompiledAclRule {
+                        rule_id: rule.id.clone(),
+                        src_group_id: *src_group_id,
+                        dst_group_id: *dst_group_id,
+                        proto: rule.proto,
+                        action: rule.action,
+                        priority: rule.priority,
+                        direction,
+                        ports: rule.ports.clone(),
+                        order,
+                    };
+                    let key = (*src_group_id, *dst_group_id, rule.proto, direction);
+                    let replace = selected
+                        .get(&key)
+                        .map(|existing| acl_candidate_wins(existing, &candidate))
+                        .unwrap_or(true);
+                    if replace {
+                        selected.insert(key, candidate);
+                    }
+                }
             }
         }
     }
-    Ok(())
+
+    let mut compiled: Vec<_> = selected.into_values().collect();
+    compiled.sort_by_key(|rule| {
+        (
+            rule.order,
+            rule.src_group_id,
+            rule.dst_group_id,
+            rule.proto,
+            rule.direction,
+        )
+    });
+    Ok(compiled)
+}
+
+fn compile_qos_rules_for_groups(
+    rules: &[QosRuleSpec],
+    groups: &HashMap<String, GroupInfo>,
+) -> Result<Vec<CompiledQosRule>, AclQosError> {
+    let mut selected: HashMap<(u32, u8), CompiledQosRule> = HashMap::new();
+
+    for (order, rule) in rules.iter().enumerate() {
+        let group_matches = matching_groups(groups, &rule.group)?;
+        for direction in requested_directions(rule.direction) {
+            for (group_name, group_id) in &group_matches {
+                let candidate = CompiledQosRule {
+                    rule_id: rule.id.clone(),
+                    group_name: group_name.clone(),
+                    group_id: *group_id,
+                    direction,
+                    rate_bps: rule.rate_bps,
+                    burst_bytes: rule.burst_bytes,
+                    priority: rule.priority,
+                    mode: rule.mode,
+                    order,
+                };
+                let key = (*group_id, direction);
+                let replace = selected
+                    .get(&key)
+                    .map(|existing| qos_candidate_wins(existing, &candidate))
+                    .unwrap_or(true);
+                if replace {
+                    selected.insert(key, candidate);
+                }
+            }
+        }
+    }
+
+    let mut compiled: Vec<_> = selected.into_values().collect();
+    compiled.sort_by_key(|rule| (rule.order, rule.group_id, rule.direction));
+    Ok(compiled)
+}
+
+fn acl_candidate_wins(existing: &CompiledAclRule, candidate: &CompiledAclRule) -> bool {
+    candidate.priority < existing.priority
+        || (candidate.priority == existing.priority && candidate.order < existing.order)
+}
+
+fn qos_candidate_wins(existing: &CompiledQosRule, candidate: &CompiledQosRule) -> bool {
+    candidate.priority < existing.priority
+        || (candidate.priority == existing.priority && candidate.order < existing.order)
+}
+
+fn matching_groups(
+    groups: &HashMap<String, GroupInfo>,
+    raw: &str,
+) -> Result<Vec<(String, u32)>, AclQosError> {
+    let name = normalize_group_name(raw);
+    if name == "any" {
+        return Ok(vec![("any".to_string(), ID_WILDCARD)]);
+    }
+
+    let cidr = normalize_cidr(&name)?;
+    let mut matches = Vec::new();
+    for group in groups.values() {
+        let mut matched = false;
+        for group_cidr in &group.cidrs {
+            if cidr_contains(&cidr, group_cidr)? {
+                matched = true;
+                break;
+            }
+        }
+        if matched {
+            matches.push((group.name.clone(), group.id));
+        }
+    }
+    matches.sort_by_key(|(_, id)| *id);
+    matches.dedup_by_key(|(_, id)| *id);
+    if matches.is_empty() {
+        return Err(AclQosError::Validation(format!(
+            "no runtime group matches CIDR '{}'",
+            cidr
+        )));
+    }
+    Ok(matches)
+}
+
+#[derive(Clone, Copy)]
+struct ParsedCidr {
+    network: IpAddr,
+    prefix_len: u8,
+}
+
+fn parse_runtime_cidr(cidr: &str) -> Result<ParsedCidr, AclQosError> {
+    let Some((ip, prefix)) = cidr.split_once('/') else {
+        return Err(AclQosError::Validation(format!("invalid CIDR '{}'", cidr)));
+    };
+    let network: IpAddr = ip
+        .parse()
+        .map_err(|_| AclQosError::Validation(format!("invalid CIDR IP '{}'", ip)))?;
+    let prefix_len: u8 = prefix
+        .parse()
+        .map_err(|_| AclQosError::Validation(format!("invalid CIDR prefix '{}'", cidr)))?;
+    let max_prefix = if network.is_ipv4() { 32 } else { 128 };
+    if prefix_len > max_prefix {
+        return Err(AclQosError::Validation(format!(
+            "invalid CIDR prefix '{}'",
+            cidr
+        )));
+    }
+    Ok(ParsedCidr {
+        network,
+        prefix_len,
+    })
+}
+
+fn cidr_contains(parent: &str, child: &str) -> Result<bool, AclQosError> {
+    let parent = parse_runtime_cidr(parent)?;
+    let child = parse_runtime_cidr(child)?;
+    let (parent_bits, parent_max) = ip_bits(parent.network);
+    let (child_bits, child_max) = ip_bits(child.network);
+    if parent_max != child_max || parent.prefix_len > child.prefix_len {
+        return Ok(false);
+    }
+    Ok(mask_bits(parent_bits, parent.prefix_len, parent_max)
+        == mask_bits(child_bits, parent.prefix_len, child_max))
+}
+
+fn ip_bits(ip: IpAddr) -> (u128, u8) {
+    match ip {
+        IpAddr::V4(addr) => (u32::from(addr) as u128, 32),
+        IpAddr::V6(addr) => (u128::from(addr), 128),
+    }
+}
+
+fn mask_bits(bits: u128, prefix_len: u8, max_prefix: u8) -> u128 {
+    if prefix_len == 0 {
+        return 0;
+    }
+    let full_mask = if max_prefix == 128 {
+        u128::MAX
+    } else {
+        (1u128 << max_prefix) - 1
+    };
+    let host_bits = max_prefix - prefix_len;
+    let host_mask = if host_bits == 128 {
+        u128::MAX
+    } else {
+        (1u128 << host_bits) - 1
+    };
+    bits & (full_mask ^ host_mask)
 }
 
 impl AclQosManager {
@@ -174,39 +376,29 @@ impl AclQosManager {
         if self.last_snapshot.as_ref() == Some(&snapshot) {
             return Ok(());
         }
-        validate_acl_runtime_keys(&snapshot.acl_rules)?;
 
         let snapshot_cache = snapshot.clone();
         self.clear_all_acl_rules()?;
         self.clear_all_qos_rules()?;
+        self.ensure_snapshot_groups(&snapshot)?;
+        let compiled_acl_rules =
+            compile_acl_rules_for_groups(&snapshot.acl_rules, &self.state.groups)?;
+        let compiled_qos_rules =
+            compile_qos_rules_for_groups(&snapshot.qos_rules, &self.state.groups)?;
 
         self.state.acl_enabled = snapshot.acl_enabled;
         self.state.qos_enabled = snapshot.qos_enabled;
 
-        for rule in snapshot.acl_rules {
-            self.apply_policy_by_group(
-                &rule.src_group,
-                &rule.dst_group,
-                rule.proto,
-                rule.action,
-                rule.ports.as_deref(),
-                rule.direction,
-            )?;
+        for rule in compiled_acl_rules {
+            self.apply_compiled_policy(&rule)?;
         }
 
         let mut has_shaping = false;
-        for rule in snapshot.qos_rules {
+        for rule in compiled_qos_rules {
             if rule.mode == 1 {
                 has_shaping = true;
             }
-            self.apply_qos_by_group(
-                &rule.group,
-                rule.direction,
-                rule.rate_bps,
-                rule.burst_bytes,
-                rule.priority,
-                rule.mode,
-            )?;
+            self.apply_compiled_qos(&rule)?;
         }
 
         if has_shaping {
@@ -238,7 +430,11 @@ impl AclQosManager {
             .into_iter()
             .enumerate()
             .map(|(idx, stat)| {
-                let action = if stat.dropped_packets > 0 { "drop" } else { "pass" };
+                let action = if stat.dropped_packets > 0 {
+                    "drop"
+                } else {
+                    "pass"
+                };
                 (idx as u32 + 1, action, stat.packets, stat.bytes)
             })
             .collect())
@@ -261,30 +457,25 @@ impl AclQosManager {
             })
             .collect();
 
-        let Some(snapshot) = &self.last_snapshot else {
-            return Ok(Vec::new());
-        };
-
         let mut result_by_id: HashMap<String, AclRuleRuntimeStats> = HashMap::new();
         let mut ordered_ids = Vec::new();
-        for rule in &snapshot.acl_rules {
-            if rule.id.trim().is_empty() {
+        for rule in &self.state.rules {
+            if rule.rule_id.trim().is_empty() {
                 continue;
             }
-            let Some(src_group) = self.state.groups.get(&normalize_group_name(&rule.src_group)) else {
-                continue;
-            };
-            let Some(dst_group) = self.state.groups.get(&normalize_group_name(&rule.dst_group)) else {
-                continue;
-            };
-            let key = (src_group.id, dst_group.id, rule.proto, rule.direction);
+            let key = (
+                rule.src_group_id,
+                rule.dst_group_id,
+                rule.proto,
+                rule.direction,
+            );
             let Some(stat) = stats_by_key.get(&key) else {
                 continue;
             };
             merge_acl_rule_runtime_stats(
                 &mut result_by_id,
                 &mut ordered_ids,
-                &rule.id,
+                &rule.rule_id,
                 stat.packets,
                 stat.bytes,
                 stat.dropped_packets,
@@ -319,27 +510,20 @@ impl AclQosManager {
             .map(|stat| ((stat.key.group_id, stat.key.direction), stat))
             .collect();
 
-        let Some(snapshot) = &self.last_snapshot else {
-            return Ok(Vec::new());
-        };
-
         let mut result_by_id: HashMap<String, QosRuleRuntimeStats> = HashMap::new();
         let mut ordered_ids = Vec::new();
-        for rule in &snapshot.qos_rules {
-            if rule.id.trim().is_empty() {
+        for rule in &self.state.qos_rules {
+            if rule.rule_id.trim().is_empty() {
                 continue;
             }
-            let Some(group) = self.state.groups.get(&normalize_group_name(&rule.group)) else {
-                continue;
-            };
-            let key = (group.id, rule.direction);
+            let key = (rule.group_id, rule.direction);
             let Some(stat) = stats_by_key.get(&key) else {
                 continue;
             };
             merge_qos_rule_runtime_stats(
                 &mut result_by_id,
                 &mut ordered_ids,
-                &rule.id,
+                &rule.rule_id,
                 stat.passed_bytes,
                 stat.dropped_bytes,
                 stat.shaped_bytes,
@@ -351,78 +535,77 @@ impl AclQosManager {
             .collect())
     }
 
-    fn apply_policy_by_group(
-        &mut self,
-        src_group: &str,
-        dst_group: &str,
-        proto: u8,
-        action: u8,
-        ports: Option<&str>,
-        direction: u8,
-    ) -> Result<(), AclQosError> {
-        let src_id = self.ensure_group(src_group)?;
-        let dst_id = self.ensure_group(dst_group)?;
-        for dir in requested_directions(direction) {
-            let result = self
-                .state
-                .apply_add_rule(src_id, dst_id, proto, action, ports, dir)
-                .map_err(AclQosError::Validation)?;
-            add_policy_to_maps(
-                &mut self.maps,
-                self.runtime,
-                src_id,
-                dst_id,
-                proto,
-                action,
-                ports,
-                result.bitmap_idx,
-                result.is_new_port_set,
-                dir,
-            )
-            .map_err(AclQosError::Kernel)?;
-            if let Some((idx, ports_normalized)) = result.old_port_set_released {
-                let _ = delete_port_set_from_maps(&mut self.maps, self.runtime, idx, &ports_normalized);
-            }
+    fn ensure_snapshot_groups(&mut self, snapshot: &AclQosSnapshot) -> Result<(), AclQosError> {
+        for rule in &snapshot.acl_rules {
+            self.ensure_group(&rule.src_group)?;
+            self.ensure_group(&rule.dst_group)?;
+        }
+        for rule in &snapshot.qos_rules {
+            self.ensure_group(&rule.group)?;
         }
         Ok(())
     }
 
-    fn apply_qos_by_group(
-        &mut self,
-        group: &str,
-        direction: u8,
-        rate_bps: u64,
-        burst_bytes: u64,
-        priority: u8,
-        mode: u8,
-    ) -> Result<(), AclQosError> {
-        let group_id = self.ensure_group(group)?;
-        for dir in requested_directions(direction) {
-            self.state
-                .qos_rules
-                .retain(|r| !(r.group_id == group_id && r.direction == dir));
-            self.state.qos_rules.push(QosRuleInfo {
-                group_name: normalize_group_name(group),
-                group_id,
-                direction: dir,
-                rate_bps,
-                burst_bytes,
-                priority,
-                mode,
-            });
-            add_qos_rule_to_maps(
-                &mut self.maps,
-                self.runtime,
-                group_id,
-                dir,
-                rate_bps,
-                burst_bytes,
-                priority,
-                mode,
-                true,
+    fn apply_compiled_policy(&mut self, rule: &CompiledAclRule) -> Result<(), AclQosError> {
+        let result = self
+            .state
+            .apply_add_rule(
+                &rule.rule_id,
+                rule.src_group_id,
+                rule.dst_group_id,
+                rule.proto,
+                rule.action,
+                rule.priority,
+                rule.ports.as_deref(),
+                rule.direction,
             )
-            .map_err(AclQosError::Kernel)?;
+            .map_err(AclQosError::Validation)?;
+        add_policy_to_maps(
+            &mut self.maps,
+            self.runtime,
+            rule.src_group_id,
+            rule.dst_group_id,
+            rule.proto,
+            rule.action,
+            rule.priority,
+            rule.ports.as_deref(),
+            result.bitmap_idx,
+            result.is_new_port_set,
+            rule.direction,
+        )
+        .map_err(AclQosError::Kernel)?;
+        if let Some((idx, ports_normalized)) = result.old_port_set_released {
+            let _ = delete_port_set_from_maps(&mut self.maps, self.runtime, idx, &ports_normalized);
         }
+        Ok(())
+    }
+
+    fn apply_compiled_qos(&mut self, rule: &CompiledQosRule) -> Result<(), AclQosError> {
+        self.state
+            .qos_rules
+            .retain(|r| !(r.group_id == rule.group_id && r.direction == rule.direction));
+        self.state.qos_rules.push(QosRuleInfo {
+            rule_id: rule.rule_id.clone(),
+            group_name: rule.group_name.clone(),
+            group_id: rule.group_id,
+            direction: rule.direction,
+            rate_bps: rule.rate_bps,
+            burst_bytes: rule.burst_bytes,
+            priority: rule.priority,
+            mode: rule.mode,
+        });
+        add_qos_rule_to_maps(
+            &mut self.maps,
+            self.runtime,
+            rule.group_id,
+            rule.direction,
+            rule.rate_bps,
+            rule.burst_bytes,
+            rule.priority,
+            rule.mode,
+            true,
+        )
+        .map_err(AclQosError::Kernel)?;
         Ok(())
     }
 
@@ -536,7 +719,10 @@ mod tests {
         merge_acl_rule_runtime_stats(&mut stats, &mut ordered_ids, "rule-b", 1, 100, 0, 0);
         merge_acl_rule_runtime_stats(&mut stats, &mut ordered_ids, "rule-a", 5, 500, 1, 50);
 
-        assert_eq!(ordered_ids, vec!["rule-a".to_string(), "rule-b".to_string()]);
+        assert_eq!(
+            ordered_ids,
+            vec!["rule-a".to_string(), "rule-b".to_string()]
+        );
         let merged = stats.get("rule-a").expect("rule-a stats");
         assert_eq!(merged.packets, 15);
         assert_eq!(merged.bytes, 1500);
@@ -560,56 +746,159 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_acl_runtime_keys_are_rejected() {
+    fn acl_compiler_expands_parent_cidr_to_existing_child_identity() {
+        let groups = test_groups(&[("10.0.0.0/8", 1), ("10.1.1.1/32", 2)]);
         let rules = vec![
             AclRuleSpec {
-                id: "rule-80".to_string(),
-                src_group: "100.64.0.2/32".to_string(),
-                dst_group: "100.64.0.3/32".to_string(),
-                proto: 6,
+                id: "deny-wide".to_string(),
+                src_group: "10.0.0.0/8".to_string(),
+                dst_group: "any".to_string(),
+                proto: 1,
                 action: 1,
-                direction: 1,
-                ports: Some("80:1".to_string()),
+                priority: 10,
+                direction: 0,
+                ports: None,
             },
             AclRuleSpec {
-                id: "rule-443".to_string(),
-                src_group: "100.64.0.2/32".to_string(),
-                dst_group: "100.64.0.3/32".to_string(),
-                proto: 6,
-                action: 1,
-                direction: 1,
-                ports: Some("443:1".to_string()),
+                id: "allow-specific-lower-priority".to_string(),
+                src_group: "10.1.1.1/32".to_string(),
+                dst_group: "any".to_string(),
+                proto: 1,
+                action: 0,
+                priority: 100,
+                direction: 0,
+                ports: None,
             },
         ];
 
-        let err = validate_acl_runtime_keys(&rules).expect_err("duplicate runtime key");
-        assert!(err.to_string().contains("duplicate ACL runtime key"));
+        let compiled = compile_acl_rules_for_groups(&rules, &groups).expect("compiled ACL");
+        let child = compiled
+            .iter()
+            .find(|rule| rule.src_group_id == 2 && rule.dst_group_id == ID_WILDCARD)
+            .expect("child runtime ACL entry");
+
+        assert_eq!(child.rule_id, "deny-wide");
+        assert_eq!(child.action, 1);
     }
 
     #[test]
-    fn acl_runtime_keys_expand_both_direction() {
+    fn acl_compiler_prefers_specific_child_when_it_has_higher_priority() {
+        let groups = test_groups(&[("10.0.0.0/8", 1), ("10.1.1.1/32", 2)]);
         let rules = vec![
             AclRuleSpec {
-                id: "egress".to_string(),
-                src_group: "any".to_string(),
-                dst_group: "100.64.0.3/32".to_string(),
+                id: "deny-wide".to_string(),
+                src_group: "10.0.0.0/8".to_string(),
+                dst_group: "any".to_string(),
                 proto: 1,
                 action: 1,
-                direction: 1,
+                priority: 10,
+                direction: 0,
                 ports: None,
             },
             AclRuleSpec {
-                id: "both".to_string(),
-                src_group: "".to_string(),
-                dst_group: "100.64.0.3/32".to_string(),
+                id: "allow-specific-higher-priority".to_string(),
+                src_group: "10.1.1.1/32".to_string(),
+                dst_group: "any".to_string(),
                 proto: 1,
-                action: 1,
-                direction: 2,
+                action: 0,
+                priority: 5,
+                direction: 0,
                 ports: None,
             },
         ];
 
-        let err = validate_acl_runtime_keys(&rules).expect_err("both should conflict with egress");
-        assert!(err.to_string().contains("duplicate ACL runtime key"));
+        let compiled = compile_acl_rules_for_groups(&rules, &groups).expect("compiled ACL");
+        let child = compiled
+            .iter()
+            .find(|rule| rule.src_group_id == 2 && rule.dst_group_id == ID_WILDCARD)
+            .expect("child runtime ACL entry");
+
+        assert_eq!(child.rule_id, "allow-specific-higher-priority");
+        assert_eq!(child.action, 0);
+    }
+
+    #[test]
+    fn qos_compiler_expands_parent_cidr_and_uses_priority_for_child_identity() {
+        let groups = test_groups(&[("100.64.0.0/24", 1), ("100.64.0.2/32", 2)]);
+        let rules = vec![
+            QosRuleSpec {
+                id: "wide-limit".to_string(),
+                group: "100.64.0.0/24".to_string(),
+                direction: 1,
+                rate_bps: 1_000_000,
+                burst_bytes: 1500,
+                priority: 10,
+                mode: 0,
+            },
+            QosRuleSpec {
+                id: "specific-lower-priority".to_string(),
+                group: "100.64.0.2/32".to_string(),
+                direction: 1,
+                rate_bps: 10_000_000,
+                burst_bytes: 1500,
+                priority: 100,
+                mode: 0,
+            },
+        ];
+
+        let compiled = compile_qos_rules_for_groups(&rules, &groups).expect("compiled QoS");
+        let child = compiled
+            .iter()
+            .find(|rule| rule.group_id == 2 && rule.direction == 1)
+            .expect("child runtime QoS entry");
+
+        assert_eq!(child.rule_id, "wide-limit");
+        assert_eq!(child.rate_bps, 1_000_000);
+    }
+
+    #[test]
+    fn qos_compiler_prefers_specific_child_when_it_has_higher_priority() {
+        let groups = test_groups(&[("100.64.0.0/24", 1), ("100.64.0.2/32", 2)]);
+        let rules = vec![
+            QosRuleSpec {
+                id: "wide-limit".to_string(),
+                group: "100.64.0.0/24".to_string(),
+                direction: 1,
+                rate_bps: 1_000_000,
+                burst_bytes: 1500,
+                priority: 10,
+                mode: 0,
+            },
+            QosRuleSpec {
+                id: "specific-higher-priority".to_string(),
+                group: "100.64.0.2/32".to_string(),
+                direction: 1,
+                rate_bps: 10_000_000,
+                burst_bytes: 1500,
+                priority: 5,
+                mode: 0,
+            },
+        ];
+
+        let compiled = compile_qos_rules_for_groups(&rules, &groups).expect("compiled QoS");
+        let child = compiled
+            .iter()
+            .find(|rule| rule.group_id == 2 && rule.direction == 1)
+            .expect("child runtime QoS entry");
+
+        assert_eq!(child.rule_id, "specific-higher-priority");
+        assert_eq!(child.rate_bps, 10_000_000);
+    }
+
+    fn test_groups(entries: &[(&str, u32)]) -> HashMap<String, GroupInfo> {
+        entries
+            .iter()
+            .map(|(cidr, id)| {
+                let name = normalize_group_name(cidr);
+                (
+                    name.clone(),
+                    GroupInfo {
+                        id: *id,
+                        name,
+                        cidrs: vec![normalize_cidr(cidr).expect("test CIDR")],
+                    },
+                )
+            })
+            .collect()
     }
 }

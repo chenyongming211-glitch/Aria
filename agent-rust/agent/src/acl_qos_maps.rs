@@ -1,11 +1,11 @@
-use aya::maps::{HashMap as AyaHashMap, MapData, PerCpuHashMap, PerCpuValues};
-use aya::util::nr_cpus;
-use aya::Ebpf;
-use aya::Pod;
 use aria_shared::{
     FirewallConfig, PolicyKey, PolicyValue, PortKey, QosConfig, QosKey, QosStatsValue,
     RuleStatsValue, TapConfig, TokenBucket, TAP_ID_UNASSIGNED,
 };
+use aya::maps::{HashMap as AyaHashMap, MapData, PerCpuHashMap, PerCpuValues};
+use aya::util::nr_cpus;
+use aya::Ebpf;
+use aya::Pod;
 
 pub const ACTION_ALLOW: u8 = 0;
 pub const ACTION_DROP: u8 = 1;
@@ -55,10 +55,7 @@ impl AclQosMapHandles {
     }
 }
 
-fn take_hash_map<K, V>(
-    ebpf: &mut Ebpf,
-    name: &str,
-) -> Result<AyaHashMap<MapData, K, V>, String>
+fn take_hash_map<K, V>(ebpf: &mut Ebpf, name: &str) -> Result<AyaHashMap<MapData, K, V>, String>
 where
     K: aya::Pod,
     V: aya::Pod,
@@ -184,6 +181,7 @@ pub fn add_policy_to_maps(
     dst_id: u32,
     proto: u8,
     action: u8,
+    priority: u16,
     ports: Option<&str>,
     bitmap_idx: Option<u32>,
     is_new_port_set: bool,
@@ -200,7 +198,8 @@ pub fn add_policy_to_maps(
     let has_port_filter = ports.is_some() && !is_all_ports;
 
     if is_new_port_set {
-        let idx = bitmap_idx.ok_or_else(|| "new port set requested without bitmap_idx".to_string())?;
+        let idx =
+            bitmap_idx.ok_or_else(|| "new port set requested without bitmap_idx".to_string())?;
         if let Some(ports_str) = ports {
             for (start, end, rule_action) in parse_ports(ports_str, action)? {
                 for port in start..=end {
@@ -230,7 +229,7 @@ pub fn add_policy_to_maps(
     let value = PolicyValue {
         action: stored_policy_action(action, has_port_filter),
         has_port_filter: has_port_filter as u8,
-        pad1: [0; 2],
+        priority,
         bitmap_idx: bitmap_idx.unwrap_or(0),
     };
     handles
@@ -342,7 +341,12 @@ pub fn delete_qos_rule_from_maps(
     let _ = handles.qos_config.remove(&key);
     let _ = handles.qos_token_bucket.remove(&key);
     let _ = handles.qos_stats.remove(&key);
-    sync_runtime_config(handles, runtime, None, Some(user_qos_enabled && has_qos_rules(handles, runtime)))
+    sync_runtime_config(
+        handles,
+        runtime,
+        None,
+        Some(user_qos_enabled && has_qos_rules(handles, runtime)),
+    )
 }
 
 pub fn sync_runtime_config(
@@ -488,7 +492,16 @@ pub fn get_qos_stats(
 
 pub fn ensure_fq_qdisc(iface: &str) -> Result<(), String> {
     let output = std::process::Command::new("tc")
-        .args(["qdisc", "replace", "dev", iface, "root", "fq", "flow_limit", "1000"])
+        .args([
+            "qdisc",
+            "replace",
+            "dev",
+            iface,
+            "root",
+            "fq",
+            "flow_limit",
+            "1000",
+        ])
         .output()
         .map_err(|e| format!("failed to run tc qdisc replace fq: {}", e))?;
     if output.status.success() {

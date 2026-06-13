@@ -1,11 +1,4 @@
 use anyhow::{Context, Result};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex};
-use std::time::Duration;
-use tokio::signal;
-use tokio::signal::unix::{signal, SignalKind};
-use tokio::sync::{Mutex, mpsc, oneshot, Notify};
-use tokio_util::sync::CancellationToken;
 use aya::{
     include_bytes_aligned,
     programs::{
@@ -15,36 +8,42 @@ use aya::{
     EbpfLoader,
 };
 use serde::{Deserialize, Serialize};
-use tracing_subscriber::{EnvFilter, Registry, reload};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::Duration;
+use tokio::signal;
+use tokio::signal::unix::{signal, SignalKind};
+use tokio::sync::{mpsc, oneshot, Mutex, Notify};
+use tokio_util::sync::CancellationToken;
+use tracing_subscriber::{reload, EnvFilter, Registry};
 
+use crate::acl_qos_manager::{AclQosManager, AclQosSnapshot, AclRuleSpec, QosRuleSpec};
+use crate::acl_qos_state::{
+    requested_directions, ACTION_DROP, DIRECTION_EGRESS, DIRECTION_INGRESS,
+};
+use crate::certificate_client;
+use crate::config::{AgentConfig, ConfigManager};
+use crate::grpc_client::{acl_policy_from_sync_rule, qos_policy_from_sync_rule};
 use crate::grpc_client::{
-    AclRule,
-    BlacklistRule as GrpcBlacklistRule,
-    GrpcClient,
-    GrpcCommandRequest,
-    GrpcCommandResponse,
-    PeerInfo as GrpcPeerInfo,
-    QoSRule as GrpcQoSRule,
+    AclRule, BlacklistRule as GrpcBlacklistRule, GrpcClient, GrpcCommandRequest,
+    GrpcCommandResponse, PeerInfo as GrpcPeerInfo, QoSRule as GrpcQoSRule,
 };
-use crate::wireguard::{WireGuardManager, PeerConfig};
-use crate::routing::RoutingManager;
-use crate::acl_qos_manager::{
-    AclQosManager, AclQosSnapshot, AclRuleSpec, QosRuleSpec,
-};
-use crate::acl_qos_state::{requested_directions, ACTION_DROP, DIRECTION_INGRESS, DIRECTION_EGRESS};
 use crate::identity::IdentityManager;
 use crate::metrics;
-use crate::config::{AgentConfig, ConfigManager};
-use crate::certificate_client;
+use crate::routing::RoutingManager;
 use crate::runtime_credential::RuntimeCredentialStore;
-use crate::grpc_client::{
-    acl_policy_from_sync_rule, qos_policy_from_sync_rule,
-};
+use crate::wireguard::{PeerConfig, WireGuardManager};
 
 const BPF_FS_PATH: &str = "/sys/fs/bpf/aria";
 const CERTIFICATE_RENEW_CHECK_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const TC_PRIORITY_ACL_EGRESS: u16 = 100;
 const TC_PRIORITY_QOS: u16 = 200;
+const BLACKLIST_ACL_PRIORITY: u16 = 0;
+const CONTROLLER_ACL_PRIORITY_BASE: u16 = 1024;
+
+fn controller_acl_order_priority(index: usize) -> u16 {
+    CONTROLLER_ACL_PRIORITY_BASE.saturating_add(u16::try_from(index).unwrap_or(u16::MAX))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UnixRequest {
@@ -80,11 +79,11 @@ pub struct AgentRuntime {
     wg_manager: Arc<Mutex<WireGuardManager>>,
     wg_managers: HashMap<String, Arc<Mutex<WireGuardManager>>>,
     routing_manager: RoutingManager,
-    
+
     unix_socket_path: String,
-    
+
     last_sync_peers: Arc<Mutex<Vec<GrpcPeerInfo>>>,
-    
+
     cancel_token: CancellationToken,
     sync_now: Arc<Notify>,
     runtime_credential: RuntimeCredentialStore,
@@ -104,7 +103,9 @@ impl AgentRuntime {
         // Create ALL WireGuard interfaces BEFORE loading eBPF
         // (eBPF XDP/TC attaches to the interfaces, so they must exist first)
         let interfaces = if config.multi_tunnel {
-            let base = config.interface_name.trim_end_matches(|c: char| c.is_numeric());
+            let base = config
+                .interface_name
+                .trim_end_matches(|c: char| c.is_numeric());
             vec![
                 config.interface_name.clone(),
                 format!("{}1", base),
@@ -124,31 +125,45 @@ impl AgentRuntime {
                 config.address.clone(),
                 port,
                 config.mtu,
-            ).context(format!("Failed to create WireGuard interface {}", iface_name))?;
-            tracing::info!("✅ WireGuard interface {} created on port {}", iface_name, port);
+            )
+            .context(format!(
+                "Failed to create WireGuard interface {}",
+                iface_name
+            ))?;
+            tracing::info!(
+                "✅ WireGuard interface {} created on port {}",
+                iface_name,
+                port
+            );
             wg_managers.insert(iface_name.clone(), Arc::new(Mutex::new(wg)));
         }
 
-        let wg_manager = wg_managers.get(&config.interface_name)
+        let wg_manager = wg_managers
+            .get(&config.interface_name)
             .expect("main interface must be in wg_managers")
             .clone();
 
         // Load eBPF programs and attach to ALL interfaces
         let (acl_qos_mgr, _identity_mgr) = Self::load_ebpf_programs_multi(&interfaces)?;
-        tracing::info!("✅ eBPF programs loaded and attached to {} interfaces", interfaces.len());
-        
+        tracing::info!(
+            "✅ eBPF programs loaded and attached to {} interfaces",
+            interfaces.len()
+        );
+
         let grpc_client = GrpcClient::new_with_options(
             config.controller_url.clone(),
             config.ca_cert.clone(),
             config.client_cert.clone(),
             config.client_key.clone(),
             config.tls_server_name.clone(),
-        ).await.context("Failed to connect to Controller")?;
+        )
+        .await
+        .context("Failed to connect to Controller")?;
         tracing::info!("✅ gRPC client connected");
 
         let routing_manager = RoutingManager::new(&config.interface_name);
         tracing::info!("✅ Routing manager created");
-        
+
         let cancel_token = CancellationToken::new();
         let sync_now = Arc::new(Notify::new());
         let current_log_level = Arc::new(StdMutex::new("info".to_string()));
@@ -171,7 +186,6 @@ impl AgentRuntime {
             log_handle,
             current_log_level,
         })
-
     }
     fn set_sync_observation(&mut self, status: &str, message: String) {
         self.config.last_sync_status = Some(status.to_string());
@@ -181,7 +195,10 @@ impl AgentRuntime {
 
     fn get_active_interfaces(&self) -> Vec<String> {
         if self.config.multi_tunnel {
-            let base = self.config.interface_name.trim_end_matches(|c: char| c.is_numeric());
+            let base = self
+                .config
+                .interface_name
+                .trim_end_matches(|c: char| c.is_numeric());
             vec![
                 self.config.interface_name.clone(),
                 format!("{}1", base),
@@ -198,65 +215,68 @@ impl AgentRuntime {
         config_manager.save_state(&self.config.to_state())?;
         Ok(())
     }
-    
+
     #[allow(dead_code)]
-    fn load_ebpf_programs(interface: &str) -> Result<(
-        Arc<Mutex<AclQosManager>>,
-        Arc<StdMutex<IdentityManager>>,
-    )> {
+    fn load_ebpf_programs(
+        interface: &str,
+    ) -> Result<(Arc<Mutex<AclQosManager>>, Arc<StdMutex<IdentityManager>>)> {
         tracing::info!("Step 1: Loading eBPF bytecodes...");
         let acl_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/acl"));
         let qos_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/qos"));
         tracing::info!("Step 2: eBPF bytecodes loaded successfully");
-        
+
         tracing::info!("Step 3: Creating ACL EbpfLoader...");
         let mut acl_ebpf = EbpfLoader::new()
             .load(acl_bytes)
             .context("Failed to load ACL eBPF bytecode")?;
         tracing::info!("Step 4: ACL eBPF loaded into memory");
-        
+
         tracing::info!("Step 4.1: Getting mutable program reference...");
-        let program_ref = acl_ebpf.program_mut("xdp_ingress_acl")
+        let program_ref = acl_ebpf
+            .program_mut("xdp_ingress_acl")
             .context("XDP program not found in eBPF object")?;
         tracing::info!("Step 4.2: Program reference obtained");
-        
+
         tracing::info!("Step 4.3: Converting to XDP type...");
-        let program: &mut Xdp = program_ref.try_into()
+        let program: &mut Xdp = program_ref
+            .try_into()
             .context("Failed to convert program to XDP type")?;
         tracing::info!("Step 5: XDP program converted successfully");
-        
+
         tracing::info!("Step 7: Loading XDP program into kernel...");
         program.load()?;
         tracing::info!("Step 8: XDP program loaded");
-        
+
         tracing::info!("Step 9: Attaching XDP program to {}...", interface);
         program.attach(interface, XdpFlags::default())?;
         tracing::info!("Step 10: XDP program attached");
-        
+
         // 确认 XDP 真的附加成功了
         tracing::info!("Step 10.5: Verifying XDP attachment...");
         std::thread::sleep(std::time::Duration::from_millis(100));
-        
+
         tracing::info!("Step 17: Creating QoS EbpfLoader...");
-        let mut qos_ebpf = EbpfLoader::new()
-            .load(qos_bytes)?;
+        let mut qos_ebpf = EbpfLoader::new().load(qos_bytes)?;
         tracing::info!("Step 18: QoS eBPF loaded into memory");
-        
+
         tracing::info!("Step 19: Loading TC ACL/QoS programs...");
         {
-            let program: &mut SchedClassifier = acl_ebpf.program_mut("tc_egress_acl")
+            let program: &mut SchedClassifier = acl_ebpf
+                .program_mut("tc_egress_acl")
                 .context("TC egress ACL program not found")?
                 .try_into()?;
             program.load()?;
         }
         {
-            let program: &mut SchedClassifier = qos_ebpf.program_mut("tc_ingress_qos")
+            let program: &mut SchedClassifier = qos_ebpf
+                .program_mut("tc_ingress_qos")
                 .context("TC ingress program not found")?
                 .try_into()?;
             program.load()?;
         }
         {
-            let program: &mut SchedClassifier = qos_ebpf.program_mut("tc_egress_qos")
+            let program: &mut SchedClassifier = qos_ebpf
+                .program_mut("tc_egress_qos")
                 .context("TC egress program not found")?
                 .try_into()?;
             program.load()?;
@@ -269,21 +289,25 @@ impl AgentRuntime {
 
         let identity_mgr = Arc::new(StdMutex::new(identity_mgr));
         tracing::info!("Step 22.7: IdentityManager wrapped in Arc");
-        
+
         tracing::info!("Step 23: Preparing clsact qdisc for {}...", interface);
         // 先删除旧的 clsact qdisc（忽略错误）
         let _ = std::process::Command::new("tc")
             .args(&["qdisc", "del", "dev", interface, "clsact"])
             .output();
         tracing::info!("Step 23.5: Old clsact removed (if existed)");
-        
+
         // 添加新的 clsact qdisc
         tc::qdisc_add_clsact(interface)?;
         tracing::info!("Step 24: clsact qdisc added");
-        
-        tracing::info!("Step 25: Attaching TC programs to {} ingress/egress...", interface);
+
+        tracing::info!(
+            "Step 25: Attaching TC programs to {} ingress/egress...",
+            interface
+        );
         {
-            let program: &mut SchedClassifier = acl_ebpf.program_mut("tc_egress_acl")
+            let program: &mut SchedClassifier = acl_ebpf
+                .program_mut("tc_egress_acl")
                 .context("TC egress ACL program not found")?
                 .try_into()?;
             Self::attach_tc_program(
@@ -294,19 +318,21 @@ impl AgentRuntime {
             )?;
         }
         {
-            let program: &mut SchedClassifier = qos_ebpf.program_mut("tc_ingress_qos")
+            let program: &mut SchedClassifier = qos_ebpf
+                .program_mut("tc_ingress_qos")
                 .context("TC ingress program not found")?
                 .try_into()?;
             Self::attach_tc_program(program, interface, TcAttachType::Ingress, TC_PRIORITY_QOS)?;
         }
         {
-            let program: &mut SchedClassifier = qos_ebpf.program_mut("tc_egress_qos")
+            let program: &mut SchedClassifier = qos_ebpf
+                .program_mut("tc_egress_qos")
                 .context("TC egress program not found")?
                 .try_into()?;
             Self::attach_tc_program(program, interface, TcAttachType::Egress, TC_PRIORITY_QOS)?;
         }
         tracing::info!("Step 26: TC programs attached");
-        
+
         let acl_qos_mgr = AclQosManager::new(
             acl_ebpf,
             qos_ebpf,
@@ -315,16 +341,19 @@ impl AgentRuntime {
         )?;
         Self::verify_ebpf_attachments(&[interface.to_string()])?;
         let acl_qos_mgr = Arc::new(Mutex::new(acl_qos_mgr));
-        
+
         Ok((acl_qos_mgr, identity_mgr))
     }
 
     /// Load eBPF programs and attach XDP/TC to multiple interfaces (multi-tunnel mode)
-    fn load_ebpf_programs_multi(interfaces: &[String]) -> Result<(
-        Arc<Mutex<AclQosManager>>,
-        Arc<StdMutex<IdentityManager>>,
-    )> {
-        tracing::info!("Loading eBPF programs for {} interfaces: {:?}", interfaces.len(), interfaces);
+    fn load_ebpf_programs_multi(
+        interfaces: &[String],
+    ) -> Result<(Arc<Mutex<AclQosManager>>, Arc<StdMutex<IdentityManager>>)> {
+        tracing::info!(
+            "Loading eBPF programs for {} interfaces: {:?}",
+            interfaces.len(),
+            interfaces
+        );
 
         // Load ACL eBPF
         let acl_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/acl"));
@@ -332,7 +361,8 @@ impl AgentRuntime {
             .load(acl_bytes)
             .context("Failed to load ACL eBPF bytecode")?;
 
-        let program_ref = acl_ebpf.program_mut("xdp_ingress_acl")
+        let program_ref = acl_ebpf
+            .program_mut("xdp_ingress_acl")
             .context("XDP program not found in eBPF object")?;
         let xdp_program: &mut Xdp = program_ref.try_into()?;
         xdp_program.load()?;
@@ -340,7 +370,8 @@ impl AgentRuntime {
         // Attach XDP to ALL interfaces
         for iface in interfaces {
             tracing::info!("Attaching XDP program to {}...", iface);
-            xdp_program.attach(iface, XdpFlags::default())
+            xdp_program
+                .attach(iface, XdpFlags::default())
                 .context(format!("Failed to attach XDP to {}", iface))?;
             tracing::info!("✅ XDP attached to {}", iface);
         }
@@ -349,19 +380,22 @@ impl AgentRuntime {
         let qos_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/qos"));
         let mut qos_ebpf = EbpfLoader::new().load(qos_bytes)?;
         {
-            let tc_program: &mut SchedClassifier = acl_ebpf.program_mut("tc_egress_acl")
+            let tc_program: &mut SchedClassifier = acl_ebpf
+                .program_mut("tc_egress_acl")
                 .context("TC egress ACL program not found")?
                 .try_into()?;
             tc_program.load()?;
         }
         {
-            let tc_program: &mut SchedClassifier = qos_ebpf.program_mut("tc_ingress_qos")
+            let tc_program: &mut SchedClassifier = qos_ebpf
+                .program_mut("tc_ingress_qos")
                 .context("TC ingress program not found")?
                 .try_into()?;
             tc_program.load()?;
         }
         {
-            let tc_program: &mut SchedClassifier = qos_ebpf.program_mut("tc_egress_qos")
+            let tc_program: &mut SchedClassifier = qos_ebpf
+                .program_mut("tc_egress_qos")
                 .context("TC egress program not found")?
                 .try_into()?;
             tc_program.load()?;
@@ -377,7 +411,8 @@ impl AgentRuntime {
                 .output();
             tc::qdisc_add_clsact(iface)?;
             {
-                let tc_program: &mut SchedClassifier = acl_ebpf.program_mut("tc_egress_acl")
+                let tc_program: &mut SchedClassifier = acl_ebpf
+                    .program_mut("tc_egress_acl")
                     .context("TC egress ACL program not found")?
                     .try_into()?;
                 Self::attach_tc_program(
@@ -388,13 +423,15 @@ impl AgentRuntime {
                 )?;
             }
             {
-                let tc_program: &mut SchedClassifier = qos_ebpf.program_mut("tc_ingress_qos")
+                let tc_program: &mut SchedClassifier = qos_ebpf
+                    .program_mut("tc_ingress_qos")
                     .context("TC ingress program not found")?
                     .try_into()?;
                 Self::attach_tc_program(tc_program, iface, TcAttachType::Ingress, TC_PRIORITY_QOS)?;
             }
             {
-                let tc_program: &mut SchedClassifier = qos_ebpf.program_mut("tc_egress_qos")
+                let tc_program: &mut SchedClassifier = qos_ebpf
+                    .program_mut("tc_egress_qos")
                     .context("TC egress program not found")?
                     .try_into()?;
                 Self::attach_tc_program(tc_program, iface, TcAttachType::Egress, TC_PRIORITY_QOS)?;
@@ -438,12 +475,18 @@ impl AgentRuntime {
         for iface in interfaces {
             Self::verify_xdp_attachment(iface)
                 .with_context(|| format!("XDP ACL attachment verification failed for {}", iface))?;
-            Self::verify_tc_attachment(iface, "egress", "tc_egress_acl")
-                .with_context(|| format!("TC egress ACL attachment verification failed for {}", iface))?;
-            Self::verify_tc_attachment(iface, "ingress", "tc_ingress_qos")
-                .with_context(|| format!("TC ingress QoS attachment verification failed for {}", iface))?;
-            Self::verify_tc_attachment(iface, "egress", "tc_egress_qos")
-                .with_context(|| format!("TC egress QoS attachment verification failed for {}", iface))?;
+            Self::verify_tc_attachment(iface, "egress", "tc_egress_acl").with_context(|| {
+                format!("TC egress ACL attachment verification failed for {}", iface)
+            })?;
+            Self::verify_tc_attachment(iface, "ingress", "tc_ingress_qos").with_context(|| {
+                format!(
+                    "TC ingress QoS attachment verification failed for {}",
+                    iface
+                )
+            })?;
+            Self::verify_tc_attachment(iface, "egress", "tc_egress_qos").with_context(|| {
+                format!("TC egress QoS attachment verification failed for {}", iface)
+            })?;
         }
         Ok(())
     }
@@ -492,7 +535,12 @@ impl AgentRuntime {
         let output = std::process::Command::new("tc")
             .args(["filter", "show", "dev", interface, direction])
             .output()
-            .with_context(|| format!("failed to execute tc filter show dev {} {}", interface, direction))?;
+            .with_context(|| {
+                format!(
+                    "failed to execute tc filter show dev {} {}",
+                    interface, direction
+                )
+            })?;
         if !output.status.success() {
             return Err(anyhow::anyhow!(
                 "tc filter show dev {} {} failed: {}",
@@ -513,7 +561,7 @@ impl AgentRuntime {
         }
         Ok(())
     }
-    
+
     pub async fn start(&mut self) -> Result<()> {
         tracing::info!("Starting AgentRuntime...");
 
@@ -524,7 +572,11 @@ impl AgentRuntime {
 
         // 确定所有接口列表
         let all_interfaces = if self.config.multi_tunnel {
-            let base = self.config.interface_name.trim_end_matches(|c: char| c.is_numeric()).to_string();
+            let base = self
+                .config
+                .interface_name
+                .trim_end_matches(|c: char| c.is_numeric())
+                .to_string();
             vec![
                 (self.config.interface_name.clone(), self.config.listen_port),
                 (format!("{}1", base), self.config.listen_port + 1),
@@ -539,8 +591,11 @@ impl AgentRuntime {
             // 自动探测物理网卡名（排除回环和虚拟网卡）
             let mut phys_iface = "eth0".to_string();
             if let Ok(interfaces) = std::panic::catch_unwind(|| pnet::datalink::interfaces()) {
-                let filtered: Vec<_> = interfaces.into_iter()
-                    .filter(|i| !i.is_loopback() && !i.name.starts_with("aria") && !i.name.starts_with("lo"))
+                let filtered: Vec<_> = interfaces
+                    .into_iter()
+                    .filter(|i| {
+                        !i.is_loopback() && !i.name.starts_with("aria") && !i.name.starts_with("lo")
+                    })
                     .collect();
                 if !filtered.is_empty() {
                     phys_iface = filtered[0].name.clone();
@@ -552,9 +607,12 @@ impl AgentRuntime {
                 phys_iface.clone(),
                 iface.clone(),
             );
-            
-            tracing::debug!("Applying system optimization to physical interface: {}", phys_iface);
-            
+
+            tracing::debug!(
+                "Applying system optimization to physical interface: {}",
+                phys_iface
+            );
+
             match optimizer.optimize(true) {
                 Ok(result) => {
                     tracing::info!("✅ System optimizations applied for {}", iface);
@@ -565,69 +623,87 @@ impl AgentRuntime {
                 Err(e) => tracing::warn!("⚠️  Failed to optimize {}: {}", iface, e),
             }
         }
-        
+
         // Step 3: 初始化路由
-        self.routing_manager.init()
+        self.routing_manager
+            .init()
             .context("Failed to initialize routing manager")?;
-        
+
         // Step 4: 首次同步
         self.sync().await?;
         tracing::info!("✅ Initial sync completed");
-        
+
         self.start_unix_socket_server()?;
         let (remote_command_tx, remote_command_rx) = mpsc::channel(16);
         self.start_command_stream_task(remote_command_tx);
-        
+
         self.run_main_loop(remote_command_rx).await
     }
-    
+
     #[allow(dead_code)]
     async fn ensure_interface(&self) -> Result<()> {
         let mut wg = self.wg_manager.lock().await;
-        
+
         // 使用 ensure_interface 确保主接口存在且配置正确
-        tracing::info!("Ensuring WireGuard interface {}", self.config.interface_name);
+        tracing::info!(
+            "Ensuring WireGuard interface {}",
+            self.config.interface_name
+        );
         wg.ensure_interface(
             self.config.private_key.clone(),
             self.config.address.clone(),
             self.config.listen_port,
             self.config.mtu,
-        ).context("Failed to ensure main interface")?;
-        
+        )
+        .context("Failed to ensure main interface")?;
+
         // 如果启用了多隧道模式，创建额外的接口
         if self.config.multi_tunnel {
             let base_name = self.config.interface_name.clone();
             let base_name = base_name.trim_end_matches(|c: char| c.is_numeric());
-            
+
             for i in 1..4 {
                 let interface_name = format!("{}{}", base_name, i);
                 let port = self.config.listen_port + i as u16;
-                
-                tracing::info!("Ensuring additional WireGuard interface {} on port {}", interface_name, port);
-                
+
+                tracing::info!(
+                    "Ensuring additional WireGuard interface {} on port {}",
+                    interface_name,
+                    port
+                );
+
                 let mut wg_extra = WireGuardManager::new(&interface_name);
-                wg_extra.ensure_interface(
-                    self.config.private_key.clone(),
-                    self.config.address.clone(),
-                    port,
-                    self.config.mtu,
-                ).context(format!("Failed to ensure interface {}", interface_name))?;
-                
-                tracing::info!("✅ Additional interface {} ready on port {}", interface_name, port);
+                wg_extra
+                    .ensure_interface(
+                        self.config.private_key.clone(),
+                        self.config.address.clone(),
+                        port,
+                        self.config.mtu,
+                    )
+                    .context(format!("Failed to ensure interface {}", interface_name))?;
+
+                tracing::info!(
+                    "✅ Additional interface {} ready on port {}",
+                    interface_name,
+                    port
+                );
             }
         }
-        
+
         Ok(())
     }
-    
-    async fn run_main_loop(&mut self, mut remote_command_rx: mpsc::Receiver<RemoteCommandEnvelope>) -> Result<()> {
+
+    async fn run_main_loop(
+        &mut self,
+        mut remote_command_rx: mpsc::Receiver<RemoteCommandEnvelope>,
+    ) -> Result<()> {
         tracing::info!("Entering main loop");
-        
+
         let mut sync_interval = tokio::time::interval(self.config.sync_interval);
         let mut metrics_timer = tokio::time::interval(Duration::from_secs(30));
         let mut certificate_renew_timer = tokio::time::interval(CERTIFICATE_RENEW_CHECK_INTERVAL);
         let mut sighup = signal(SignalKind::hangup())?;
-        
+
         loop {
             tokio::select! {
                 _ = sync_interval.tick() => {
@@ -668,7 +744,7 @@ impl AgentRuntime {
                         tracing::warn!("Certificate renewal check failed: {:?}", e);
                     }
                 }
-                
+
                 _ = sighup.recv() => {
                     tracing::info!("SIGHUP received, reloading config...");
                     let old_interval = self.config.sync_interval;
@@ -708,14 +784,14 @@ impl AgentRuntime {
                         }
                     }
                 }
-                
+
                 _ = signal::ctrl_c() => {
                     tracing::info!("Shutting down...");
                     break;
                 }
             }
         }
-        
+
         self.cancel_token.cancel();
         self.cleanup().await?;
         Ok(())
@@ -737,12 +813,16 @@ impl AgentRuntime {
 
                 let current_credential = runtime_credential.snapshot().await;
                 match grpc_client
-                    .connect_command_stream(node_id.clone(), public_key.clone(), current_credential.clone())
+                    .connect_command_stream(
+                        node_id.clone(),
+                        public_key.clone(),
+                        current_credential.clone(),
+                    )
                     .await
                 {
                     Ok((response_tx, mut request_stream)) => {
                         tracing::info!("Controller command stream connected");
-                        
+
                         // 连接成功，通知主循环立即执行一次 Sync
                         sync_now.notify_one();
 
@@ -828,22 +908,22 @@ impl AgentRuntime {
             tracing::info!("Command stream task stopped");
         });
     }
-    
+
     fn start_unix_socket_server(&self) -> Result<()> {
-        use tokio::net::UnixListener;
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-        
+        use tokio::net::UnixListener;
+
         let wg_manager = self.wg_manager.clone();
         let socket_path = self.unix_socket_path.clone();
         let cancel_token = self.cancel_token.clone();
         let log_handle = self.log_handle.clone();
         let current_log_level = self.current_log_level.clone();
         let last_sync_peers = self.last_sync_peers.clone();
-        
+
         if std::path::Path::new(&socket_path).exists() {
             let _ = std::fs::remove_file(&socket_path);
         }
-        
+
         tokio::spawn(async move {
             let listener = match UnixListener::bind(&socket_path) {
                 Ok(l) => l,
@@ -852,9 +932,9 @@ impl AgentRuntime {
                     return;
                 }
             };
-            
+
             tracing::info!("Unix socket server listening on {}", socket_path);
-            
+
             loop {
                 tokio::select! {
                     accept_result = listener.accept() => {
@@ -864,24 +944,24 @@ impl AgentRuntime {
                                 let log_handle = log_handle.clone();
                                 let current_log_level = current_log_level.clone();
                                 let last_sync_peers = last_sync_peers.clone();
-                                
+
                                 tokio::spawn(async move {
                                     let (reader, mut writer) = stream.into_split();
                                     let mut reader = BufReader::new(reader).lines();
-                                    
+
                                     while let Some(line) = reader.next_line().await.transpose() {
                                         let line = match line {
                                             Ok(l) => l,
                                             Err(_) => break,
                                         };
-                                        
+
                                         if line.is_empty() {
                                             continue;
                                         }
-                                        
+
                                         // 获取 last_sync_peers 的快照
                                         let peers_snapshot = last_sync_peers.lock().await.clone();
-                                        
+
                                         let response = match serde_json::from_str::<UnixRequest>(&line) {
                                             Ok(req) => {
                                                 Self::handle_unix_command(
@@ -896,7 +976,7 @@ impl AgentRuntime {
                                                 format!("{{\"success\":false,\"message\":\"Invalid request: {}\"}}\n", e)
                                             }
                                         };
-                                        
+
                                         if let Err(e) = writer.write_all(response.as_bytes()).await {
                                             tracing::debug!("Failed to write response: {}", e);
                                             break;
@@ -909,24 +989,24 @@ impl AgentRuntime {
                             }
                         }
                     }
-                    
+
                     _ = cancel_token.cancelled() => {
                         tracing::info!("Unix socket server shutting down gracefully");
                         break;
                     }
                 }
             }
-            
+
             if let Err(e) = std::fs::remove_file(&socket_path) {
                 tracing::warn!("Failed to remove socket file: {}", e);
             }
-            
+
             tracing::info!("Unix socket server stopped");
         });
-        
+
         Ok(())
     }
-    
+
     async fn handle_unix_command(
         req: UnixRequest,
         wg_manager: &Arc<Mutex<WireGuardManager>>,
@@ -950,11 +1030,12 @@ impl AgentRuntime {
                             .into_iter()
                             .map(|p| {
                                 // 从 last_sync_peers 中查找 region
-                                let region = last_sync.iter()
+                                let region = last_sync
+                                    .iter()
                                     .find(|sync_peer| sync_peer.public_key == p.public_key)
                                     .map(|sync_peer| sync_peer.region.clone())
                                     .unwrap_or_else(|| "unknown".to_string());
-                                
+
                                 serde_json::json!({
                                     "public_key": p.public_key,
                                     "endpoint": p.endpoint,
@@ -967,7 +1048,9 @@ impl AgentRuntime {
                         UnixResponse {
                             success: true,
                             message: None,
-                            data: Some(serde_json::json!({"peers": peers_json, "total": peers_json.len()})),
+                            data: Some(
+                                serde_json::json!({"peers": peers_json, "total": peers_json.len()}),
+                            ),
                         }
                     }
                     Err(e) => UnixResponse {
@@ -982,8 +1065,9 @@ impl AgentRuntime {
                     std::process::Command::new("ip")
                         .args(&["route", "show", "table", "100"])
                         .output()
-                }).await;
-                
+                })
+                .await;
+
                 match output {
                     Ok(Ok(output)) if output.status.success() => {
                         let routes_str = String::from_utf8_lossy(&output.stdout);
@@ -1000,8 +1084,10 @@ impl AgentRuntime {
                     }
                     Ok(Ok(output)) => UnixResponse {
                         success: false,
-                        message: Some(format!("Failed to list routes: {}", 
-                            String::from_utf8_lossy(&output.stderr))),
+                        message: Some(format!(
+                            "Failed to list routes: {}",
+                            String::from_utf8_lossy(&output.stderr)
+                        )),
                         data: None,
                     },
                     Ok(Err(e)) => UnixResponse {
@@ -1024,7 +1110,7 @@ impl AgentRuntime {
             // ===== 日志管理 =====
             "set_log_level" => {
                 let level = req.args["level"].as_str().unwrap_or("info").to_string();
-                
+
                 let handle = log_handle.lock().unwrap();
                 if let Some(handle) = handle.as_ref() {
                     let new_filter = match level.as_str() {
@@ -1035,12 +1121,12 @@ impl AgentRuntime {
                         "error" => EnvFilter::new("error"),
                         _ => EnvFilter::new("info"),
                     };
-                    
+
                     match handle.reload(new_filter) {
                         Ok(_) => {
                             let mut current = current_log_level.lock().unwrap();
                             *current = level.clone();
-                            
+
                             tracing::info!("Log level updated to {}", level);
                             UnixResponse {
                                 success: true,
@@ -1048,13 +1134,11 @@ impl AgentRuntime {
                                 data: None,
                             }
                         }
-                        Err(e) => {
-                            UnixResponse {
-                                success: false,
-                                message: Some(format!("Failed to update log level: {}", e)),
-                                data: None,
-                            }
-                        }
+                        Err(e) => UnixResponse {
+                            success: false,
+                            message: Some(format!("Failed to update log level: {}", e)),
+                            data: None,
+                        },
                     }
                 } else {
                     UnixResponse {
@@ -1068,14 +1152,14 @@ impl AgentRuntime {
                 let current = current_log_level.lock().unwrap();
                 let level = current.clone();
                 drop(current);
-                
+
                 UnixResponse {
                     success: true,
                     message: None,
                     data: Some(serde_json::json!({"level": level})),
                 }
             }
-            
+
             // ===== 未知命令 =====
             _ => UnixResponse {
                 success: false,
@@ -1083,7 +1167,7 @@ impl AgentRuntime {
                 data: None,
             },
         };
-        
+
         serde_json::to_string(&response).unwrap_or_else(|_| {
             "{\"success\":false,\"message\":\"Failed to serialize response\"}".to_string()
         }) + "\n"
@@ -1103,16 +1187,36 @@ impl AgentRuntime {
                         "peer_count".to_string(),
                         self.last_sync_peers.lock().await.len().to_string(),
                     );
-                    if let Some(value) = self.config.last_desired_version.clone().filter(|value| !value.trim().is_empty()) {
+                    if let Some(value) = self
+                        .config
+                        .last_desired_version
+                        .clone()
+                        .filter(|value| !value.trim().is_empty())
+                    {
                         result.insert("desired_state_version".to_string(), value);
                     }
-                    if let Some(value) = self.config.last_applied_version.clone().filter(|value| !value.trim().is_empty()) {
+                    if let Some(value) = self
+                        .config
+                        .last_applied_version
+                        .clone()
+                        .filter(|value| !value.trim().is_empty())
+                    {
                         result.insert("applied_state_version".to_string(), value);
                     }
-                    if let Some(value) = self.config.last_sync_status.clone().filter(|value| !value.trim().is_empty()) {
+                    if let Some(value) = self
+                        .config
+                        .last_sync_status
+                        .clone()
+                        .filter(|value| !value.trim().is_empty())
+                    {
                         result.insert("observed_state".to_string(), value);
                     }
-                    if let Some(value) = self.config.last_sync_message.clone().filter(|value| !value.trim().is_empty()) {
+                    if let Some(value) = self
+                        .config
+                        .last_sync_message
+                        .clone()
+                        .filter(|value| !value.trim().is_empty())
+                    {
                         result.insert("observed_message".to_string(), value);
                     }
                     if let Some(value) = self.config.last_sync_at {
@@ -1124,10 +1228,9 @@ impl AgentRuntime {
                         result,
                     )
                 }
-                Err(e) => build_failed_command_response(
-                    command_id.clone(),
-                    format!("sync failed: {}", e),
-                ),
+                Err(e) => {
+                    build_failed_command_response(command_id.clone(), format!("sync failed: {}", e))
+                }
             },
             "config_reload" => match self.reload_config().await {
                 Ok(_) => build_completed_command_response(
@@ -1172,13 +1275,24 @@ impl AgentRuntime {
             .unwrap_or_else(|| self.config.public_key.clone());
         result.insert("agent_id".to_string(), reported_agent_id);
         result.insert("public_key".to_string(), self.config.public_key.clone());
-        if let Some(node_id) = self.config.node_id.clone().filter(|value| !value.trim().is_empty()) {
+        if let Some(node_id) = self
+            .config
+            .node_id
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+        {
             result.insert("node_id".to_string(), node_id);
         }
-        result.insert("interface_name".to_string(), self.config.interface_name.clone());
+        result.insert(
+            "interface_name".to_string(),
+            self.config.interface_name.clone(),
+        );
         result.insert(
             "hostname".to_string(),
-            self.config.hostname.clone().unwrap_or_else(|| "unknown".to_string()),
+            self.config
+                .hostname
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
         );
         result.insert(
             "sync_interval_secs".to_string(),
@@ -1193,11 +1307,7 @@ impl AgentRuntime {
         match wg.list_peers() {
             Ok(peers) => {
                 result.insert("wireguard_peer_count".to_string(), peers.len().to_string());
-                build_completed_command_response(
-                    command_id,
-                    "agent healthy".to_string(),
-                    result,
-                )
+                build_completed_command_response(command_id, "agent healthy".to_string(), result)
             }
             Err(e) => {
                 result.insert("wireguard_error".to_string(), e.to_string());
@@ -1234,13 +1344,17 @@ impl AgentRuntime {
                 if response.success {
                     build_completed_command_response(
                         request.command_id,
-                        response.message.unwrap_or_else(|| "command completed".to_string()),
+                        response
+                            .message
+                            .unwrap_or_else(|| "command completed".to_string()),
                         result,
                     )
                 } else {
                     build_failed_command_response_with_result(
                         request.command_id,
-                        response.message.unwrap_or_else(|| "command failed".to_string()),
+                        response
+                            .message
+                            .unwrap_or_else(|| "command failed".to_string()),
                         result,
                     )
                 }
@@ -1282,11 +1396,12 @@ impl AgentRuntime {
             None => HashMap::new(),
         }
     }
-    
+
     pub async fn sync(&mut self) -> Result<()> {
         tracing::debug!("Syncing with Controller...");
 
-        let sync_result = self.grpc_client
+        let sync_result = self
+            .grpc_client
             .sync_with_state(
                 self.config.node_id.clone(),
                 self.config.public_key.clone(),
@@ -1299,13 +1414,16 @@ impl AgentRuntime {
             )
             .await?;
 
-        apply_runtime_token_from_sync(&mut self.config, &self.runtime_credential, &sync_result).await;
-        
-        tracing::debug!("Sync received: {} peers, {} ACL rules, {} blacklist rules, {} QoS rules", 
-            sync_result.peers.len(), 
+        apply_runtime_token_from_sync(&mut self.config, &self.runtime_credential, &sync_result)
+            .await;
+
+        tracing::debug!(
+            "Sync received: {} peers, {} ACL rules, {} blacklist rules, {} QoS rules",
+            sync_result.peers.len(),
             sync_result.acl_rules.len(),
             sync_result.blacklist_rules.len(),
-            sync_result.qos_rules.len());
+            sync_result.qos_rules.len()
+        );
 
         self.sync_peers(&sync_result.peers).await?;
         self.sync_advertised_routes(&sync_result.peers).await?;
@@ -1355,7 +1473,7 @@ impl AgentRuntime {
         tracing::debug!("Sync completed");
         Ok(())
     }
-    
+
     async fn sync_acl_qos_snapshot(
         &mut self,
         acl_rules: &[AclRule],
@@ -1376,7 +1494,7 @@ impl AgentRuntime {
             qos_enabled: true,
         };
 
-        for rule in acl_rules {
+        for (idx, rule) in acl_rules.iter().enumerate() {
             let policy = acl_policy_from_sync_rule(rule)?;
             for direction in requested_directions(policy.direction) {
                 snapshot.acl_rules.push(AclRuleSpec {
@@ -1385,6 +1503,7 @@ impl AgentRuntime {
                     dst_group: policy.dst_group.clone(),
                     proto: policy.proto,
                     action: policy.action,
+                    priority: controller_acl_order_priority(idx),
                     direction,
                     ports: policy.ports.clone(),
                 });
@@ -1399,6 +1518,7 @@ impl AgentRuntime {
                     dst_group: "any".to_string(),
                     proto: 0,
                     action: ACTION_DROP,
+                    priority: BLACKLIST_ACL_PRIORITY,
                     direction: DIRECTION_INGRESS,
                     ports: None,
                 }),
@@ -1408,6 +1528,7 @@ impl AgentRuntime {
                     dst_group: rule.cidr.clone(),
                     proto: 0,
                     action: ACTION_DROP,
+                    priority: BLACKLIST_ACL_PRIORITY,
                     direction: DIRECTION_INGRESS,
                     ports: None,
                 }),
@@ -1420,6 +1541,7 @@ impl AgentRuntime {
                             dst_group: "any".to_string(),
                             proto,
                             action: ACTION_DROP,
+                            priority: BLACKLIST_ACL_PRIORITY,
                             direction: DIRECTION_INGRESS,
                             ports: Some(ports.clone()),
                         });
@@ -1464,7 +1586,7 @@ impl AgentRuntime {
         );
         Ok(())
     }
-    
+
     async fn sync_peers(&mut self, new_peers: &[GrpcPeerInfo]) -> Result<()> {
         let new_peers = new_peers.to_vec();
         let _multi_tunnel = self.config.multi_tunnel;
@@ -1473,114 +1595,145 @@ impl AgentRuntime {
         let base_iface = self.config.interface_name.clone();
         let listen_port = self.config.listen_port;
 
-        let result = tokio::task::spawn_blocking(move || -> Result<(usize, usize, usize, usize)> {
-            let interface_count = interfaces.len();
+        let result =
+            tokio::task::spawn_blocking(move || -> Result<(usize, usize, usize, usize)> {
+                let interface_count = interfaces.len();
 
-            let mut total_added = 0;
-            let mut total_removed = 0;
-            let mut total_updated = 0;
+                let mut total_added = 0;
+                let mut total_removed = 0;
+                let mut total_updated = 0;
 
-            for iface in &interfaces {
-                let mgr = wg_managers.get(iface)
-                    .unwrap_or_else(|| panic!("WireGuardManager for {} not found", iface));
-                let mut wg = mgr.blocking_lock();
-                
-                let current_peers = wg.list_peers()
-                    .context("Failed to list current peers")?;
-                
-                let (to_add, to_remove, to_update) = Self::diff_peers_static(&current_peers, &new_peers);
-                
-                // 删除 peer
-                for peer in &to_remove {
-                    if iface == &base_iface {
-                        tracing::info!("Removing peer {} from {}...", &peer[..16.min(peer.len())], iface);
+                for iface in &interfaces {
+                    let mgr = wg_managers
+                        .get(iface)
+                        .unwrap_or_else(|| panic!("WireGuardManager for {} not found", iface));
+                    let mut wg = mgr.blocking_lock();
+
+                    let current_peers = wg.list_peers().context("Failed to list current peers")?;
+
+                    let (to_add, to_remove, to_update) =
+                        Self::diff_peers_static(&current_peers, &new_peers);
+
+                    // 删除 peer
+                    for peer in &to_remove {
+                        if iface == &base_iface {
+                            tracing::info!(
+                                "Removing peer {} from {}...",
+                                &peer[..16.min(peer.len())],
+                                iface
+                            );
+                        }
+                        wg.remove_peer(&peer).context("Failed to remove peer")?;
+                        if iface == &base_iface {
+                            metrics::record_wireguard_peer_change("remove");
+                        }
                     }
-                    wg.remove_peer(&peer)
-                        .context("Failed to remove peer")?;
-                    if iface == &base_iface {
-                        metrics::record_wireguard_peer_change("remove");
+                    total_removed += to_remove.len();
+
+                    // 添加 peer
+                    for peer in &to_add {
+                        if iface == &base_iface {
+                            tracing::info!(
+                                "Adding peer {} to {}...",
+                                &peer.public_key[..16.min(peer.public_key.len())],
+                                iface
+                            );
+                        }
+
+                        let mut allowed_ips = vec![format!("{}/32", peer.assigned_ip)];
+                        allowed_ips.extend(peer.advertised_routes.clone());
+
+                        // 根据 iface 编号调整 endpoint 端口
+                        let endpoint = if !peer.endpoint.is_empty() {
+                            let adjusted_endpoint = Self::adjust_endpoint_port_static(
+                                &peer.endpoint,
+                                iface,
+                                &base_iface,
+                                listen_port,
+                            );
+                            Some(adjusted_endpoint)
+                        } else {
+                            None
+                        };
+
+                        let peer_config = PeerConfig {
+                            public_key: peer.public_key.clone(),
+                            endpoint,
+                            allowed_ips,
+                            persistent_keepalive: 25,
+                        };
+
+                        wg.add_peer(peer_config).context("Failed to add peer")?;
+                        if iface == &base_iface {
+                            metrics::record_wireguard_peer_change("add");
+                        }
                     }
+                    total_added += to_add.len();
+
+                    // 更新 peer
+                    for peer in &to_update {
+                        if iface == &base_iface {
+                            tracing::debug!(
+                                "Updating peer {} on {}...",
+                                &peer.public_key[..16.min(peer.public_key.len())],
+                                iface
+                            );
+                        }
+
+                        wg.remove_peer(&peer.public_key)
+                            .context("Failed to remove peer for update")?;
+
+                        let mut allowed_ips = vec![format!("{}/32", peer.assigned_ip)];
+                        allowed_ips.extend(peer.advertised_routes.clone());
+
+                        // 根据 iface 编号调整 endpoint 端口
+                        let endpoint = if !peer.endpoint.is_empty() {
+                            let adjusted_endpoint = Self::adjust_endpoint_port_static(
+                                &peer.endpoint,
+                                iface,
+                                &base_iface,
+                                listen_port,
+                            );
+                            Some(adjusted_endpoint)
+                        } else {
+                            None
+                        };
+
+                        let peer_config = PeerConfig {
+                            public_key: peer.public_key.clone(),
+                            endpoint,
+                            allowed_ips,
+                            persistent_keepalive: 25,
+                        };
+
+                        wg.add_peer(peer_config)
+                            .context("Failed to add updated peer")?;
+                        if iface == &base_iface {
+                            metrics::record_wireguard_peer_change("update");
+                        }
+                    }
+                    total_updated += to_update.len();
                 }
-                total_removed += to_remove.len();
-                
-                // 添加 peer
-                for peer in &to_add {
-                    if iface == &base_iface {
-                        tracing::info!("Adding peer {} to {}...", &peer.public_key[..16.min(peer.public_key.len())], iface);
-                    }
-                    
-                    let mut allowed_ips = vec![format!("{}/32", peer.assigned_ip)];
-                    allowed_ips.extend(peer.advertised_routes.clone());
-                    
-                    // 根据 iface 编号调整 endpoint 端口
-                    let endpoint = if !peer.endpoint.is_empty() {
-                        let adjusted_endpoint = Self::adjust_endpoint_port_static(&peer.endpoint, iface, &base_iface, listen_port);
-                        Some(adjusted_endpoint)
-                    } else {
-                        None
-                    };
-                    
-                    let peer_config = PeerConfig {
-                        public_key: peer.public_key.clone(),
-                        endpoint,
-                        allowed_ips,
-                        persistent_keepalive: 25,
-                    };
-                    
-                    wg.add_peer(peer_config)
-                        .context("Failed to add peer")?;
-                    if iface == &base_iface {
-                        metrics::record_wireguard_peer_change("add");
-                    }
-                }
-                total_added += to_add.len();
-                
-                // 更新 peer
-                for peer in &to_update {
-                    if iface == &base_iface {
-                        tracing::debug!("Updating peer {} on {}...", &peer.public_key[..16.min(peer.public_key.len())], iface);
-                    }
-                    
-                    wg.remove_peer(&peer.public_key)
-                        .context("Failed to remove peer for update")?;
-                    
-                    let mut allowed_ips = vec![format!("{}/32", peer.assigned_ip)];
-                    allowed_ips.extend(peer.advertised_routes.clone());
-                    
-                    // 根据 iface 编号调整 endpoint 端口
-                    let endpoint = if !peer.endpoint.is_empty() {
-                        let adjusted_endpoint = Self::adjust_endpoint_port_static(&peer.endpoint, iface, &base_iface, listen_port);
-                        Some(adjusted_endpoint)
-                    } else {
-                        None
-                    };
-                    
-                    let peer_config = PeerConfig {
-                        public_key: peer.public_key.clone(),
-                        endpoint,
-                        allowed_ips,
-                        persistent_keepalive: 25,
-                    };
-                    
-                    wg.add_peer(peer_config)
-                        .context("Failed to add updated peer")?;
-                    if iface == &base_iface {
-                        metrics::record_wireguard_peer_change("update");
-                    }
-                }
-                total_updated += to_update.len();
-            }
-            
-            Ok((total_added / interface_count, total_removed / interface_count, total_updated / interface_count, new_peers.len()))
-        }).await?;
-        
+
+                Ok((
+                    total_added / interface_count,
+                    total_removed / interface_count,
+                    total_updated / interface_count,
+                    new_peers.len(),
+                ))
+            })
+            .await?;
+
         match result {
             Ok((added, removed, updated, total)) => {
                 let total_changes = added + removed + updated;
                 if total_changes > 0 {
                     tracing::info!(
                         "Peer sync: +{} -{} ~{} (total: {})",
-                        added, removed, updated, total
+                        added,
+                        removed,
+                        updated,
+                        total
                     );
                 }
             }
@@ -1589,11 +1742,16 @@ impl AgentRuntime {
                 return Err(e);
             }
         }
-        
+
         Ok(())
     }
-    
-    fn adjust_endpoint_port_static(endpoint: &str, iface: &str, base_iface: &str, base_port: u16) -> String {
+
+    fn adjust_endpoint_port_static(
+        endpoint: &str,
+        iface: &str,
+        base_iface: &str,
+        base_port: u16,
+    ) -> String {
         // Calculate offset based on trailing digit or comparison
         let offset = if iface == base_iface {
             0
@@ -1606,23 +1764,23 @@ impl AgentRuntime {
         } else {
             0
         };
-        
+
         if let Some(colon_pos) = endpoint.rfind(':') {
             let host = &endpoint[..colon_pos];
             let port_str = &endpoint[colon_pos + 1..];
-            
+
             let port = if let Ok(orig_port) = port_str.parse::<u16>() {
                 orig_port + offset
             } else {
                 base_port + offset
             };
-            
+
             format!("{}:{}", host, port)
         } else {
             endpoint.to_string()
         }
     }
-    
+
     fn diff_peers_static(
         current: &[crate::wireguard::PeerInfo],
         desired: &[GrpcPeerInfo],
@@ -1630,44 +1788,51 @@ impl AgentRuntime {
         let mut to_add = Vec::new();
         let mut to_remove = Vec::new();
         let mut to_update = Vec::new();
-        
+
         for desired_peer in desired {
-            let current_peer = current.iter().find(|p| p.public_key == desired_peer.public_key);
-            
+            let current_peer = current
+                .iter()
+                .find(|p| p.public_key == desired_peer.public_key);
+
             if let Some(current) = current_peer {
                 let desired_endpoint = if desired_peer.endpoint.is_empty() {
                     None
                 } else {
                     Some(desired_peer.endpoint.as_str())
                 };
-                
-                if current.endpoint.as_deref() != desired_endpoint ||
-                   current.allowed_ips.get(0).map(|s| s.as_str()) != Some(&desired_peer.assigned_ip) {
+
+                if current.endpoint.as_deref() != desired_endpoint
+                    || current.allowed_ips.get(0).map(|s| s.as_str())
+                        != Some(&desired_peer.assigned_ip)
+                {
                     to_update.push(desired_peer.clone());
                 }
             } else {
                 to_add.push(desired_peer.clone());
             }
         }
-        
+
         for current_peer in current {
-            if !desired.iter().any(|p| p.public_key == current_peer.public_key) {
+            if !desired
+                .iter()
+                .any(|p| p.public_key == current_peer.public_key)
+            {
                 to_remove.push(current_peer.public_key.clone());
             }
         }
-        
+
         (to_add, to_remove, to_update)
     }
-    
+
     async fn sync_advertised_routes(&mut self, peers: &[GrpcPeerInfo]) -> Result<()> {
         use std::collections::HashSet as StdHashSet;
-        
+
         // 收集期望的所有路由
         let mut desired_routes = StdHashSet::new();
         for peer in peers {
             // 添加 peer 的 VPN IP 路由
             desired_routes.insert(format!("{}/32", peer.assigned_ip));
-            
+
             // 添加 peer 宣告的非 /32 路由
             for route in &peer.advertised_routes {
                 if !route.ends_with("/32") {
@@ -1675,25 +1840,29 @@ impl AgentRuntime {
                 }
             }
         }
-        
+
         // 确定要使用的接口列表
         let interfaces = self.get_active_interfaces();
         let multi_tunnel = self.config.multi_tunnel;
-        
+
         // 在单个阻塞任务中完成所有路由操作，保证原子性和性能
         let routing_manager = self.routing_manager.clone();
         let result = tokio::task::spawn_blocking(move || -> Result<(usize, usize, usize)> {
             // 获取当前路由
-            let current_routes = routing_manager.list_vpn_routes()
+            let current_routes = routing_manager
+                .list_vpn_routes()
                 .context("Failed to list current VPN routes")?;
-            
+
             // 计算差异
-            let to_remove: Vec<_> = current_routes.difference(&desired_routes).cloned().collect();
-            
+            let to_remove: Vec<_> = current_routes
+                .difference(&desired_routes)
+                .cloned()
+                .collect();
+
             let mut added_count = 0;
             let mut removed_count = 0;
             let mut failures = Vec::new();
-            
+
             // 删除多余的路由
             for route in &to_remove {
                 if let Err(e) = routing_manager.remove_vpn_route(route) {
@@ -1704,13 +1873,15 @@ impl AgentRuntime {
                     tracing::info!("Removed stale route: {}", route);
                 }
             }
-            
+
             // 添加或更新所有期望的路由（使用 replace，会自动替换旧路由）
             for route in &desired_routes {
                 if multi_tunnel {
                     // 多隧道模式：使用 ECMP 路由
                     let interfaces_str: Vec<&str> = interfaces.iter().map(|s| s.as_str()).collect();
-                    if let Err(e) = routing_manager.add_ecmp_route(route, &interfaces_str, Some(100)) {
+                    if let Err(e) =
+                        routing_manager.add_ecmp_route(route, &interfaces_str, Some(100))
+                    {
                         tracing::error!("Failed to add ECMP route {}: {:?}", route, e);
                         failures.push(format!("add ecmp {}: {}", route, e));
                     } else {
@@ -1726,11 +1897,12 @@ impl AgentRuntime {
                     }
                 }
             }
-            
+
             fail_route_sync_if_needed(&failures)?;
             Ok((added_count, removed_count, desired_routes.len()))
-        }).await?;
-        
+        })
+        .await?;
+
         match result {
             Ok((added_count, removed_count, total_count)) => {
                 if added_count > 0 || removed_count > 0 {
@@ -1745,16 +1917,16 @@ impl AgentRuntime {
                 return Err(e);
             }
         }
-        
+
         Ok(())
     }
-    
+
     async fn collect_and_report_metrics(&self) -> Result<()> {
         tracing::trace!("Collecting metrics...");
-        
+
         let wg_manager = self.wg_manager.clone();
         let acl_qos_mgr = self.acl_qos_mgr.clone();
-        
+
         let result = tokio::task::spawn_blocking(move || -> Result<(
             Vec<(String, Option<String>, u64, u64, Option<u64>)>, // peers
             (usize, usize, u64, u64), // wg totals
@@ -1764,34 +1936,39 @@ impl AgentRuntime {
             // 收集 WireGuard 统计
             let wg = wg_manager.blocking_lock();
             let stats = wg.get_stats()?;
-            
+
             let total_rx: u64 = stats.peers.iter().map(|p| p.rx_bytes).sum();
             let total_tx: u64 = stats.peers.iter().map(|p| p.tx_bytes).sum();
             let active_peers = stats.peers.iter().filter(|p| {
                 p.last_handshake.map(|hs| hs > 0 && hs < 180).unwrap_or(false)
             }).count();
-            
+
             let wg_totals = (stats.peers.len(), active_peers, total_rx, total_tx);
-            
+
             let peer_stats: Vec<_> = stats.peers.iter().map(|p| {
                 (p.public_key.clone(), p.endpoint.clone(), p.rx_bytes, p.tx_bytes, p.last_handshake)
             }).collect();
-            
+
             drop(wg);
-            
+
             let acl_qos = acl_qos_mgr.blocking_lock();
             let acl_stats = acl_qos.get_all_rule_stats().unwrap_or_default();
             let qos_stats = acl_qos.get_all_qos_stats().unwrap_or_default();
-            
+
             Ok((peer_stats, wg_totals, acl_stats, qos_stats))
         }).await?;
-        
+
         // 在异步上下文中记录 metrics
         match result {
             Ok((peer_stats, wg_totals, acl_stats, qos_stats)) => {
                 // WireGuard metrics
-                metrics::record_wireguard_totals(wg_totals.0, wg_totals.1, wg_totals.2, wg_totals.3);
-                
+                metrics::record_wireguard_totals(
+                    wg_totals.0,
+                    wg_totals.1,
+                    wg_totals.2,
+                    wg_totals.3,
+                );
+
                 for (public_key, endpoint, rx_bytes, tx_bytes, last_handshake) in peer_stats {
                     metrics::record_wireguard_peer_stats(
                         &public_key,
@@ -1801,7 +1978,7 @@ impl AgentRuntime {
                         last_handshake,
                     );
                 }
-                
+
                 let mut custom_metrics = HashMap::new();
                 let mut acl_packets = 0_u64;
                 let mut acl_bytes = 0_u64;
@@ -1819,7 +1996,7 @@ impl AgentRuntime {
                         acl_bytes = acl_bytes.saturating_add(*bytes);
                     }
                 }
-                
+
                 let mut qos_passed_bytes = 0_u64;
                 let mut qos_dropped_bytes = 0_u64;
                 let mut qos_shaped_bytes = 0_u64;
@@ -1843,7 +2020,8 @@ impl AgentRuntime {
                 })
                 .await??;
                 for stat in rule_stats.0 {
-                    custom_metrics.insert(format!("acl_rule.{}.packets", stat.id), stat.packets as f64);
+                    custom_metrics
+                        .insert(format!("acl_rule.{}.packets", stat.id), stat.packets as f64);
                     custom_metrics.insert(format!("acl_rule.{}.bytes", stat.id), stat.bytes as f64);
                     custom_metrics.insert(
                         format!("acl_rule.{}.dropped_packets", stat.id),
@@ -1872,7 +2050,10 @@ impl AgentRuntime {
 
                 custom_metrics.insert("acl_packets".to_string(), acl_packets as f64);
                 custom_metrics.insert("acl_bytes".to_string(), acl_bytes as f64);
-                custom_metrics.insert("acl_dropped_packets".to_string(), acl_dropped_packets as f64);
+                custom_metrics.insert(
+                    "acl_dropped_packets".to_string(),
+                    acl_dropped_packets as f64,
+                );
                 custom_metrics.insert("acl_dropped_bytes".to_string(), acl_dropped_bytes as f64);
                 custom_metrics.insert("qos_passed_bytes".to_string(), qos_passed_bytes as f64);
                 custom_metrics.insert("qos_dropped_bytes".to_string(), qos_dropped_bytes as f64);
@@ -1896,38 +2077,52 @@ impl AgentRuntime {
                 tracing::error!("Failed to collect metrics: {:?}", e);
             }
         }
-        
+
         let uptime = metrics::record_agent_uptime();
         tracing::trace!("Metrics collected (uptime: {}s)", uptime);
-        
+
         Ok(())
     }
-    
+
     async fn reconnect_grpc(&mut self) -> Result<()> {
-        tracing::info!("Reconnecting to Controller at {}...", self.config.controller_url);
-        
+        tracing::info!(
+            "Reconnecting to Controller at {}...",
+            self.config.controller_url
+        );
+
         let new_client = GrpcClient::new_with_options(
             self.config.controller_url.clone(),
             self.config.ca_cert.clone(),
             self.config.client_cert.clone(),
             self.config.client_key.clone(),
             self.config.tls_server_name.clone(),
-        ).await.context("Failed to reconnect to Controller")?;
-        
+        )
+        .await
+        .context("Failed to reconnect to Controller")?;
+
         self.grpc_client = new_client;
         tracing::info!("✅ gRPC client reconnected successfully");
         Ok(())
     }
 
     async fn maybe_renew_certificate(&mut self) -> Result<()> {
-        if self.config.current_credential.as_deref().map(str::trim).unwrap_or("").is_empty() {
+        if self
+            .config
+            .current_credential
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+        {
             return Ok(());
         }
         if self.config.client_cert.trim().is_empty()
             || self.config.client_key.trim().is_empty()
             || self.config.ca_cert.trim().is_empty()
         {
-            tracing::debug!("Skipping certificate renewal check because certificate paths are incomplete");
+            tracing::debug!(
+                "Skipping certificate renewal check because certificate paths are incomplete"
+            );
             return Ok(());
         }
 
@@ -1980,17 +2175,20 @@ impl AgentRuntime {
         );
         Ok(())
     }
-    
+
     async fn reload_config(&mut self) -> Result<()> {
         tracing::info!("Reloading configuration...");
-        
+
         let config_manager = crate::config::ConfigManager::new(&self.config_path);
         let new_config = config_manager.load()?;
-        
+
         // 1. 检测 sync_interval 变更
         if new_config.sync_interval != self.config.sync_interval {
-            tracing::info!("Sync interval changed: {:?} -> {:?}", 
-                self.config.sync_interval, new_config.sync_interval);
+            tracing::info!(
+                "Sync interval changed: {:?} -> {:?}",
+                self.config.sync_interval,
+                new_config.sync_interval
+            );
             self.config.sync_interval = new_config.sync_interval;
         }
 
@@ -2011,125 +2209,139 @@ impl AgentRuntime {
             );
             self.config.controller_api_url = new_config.controller_api_url.clone();
         }
-        
+
         // 2. 检测 Controller URL 变更（需要重连）
         if new_config.controller_url != self.config.controller_url {
-            tracing::warn!("Controller URL changed: {} -> {}", 
-                self.config.controller_url, new_config.controller_url);
-            
+            tracing::warn!(
+                "Controller URL changed: {} -> {}",
+                self.config.controller_url,
+                new_config.controller_url
+            );
+
             // 备份旧配置以便回滚
             let old_url = self.config.controller_url.clone();
             let old_ca = self.config.ca_cert.clone();
             let old_cert = self.config.client_cert.clone();
             let old_key = self.config.client_key.clone();
             let old_tls_server_name = self.config.tls_server_name.clone();
-            
+
             // 更新配置
             self.config.controller_url = new_config.controller_url.clone();
             self.config.ca_cert = new_config.ca_cert.clone();
             self.config.client_cert = new_config.client_cert.clone();
             self.config.client_key = new_config.client_key.clone();
             self.config.tls_server_name = new_config.tls_server_name.clone();
-            
+
             // 尝试重连
             if let Err(e) = self.reconnect_grpc().await {
-                tracing::error!("Failed to reconnect gRPC client, rolling back config: {:?}", e);
-                
+                tracing::error!(
+                    "Failed to reconnect gRPC client, rolling back config: {:?}",
+                    e
+                );
+
                 // 回滚配置
                 self.config.controller_url = old_url;
                 self.config.ca_cert = old_ca;
                 self.config.client_cert = old_cert;
                 self.config.client_key = old_key;
                 self.config.tls_server_name = old_tls_server_name;
-                
+
                 metrics::record_grpc_error();
                 metrics::record_config_reload_failure();
             }
         }
-        
         // 3. 检测证书路径变更
-        else if new_config.ca_cert != self.config.ca_cert ||
-                new_config.client_cert != self.config.client_cert ||
-                new_config.client_key != self.config.client_key ||
-                new_config.tls_server_name != self.config.tls_server_name {
+        else if new_config.ca_cert != self.config.ca_cert
+            || new_config.client_cert != self.config.client_cert
+            || new_config.client_key != self.config.client_key
+            || new_config.tls_server_name != self.config.tls_server_name
+        {
             tracing::warn!("Certificate paths changed, reconnecting gRPC client");
-            
+
             // 备份旧证书路径
             let old_ca = self.config.ca_cert.clone();
             let old_cert = self.config.client_cert.clone();
             let old_key = self.config.client_key.clone();
             let old_tls_server_name = self.config.tls_server_name.clone();
-            
+
             // 更新证书路径
             self.config.ca_cert = new_config.ca_cert.clone();
             self.config.client_cert = new_config.client_cert.clone();
             self.config.client_key = new_config.client_key.clone();
             self.config.tls_server_name = new_config.tls_server_name.clone();
-            
+
             // 尝试重连
             if let Err(e) = self.reconnect_grpc().await {
-                tracing::error!("Failed to reconnect gRPC client with new certificates, rolling back: {:?}", e);
-                
+                tracing::error!(
+                    "Failed to reconnect gRPC client with new certificates, rolling back: {:?}",
+                    e
+                );
+
                 // 回滚证书路径
                 self.config.ca_cert = old_ca;
                 self.config.client_cert = old_cert;
                 self.config.client_key = old_key;
                 self.config.tls_server_name = old_tls_server_name;
-                
+
                 metrics::record_grpc_error();
                 metrics::record_config_reload_failure();
             }
         }
-        
+
         // 4. 检测 WireGuard 配置变更
         if new_config.listen_port != self.config.listen_port {
-            tracing::warn!("Listen port changed: {} -> {}", 
-                self.config.listen_port, new_config.listen_port);
+            tracing::warn!(
+                "Listen port changed: {} -> {}",
+                self.config.listen_port,
+                new_config.listen_port
+            );
         }
-        
+
         if new_config.mtu != self.config.mtu {
-            tracing::warn!("MTU changed: {} -> {}", 
-                self.config.mtu, new_config.mtu);
+            tracing::warn!("MTU changed: {} -> {}", self.config.mtu, new_config.mtu);
         }
-        
+
         // 5. 检测不应动态变更的配置
-        if new_config.public_key != self.config.public_key ||
-           new_config.private_key != self.config.private_key {
+        if new_config.public_key != self.config.public_key
+            || new_config.private_key != self.config.private_key
+        {
             tracing::error!("Public/private key cannot be changed dynamically, ignoring");
         }
-        
+
         if new_config.interface_name != self.config.interface_name {
             tracing::error!("Interface name cannot be changed dynamically, ignoring");
         }
-        
+
         // 更新其他可安全变更的配置
         self.config.region = new_config.region;
         self.config.advertised_routes = new_config.advertised_routes;
         self.config.hostname = new_config.hostname;
-        
+
         tracing::info!("Configuration reloaded successfully");
         Ok(())
     }
-    
+
     async fn cleanup(&self) -> Result<()> {
         tracing::info!("Cleaning up...");
-        
+
         let map_names = [
-            "SRC_IPV4_ID_MAP", "DST_IPV4_ID_MAP",
-            "SRC_IPV6_ID_MAP", "DST_IPV6_ID_MAP",
+            "SRC_IPV4_ID_MAP",
+            "DST_IPV4_ID_MAP",
+            "SRC_IPV6_ID_MAP",
+            "DST_IPV6_ID_MAP",
         ];
-        
+
         for map_name in map_names {
             let pin_path = format!("{}/{}", BPF_FS_PATH, map_name);
             if std::path::Path::new(&pin_path).exists() {
                 let _ = std::fs::remove_file(&pin_path);
             }
         }
-        
+
         if std::path::Path::new(&self.unix_socket_path).exists() {
             let _ = std::fs::remove_file(&self.unix_socket_path);
         }
-        
+
         tracing::info!("Cleanup completed");
         Ok(())
     }

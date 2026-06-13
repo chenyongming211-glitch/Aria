@@ -108,7 +108,7 @@ unsafe impl aya::Pod for PolicyKey {}
 pub struct PolicyValue {
     pub action: u8,
     pub has_port_filter: u8,
-    pub pad1: [u8; 2],
+    pub priority: u16,
     pub bitmap_idx: u32,
 }
 

@@ -50,7 +50,7 @@ pub struct PolicyKey {
 pub struct PolicyValue {
     pub action: u8,
     pub has_port_filter: u8,
-    pub pad1: [u8; 2],
+    pub priority: u16,
     pub bitmap_idx: u32,
 }
 
@@ -206,11 +206,7 @@ fn try_tc_egress_acl(ctx: TcContext) -> Result<i32, u64> {
 }
 
 #[inline(always)]
-fn try_xdp_ingress_acl_ipv4(
-    ctx: &XdpContext,
-    pkt_len: u64,
-    ip_offset: usize,
-) -> Result<u32, u64> {
+fn try_xdp_ingress_acl_ipv4(ctx: &XdpContext, pkt_len: u64, ip_offset: usize) -> Result<u32, u64> {
     let ip = ptr_at::<Ipv4Hdr>(ctx, ip_offset)?;
     let (_, dst_port) = parse_ports_ipv4(ctx, ip_offset, ip)?;
     let src_id = lookup_ipv4_id(&SRC_IPV4_ID_MAP, u32::from_be_bytes(ip.src_addr));
@@ -231,11 +227,7 @@ fn try_xdp_ingress_acl_ipv4(
 }
 
 #[inline(always)]
-fn try_xdp_ingress_acl_ipv6(
-    ctx: &XdpContext,
-    pkt_len: u64,
-    ip_offset: usize,
-) -> Result<u32, u64> {
+fn try_xdp_ingress_acl_ipv6(ctx: &XdpContext, pkt_len: u64, ip_offset: usize) -> Result<u32, u64> {
     let ip = ptr_at::<Ipv6Hdr>(ctx, ip_offset)?;
     let (_, dst_port) = parse_ports_ipv6(ctx, ip_offset, ip)?;
     let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, ip.src_addr);
@@ -248,15 +240,15 @@ fn try_xdp_ingress_acl_ipv6(
         pkt_len,
         DIRECTION_INGRESS,
     );
-    Ok(if action == ACTION_DROP { XDP_DROP } else { XDP_PASS })
+    Ok(if action == ACTION_DROP {
+        XDP_DROP
+    } else {
+        XDP_PASS
+    })
 }
 
 #[inline(always)]
-fn try_tc_egress_acl_ipv4(
-    ctx: &TcContext,
-    pkt_len: u64,
-    ip_offset: usize,
-) -> Result<i32, u64> {
+fn try_tc_egress_acl_ipv4(ctx: &TcContext, pkt_len: u64, ip_offset: usize) -> Result<i32, u64> {
     let ip = ptr_at_tc::<Ipv4Hdr>(ctx, ip_offset)?;
     let (_, dst_port) = parse_ports_ipv4_tc(ctx, ip_offset, ip)?;
     let src_id = lookup_ipv4_id(&SRC_IPV4_ID_MAP, u32::from_be_bytes(ip.src_addr));
@@ -277,11 +269,7 @@ fn try_tc_egress_acl_ipv4(
 }
 
 #[inline(always)]
-fn try_tc_egress_acl_ipv6(
-    ctx: &TcContext,
-    pkt_len: u64,
-    ip_offset: usize,
-) -> Result<i32, u64> {
+fn try_tc_egress_acl_ipv6(ctx: &TcContext, pkt_len: u64, ip_offset: usize) -> Result<i32, u64> {
     let ip = ptr_at_tc::<Ipv6Hdr>(ctx, ip_offset)?;
     let (_, dst_port) = parse_ports_ipv6_tc(ctx, ip_offset, ip)?;
     let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, ip.src_addr);
@@ -310,13 +298,8 @@ fn acl_policy_action(
     pkt_len: u64,
     direction: u8,
 ) -> u8 {
-    if let Some((key, policy)) = lookup_policy(
-        TAP_ID_UNASSIGNED,
-        src_id,
-        dst_id,
-        proto,
-        direction,
-    ) {
+    if let Some((key, policy)) = lookup_policy(TAP_ID_UNASSIGNED, src_id, dst_id, proto, direction)
+    {
         let action = policy_action(TAP_ID_UNASSIGNED, policy, dst_port);
         update_rule_stats(&key, pkt_len, action == ACTION_DROP);
         return action;
@@ -345,15 +328,17 @@ fn lookup_policy(
     proto: u8,
     direction: u8,
 ) -> Option<(PolicyKey, PolicyValue)> {
-    if let Some(policy) = lookup_policy_for_proto(tap_id, src_id, dst_id, proto, direction) {
-        return Some(policy);
-    }
+    let mut best = lookup_policy_for_proto(tap_id, src_id, dst_id, proto, direction);
 
     if proto != PROTO_WILDCARD {
-        return lookup_policy_for_proto(tap_id, src_id, dst_id, PROTO_WILDCARD, direction);
+        if let Some(policy) =
+            lookup_policy_for_proto(tap_id, src_id, dst_id, PROTO_WILDCARD, direction)
+        {
+            best = choose_policy(best, policy);
+        }
     }
 
-    None
+    best
 }
 
 fn lookup_policy_for_proto(
@@ -363,6 +348,7 @@ fn lookup_policy_for_proto(
     proto: u8,
     direction: u8,
 ) -> Option<(PolicyKey, PolicyValue)> {
+    let mut best: Option<(PolicyKey, PolicyValue)> = None;
     let exact_key = PolicyKey {
         tap_id,
         src_id,
@@ -372,7 +358,7 @@ fn lookup_policy_for_proto(
         pad: [0; 2],
     };
     if let Some(policy) = unsafe { POLICY_TABLE.get(&exact_key) } {
-        return Some((exact_key, *policy));
+        best = choose_policy(best, (exact_key, *policy));
     }
 
     let wildcard_src_key = PolicyKey {
@@ -384,7 +370,7 @@ fn lookup_policy_for_proto(
         pad: [0; 2],
     };
     if let Some(policy) = unsafe { POLICY_TABLE.get(&wildcard_src_key) } {
-        return Some((wildcard_src_key, *policy));
+        best = choose_policy(best, (wildcard_src_key, *policy));
     }
 
     let wildcard_dst_key = PolicyKey {
@@ -396,7 +382,7 @@ fn lookup_policy_for_proto(
         pad: [0; 2],
     };
     if let Some(policy) = unsafe { POLICY_TABLE.get(&wildcard_dst_key) } {
-        return Some((wildcard_dst_key, *policy));
+        best = choose_policy(best, (wildcard_dst_key, *policy));
     }
 
     let full_wildcard_key = PolicyKey {
@@ -408,10 +394,20 @@ fn lookup_policy_for_proto(
         pad: [0; 2],
     };
     if let Some(policy) = unsafe { POLICY_TABLE.get(&full_wildcard_key) } {
-        return Some((full_wildcard_key, *policy));
+        best = choose_policy(best, (full_wildcard_key, *policy));
     }
 
-    None
+    best
+}
+
+fn choose_policy(
+    current: Option<(PolicyKey, PolicyValue)>,
+    candidate: (PolicyKey, PolicyValue),
+) -> Option<(PolicyKey, PolicyValue)> {
+    match current {
+        Some(existing) if existing.1.priority <= candidate.1.priority => Some(existing),
+        _ => Some(candidate),
+    }
 }
 
 fn policy_action(tap_id: u32, policy: PolicyValue, dst_port: u16) -> u8 {
@@ -498,11 +494,7 @@ fn parse_ports_ipv6(ctx: &XdpContext, ip_offset: usize, ip: &Ipv6Hdr) -> Result<
     }
 }
 
-fn parse_ports_ipv4_tc(
-    ctx: &TcContext,
-    ip_offset: usize,
-    ip: &Ipv4Hdr,
-) -> Result<(u16, u16), u64> {
+fn parse_ports_ipv4_tc(ctx: &TcContext, ip_offset: usize, ip: &Ipv4Hdr) -> Result<(u16, u16), u64> {
     match IpProto::from(ip.proto) {
         IpProto::Tcp => {
             let tcp = ptr_at_tc::<TcpHdr>(ctx, ip_offset + Ipv4Hdr::LEN)?;
@@ -516,11 +508,7 @@ fn parse_ports_ipv4_tc(
     }
 }
 
-fn parse_ports_ipv6_tc(
-    ctx: &TcContext,
-    ip_offset: usize,
-    ip: &Ipv6Hdr,
-) -> Result<(u16, u16), u64> {
+fn parse_ports_ipv6_tc(ctx: &TcContext, ip_offset: usize, ip: &Ipv6Hdr) -> Result<(u16, u16), u64> {
     match IpProto::from(ip.next_hdr) {
         IpProto::Tcp => {
             let tcp = ptr_at_tc::<TcpHdr>(ctx, ip_offset + Ipv6Hdr::LEN)?;
