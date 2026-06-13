@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -36,6 +37,27 @@ type PermissionsResponse struct {
 
 func normalizeAuthRole(role string) string {
 	return controllerstorage.NormalizeRoleName(role)
+}
+
+func sanitizeTenantPermissions(permissions []string) []string {
+	if len(permissions) == 0 {
+		return []string{}
+	}
+
+	sanitized := make([]string, 0, len(permissions))
+	seen := make(map[string]struct{}, len(permissions))
+	for _, permission := range permissions {
+		permission = strings.TrimSpace(permission)
+		if permission == "" || permission == "*" {
+			continue
+		}
+		if _, ok := seen[permission]; ok {
+			continue
+		}
+		seen[permission] = struct{}{}
+		sanitized = append(sanitized, permission)
+	}
+	return sanitized
 }
 
 func (a *AuthAPI) HandleLogin(w http.ResponseWriter, r *http.Request) {
@@ -218,9 +240,7 @@ func (a *AuthAPI) HandlePermissions(w http.ResponseWriter, r *http.Request) {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Role permission lookup failed", nil)
 		return
 	}
-	if permissions == nil {
-		permissions = []string{}
-	}
+	permissions = sanitizeTenantPermissions(permissions)
 
 	apibase.WriteSuccess(w, PermissionsResponse{
 		Role:        roleName,
