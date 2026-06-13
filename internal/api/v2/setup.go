@@ -901,6 +901,9 @@ func (r *Router) getTenantNodeRecord(nodeID string, tenantID uuid.UUID) (*contro
 	if node.TenantID != tenantID {
 		return nil, sql.ErrNoRows
 	}
+	if strings.EqualFold(strings.TrimSpace(node.Status), "deleted") {
+		return nil, sql.ErrNoRows
+	}
 	return node, nil
 }
 
