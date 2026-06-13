@@ -55,6 +55,34 @@ func TestJWTAuthMiddlewareAllowsPermissionsDuringForcedPasswordChange(t *testing
 	}
 }
 
+func TestJWTAuthMiddlewareAcceptsCaseInsensitiveBearerScheme(t *testing.T) {
+	auth.SetSecret("test-jwt-secret")
+	t.Cleanup(func() { auth.SetSecret("") })
+
+	token, err := auth.GenerateToken(uuid.New().String(), "alice", "admin", uuid.New().String())
+	if err != nil {
+		t.Fatalf("GenerateToken failed: %v", err)
+	}
+
+	called := false
+	handler := JWTAuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/tenants", nil)
+	req.Header.Set("Authorization", "bearer "+token)
+	rr := httptest.NewRecorder()
+
+	handler(rr, req)
+
+	if !called {
+		t.Fatalf("expected handler to be called")
+	}
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestJWTAuthMiddlewareBlocksOtherPathsDuringForcedPasswordChange(t *testing.T) {
 	auth.SetSecret("test-jwt-secret")
 	t.Cleanup(func() { auth.SetSecret("") })
