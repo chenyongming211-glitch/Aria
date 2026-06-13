@@ -150,8 +150,14 @@ func TestProcessSyncReturnsErrorWhenACLQueryFails(t *testing.T) {
 			nodeID, publicKey, "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-a", "100.64.0.2", 2,
 			now.Unix(), now.Add(-time.Hour).Unix(), "spoke", "kernel", "6.0", true, "online", int64(0), "{}", "", now, now,
 		))
-	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO nodes`)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow(nodeID, now, now))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE nodes
+		SET last_seen = $2,
+		    status = 'online',
+		    offline_since = NULL,
+		    updated_at = NOW()
+		WHERE id = $1 AND status NOT IN ('deleted', 'suspended', 'banned')`)).
+		WithArgs(nodeID, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND status != 'deleted' ORDER BY last_seen DESC`)).
 		WithArgs(tenantID).
 		WillReturnRows(sqlmock.NewRows(syncNodeColumns()).AddRow(
@@ -167,6 +173,46 @@ func TestProcessSyncReturnsErrorWhenACLQueryFails(t *testing.T) {
 	_, _, _, _, err = controller.processSync(publicKey)
 	if err == nil || !strings.Contains(err.Error(), "failed to get node ACL rules") {
 		t.Fatalf("expected ACL query error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestProcessSyncReturnsErrorWhenHeartbeatUpdateFindsInactiveNode(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+	publicKey := "node-public-key"
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE public_key = $1`)).
+		WithArgs(publicKey).
+		WillReturnRows(sqlmock.NewRows(syncNodeColumns()).AddRow(
+			nodeID, publicKey, "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-a", "100.64.0.2", 2,
+			now.Unix(), now.Add(-time.Hour).Unix(), "spoke", "kernel", "6.0", true, "suspended", int64(0), "{}", "", now, now,
+		))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE nodes
+		SET last_seen = $2,
+		    status = 'online',
+		    offline_since = NULL,
+		    updated_at = NOW()
+		WHERE id = $1 AND status NOT IN ('deleted', 'suspended', 'banned')`)).
+		WithArgs(nodeID, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	controller := &Controller{
+		store:  controllerstorage.NewStorageWithDB(db),
+		logger: logging.GetLogger(),
+	}
+	_, _, _, _, err = controller.processSync(publicKey)
+	if err == nil || !strings.Contains(err.Error(), "failed to update node heartbeat") {
+		t.Fatalf("expected heartbeat update error, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
