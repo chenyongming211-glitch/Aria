@@ -357,6 +357,9 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
 		return
 	}
+	if writeInactivePolicyMutationError(w, node) {
+		return
+	}
 
 	// 字段合并对齐
 	src := body.SrcCIDR
@@ -470,6 +473,9 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
 		return
 	}
+	if writeInactivePolicyMutationError(w, node) {
+		return
+	}
 
 	existing, err := r.store.GetTenantNodeACLRule(tenantID, node.ID, ruleID)
 	if err != nil {
@@ -580,6 +586,9 @@ func (r *Router) deleteTenantNodeACL(w http.ResponseWriter, tenantID uuid.UUID, 
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid rule ID format", nil)
 		return
 	}
+	if writeInactivePolicyMutationError(w, node) {
+		return
+	}
 
 	r.writeTransactionalPolicyMutationSuccess(w, node, "acl", "delete", "ACL rule deleted successfully", map[string]interface{}{
 		"node_id": node.ID.String(),
@@ -661,6 +670,9 @@ func (r *Router) createTenantNodeBlacklistRule(w http.ResponseWriter, req *http.
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
 		return
 	}
+	if writeInactivePolicyMutationError(w, node) {
+		return
+	}
 
 	if scope != "ports" && body.CIDR == "" {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "CIDR is required for src/dst scope", nil)
@@ -710,6 +722,9 @@ func (r *Router) deleteTenantNodeBlacklistRule(w http.ResponseWriter, tenantID u
 	ruleID, err := uuid.Parse(ruleIDStr)
 	if err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid rule ID format", nil)
+		return
+	}
+	if writeInactivePolicyMutationError(w, node) {
 		return
 	}
 
@@ -970,6 +985,9 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
 		return
 	}
+	if writeInactivePolicyMutationError(w, node) {
+		return
+	}
 	if body.BandwidthMbps <= 0 {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "bandwidth_mbps must be greater than 0", nil)
 		return
@@ -1064,6 +1082,9 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
+		return
+	}
+	if writeInactivePolicyMutationError(w, node) {
 		return
 	}
 
@@ -1170,6 +1191,9 @@ func (r *Router) deleteTenantNodeQoS(w http.ResponseWriter, tenantID uuid.UUID, 
 	ruleID, err := uuid.Parse(ruleIDStr)
 	if err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid rule ID format", nil)
+		return
+	}
+	if writeInactivePolicyMutationError(w, node) {
 		return
 	}
 

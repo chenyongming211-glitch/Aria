@@ -765,6 +765,9 @@ func (r *Router) addTenantNodeRoute(w http.ResponseWriter, req *http.Request, te
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
 		return
 	}
+	if writeInactivePolicyMutationError(w, node) {
+		return
+	}
 
 	routes := append(append([]string{}, node.AdvertisedRoutes...), route)
 	normalized, err := normalizeRoutes(routes)
@@ -813,6 +816,9 @@ func (r *Router) replaceTenantNodeRoute(w http.ResponseWriter, req *http.Request
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
 		return
 	}
+	if writeInactivePolicyMutationError(w, node) {
+		return
+	}
 
 	updated := make([]string, 0, len(node.AdvertisedRoutes))
 	for _, route := range node.AdvertisedRoutes {
@@ -858,6 +864,9 @@ func (r *Router) deleteTenantNodeRoute(w http.ResponseWriter, tenantID uuid.UUID
 
 	if !containsString(node.AdvertisedRoutes, routeID) {
 		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Route not found", nil)
+		return
+	}
+	if writeInactivePolicyMutationError(w, node) {
 		return
 	}
 
@@ -1019,6 +1028,14 @@ func inactivePolicyMutationMessage(node *controllerstorage.Node) string {
 	}
 }
 
+func writeInactivePolicyMutationError(w http.ResponseWriter, node *controllerstorage.Node) bool {
+	if message := inactivePolicyMutationMessage(node); message != "" {
+		apibase.WriteError(w, http.StatusConflict, apibase.CodeConflict, message, nil)
+		return true
+	}
+	return false
+}
+
 func (r *Router) writePolicyMutationSuccess(
 	w http.ResponseWriter,
 	node *controllerstorage.Node,
@@ -1028,8 +1045,7 @@ func (r *Router) writePolicyMutationSuccess(
 	message string,
 	metadata map[string]interface{},
 ) {
-	if message := inactivePolicyMutationMessage(node); message != "" {
-		apibase.WriteError(w, http.StatusConflict, apibase.CodeConflict, message, nil)
+	if writeInactivePolicyMutationError(w, node) {
 		return
 	}
 
@@ -1071,8 +1087,7 @@ func (r *Router) writeTransactionalPolicyMutationSuccess(
 	metadata map[string]interface{},
 	mutate func(*controllerstorage.PolicyMutationTx) (map[string]interface{}, error),
 ) {
-	if message := inactivePolicyMutationMessage(node); message != "" {
-		apibase.WriteError(w, http.StatusConflict, apibase.CodeConflict, message, nil)
+	if writeInactivePolicyMutationError(w, node) {
 		return
 	}
 
