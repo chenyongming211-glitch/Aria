@@ -870,6 +870,8 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 		aclRules, err := c.store.GetEnabledTenantNodeACLRules(nodeTenantID, requestingNode.ID)
 		if err != nil {
 			c.logger.Error("Failed to get node ACL rules for tenant %s node %s: %v", nodeTenantID, requestingNode.ID, err)
+			http.Error(w, "Failed to load ACL rules", http.StatusInternalServerError)
+			return
 		} else {
 			aclRulesJSON = aclRuleRecordsForSync(aclRules)
 		}
@@ -1958,8 +1960,7 @@ func (c *Controller) processSync(publicKey string) (interface{}, string, interfa
 
 	aclRuleRecords, err := c.store.GetEnabledTenantNodeACLRules(node.TenantID, node.ID)
 	if err != nil {
-		c.logger.Warn("Failed to get node ACL rules for tenant %s node %s: %v", node.TenantID, node.ID, err)
-		aclRuleRecords = []*controllerstorage.ACLRuleRecord{}
+		return nil, "", nil, uuid.Nil, fmt.Errorf("failed to get node ACL rules: %w", err)
 	}
 
 	aclRules := aclRuleRecordsForSync(aclRuleRecords)
