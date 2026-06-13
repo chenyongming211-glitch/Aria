@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"aria/internal/api/apibase"
@@ -50,6 +51,102 @@ func validateQoSMatchFields(protocol, srcPort, dstPort int) error {
 		return fmt.Errorf("qos port matching is not supported yet")
 	}
 	return nil
+}
+
+func validateACLPortFields(protocol int, ports string, dstPort int) error {
+	if dstPort < 0 || dstPort > 65535 {
+		return fmt.Errorf("dst_port must be between 0 and 65535")
+	}
+
+	if !aclHasRuntimePortFilter(ports, dstPort) {
+		return nil
+	}
+	switch protocol {
+	case 0, 6, 17:
+	default:
+		return fmt.Errorf("ACL port filters require any, tcp, or udp protocol")
+	}
+
+	return validateACLPortsSyntax(ports)
+}
+
+func aclHasRuntimePortFilter(ports string, dstPort int) bool {
+	normalized := strings.TrimSpace(ports)
+	if normalized != "" && !strings.EqualFold(normalized, "all") {
+		return true
+	}
+	return dstPort > 0
+}
+
+func validateACLPortsSyntax(ports string) error {
+	trimmed := strings.TrimSpace(ports)
+	if trimmed == "" || strings.EqualFold(trimmed, "all") {
+		return nil
+	}
+
+	entries := 0
+	for _, rawPart := range strings.Split(trimmed, ",") {
+		part := strings.TrimSpace(rawPart)
+		if part == "" {
+			continue
+		}
+		entries++
+
+		pieces := strings.Split(part, ":")
+		if len(pieces) > 2 {
+			return fmt.Errorf("invalid ACL port filter %q", part)
+		}
+		if len(pieces) == 2 {
+			action, err := strconv.Atoi(strings.TrimSpace(pieces[1]))
+			if err != nil || action < 0 || action > 1 {
+				return fmt.Errorf("invalid ACL port action %q", pieces[1])
+			}
+		}
+
+		rangePart := strings.TrimSpace(pieces[0])
+		if rangePart == "" {
+			return fmt.Errorf("invalid ACL port filter %q", part)
+		}
+		start, end, err := parseACLPortRange(rangePart)
+		if err != nil {
+			return err
+		}
+		if start > end {
+			return fmt.Errorf("invalid ACL port range %d-%d", start, end)
+		}
+	}
+	if entries == 0 {
+		return fmt.Errorf("ACL ports must include at least one port")
+	}
+	return nil
+}
+
+func parseACLPortRange(value string) (int, int, error) {
+	if strings.Contains(value, "-") {
+		parts := strings.Split(value, "-")
+		if len(parts) != 2 {
+			return 0, 0, fmt.Errorf("invalid ACL port range %q", value)
+		}
+		start, err := parseACLPort(parts[0])
+		if err != nil {
+			return 0, 0, err
+		}
+		end, err := parseACLPort(parts[1])
+		if err != nil {
+			return 0, 0, err
+		}
+		return start, end, nil
+	}
+	port, err := parseACLPort(value)
+	return port, port, err
+}
+
+func parseACLPort(value string) (int, error) {
+	port, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || port < 0 || port > 65535 {
+		return 0, fmt.Errorf("ACL port must be between 0 and 65535")
+	}
+	return port, nil
 }
 
 func boolValueOrDefault(value *bool, defaultValue bool) bool {
@@ -132,7 +229,7 @@ func aclRuntimeProtocols(protocol int, ports string, dstPort int) []int {
 	if protocol != 0 {
 		return []int{protocol}
 	}
-	if strings.TrimSpace(ports) != "" || dstPort != 0 {
+	if aclHasRuntimePortFilter(ports, dstPort) {
 		return []int{6, 17}
 	}
 	return []int{0}
@@ -286,6 +383,9 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 	if writePolicyValidationError(w, validatePolicyDirectionField(body.Direction)) {
 		return
 	}
+	if writePolicyValidationError(w, validateACLPortFields(body.Protocol, body.Ports, port)) {
+		return
+	}
 
 	rule := &controllerstorage.ACLRuleRecord{
 		TenantID:    tenantID,
@@ -429,6 +529,9 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		return
 	}
 	if writePolicyValidationError(w, validatePolicyDirectionField(rule.Direction)) {
+		return
+	}
+	if writePolicyValidationError(w, validateACLPortFields(rule.Protocol, rule.Ports, rule.DstPort)) {
 		return
 	}
 
