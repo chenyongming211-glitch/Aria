@@ -383,7 +383,8 @@ export default defineStore('user', () => {
       }
       const response = await api.get(API_ENDPOINTS.TENANT.ROLES(roleId))
       const roles = response.data?.data || []
-      const matchedRole = roles.find(r => r.name === roleName)
+      const normalizedTargetRole = String(roleName || '').trim().toLowerCase()
+      const matchedRole = roles.find(r => String(r.name || '').trim().toLowerCase() === normalizedTargetRole)
       if (matchedRole) {
         return setPermissions(matchedRole.permissions || [])
       }
