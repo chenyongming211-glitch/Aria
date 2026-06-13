@@ -4,12 +4,62 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"aria/internal/api/apibase"
+	"aria/internal/api/middleware"
 	controllerstorage "aria/pkg/controllerstorage"
 
 	"github.com/google/uuid"
 )
+
+var allowedCustomRolePermissions = map[string]struct{}{
+	middleware.PermNodesRead:      {},
+	middleware.PermNodesWrite:     {},
+	middleware.PermRoutesRead:     {},
+	middleware.PermRoutesWrite:    {},
+	middleware.PermAclsRead:       {},
+	middleware.PermAclsWrite:      {},
+	middleware.PermQosRead:        {},
+	middleware.PermQosWrite:       {},
+	middleware.PermBlacklistRead:  {},
+	middleware.PermBlacklistWrite: {},
+	middleware.PermMonitoringRead: {},
+	middleware.PermCommandsWrite:  {},
+	middleware.PermTokensRead:     {},
+	middleware.PermTokensWrite:    {},
+	middleware.PermUsersRead:      {},
+	middleware.PermUsersWrite:     {},
+	middleware.PermRolesRead:      {},
+	middleware.PermRolesWrite:     {},
+	middleware.PermAiUse:          {},
+	middleware.PermPoliciesRead:   {},
+	middleware.PermSettingsRead:   {},
+	middleware.PermSettingsWrite:  {},
+}
+
+func normalizeCustomRolePermissions(raw []string) ([]string, error) {
+	normalized := make([]string, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for _, permission := range raw {
+		permission = strings.TrimSpace(permission)
+		if permission == "" {
+			continue
+		}
+		if _, ok := allowedCustomRolePermissions[permission]; !ok {
+			return nil, fmt.Errorf("invalid permission %q", permission)
+		}
+		if _, ok := seen[permission]; ok {
+			continue
+		}
+		seen[permission] = struct{}{}
+		normalized = append(normalized, permission)
+	}
+	if len(normalized) == 0 {
+		return nil, fmt.Errorf("at least one permission is required")
+	}
+	return normalized, nil
+}
 
 func (r *Router) handleRoles(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, parts []string) {
 	switch req.Method {
@@ -72,12 +122,14 @@ func (r *Router) createRole(w http.ResponseWriter, req *http.Request, tenantID u
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
 		return
 	}
+	body.Name = strings.TrimSpace(body.Name)
 	if body.Name == "" {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Role name is required", nil)
 		return
 	}
-	if len(body.Permissions) == 0 {
-		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "At least one permission is required", nil)
+	permissions, err := normalizeCustomRolePermissions(body.Permissions)
+	if err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
 		return
 	}
 
@@ -85,7 +137,7 @@ func (r *Router) createRole(w http.ResponseWriter, req *http.Request, tenantID u
 		TenantID:    tenantID,
 		Name:        body.Name,
 		Description: body.Description,
-		Permissions: body.Permissions,
+		Permissions: permissions,
 	}
 
 	created, err := r.store.CreateRole(role)
@@ -105,8 +157,13 @@ func (r *Router) updateRole(w http.ResponseWriter, req *http.Request, tenantID, 
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
 		return
 	}
+	permissions, err := normalizeCustomRolePermissions(body.Permissions)
+	if err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
+		return
+	}
 
-	updated, err := r.store.UpdateRole(tenantID, roleID, body.Description, body.Permissions)
+	updated, err := r.store.UpdateRole(tenantID, roleID, body.Description, permissions)
 	if err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Failed to update role: "+err.Error(), nil)
 		return
