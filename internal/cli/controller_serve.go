@@ -860,22 +860,23 @@ func (c *Controller) syncNode(req *RegisterRequest, assignedIP string, w http.Re
 		}
 	}
 
+	if requestingNode == nil {
+		c.logger.Error("Registered agent %s was not found in active peer set for tenant %s", previewString(req.PublicKey, 16), nodeTenantID)
+		http.Error(w, "Registered node not found in active peer set", http.StatusInternalServerError)
+		return
+	}
+
 	// Get enabled ACL rules owned by the requesting node. ACL is a node-scoped
 	// runtime policy; region/advertised-route filtering belongs to the legacy
 	// topology model and must not hide node ACLs from the owning agent.
 	var aclRulesJSON []ACLRuleJSON
-	if requestingNode == nil {
-		c.logger.Warn("Agent %s was not found in tenant peer set; sending no ACL rules", previewString(req.PublicKey, 16))
-	} else {
-		aclRules, err := c.store.GetEnabledTenantNodeACLRules(nodeTenantID, requestingNode.ID)
-		if err != nil {
-			c.logger.Error("Failed to get node ACL rules for tenant %s node %s: %v", nodeTenantID, requestingNode.ID, err)
-			http.Error(w, "Failed to load ACL rules", http.StatusInternalServerError)
-			return
-		} else {
-			aclRulesJSON = aclRuleRecordsForSync(aclRules)
-		}
+	aclRules, err := c.store.GetEnabledTenantNodeACLRules(nodeTenantID, requestingNode.ID)
+	if err != nil {
+		c.logger.Error("Failed to get node ACL rules for tenant %s node %s: %v", nodeTenantID, requestingNode.ID, err)
+		http.Error(w, "Failed to load ACL rules", http.StatusInternalServerError)
+		return
 	}
+	aclRulesJSON = aclRuleRecordsForSync(aclRules)
 	c.logger.Info("Agent %s: sending %d node ACL rules", previewString(req.PublicKey, 16), len(aclRulesJSON))
 
 	desiredVersion, err := c.ensureRESTDesiredStateVersion(requestingNode)
