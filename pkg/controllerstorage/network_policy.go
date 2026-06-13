@@ -283,7 +283,7 @@ func (s *Storage) ListTenantNodeACLRules(tenantID, nodeID uuid.UUID) ([]*ACLRule
 		        created_at, updated_at
 		   FROM acl_rules
 		  WHERE tenant_id = $1 AND node_id = $2
-		  ORDER BY priority DESC, created_at DESC`,
+		  ORDER BY priority ASC, created_at ASC`,
 		tenantID, nodeID,
 	)
 	if err != nil {

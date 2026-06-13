@@ -268,7 +268,7 @@ func expectACLListSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 			        created_at, updated_at
 			   FROM acl_rules
 			  WHERE tenant_id = $1 AND node_id = $2
-		  ORDER BY priority DESC, created_at DESC`)).
+		  ORDER BY priority ASC, created_at ASC`)).
 		WithArgs(tenantID, nodeID).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
@@ -285,7 +285,7 @@ func expectACLRuntimeConflictCheckEmpty(mock sqlmock.Sqlmock, tenantID, nodeID u
 			        created_at, updated_at
 			   FROM acl_rules
 			  WHERE tenant_id = $1 AND node_id = $2
-		  ORDER BY priority DESC, created_at DESC`)).
+		  ORDER BY priority ASC, created_at ASC`)).
 		WithArgs(tenantID, nodeID).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
