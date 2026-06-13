@@ -91,6 +91,47 @@ func TestSyncNodeReturnsInternalServerErrorWhenACLQueryFails(t *testing.T) {
 	}
 }
 
+func TestSyncNodeReturnsInternalServerErrorWhenRegisteredNodeMissingFromPeerSet(t *testing.T) {
+	tenantID := uuid.New()
+	otherNodeID := uuid.New()
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT tenant_id FROM tokens WHERE token = $1`)).
+		WithArgs("enroll-token").
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id"}).AddRow(tenantID))
+	expectSyncNodePeerQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows(syncNodeColumns()).AddRow(
+		otherNodeID, "other-node-public-key", "machine-2", tenantID, "1.1.1.2:51820", "10.0.0.2", "1.1.1.2", "sh", "vpc-1", "node-b", "100.64.0.3", 3,
+		now.Unix(), now.Add(-time.Hour).Unix(), "spoke", "kernel", "6.0", true, "online", int64(0), "{}", "", now, now,
+	))
+
+	controller := &Controller{
+		store:  controllerstorage.NewStorageWithDB(db),
+		logger: logging.GetLogger(),
+	}
+	rr := httptest.NewRecorder()
+	controller.syncNode(&RegisterRequest{
+		Token:     "enroll-token",
+		PublicKey: "node-public-key",
+		Region:    "sh",
+	}, "100.64.0.2", rr)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "Registered node not found in active peer set") {
+		t.Fatalf("expected missing registered node response, got body=%s", rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestProcessSyncReturnsErrorWhenACLQueryFails(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
