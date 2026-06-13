@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+
+	"aria/internal/auth"
 
 	"github.com/spf13/cobra"
 )
@@ -15,6 +18,7 @@ import (
 var (
 	controllerURL string
 	authToken     string
+	tenantID      string
 	version       = "0.2.26-test-7" // 默认开发版本，通过 ldflags 注入
 )
 
@@ -78,6 +82,7 @@ Examples:
 func init() {
 	rootCmd.PersistentFlags().StringVar(&controllerURL, "controller", "http://localhost:8080", "Controller URL")
 	rootCmd.PersistentFlags().StringVar(&authToken, "token", os.Getenv("ARIACTL_TOKEN"), "Controller JWT token; defaults to ARIACTL_TOKEN")
+	rootCmd.PersistentFlags().StringVar(&tenantID, "tenant-id", os.Getenv("ARIACTL_TENANT_ID"), "Tenant ID for tenant-scoped APIs; defaults to ARIACTL_TENANT_ID or token tid claim")
 
 	rootCmd.AddCommand(networkCmd)
 	networkCmd.AddCommand(networkListCmd)
@@ -99,8 +104,12 @@ type NodeInfo struct {
 }
 
 func runNetworkList(cmd *cobra.Command, args []string) error {
-	// Get all nodes
-	resp, err := http.Get(controllerURL + "/nodes")
+	listURL, err := tenantScopedURL("/nodes")
+	if err != nil {
+		return err
+	}
+
+	resp, err := getJSON(listURL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to controller: %w", err)
 	}
@@ -111,8 +120,8 @@ func runNetworkList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("controller returned error: %s", string(body))
 	}
 
-	var nodes []NodeInfo
-	if err := json.NewDecoder(resp.Body).Decode(&nodes); err != nil {
+	nodes, err := decodeNodeListResponse(resp.Body)
+	if err != nil {
 		return fmt.Errorf("failed to decode response: %w", err)
 	}
 
@@ -162,6 +171,9 @@ func runNetworkAdd(cmd *cobra.Command, args []string) error {
 		"cidr":     cidr,
 		"action":   "add",
 	}
+	if resolvedTenantID := resolveTenantID(); resolvedTenantID != "" {
+		reqBody["tenant_id"] = resolvedTenantID
+	}
 
 	body, _ := json.Marshal(reqBody)
 	resp, err := postJSON(controllerURL+"/api/v2/agents/network", body)
@@ -192,6 +204,9 @@ func runNetworkRemove(cmd *cobra.Command, args []string) error {
 		"cidr":     cidr,
 		"action":   "remove",
 	}
+	if resolvedTenantID := resolveTenantID(); resolvedTenantID != "" {
+		reqBody["tenant_id"] = resolvedTenantID
+	}
 
 	body, _ := json.Marshal(reqBody)
 	resp, err := postJSON(controllerURL+"/api/v2/agents/network", body)
@@ -213,13 +228,81 @@ func runNetworkRemove(cmd *cobra.Command, args []string) error {
 }
 
 func postJSON(url string, body []byte) (*http.Response, error) {
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	req, err := newAuthenticatedRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	return http.DefaultClient.Do(req)
+}
+
+func getJSON(url string) (*http.Response, error) {
+	req, err := newAuthenticatedRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return http.DefaultClient.Do(req)
+}
+
+func newAuthenticatedRequest(method, url string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(authToken) != "" {
 		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(authToken))
 	}
-	return http.DefaultClient.Do(req)
+	return req, nil
+}
+
+func tenantScopedURL(path string) (string, error) {
+	resolvedTenantID := resolveTenantID()
+	if resolvedTenantID == "" {
+		return "", fmt.Errorf("tenant ID is required for network list; set --tenant-id, ARIACTL_TENANT_ID, or use a tenant-scoped JWT")
+	}
+	return strings.TrimRight(controllerURL, "/") + "/api/v2/tenants/" + url.PathEscape(resolvedTenantID) + path, nil
+}
+
+func resolveTenantID() string {
+	if strings.TrimSpace(tenantID) != "" {
+		return strings.TrimSpace(tenantID)
+	}
+	if envTenantID := strings.TrimSpace(os.Getenv("ARIACTL_TENANT_ID")); envTenantID != "" {
+		return envTenantID
+	}
+	token := strings.TrimSpace(authToken)
+	if token == "" {
+		return ""
+	}
+	claims, err := auth.ExtractUserInfo(token)
+	if err != nil || claims == nil {
+		return ""
+	}
+	return strings.TrimSpace(claims.TenantID)
+}
+
+func decodeNodeListResponse(body io.Reader) ([]NodeInfo, error) {
+	var raw json.RawMessage
+	if err := json.NewDecoder(body).Decode(&raw); err != nil {
+		return nil, err
+	}
+
+	var nodes []NodeInfo
+	if err := json.Unmarshal(raw, &nodes); err == nil {
+		return nodes, nil
+	}
+
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, err
+	}
+	if len(envelope.Data) == 0 {
+		return nil, fmt.Errorf("response data is missing")
+	}
+	if err := json.Unmarshal(envelope.Data, &nodes); err != nil {
+		return nil, err
+	}
+	return nodes, nil
 }
