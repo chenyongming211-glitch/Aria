@@ -1973,7 +1973,16 @@ func aclRuleRecordsForSync(rules []*controllerstorage.ACLRuleRecord) []ACLRuleJS
 		if rule == nil || !rule.Enabled {
 			continue
 		}
-		result = append(result, aclRuleRecordForSync(rule))
+		syncRule := aclRuleRecordForSync(rule)
+		if syncRule.Protocol == 0 && aclSyncRuleHasPortFilter(syncRule) {
+			tcpRule := syncRule
+			tcpRule.Protocol = 6
+			udpRule := syncRule
+			udpRule.Protocol = 17
+			result = append(result, tcpRule, udpRule)
+			continue
+		}
+		result = append(result, syncRule)
 	}
 	return result
 }
@@ -2005,6 +2014,14 @@ func aclPortsForSync(rule *controllerstorage.ACLRuleRecord) (uint16, uint16) {
 		return 0, 0
 	}
 	return parsePortRange(rule.Ports)
+}
+
+func aclSyncRuleHasPortFilter(rule ACLRuleJSON) bool {
+	ports := strings.TrimSpace(rule.Ports)
+	if ports != "" && !strings.EqualFold(ports, "all") {
+		return true
+	}
+	return rule.MinPort > 0 || rule.MaxPort > 0
 }
 
 func nodeEligibleForSync(node *controllerstorage.Node) bool {
