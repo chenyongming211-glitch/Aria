@@ -469,6 +469,15 @@ describe('page-level RBAC button visibility', () => {
     expect(allowed.find('[data-index="/platform/tenants"]').exists()).toBe(true)
   })
 
+  it('does not show an empty platform menu for users:read-only users', () => {
+    mockUserStore.user = { role: 'admin' }
+    permissionSet.add('users:read')
+
+    const wrapper = mountWithStubs(Layout)
+
+    expect(wrapper.find('[data-index="platform"]').exists()).toBe(false)
+  })
+
   it('shows/hides Routing write actions based on routes:write', async () => {
     permissionSet.add('routes:write')
     const allowed = mountWithStubs(Routing)

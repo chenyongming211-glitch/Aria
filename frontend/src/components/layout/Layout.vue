@@ -71,7 +71,7 @@
           <el-icon><ChatLineRound /></el-icon>
           <template #title>{{ t('nav.aiCopilot') }}</template>
         </el-menu-item>
-        <el-sub-menu v-if="isSuperAdmin || canAnyAccess(['tokens:read', 'users:read', 'roles:read'])" index="platform">
+        <el-sub-menu v-if="isSuperAdmin || canAnyAccess(['tokens:read', 'roles:read'])" index="platform">
           <template #title>
             <el-icon><Setting /></el-icon>
             <span>{{ t('nav.platform') }}</span>
@@ -80,7 +80,7 @@
             <el-icon><Key /></el-icon>
             <template #title>{{ t('nav.tokenManagement') }}</template>
           </el-menu-item>
-          <el-menu-item v-if="canAccess('users:read')" index="/platform/tenants">
+          <el-menu-item v-if="isSuperAdmin" index="/platform/tenants">
             <el-icon><User /></el-icon>
             <template #title>{{ t('nav.tenantManagement') }}</template>
           </el-menu-item>

@@ -71,7 +71,7 @@ const routes = [
         path: 'platform/tenants',
         name: 'TenantManagement',
         component: () => import('@/views/TenantManagement.vue'),
-        meta: { title: 'Tenant Management', requiresAuth: true, section: 'platform', permission: 'users:read' }
+        meta: { title: 'Tenant Management', requiresAuth: true, section: 'platform', role: 'super_admin' }
       },
       {
         path: 'platform/roles',
