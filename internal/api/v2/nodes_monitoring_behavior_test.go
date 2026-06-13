@@ -944,6 +944,54 @@ func TestMonitoringAPI_NodeDetailNotFoundReturnsNodeNotFound(t *testing.T) {
 	}
 }
 
+func TestMonitoringAPI_NodeDetailPolicyStatsFailureReturnsInternalError(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT tenant_id, node_id, COALESCE(desired_state_version, ''), desired_state_metadata, desired_state_updated_at,
+		       COALESCE(applied_state_version, ''), applied_state_updated_at, COALESCE(observed_state, ''),
+		       COALESCE(observed_message, ''), observed_at, last_sync_at, COALESCE(last_sync_error, ''),
+		       created_at, updated_at
+		FROM node_control_states
+		WHERE tenant_id = $1 AND node_id = $2
+	`)).
+		WithArgs(tenantID, nodeID).
+		WillReturnError(sql.ErrNoRows)
+	statsErr := errors.New("policy stats unavailable")
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT tenant_id, node_id, stats, updated_at
+		FROM node_policy_stats
+		WHERE tenant_id = $1 AND node_id = $2`)).
+		WithArgs(tenantID, nodeID).
+		WillReturnError(statsErr)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/nodes/"+nodeID.String(), nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if resp.Code != apibase.CodeInternalServerError {
+		t.Fatalf("expected code %s, got %s", apibase.CodeInternalServerError, resp.Code)
+	}
+	if !strings.Contains(resp.Message, "Failed to get policy stats") {
+		t.Fatalf("expected policy stats error, got %q", resp.Message)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestMonitoringAPI_NodeDetailCrossTenantReturnsNodeNotFound(t *testing.T) {
 	tenantID := uuid.New()
 	otherTenantID := uuid.New()
