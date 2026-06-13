@@ -123,6 +123,47 @@ func TestSyncNodeReturnsNodeScopedACLWithoutRegionFiltering(t *testing.T) {
 	}
 }
 
+func TestACLRuleRecordsForSyncExpandsAnyProtocolPortRules(t *testing.T) {
+	ruleID := uuid.New()
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+
+	rules := aclRuleRecordsForSync([]*controllerstorage.ACLRuleRecord{
+		{
+			ID:        ruleID,
+			TenantID:  tenantID,
+			NodeID:    nodeID,
+			Action:    "deny",
+			SrcCIDR:   "198.51.100.10/32",
+			DstCIDR:   "203.0.113.10/32",
+			Protocol:  0,
+			Direction: "egress",
+			Ports:     "443",
+			Priority:  100,
+			Enabled:   true,
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+	})
+
+	if len(rules) != 2 {
+		t.Fatalf("expected Any+ports ACL to expand to TCP and UDP, got %#v", rules)
+	}
+	for i, protocol := range []uint8{6, 17} {
+		rule := rules[i]
+		if rule.ID != ruleID.String() ||
+			rule.SrcNet != "198.51.100.10/32" ||
+			rule.DstNet != "203.0.113.10/32" ||
+			rule.Protocol != protocol ||
+			rule.Direction != "egress" ||
+			rule.Ports != "443" ||
+			rule.Action != "deny" {
+			t.Fatalf("unexpected expanded ACL rule %d: %#v", i, rule)
+		}
+	}
+}
+
 func expectSyncNodePeerQuery(mock sqlmock.Sqlmock, tenantID uuid.UUID) *sqlmock.ExpectedQuery {
 	return mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND COALESCE(status, 'online') NOT IN ('deleted', 'suspended', 'banned')`)).
 		WithArgs(tenantID)
