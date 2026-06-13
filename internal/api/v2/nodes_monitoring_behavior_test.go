@@ -714,6 +714,9 @@ func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
 	`)).
 		WithArgs(tenantID, nodeID).
 		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(`SELECT tenant_id, node_id, stats, updated_at\s+FROM node_policy_stats\s+WHERE tenant_id = \$1 AND node_id = \$2`).
+		WithArgs(tenantID, nodeID).
+		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
 		       not_before, not_after, status, issued_at, revoked_at,
