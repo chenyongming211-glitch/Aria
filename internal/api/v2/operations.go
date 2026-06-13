@@ -98,6 +98,10 @@ func (r *Router) handleTenantNodeAgentCommand(w http.ResponseWriter, req *http.R
 	if body.Timeout == 0 {
 		body.Timeout = 30
 	}
+	if message := inactiveCommandTargetMessage(node); message != "" {
+		apibase.WriteError(w, http.StatusConflict, apibase.CodeConflict, message, nil)
+		return
+	}
 
 	cmd, err := r.store.QueueAgentCommand(node.PublicKey, body.Command, body.Params, body.Priority, body.Timeout)
 	if err != nil {
@@ -208,6 +212,17 @@ func (r *Router) handleTenantBatchAgentCommand(w http.ResponseWriter, req *http.
 	successCount := 0
 	failedCount := 0
 	for _, node := range nodes {
+		if message := inactiveCommandTargetMessage(node); message != "" {
+			failedCount++
+			results = append(results, map[string]interface{}{
+				"node_id":         node.ID.String(),
+				"node_public_key": node.PublicKey,
+				"status":          controllerstorage.AgentCommandStatusFailed,
+				"message":         message,
+			})
+			continue
+		}
+
 		cmd, err := r.store.QueueAgentCommand(node.PublicKey, body.Command.Command, body.Command.Params, body.Command.Priority, body.Command.Timeout)
 		if err != nil {
 			failedCount++
@@ -238,6 +253,19 @@ func (r *Router) handleTenantBatchAgentCommand(w http.ResponseWriter, req *http.
 		"failed_count":  failedCount,
 		"results":       results,
 	}, "Batch command processed")
+}
+
+func inactiveCommandTargetMessage(node *controllerstorage.Node) string {
+	if node == nil {
+		return "Node is not available for commands"
+	}
+	status := strings.ToLower(strings.TrimSpace(node.Status))
+	switch status {
+	case "deleted", "suspended", "banned":
+		return "Node status " + status + " does not allow commands"
+	default:
+		return ""
+	}
 }
 
 func (r *Router) handleTenantMonitoring(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
