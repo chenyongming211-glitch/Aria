@@ -1006,6 +1006,19 @@ func policySyncDispatch(result *controllerstorage.PolicySyncResult) map[string]i
 	return dispatch
 }
 
+func inactivePolicyMutationMessage(node *controllerstorage.Node) string {
+	if node == nil {
+		return "Node is not available for policy changes"
+	}
+	status := strings.ToLower(strings.TrimSpace(node.Status))
+	switch status {
+	case "deleted", "suspended", "banned":
+		return "Node status " + status + " does not allow policy changes"
+	default:
+		return ""
+	}
+}
+
 func (r *Router) writePolicyMutationSuccess(
 	w http.ResponseWriter,
 	node *controllerstorage.Node,
@@ -1015,6 +1028,11 @@ func (r *Router) writePolicyMutationSuccess(
 	message string,
 	metadata map[string]interface{},
 ) {
+	if message := inactivePolicyMutationMessage(node); message != "" {
+		apibase.WriteError(w, http.StatusConflict, apibase.CodeConflict, message, nil)
+		return
+	}
+
 	policyRef, policyName := inferPolicyDeliveryIdentity(domain, data, metadata)
 	dispatch, delivery, err := r.queueNodePolicySync(node, domain, action, policyRef, policyName, metadata)
 
@@ -1053,6 +1071,11 @@ func (r *Router) writeTransactionalPolicyMutationSuccess(
 	metadata map[string]interface{},
 	mutate func(*controllerstorage.PolicyMutationTx) (map[string]interface{}, error),
 ) {
+	if message := inactivePolicyMutationMessage(node); message != "" {
+		apibase.WriteError(w, http.StatusConflict, apibase.CodeConflict, message, nil)
+		return
+	}
+
 	var data map[string]interface{}
 	var policyRef string
 	var policyName string
