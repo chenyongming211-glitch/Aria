@@ -422,7 +422,11 @@ func TestCreateTenantCreatesSystemRoles(t *testing.T) {
 	for _, role := range []string{"admin", "operator", "viewer"} {
 		mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO roles (tenant_id, name, description, is_system, permissions)
 				VALUES ($1, $2, $3, true, $4)
-				ON CONFLICT (tenant_id, name) DO NOTHING`)).
+				ON CONFLICT (tenant_id, name) DO UPDATE SET
+				description = EXCLUDED.description,
+				is_system = true,
+				permissions = EXCLUDED.permissions,
+				updated_at = NOW()`)).
 			WithArgs(sqlmock.AnyArg(), role, sqlmock.AnyArg(), sqlmock.AnyArg()).
 			WillReturnResult(sqlmock.NewResult(0, 1))
 	}
@@ -500,7 +504,11 @@ func TestCreateTenantRollsBackWhenSystemRoleCreationFails(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO roles (tenant_id, name, description, is_system, permissions)
 			VALUES ($1, $2, $3, true, $4)
-			ON CONFLICT (tenant_id, name) DO NOTHING`)).
+			ON CONFLICT (tenant_id, name) DO UPDATE SET
+				description = EXCLUDED.description,
+				is_system = true,
+				permissions = EXCLUDED.permissions,
+				updated_at = NOW()`)).
 		WithArgs(sqlmock.AnyArg(), "admin", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnError(errors.New("role insert failed"))
 	mock.ExpectRollback()
