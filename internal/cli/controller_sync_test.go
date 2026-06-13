@@ -48,6 +48,48 @@ func TestSyncNodeReturnsInternalServerErrorWhenPeerQueryFails(t *testing.T) {
 	}
 }
 
+func TestSyncNodeReturnsInternalServerErrorWhenACLQueryFails(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT tenant_id FROM tokens WHERE token = $1`)).
+		WithArgs("enroll-token").
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id"}).AddRow(tenantID))
+	expectSyncNodePeerQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows(syncNodeColumns()).AddRow(
+		nodeID, "node-public-key", "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-a", "100.64.0.2", 2,
+		now.Unix(), now.Add(-time.Hour).Unix(), "spoke", "kernel", "6.0", true, "online", int64(0), "{}", "", now, now,
+	))
+	expectEnabledACLRulesQuery(mock, tenantID, nodeID).WillReturnError(errors.New("acl query unavailable"))
+
+	controller := &Controller{
+		store:  controllerstorage.NewStorageWithDB(db),
+		logger: logging.GetLogger(),
+	}
+	rr := httptest.NewRecorder()
+	controller.syncNode(&RegisterRequest{
+		Token:     "enroll-token",
+		PublicKey: "node-public-key",
+		Region:    "sh",
+	}, "100.64.0.2", rr)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "Failed to load ACL rules") {
+		t.Fatalf("expected ACL error response, got body=%s", rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestSyncNodeReturnsNodeScopedACLWithoutRegionFiltering(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()
@@ -67,16 +109,7 @@ func TestSyncNodeReturnsNodeScopedACLWithoutRegionFiltering(t *testing.T) {
 		nodeID, "node-public-key", "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-a", "100.64.0.2", 2,
 		now.Unix(), now.Add(-time.Hour).Unix(), "spoke", "kernel", "6.0", true, "online", int64(0), "{}", "", now, now,
 	))
-	mock.ExpectQuery(regexp.QuoteMeta(`
-			SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
-			        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
-			        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
-			        priority, enabled, COALESCE(description, ''),
-			        created_at, updated_at
-			   FROM acl_rules
-			  WHERE tenant_id = $1 AND node_id = $2 AND enabled = true
-			  ORDER BY priority ASC, created_at ASC
-		`)).
+	expectEnabledACLRulesQuery(mock, tenantID, nodeID).
 		WithArgs(tenantID, nodeID).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "name", "action", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
@@ -167,6 +200,19 @@ func TestACLRuleRecordsForSyncExpandsAnyProtocolPortRules(t *testing.T) {
 func expectSyncNodePeerQuery(mock sqlmock.Sqlmock, tenantID uuid.UUID) *sqlmock.ExpectedQuery {
 	return mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND COALESCE(status, 'online') NOT IN ('deleted', 'suspended', 'banned')`)).
 		WithArgs(tenantID)
+}
+
+func expectEnabledACLRulesQuery(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) *sqlmock.ExpectedQuery {
+	return mock.ExpectQuery(regexp.QuoteMeta(`
+			SELECT id, tenant_id, node_id, COALESCE(name, ''), action, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+			        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
+			        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+			        priority, enabled, COALESCE(description, ''),
+			        created_at, updated_at
+			   FROM acl_rules
+			  WHERE tenant_id = $1 AND node_id = $2 AND enabled = true
+			  ORDER BY priority ASC, created_at ASC
+		`))
 }
 
 func syncNodeColumns() []string {
