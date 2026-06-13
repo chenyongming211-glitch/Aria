@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -282,6 +283,82 @@ func TestDeleteTenantNodeBlacklistReturnsNotFoundWhenRuleMissing(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestPolicyMutationsRejectInactiveNodes(t *testing.T) {
+	tests := []struct {
+		name   string
+		status string
+		run    func(*Router, http.ResponseWriter, *controllerstorage.Node, uuid.UUID)
+	}{
+		{
+			name:   "acl create suspended",
+			status: "suspended",
+			run: func(router *Router, rr http.ResponseWriter, node *controllerstorage.Node, tenantID uuid.UUID) {
+				req := httptest.NewRequest(http.MethodPost, "/",
+					strings.NewReader(`{"name":"deny-icmp","action":"deny","src_cidr":"any","dst_cidr":"any","protocol":1,"direction":"ingress","enabled":true}`))
+				router.createTenantNodeACL(rr, req, tenantID, node)
+			},
+		},
+		{
+			name:   "qos create banned",
+			status: "banned",
+			run: func(router *Router, rr http.ResponseWriter, node *controllerstorage.Node, tenantID uuid.UUID) {
+				req := httptest.NewRequest(http.MethodPost, "/",
+					strings.NewReader(`{"dst_cidr":"100.64.0.2/32","bandwidth_mbps":10,"direction":"egress","mode":"policing","enabled":true}`))
+				router.createTenantNodeQoS(rr, req, tenantID, node)
+			},
+		},
+		{
+			name:   "blacklist create suspended",
+			status: "suspended",
+			run: func(router *Router, rr http.ResponseWriter, node *controllerstorage.Node, tenantID uuid.UUID) {
+				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"cidr":"203.0.113.250/32"}`))
+				router.createTenantNodeBlacklistRule(rr, req, tenantID, node, controllerstorage.BlacklistScopeSrc)
+			},
+		},
+		{
+			name:   "route create suspended",
+			status: "suspended",
+			run: func(router *Router, rr http.ResponseWriter, node *controllerstorage.Node, tenantID uuid.UUID) {
+				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"cidr":"10.255.0.0/24"}`))
+				router.addTenantNodeRoute(rr, req, tenantID, node)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New failed: %v", err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+
+			tenantID := uuid.New()
+			node := &controllerstorage.Node{
+				ID:        uuid.New(),
+				TenantID:  tenantID,
+				PublicKey: "inactive-node-key",
+				Hostname:  "inactive-node",
+				Status:    tc.status,
+			}
+			router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+			rr := httptest.NewRecorder()
+
+			tc.run(router, rr, node, tenantID)
+
+			if rr.Code != http.StatusConflict {
+				t.Fatalf("expected 409, got %d body=%s", rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), tc.status) {
+				t.Fatalf("expected response to mention status %q, body=%s", tc.status, rr.Body.String())
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("unmet sql expectations: %v", err)
+			}
+		})
 	}
 }
 
