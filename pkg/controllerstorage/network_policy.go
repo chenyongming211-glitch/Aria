@@ -21,6 +21,8 @@ type QoSRuleRecord struct {
 	NodeID            uuid.UUID                `json:"node_id"`
 	SrcCIDR           string                   `json:"src_cidr"`
 	DstCIDR           string                   `json:"dst_cidr"`
+	GroupID           uuid.NullUUID            `json:"group_id,omitempty"`
+	Group             *IPGroupRecord           `json:"group,omitempty"`
 	SrcPort           int                      `json:"src_port"`
 	DstPort           int                      `json:"dst_port"`
 	Protocol          int                      `json:"protocol"`
@@ -50,6 +52,10 @@ type ACLRuleRecord struct {
 	Action            string                   `json:"action"` // "allow", "deny"
 	SrcCIDR           string                   `json:"src_cidr"`
 	DstCIDR           string                   `json:"dst_cidr"`
+	SrcGroupID        uuid.NullUUID            `json:"src_group_id,omitempty"`
+	DstGroupID        uuid.NullUUID            `json:"dst_group_id,omitempty"`
+	SrcGroup          *IPGroupRecord           `json:"src_group,omitempty"`
+	DstGroup          *IPGroupRecord           `json:"dst_group,omitempty"`
 	DstPort           int                      `json:"dst_port"`
 	Protocol          int                      `json:"protocol"`
 	Direction         string                   `json:"direction"`

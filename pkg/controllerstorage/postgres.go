@@ -267,6 +267,31 @@ func (s *Storage) Migrate() error {
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
 		`ALTER TABLE users ALTER COLUMN tenant_id DROP NOT NULL`,
 
+		`CREATE TABLE IF NOT EXISTS ip_groups (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+			name VARCHAR(128) NOT NULL,
+			description TEXT DEFAULT '',
+			kind VARCHAR(16) NOT NULL DEFAULT 'custom',
+			created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			updated_at TIMESTAMPTZ DEFAULT NOW(),
+			CHECK (kind IN ('custom', 'inline', 'system')),
+			UNIQUE (tenant_id, name)
+		)`,
+		`CREATE TABLE IF NOT EXISTS ip_group_members (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+			group_id UUID NOT NULL REFERENCES ip_groups(id) ON DELETE CASCADE,
+			cidr CIDR NOT NULL,
+			note TEXT DEFAULT '',
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			UNIQUE (group_id, cidr)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_ip_groups_tenant_kind ON ip_groups(tenant_id, kind)`,
+		`CREATE INDEX IF NOT EXISTS idx_ip_group_members_tenant_group ON ip_group_members(tenant_id, group_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_ip_group_members_cidr ON ip_group_members USING gist(cidr inet_ops)`,
+
 		`CREATE TABLE IF NOT EXISTS acl_rules (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			name VARCHAR(100),
@@ -345,11 +370,15 @@ func (s *Storage) Migrate() error {
 		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS action VARCHAR(10) DEFAULT 'allow'`,
 		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS direction VARCHAR(16) DEFAULT 'ingress'`,
 		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS ports TEXT`,
+		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS src_group_id UUID REFERENCES ip_groups(id)`,
+		`ALTER TABLE acl_rules ADD COLUMN IF NOT EXISTS dst_group_id UUID REFERENCES ip_groups(id)`,
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_enabled ON acl_rules(enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_priority ON acl_rules(priority)`,
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_src_node ON acl_rules(src_node)`,
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_dst_node ON acl_rules(dst_node)`,
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_node_id ON acl_rules(node_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_acl_rules_src_group ON acl_rules(tenant_id, src_group_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_acl_rules_dst_group ON acl_rules(tenant_id, dst_group_id)`,
 
 		// Add indexes for tenant isolation
 		`CREATE INDEX IF NOT EXISTS idx_tokens_tenant_id ON tokens(tenant_id)`,
@@ -362,8 +391,11 @@ func (s *Storage) Migrate() error {
 		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS direction VARCHAR(16) DEFAULT 'egress'`,
 		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS rate_bps BIGINT`,
 		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS burst_bytes BIGINT`,
-		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 0`,
+		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 100`,
+		`ALTER TABLE qos_rules ALTER COLUMN priority SET DEFAULT 100`,
 		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS mode VARCHAR(16) DEFAULT 'policing'`,
+		`ALTER TABLE qos_rules ADD COLUMN IF NOT EXISTS group_id UUID REFERENCES ip_groups(id)`,
+		`CREATE INDEX IF NOT EXISTS idx_qos_rules_group ON qos_rules(tenant_id, group_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_blacklist_rules_tenant_node_scope ON blacklist_rules(tenant_id, node_id, scope)`,
 		`CREATE INDEX IF NOT EXISTS idx_blacklist_rules_enabled ON blacklist_rules(enabled)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_unique ON users(username)`,
