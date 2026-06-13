@@ -8,6 +8,7 @@ const routePermissionCases = [
   ['Routing', 'routes:read'],
   ['Policies', 'policies:read'],
   ['ACLRules', 'acls:read'],
+  ['IPGroups', 'ip-groups:read'],
   ['BandwidthControl', 'qos:read'],
   ['Tokens', 'tokens:read'],
   ['Roles', 'roles:read'],

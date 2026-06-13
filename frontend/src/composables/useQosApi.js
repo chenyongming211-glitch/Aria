@@ -57,7 +57,7 @@ function qosGroupForRule(rule) {
   const direction = normalizeDirection(rule)
   const src = rule.src_cidr || rule.src_net || ''
   const dst = rule.dst_cidr || rule.dst_net || ''
-  const explicit = rule.group_cidr || rule.group || rule.runtime_group || ''
+  const explicit = rule.group_name || rule.group_id || rule.group_cidr || rule.group || rule.runtime_group || ''
   if (explicit) return explicit
   if (direction === 'ingress') return src || dst || 'any'
   return dst || src || 'any'
@@ -67,10 +67,11 @@ function normalizeRulePayload(rule) {
   const bandwidthMbps = normalizeBandwidthMbps(rule)
   const rateBps = normalizeRateBps(rule, bandwidthMbps)
   const direction = normalizeDirection(rule)
+  const groupID = rule.group_id || rule.groupId || ''
   const group = rule.group_cidr || rule.group || ''
-  const srcCIDR = rule.src_cidr || rule.src_net || (direction === 'ingress' ? group : '') || ''
-  const dstCIDR = rule.dst_cidr || rule.dst_net || (direction !== 'ingress' ? group : '') || ''
-  return {
+  const srcCIDR = groupID ? '' : (rule.src_cidr || rule.src_net || (direction === 'ingress' ? group : '') || '')
+  const dstCIDR = groupID ? '' : (rule.dst_cidr || rule.dst_net || (direction !== 'ingress' ? group : '') || '')
+  const payload = {
     src_cidr: srcCIDR,
     dst_cidr: dstCIDR,
     src_port: Number(rule.src_port || 0),
@@ -80,11 +81,15 @@ function normalizeRulePayload(rule) {
     direction,
     rate_bps: rateBps,
     burst_bytes: normalizeBurstBytes(rule, rateBps),
-    priority: Number(rule.priority || 0),
+    priority: Number(rule.priority ?? 100),
     mode: normalizePayloadMode(rule),
     description: rule.description || '',
     enabled: rule.enabled !== false
   }
+  if (groupID) {
+    payload.group_id = groupID
+  }
+  return payload
 }
 
 function normalizeListResponse(response) {
@@ -134,9 +139,11 @@ export const useQosApi = {
           node_id: nodeId,
           direction: normalizeDirection(rule),
           mode: normalizeMode(rule),
+          group_id: rule.group_id || '',
+          group_name: rule.group_name || rule.group?.name || '',
           rate_bps: rateBps,
           burst_bytes: burstBytes,
-          priority: Number(rule.priority || 0),
+          priority: Number(rule.priority ?? 100),
           stats: normalizeStats(rule),
           // 兼容旧 UI 字段名
           bandwidth_mbps: bandwidthMbps,

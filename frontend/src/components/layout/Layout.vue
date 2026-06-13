@@ -45,7 +45,7 @@
             <template #title>{{ t('nav.vpnTopology') }}</template>
           </el-menu-item>
         </el-sub-menu>
-        <el-sub-menu v-if="canAnyAccess(['policies:read', 'acls:read', 'qos:read'])" index="policy-center">
+        <el-sub-menu v-if="canAnyAccess(['policies:read', 'ip-groups:read', 'acls:read', 'qos:read'])" index="policy-center">
           <template #title>
             <el-icon><Tickets /></el-icon>
             <span>{{ t('nav.policyCenter') }}</span>
@@ -57,6 +57,10 @@
           <el-menu-item v-if="canAccess('acls:read')" index="/policy-center/acl-rules">
             <el-icon><Lock /></el-icon>
             <template #title>{{ t('nav.aclManagement') }}</template>
+          </el-menu-item>
+          <el-menu-item v-if="canAccess('ip-groups:read')" index="/policy-center/ip-groups">
+            <el-icon><Collection /></el-icon>
+            <template #title>{{ t('nav.ipGroupManagement') }}</template>
           </el-menu-item>
           <el-menu-item v-if="canAccess('qos:read')" index="/policy-center/bandwidth-control">
             <el-icon><Coin /></el-icon>
@@ -212,6 +216,7 @@ import {
   Connection,
   Coin,
   Lock,
+  Collection,
   ChatLineRound,
   CaretBottom,
   SwitchButton
@@ -255,6 +260,7 @@ const getPageTitle = computed(() => {
     VpnTopology: t('nav.vpnTopology'),
     Policies: t('nav.policyCenter'),
     ACLRules: t('nav.aclManagement'),
+    IPGroups: t('nav.ipGroupManagement'),
     BandwidthControl: t('nav.bandwidthControl'),
     Tokens: t('nav.tokenManagement'),
     TenantManagement: t('nav.tenantManagement'),

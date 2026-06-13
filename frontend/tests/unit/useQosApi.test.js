@@ -59,11 +59,33 @@ describe('useQosApi', () => {
       direction: 'egress',
       rate_bps: 200000000,
       burst_bytes: 2500000,
-      priority: 0,
+      priority: 100,
       mode: 'policing',
       description: 'https limit',
       enabled: true
     })
+  })
+
+  it('应该优先发送 IP Group ID 并清空直接 CIDR', async () => {
+    api.post.mockResolvedValue({
+      data: { success: true, data: { id: 'rule-1' } }
+    })
+
+    await useQosApi.createQoSRule('node-1', {
+      group_id: 'group-1',
+      group_cidr: '10.0.0.0/24',
+      direction: 'egress',
+      bandwidth_mbps: 10,
+      priority: 20,
+      description: 'group limit'
+    })
+
+    expect(api.post).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/qos', expect.objectContaining({
+      group_id: 'group-1',
+      src_cidr: '',
+      dst_cidr: '',
+      priority: 20
+    }))
   })
 
   it('应该拒绝 0 Mbps 的 QoS 规则', async () => {

@@ -16,6 +16,8 @@ function normalizeRuleRecord(rule, nodeId) {
   const ports = rule.ports || (dstPort > 0 ? String(dstPort) : '')
   const srcCIDR = rule.src_cidr || rule.src_net || ''
   const dstCIDR = rule.dst_cidr || rule.dst_net || ''
+  const srcGroupID = rule.src_group_id || rule.srcGroupId || ''
+  const dstGroupID = rule.dst_group_id || rule.dstGroupId || ''
   const action = normalizeAction(rule.action)
   const direction = normalizeDirection(rule.direction)
   return {
@@ -27,11 +29,15 @@ function normalizeRuleRecord(rule, nodeId) {
     ports,
     src_cidr: srcCIDR,
     dst_cidr: dstCIDR,
+    src_group_id: srcGroupID,
+    dst_group_id: dstGroupID,
+    src_group_name: rule.src_group_name || rule.src_group?.name || '',
+    dst_group_name: rule.dst_group_name || rule.dst_group?.name || '',
     dst_port: dstPort,
     src_net: srcCIDR,
     dst_net: dstCIDR,
-    runtime_src_group: cidrOrAny(srcCIDR),
-    runtime_dst_group: cidrOrAny(dstCIDR),
+    runtime_src_group: rule.src_group_name || srcGroupID || cidrOrAny(srcCIDR),
+    runtime_dst_group: rule.dst_group_name || dstGroupID || cidrOrAny(dstCIDR),
     runtime_ports: ports || 'all',
     stats: normalizeStats(rule),
     min_port: dstPort > 0 ? dstPort : 0,
@@ -63,12 +69,14 @@ function applyFilters(rules, filters = {}) {
 function normalizeRulePayload(rule) {
   const srcCIDR = rule.src_cidr || rule.src_net || ''
   const dstCIDR = rule.dst_cidr || rule.dst_net || ''
+  const srcGroupID = rule.src_group_id || rule.srcGroupId || ''
+  const dstGroupID = rule.dst_group_id || rule.dstGroupId || ''
   const dstPort = Number(rule.dst_port ?? rule.max_port ?? 0)
   const ports = rule.ports || (dstPort > 0 ? String(dstPort) : '')
   const payload = {
     name: rule.name,
-    src_cidr: srcCIDR,
-    dst_cidr: dstCIDR,
+    src_cidr: srcGroupID ? '' : srcCIDR,
+    dst_cidr: dstGroupID ? '' : dstCIDR,
     protocol: Number(rule.protocol || 0),
     dst_port: dstPort,
     direction: normalizeDirection(rule.direction),
@@ -77,6 +85,13 @@ function normalizeRulePayload(rule) {
     enabled: rule.enabled !== false,
     priority: Number(rule.priority || 100),
     description: rule.description || ''
+  }
+
+  if (srcGroupID) {
+    payload.src_group_id = srcGroupID
+  }
+  if (dstGroupID) {
+    payload.dst_group_id = dstGroupID
   }
 
   if (rule.src_node) {

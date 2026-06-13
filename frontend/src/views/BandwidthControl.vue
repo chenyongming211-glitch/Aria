@@ -51,7 +51,7 @@
         <el-table-column prop="description" label="描述" min-width="160" />
         <el-table-column label="Group" min-width="180">
           <template #default="{ row }">
-            <code>{{ row.runtime_group || row.group_cidr || 'any' }}</code>
+            <code>{{ formatGroupRef(row.group_id, row.runtime_group || row.group_cidr) }}</code>
           </template>
         </el-table-column>
         <el-table-column label="带宽限制" width="150">
@@ -107,8 +107,20 @@
           <el-input v-model="form.description" placeholder="例如: 限制某个网段出站带宽" />
         </el-form-item>
 
-        <el-form-item label="Group" prop="group_cidr">
-          <el-input v-model="form.group_cidr" placeholder="例如: 10.0.0.0/24，或 any" />
+        <el-form-item label="IP Group">
+          <el-select v-model="form.group_id" clearable filterable placeholder="any / 选择 Group" style="width: 100%">
+            <el-option
+              v-for="group in selectableGroups"
+              :key="group.id"
+              :label="formatGroupOption(group)"
+              :value="group.id"
+            />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="CIDR 快捷输入" prop="group_cidr">
+          <el-input v-model="form.group_cidr" :disabled="Boolean(form.group_id)" placeholder="留空为 any；例如 10.0.0.0/24" />
+          <div class="form-help">未选择 Group 时，CIDR 会保存为 inline IP Group。</div>
         </el-form-item>
 
         <el-form-item label="带宽限制" prop="bandwidth_mbps">
@@ -147,6 +159,11 @@
             </el-form-item>
           </el-col>
         </el-row>
+
+        <el-form-item label="优先级" prop="priority">
+          <el-input-number v-model="form.priority" :min="0" :max="255" style="width: 100%" />
+          <div class="form-help">数字越小优先级越高；同优先级冲突由 Controller 拒绝。</div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -161,6 +178,7 @@ import { computed, ref, reactive, onMounted } from 'vue'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useQosApi } from '@/composables/useQosApi'
+import { useIpGroupApi } from '@/composables/useIpGroupApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
@@ -172,6 +190,7 @@ const submitting = ref(false)
 const dialogVisible = ref(false)
 const selectedNodeId = ref('')
 const tenantNodes = ref([])
+const ipGroups = ref([])
 const rules = ref([])
 const formRef = ref(null)
 const selectedNodeName = computed(() => {
@@ -185,20 +204,28 @@ const qosEmptyText = computed(() => {
 
 const form = reactive({
   description: '',
+  group_id: '',
   group_cidr: '',
   bandwidth_mbps: 100,
   direction: 'egress',
   rate_bps: 0,
   burst_bytes: 0,
-  priority: 0,
+  priority: 100,
   mode: 'policing'
 })
 
 const formRules = {
   description: [{ required: true, message: '请输入描述', trigger: 'blur' }],
-  group_cidr: [{ required: true, message: '请输入 Group', trigger: 'blur' }],
   bandwidth_mbps: [{ required: true, message: '请设置带宽限制', trigger: 'blur' }]
 }
+
+const selectableGroups = computed(() => ipGroups.value.filter((group) => group.kind !== 'inline'))
+
+const groupById = computed(() => {
+  const result = new Map()
+  ipGroups.value.forEach((group) => result.set(group.id, group))
+  return result
+})
 
 const loadNodes = async () => {
   try {
@@ -212,6 +239,15 @@ const loadNodes = async () => {
     }
   } catch (error) {
     console.error('加载节点失败:', error)
+  }
+}
+
+const loadIPGroups = async () => {
+  try {
+    ipGroups.value = await useIpGroupApi.listIPGroups()
+  } catch (error) {
+    console.error('加载 IP Group 失败:', error)
+    ipGroups.value = []
   }
 }
 
@@ -233,13 +269,13 @@ const onNodeChange = () => {
 }
 
 const getPolicyTagType = (status) => {
-  const map = { applied: 'success', pending: 'warning', error: 'danger' }
+  const map = { applied: 'success', pending: 'warning', in_progress: 'warning', error: 'danger', idle: 'info' }
   return map[status] || 'info'
 }
 
 const formatPolicyStatus = (status) => {
-  const map = { applied: '已收敛', pending: '同步中', error: '异常' }
-  return map[status] || '待同步'
+  const map = { applied: '已收敛', pending: '同步中', in_progress: '同步中', error: '异常', idle: '空闲' }
+  return map[status] || status || '待同步'
 }
 
 const formatDirection = (direction) => {
@@ -267,6 +303,19 @@ const formatBytes = (bytes) => {
   return `${value} B`
 }
 
+const formatGroupOption = (group) => {
+  const cidrs = Array.isArray(group.members) ? group.members.map((member) => member.cidr).join(', ') : ''
+  return cidrs ? `${group.name} (${cidrs})` : group.name
+}
+
+const formatGroupRef = (groupId, fallback) => {
+  if (groupId) {
+    const group = groupById.value.get(groupId)
+    return group ? group.name : groupId
+  }
+  return fallback || 'any'
+}
+
 const showAddDialog = () => {
   dialogVisible.value = true
 }
@@ -274,12 +323,13 @@ const showAddDialog = () => {
 const resetForm = () => {
   Object.assign(form, {
     description: '',
+    group_id: '',
     group_cidr: '',
     bandwidth_mbps: 100,
     direction: 'egress',
     rate_bps: 0,
     burst_bytes: 0,
-    priority: 0,
+    priority: 100,
     mode: 'policing'
   })
   if (formRef.value) formRef.value.resetFields()
@@ -335,8 +385,9 @@ const handleDelete = async (row) => {
 const reloadTenantScopedData = async () => {
   selectedNodeId.value = ''
   tenantNodes.value = []
+  ipGroups.value = []
   rules.value = []
-  await loadNodes()
+  await Promise.all([loadIPGroups(), loadNodes()])
 }
 
 onMounted(() => {
@@ -352,6 +403,7 @@ useTenantChangeReload(reloadTenantScopedData)
 .header-left { display: flex; align-items: center; }
 .header-actions { display: flex; gap: 10px; }
 .unit-text { margin-left: 10px; color: #606266; }
+.form-help { font-size: 12px; color: #909399; margin-top: 5px; }
 .qos-runtime-cell { display: flex; flex-direction: column; gap: 4px; line-height: 1.25; }
 .qos-runtime-cell small { color: var(--aria-text-muted, #8a93a6); }
 code { background: #f4f4f5; padding: 2px 4px; border-radius: 4px; color: #cf9236; font-family: monospace; }

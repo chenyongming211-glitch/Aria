@@ -127,6 +127,10 @@ const permissionGroups = [
     { value: 'acls:read', label: '查看' },
     { value: 'acls:write', label: '管理' }
   ]},
+  { label: 'IP Group', items: [
+    { value: 'ip-groups:read', label: '查看' },
+    { value: 'ip-groups:write', label: '管理' }
+  ]},
   { label: 'QoS', items: [
     { value: 'qos:read', label: '查看' },
     { value: 'qos:write', label: '管理' }

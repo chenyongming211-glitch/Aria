@@ -58,6 +58,12 @@ const routes = [
         meta: { title: 'ACL Rules Management', requiresAuth: true, section: 'policy-center', permission: 'acls:read' }
       },
       {
+        path: 'policy-center/ip-groups',
+        name: 'IPGroups',
+        component: () => import('@/views/IPGroups.vue'),
+        meta: { title: 'IP Group Management', requiresAuth: true, section: 'policy-center', permission: 'ip-groups:read' }
+      },
+      {
         path: 'platform',
         redirect: '/platform/tokens'
       },
@@ -118,6 +124,10 @@ const routes = [
       {
         path: 'acl-rules',
         redirect: '/policy-center/acl-rules'
+      },
+      {
+        path: 'ip-groups',
+        redirect: '/policy-center/ip-groups'
       },
       {
         path: 'tokens',

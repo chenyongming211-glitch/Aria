@@ -76,6 +76,7 @@ describe('useAclApi', () => {
       expect(rules).toHaveLength(1)
       expect(rules[0]).toMatchObject({ id: 1, name: 'allow-web', action: 'allow', node_id: 'node-1' })
     })
+
   })
 
   describe('createACLRule', () => {
@@ -114,6 +115,32 @@ describe('useAclApi', () => {
         description: ''
       })
       expect(result).toEqual(createdRule)
+    })
+
+    it('应该优先发送源/目标 IP Group ID 并清空对应 CIDR', async () => {
+      api.post.mockResolvedValue({
+        data: { success: true, data: { id: 2 } }
+      })
+
+      await useAclApi.createACLRule({
+        node_id: 'node-1',
+        name: 'group-acl',
+        src_group_id: 'src-group',
+        dst_group_id: 'dst-group',
+        src_cidr: '192.168.1.0/24',
+        dst_cidr: '10.0.0.0/24',
+        action: 'deny',
+        direction: 'egress'
+      })
+
+      expect(api.post).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/security/acls', expect.objectContaining({
+        src_group_id: 'src-group',
+        dst_group_id: 'dst-group',
+        src_cidr: '',
+        dst_cidr: '',
+        action: 'deny',
+        direction: 'egress'
+      }))
     })
   })
 

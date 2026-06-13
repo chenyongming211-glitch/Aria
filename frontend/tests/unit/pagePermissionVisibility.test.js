@@ -133,6 +133,16 @@ vi.mock('@/composables/useAclApi', () => ({
   }
 }))
 
+vi.mock('@/composables/useIpGroupApi', () => ({
+  useIpGroupApi: {
+    listIPGroups: vi.fn(async () => []),
+    createIPGroup: vi.fn(async () => ({})),
+    updateIPGroup: vi.fn(async () => ({})),
+    deleteIPGroup: vi.fn(async () => ({})),
+    formatGroupLabel: vi.fn((group) => group?.name || 'any')
+  }
+}))
+
 vi.mock('@/composables/useTokenApi', () => ({
   useTokenApi: {
     getAllTokens: vi.fn(async () => []),
@@ -208,6 +218,7 @@ vi.mock('element-plus', () => ({
 }))
 
 import ACLRules from '@/views/ACLRules.vue'
+import IPGroups from '@/views/IPGroups.vue'
 import Tokens from '@/views/Tokens.vue'
 import Settings from '@/views/Settings.vue'
 import Nodes from '@/views/Nodes.vue'
@@ -512,6 +523,32 @@ describe('page-level RBAC button visibility', () => {
     expect(deniedButtons).not.toContain('添加规则')
     expect(deniedButtons).not.toContain('删除')
     expect(deniedButtons).not.toContain('保存并应用')
+  })
+
+  it('shows/hides IPGroups write actions based on ip-groups:write', async () => {
+    permissionSet.add('ip-groups:write')
+    const allowed = mountWithStubs(IPGroups)
+    await flushPromises()
+    expect(allowed.text()).toContain('新建 Group')
+    expect(allowed.text()).toContain('保存')
+
+    permissionSet.clear()
+    const denied = mountWithStubs(IPGroups)
+    await flushPromises()
+    expect(denied.text()).not.toContain('新建 Group')
+    expect(denied.text()).not.toContain('保存')
+  })
+
+  it('shows the IP Group menu only with ip-groups:read', () => {
+    mockUserStore.user = { role: 'admin' }
+    permissionSet.add('ip-groups:read')
+
+    const allowed = mountWithStubs(Layout)
+    expect(allowed.find('[data-index="/policy-center/ip-groups"]').exists()).toBe(true)
+
+    permissionSet.clear()
+    const denied = mountWithStubs(Layout)
+    expect(denied.find('[data-index="/policy-center/ip-groups"]').exists()).toBe(false)
   })
 
   it('shows/hides Monitoring resolve actions based on commands:write', async () => {

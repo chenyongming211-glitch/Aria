@@ -53,12 +53,12 @@
       <el-table-column prop="name" label="名称" width="150" />
       <el-table-column label="源 Group/CIDR" min-width="170">
         <template #default="{ row }">
-          <code>{{ row.runtime_src_group || row.src_cidr || 'any' }}</code>
+          <code>{{ formatGroupRef(row.src_group_id, row.runtime_src_group || row.src_cidr) }}</code>
         </template>
       </el-table-column>
       <el-table-column label="目标 Group/CIDR" min-width="170">
         <template #default="{ row }">
-          <code>{{ row.runtime_dst_group || row.dst_cidr || 'any' }}</code>
+          <code>{{ formatGroupRef(row.dst_group_id, row.runtime_dst_group || row.dst_cidr) }}</code>
         </template>
       </el-table-column>
       <el-table-column label="方向/端口规则" min-width="160">
@@ -156,12 +156,36 @@
           <el-input v-model="form.name" placeholder="请输入规则名称" />
         </el-form-item>
         
-        <el-form-item label="源网络" prop="src_cidr">
-          <el-input v-model="form.src_cidr" placeholder="例如: 192.168.1.0/24" />
+        <el-form-item label="源 IP Group">
+          <el-select v-model="form.src_group_id" clearable filterable placeholder="any / 选择源 Group" style="width: 100%">
+            <el-option
+              v-for="group in selectableGroups"
+              :key="group.id"
+              :label="formatGroupOption(group)"
+              :value="group.id"
+            />
+          </el-select>
         </el-form-item>
 
-        <el-form-item label="目标网络" prop="dst_cidr">
-          <el-input v-model="form.dst_cidr" placeholder="例如: 10.0.0.0/24" />
+        <el-form-item label="源 CIDR" prop="src_cidr">
+          <el-input v-model="form.src_cidr" :disabled="Boolean(form.src_group_id)" placeholder="留空为 any；例如 192.168.1.0/24" />
+          <div class="form-help">未选择 Group 时，CIDR 会保存为 inline IP Group。</div>
+        </el-form-item>
+
+        <el-form-item label="目标 IP Group">
+          <el-select v-model="form.dst_group_id" clearable filterable placeholder="any / 选择目标 Group" style="width: 100%">
+            <el-option
+              v-for="group in selectableGroups"
+              :key="group.id"
+              :label="formatGroupOption(group)"
+              :value="group.id"
+            />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="目标 CIDR" prop="dst_cidr">
+          <el-input v-model="form.dst_cidr" :disabled="Boolean(form.dst_group_id)" placeholder="留空为 any；例如 10.0.0.0/24" />
+          <div class="form-help">未选择 Group 时，CIDR 会保存为 inline IP Group。</div>
         </el-form-item>
         
         <el-form-item label="协议" prop="protocol">
@@ -236,6 +260,7 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 import { useAclApi } from '@/composables/useAclApi'
+import { useIpGroupApi } from '@/composables/useIpGroupApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
@@ -245,6 +270,7 @@ const { hasPermission } = usePermission()
 const loading = ref(false)
 const rules = ref([])
 const tenantNodes = ref([])
+const ipGroups = ref([])
 const dialogVisible = ref(false)
 const submitting = ref(false)
 const formRef = ref(null)
@@ -267,6 +293,8 @@ const form = reactive({
   node_name: '',
   id: null,
   name: '',
+  src_group_id: '',
+  dst_group_id: '',
   src_cidr: '',
   dst_cidr: '',
   protocol: 6,
@@ -287,14 +315,8 @@ const formRules = {
     { required: true, message: '请输入规则名称', trigger: 'blur' },
     { min: 1, max: 50, message: '长度在 1 到 50 个字符', trigger: 'blur' }
   ],
-  src_cidr: [
-    { required: true, message: '请输入源网络', trigger: 'blur' },
-    { pattern: /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/, message: '请输入有效的 CIDR 格式', trigger: 'blur' }
-  ],
-  dst_cidr: [
-    { required: true, message: '请输入目标网络', trigger: 'blur' },
-    { pattern: /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/, message: '请输入有效的 CIDR 格式', trigger: 'blur' }
-  ],
+  src_cidr: [],
+  dst_cidr: [],
   dst_port: [
     { required: true, message: '请输入目标端口', trigger: 'blur' }
   ],
@@ -310,6 +332,14 @@ const formRules = {
 }
 
 const dialogTitle = computed(() => form.id ? '编辑规则' : '新建规则')
+
+const selectableGroups = computed(() => ipGroups.value.filter((group) => group.kind !== 'inline'))
+
+const groupById = computed(() => {
+  const result = new Map()
+  ipGroups.value.forEach((group) => result.set(group.id, group))
+  return result
+})
 
 const paginatedRules = computed(() => {
   const start = (pagination.page - 1) * pagination.pageSize
@@ -329,6 +359,15 @@ const loadNodes = async () => {
     }
   } catch (error) {
     console.error('加载节点失败:', error)
+  }
+}
+
+const loadIPGroups = async () => {
+  try {
+    ipGroups.value = await useIpGroupApi.listIPGroups()
+  } catch (error) {
+    console.error('加载 IP Group 失败:', error)
+    ipGroups.value = []
   }
 }
 
@@ -378,6 +417,8 @@ const handleEdit = (row) => {
   Object.assign(form, {
     ...row,
     node_id: row.node_id,
+    src_group_id: row.src_group_id || '',
+    dst_group_id: row.dst_group_id || '',
     src_cidr: row.src_cidr || row.src_net || '',
     dst_cidr: row.dst_cidr || row.dst_net || '',
     dst_port: row.dst_port ?? row.max_port ?? 0,
@@ -452,7 +493,7 @@ const resetForm = () => {
   Object.assign(form, {
     node_id: tenantNodes.value[0]?.id || '',
     node_name: '',
-    id: null, name: '', src_cidr: '', dst_cidr: '',
+    id: null, name: '', src_group_id: '', dst_group_id: '', src_cidr: '', dst_cidr: '',
     protocol: 6, dst_port: 0, direction: 'ingress', ports: '',
     action: 'allow', enabled: true, priority: 100, description: ''
   })
@@ -501,6 +542,19 @@ const getPolicyTagType = (status) => {
   return map[status] || 'info'
 }
 
+const formatGroupOption = (group) => {
+  const cidrs = Array.isArray(group.members) ? group.members.map((member) => member.cidr).join(', ') : ''
+  return cidrs ? `${group.name} (${cidrs})` : group.name
+}
+
+const formatGroupRef = (groupId, fallback) => {
+  if (groupId) {
+    const group = groupById.value.get(groupId)
+    return group ? group.name : groupId
+  }
+  return fallback || 'any'
+}
+
 const shortCommandId = (commandId) => {
   if (!commandId) {
     return '-'
@@ -526,10 +580,11 @@ const formatBytes = (value) => {
 const reloadTenantScopedData = async () => {
   rules.value = []
   tenantNodes.value = []
+  ipGroups.value = []
   filters.node_id = ''
   pagination.page = 1
   pagination.total = 0
-  await loadNodes()
+  await Promise.all([loadIPGroups(), loadNodes()])
 }
 
 onMounted(() => {
