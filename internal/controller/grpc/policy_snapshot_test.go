@@ -2,8 +2,12 @@ package grpc
 
 import (
 	"testing"
+	"time"
 
+	controllerstorage "aria/pkg/controllerstorage"
 	"aria/pkg/grpc/agentpb"
+
+	"github.com/google/uuid"
 )
 
 func TestCompilePolicySnapshotExpandsPortAclAndBlacklist(t *testing.T) {
@@ -105,5 +109,74 @@ func TestCompilePolicySnapshotNormalizesQoSForAgentGroups(t *testing.T) {
 		ingress.GetBurstBytes() != 4_000_000 ||
 		ingress.GetMode() != "policing" {
 		t.Fatalf("unexpected ingress QoS rule: %#v", ingress)
+	}
+}
+
+func TestCompilePolicySnapshotIncludesIPGroups(t *testing.T) {
+	officeID := "11111111-1111-1111-1111-111111111111"
+	prodID := "22222222-2222-2222-2222-222222222222"
+	now := time.Now()
+
+	snapshot, err := compileAgentPolicySnapshotWithGroups(
+		[]*controllerstorage.IPGroupRecord{
+			{
+				ID:   uuid.MustParse(officeID),
+				Name: "office",
+				Kind: controllerstorage.IPGroupKindCustom,
+				Members: []controllerstorage.IPGroupMemberRecord{
+					{CIDR: "10.10.0.0/16"},
+					{CIDR: "2001:db8:10::/48"},
+				},
+			},
+			{
+				ID:      uuid.MustParse(prodID),
+				Name:    "prod",
+				Kind:    controllerstorage.IPGroupKindCustom,
+				Members: []controllerstorage.IPGroupMemberRecord{{CIDR: "172.16.0.0/16"}},
+			},
+		},
+		[]*controllerstorage.ACLRuleRecord{
+			{
+				ID:         uuid.New(),
+				SrcGroupID: uuid.NullUUID{UUID: uuid.MustParse(officeID), Valid: true},
+				DstGroupID: uuid.NullUUID{UUID: uuid.MustParse(prodID), Valid: true},
+				Protocol:   6,
+				Action:     "deny",
+				Direction:  "egress",
+				Priority:   100,
+				Enabled:    true,
+				CreatedAt:  now,
+			},
+		},
+		[]*controllerstorage.QoSRuleRecord{
+			{
+				ID:            uuid.New(),
+				GroupID:       uuid.NullUUID{UUID: uuid.MustParse(officeID), Valid: true},
+				Direction:     "egress",
+				BandwidthMbps: 10,
+				RateBps:       10_000_000,
+				BurstBytes:    1500,
+				Priority:      100,
+				Mode:          "policing",
+				Enabled:       true,
+				CreatedAt:     now,
+			},
+		},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("compileAgentPolicySnapshotWithGroups failed: %v", err)
+	}
+	if len(snapshot.IPGroups) != 2 {
+		t.Fatalf("expected 2 IP groups, got %#v", snapshot.IPGroups)
+	}
+	if snapshot.IPGroups[0].GetId() != officeID || len(snapshot.IPGroups[0].GetCidrs()) != 2 {
+		t.Fatalf("office group was not compiled with members: %#v", snapshot.IPGroups[0])
+	}
+	if snapshot.ACLRules[0].GetSrcGroupId() != officeID || snapshot.ACLRules[0].GetDstGroupId() != prodID {
+		t.Fatalf("ACL group ids not preserved: %#v", snapshot.ACLRules[0])
+	}
+	if snapshot.QoSRules[0].GetGroupId() != officeID {
+		t.Fatalf("QoS group id not preserved: %#v", snapshot.QoSRules[0])
 	}
 }

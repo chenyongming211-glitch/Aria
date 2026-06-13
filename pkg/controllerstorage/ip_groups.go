@@ -305,6 +305,45 @@ func (s *Storage) ResolvePolicyGroupRef(tenantID uuid.UUID, explicit uuid.NullUU
 	return resolvePolicyGroupRefWith(s.db, tenantID, explicit, directCIDR)
 }
 
+func (s *Storage) ListIPGroupsForNodePolicySnapshot(tenantID, nodeID uuid.UUID) ([]*IPGroupRecord, error) {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT g.id, g.tenant_id, g.name, COALESCE(g.description, ''), g.kind, g.created_by, g.created_at, g.updated_at
+		   FROM ip_groups g
+		  WHERE g.tenant_id = $1
+		    AND g.id IN (
+			SELECT src_group_id FROM acl_rules
+			 WHERE tenant_id = $1 AND node_id = $2 AND enabled = true AND src_group_id IS NOT NULL
+			UNION
+			SELECT dst_group_id FROM acl_rules
+			 WHERE tenant_id = $1 AND node_id = $2 AND enabled = true AND dst_group_id IS NOT NULL
+			UNION
+			SELECT group_id FROM qos_rules
+			 WHERE tenant_id = $1 AND node_id = $2 AND enabled = true AND group_id IS NOT NULL
+		    )
+		  ORDER BY g.kind ASC, g.name ASC, g.id ASC`,
+		tenantID,
+		nodeID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	groups := make([]*IPGroupRecord, 0)
+	for rows.Next() {
+		group, err := scanIPGroup(rows)
+		if err != nil {
+			return nil, err
+		}
+		group.Members, err = s.listIPGroupMembers(tenantID, group.ID)
+		if err != nil {
+			return nil, err
+		}
+		groups = append(groups, group)
+	}
+	return groups, rows.Err()
+}
+
 func resolvePolicyGroupRefWith(q ipGroupExecutor, tenantID uuid.UUID, explicit uuid.NullUUID, directCIDR string) (uuid.NullUUID, error) {
 	if explicit.Valid {
 		var found uuid.UUID

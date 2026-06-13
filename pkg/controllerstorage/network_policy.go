@@ -101,6 +101,10 @@ func (s *Storage) ListTenantNodeQoSRules(tenantID, nodeID uuid.UUID) ([]*QoSRule
 	return listTenantNodeQoSRules(s.db, tenantID, nodeID, false)
 }
 
+func (s *Storage) GetEnabledTenantNodeQoSRules(tenantID, nodeID uuid.UUID) ([]*QoSRuleRecord, error) {
+	return listTenantNodeQoSRules(s.db, tenantID, nodeID, true)
+}
+
 func listTenantNodeQoSRules(q policyMutationExecutor, tenantID, nodeID uuid.UUID, enabledOnly bool) ([]*QoSRuleRecord, error) {
 	enabledClause := ""
 	if enabledOnly {

@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
+	controllerstorage "aria/pkg/controllerstorage"
 	"aria/pkg/grpc/agentpb"
 )
 
 type agentPolicySnapshot struct {
+	IPGroups       []*agentpb.IPGroup
 	ACLRules       []*agentpb.ACLRule
 	QoSRules       []*agentpb.QoSRule
 	BlacklistRules []*agentpb.BlacklistRule
@@ -49,6 +52,225 @@ func compileAgentPolicySnapshot(
 	}
 
 	return compiled, nil
+}
+
+func compileAgentPolicySnapshotWithGroups(
+	groups []*controllerstorage.IPGroupRecord,
+	aclRuleRecords []*controllerstorage.ACLRuleRecord,
+	qosRuleRecords []*controllerstorage.QoSRuleRecord,
+	blacklistRules []*agentpb.BlacklistRule,
+) (*agentPolicySnapshot, error) {
+	compiled := &agentPolicySnapshot{}
+	referencedGroups := map[string]struct{}{}
+
+	aclRuleRecords = sortedACLRuleRecords(aclRuleRecords)
+	for _, record := range aclRuleRecords {
+		if record == nil || !record.Enabled {
+			continue
+		}
+		rule := aclRecordToProto(record)
+		recordACLGroupRefs(record, referencedGroups)
+		rules, err := compileACLRule(rule)
+		if err != nil {
+			return nil, err
+		}
+		compiled.ACLRules = append(compiled.ACLRules, rules...)
+	}
+
+	for _, rule := range blacklistRules {
+		rules, err := compileBlacklistRule(rule)
+		if err != nil {
+			return nil, err
+		}
+		compiled.ACLRules = append(compiled.ACLRules, rules...)
+	}
+
+	qosRuleRecords = sortedQoSRuleRecords(qosRuleRecords)
+	for _, record := range qosRuleRecords {
+		if record == nil || !record.Enabled {
+			continue
+		}
+		rule := qosRecordToProto(record)
+		recordQoSGroupRefs(record, referencedGroups)
+		compiledRule, err := compileQoSRule(rule)
+		if err != nil {
+			return nil, err
+		}
+		compiled.QoSRules = append(compiled.QoSRules, compiledRule)
+	}
+
+	ipGroups, err := compileReferencedIPGroups(groups, referencedGroups)
+	if err != nil {
+		return nil, err
+	}
+	compiled.IPGroups = ipGroups
+	return compiled, nil
+}
+
+func sortedACLRuleRecords(rules []*controllerstorage.ACLRuleRecord) []*controllerstorage.ACLRuleRecord {
+	sorted := append([]*controllerstorage.ACLRuleRecord(nil), rules...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		left, right := sorted[i], sorted[j]
+		if left == nil {
+			return false
+		}
+		if right == nil {
+			return true
+		}
+		if left.Priority != right.Priority {
+			return left.Priority < right.Priority
+		}
+		return left.CreatedAt.Before(right.CreatedAt)
+	})
+	return sorted
+}
+
+func sortedQoSRuleRecords(rules []*controllerstorage.QoSRuleRecord) []*controllerstorage.QoSRuleRecord {
+	sorted := append([]*controllerstorage.QoSRuleRecord(nil), rules...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		left, right := sorted[i], sorted[j]
+		if left == nil {
+			return false
+		}
+		if right == nil {
+			return true
+		}
+		if left.Priority != right.Priority {
+			return left.Priority < right.Priority
+		}
+		return left.CreatedAt.Before(right.CreatedAt)
+	})
+	return sorted
+}
+
+func aclRecordToProto(record *controllerstorage.ACLRuleRecord) *agentpb.ACLRule {
+	rule := &agentpb.ACLRule{
+		Id:        record.ID.String(),
+		SrcNet:    strings.TrimSpace(record.SrcCIDR),
+		DstNet:    strings.TrimSpace(record.DstCIDR),
+		Protocol:  uint32(record.Protocol),
+		Action:    record.Action,
+		Direction: record.Direction,
+		Ports:     record.Ports,
+	}
+	if record.DstPort > 0 {
+		rule.MinPort = uint32(record.DstPort)
+		rule.MaxPort = uint32(record.DstPort)
+	}
+	if record.SrcGroupID.Valid {
+		rule.SrcGroupId = record.SrcGroupID.UUID.String()
+	}
+	if record.DstGroupID.Valid {
+		rule.DstGroupId = record.DstGroupID.UUID.String()
+	}
+	return rule
+}
+
+func qosRecordToProto(record *controllerstorage.QoSRuleRecord) *agentpb.QoSRule {
+	rule := &agentpb.QoSRule{
+		Id:            record.ID.String(),
+		SrcIp:         strings.TrimSpace(record.SrcCIDR),
+		DstIp:         strings.TrimSpace(record.DstCIDR),
+		SrcPort:       uint32(record.SrcPort),
+		DstPort:       uint32(record.DstPort),
+		Protocol:      uint32(record.Protocol),
+		BandwidthMbps: uint64(record.BandwidthMbps),
+		Direction:     record.Direction,
+		RateBps:       record.RateBps,
+		BurstBytes:    record.BurstBytes,
+		Priority:      uint32(record.Priority),
+		Mode:          record.Mode,
+	}
+	if record.GroupID.Valid {
+		rule.GroupId = record.GroupID.UUID.String()
+	}
+	return rule
+}
+
+func recordACLGroupRefs(record *controllerstorage.ACLRuleRecord, refs map[string]struct{}) {
+	if record == nil {
+		return
+	}
+	if record.SrcGroupID.Valid {
+		refs[record.SrcGroupID.UUID.String()] = struct{}{}
+	}
+	if record.DstGroupID.Valid {
+		refs[record.DstGroupID.UUID.String()] = struct{}{}
+	}
+}
+
+func recordQoSGroupRefs(record *controllerstorage.QoSRuleRecord, refs map[string]struct{}) {
+	if record == nil {
+		return
+	}
+	if record.GroupID.Valid {
+		refs[record.GroupID.UUID.String()] = struct{}{}
+	}
+}
+
+func compileReferencedIPGroups(groups []*controllerstorage.IPGroupRecord, refs map[string]struct{}) ([]*agentpb.IPGroup, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+
+	groups = sortedIPGroups(groups)
+	compiled := make([]*agentpb.IPGroup, 0, len(refs))
+	seen := map[string]struct{}{}
+	for _, group := range groups {
+		if group == nil {
+			continue
+		}
+		groupID := group.ID.String()
+		if _, ok := refs[groupID]; !ok {
+			continue
+		}
+		compiled = append(compiled, compileIPGroup(group))
+		seen[groupID] = struct{}{}
+	}
+
+	for groupID := range refs {
+		if _, ok := seen[groupID]; !ok {
+			return nil, fmt.Errorf("policy references missing IP group %s", groupID)
+		}
+	}
+	return compiled, nil
+}
+
+func sortedIPGroups(groups []*controllerstorage.IPGroupRecord) []*controllerstorage.IPGroupRecord {
+	sorted := append([]*controllerstorage.IPGroupRecord(nil), groups...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		left, right := sorted[i], sorted[j]
+		if left == nil {
+			return false
+		}
+		if right == nil {
+			return true
+		}
+		if left.Kind != right.Kind {
+			return left.Kind < right.Kind
+		}
+		if left.Name != right.Name {
+			return left.Name < right.Name
+		}
+		return left.ID.String() < right.ID.String()
+	})
+	return sorted
+}
+
+func compileIPGroup(group *controllerstorage.IPGroupRecord) *agentpb.IPGroup {
+	cidrs := make([]string, 0, len(group.Members))
+	for _, member := range group.Members {
+		if cidr := strings.TrimSpace(member.CIDR); cidr != "" {
+			cidrs = append(cidrs, cidr)
+		}
+	}
+	sort.Strings(cidrs)
+	return &agentpb.IPGroup{
+		Id:    group.ID.String(),
+		Name:  group.Name,
+		Cidrs: cidrs,
+		Kind:  group.Kind,
+	}
 }
 
 func aclRulesFromLegacyPayload(payload interface{}) ([]*agentpb.ACLRule, error) {
@@ -120,13 +342,15 @@ func compileACLRule(rule *agentpb.ACLRule) ([]*agentpb.ACLRule, error) {
 	compiled := make([]*agentpb.ACLRule, 0, len(protocols))
 	for _, proto := range protocols {
 		compiled = append(compiled, &agentpb.ACLRule{
-			Id:        rule.GetId(),
-			SrcNet:    cidrOrAny(rule.GetSrcNet()),
-			DstNet:    cidrOrAny(rule.GetDstNet()),
-			Protocol:  proto,
-			Action:    action,
-			Direction: direction,
-			Ports:     ports,
+			Id:         rule.GetId(),
+			SrcNet:     aclNetFallback(rule.GetSrcNet(), rule.GetSrcGroupId()),
+			DstNet:     aclNetFallback(rule.GetDstNet(), rule.GetDstGroupId()),
+			Protocol:   proto,
+			Action:     action,
+			Direction:  direction,
+			Ports:      ports,
+			SrcGroupId: rule.GetSrcGroupId(),
+			DstGroupId: rule.GetDstGroupId(),
 		})
 	}
 	return compiled, nil
@@ -184,6 +408,9 @@ func compileQoSRule(rule *agentpb.QoSRule) (*agentpb.QoSRule, error) {
 		return nil, err
 	}
 	group := qosGroupForDirection(rule, direction)
+	if strings.TrimSpace(rule.GetGroupId()) != "" {
+		group = qosCIDRFallbackForDirection(rule, direction)
+	}
 
 	rateBps := rule.GetRateBps()
 	if rateBps == 0 && rule.GetBandwidthMbps() > 0 {
@@ -212,19 +439,31 @@ func compileQoSRule(rule *agentpb.QoSRule) (*agentpb.QoSRule, error) {
 		BurstBytes:    rule.GetBurstBytes(),
 		Priority:      priority,
 		Mode:          mode,
+		GroupId:       rule.GetGroupId(),
 	}
 	if compiled.BurstBytes == 0 {
 		compiled.BurstBytes = defaultQoSBurst(rateBps)
 	}
 	switch direction {
 	case "ingress":
-		compiled.SrcIp = group
+		if group != "" {
+			compiled.SrcIp = group
+		}
 	case "egress", "both":
-		compiled.DstIp = group
+		if group != "" {
+			compiled.DstIp = group
+		}
 	default:
 		return nil, fmt.Errorf("invalid normalized QoS direction %q", direction)
 	}
 	return compiled, nil
+}
+
+func aclNetFallback(cidr, groupID string) string {
+	if strings.TrimSpace(groupID) != "" {
+		return strings.TrimSpace(cidr)
+	}
+	return cidrOrAny(cidr)
 }
 
 func normalizeACLAction(action string) (string, error) {
@@ -307,6 +546,19 @@ func qosGroupForDirection(rule *agentpb.QoSRule, direction string) string {
 			return cidrOrAny(rule.GetSrcIp())
 		}
 		return dst
+	}
+}
+
+func qosCIDRFallbackForDirection(rule *agentpb.QoSRule, direction string) string {
+	switch direction {
+	case "ingress":
+		return strings.TrimSpace(rule.GetSrcIp())
+	default:
+		dst := strings.TrimSpace(rule.GetDstIp())
+		if dst != "" {
+			return dst
+		}
+		return strings.TrimSpace(rule.GetSrcIp())
 	}
 }
 

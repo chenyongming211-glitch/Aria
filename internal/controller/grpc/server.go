@@ -136,7 +136,7 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 	}
 
 	// 调用 REST API handler
-	peersInterface, assignedIP, aclRulesInterface, metricsGateway, err := s.syncHandler(node.PublicKey)
+	peersInterface, assignedIP, _, metricsGateway, err := s.syncHandler(node.PublicKey)
 	if err != nil {
 		return nil, fmt.Errorf("sync failed: %w", err)
 	}
@@ -165,10 +165,19 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 		}
 	}
 
-	// 查询 QoS 规则
-	qosRules, err := s.getQoSRules(ctx, node.PublicKey)
+	aclRules, err := s.store.GetEnabledTenantNodeACLRules(node.TenantID, node.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ACL rules: %w", err)
+	}
+
+	qosRules, err := s.store.GetEnabledTenantNodeQoSRules(node.TenantID, node.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get QoS rules: %w", err)
+	}
+
+	policyGroups, err := s.store.ListIPGroupsForNodePolicySnapshot(node.TenantID, node.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get policy IP groups: %w", err)
 	}
 
 	blacklistRules, err := s.getBlacklistRules(ctx, node.PublicKey)
@@ -176,7 +185,7 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 		return nil, fmt.Errorf("failed to get blacklist rules: %w", err)
 	}
 
-	policySnapshot, err := compileAgentPolicySnapshot(aclRulesInterface, qosRules, blacklistRules)
+	policySnapshot, err := compileAgentPolicySnapshotWithGroups(policyGroups, aclRules, qosRules, blacklistRules)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile policy snapshot: %w", err)
 	}
@@ -200,6 +209,7 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 		MetricsPushGateway:    metricsGateway,
 		QosRules:              policySnapshot.QoSRules,
 		BlacklistRules:        policySnapshot.BlacklistRules,
+		IpGroups:              policySnapshot.IPGroups,
 		DesiredStateVersion:   desiredVersion,
 		RuntimeToken:          runtimeToken,
 		RuntimeTokenExpiresAt: runtimeTokenExpiresAt,
@@ -767,6 +777,13 @@ func getStringSlice(m map[string]interface{}, key string) []string {
 	return nil
 }
 
+func protoUUIDString(value uuid.NullUUID) string {
+	if value.Valid {
+		return value.UUID.String()
+	}
+	return ""
+}
+
 // 辅助函数：从 map 中安全获取 uint32
 func getUint32(m map[string]interface{}, key string) uint32 {
 	if val, ok := m[key]; ok {
@@ -813,6 +830,7 @@ func (s *ControllerServer) getQoSRules(ctx context.Context, publicKey string) ([
 			Id:            rule.ID.String(),
 			SrcIp:         rule.SrcCIDR,
 			DstIp:         rule.DstCIDR,
+			GroupId:       protoUUIDString(rule.GroupID),
 			SrcPort:       uint32(rule.SrcPort),
 			DstPort:       uint32(rule.DstPort),
 			Protocol:      uint32(rule.Protocol),

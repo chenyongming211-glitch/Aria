@@ -360,6 +360,7 @@ type SyncResponse struct {
 	RuntimeTokenExpiresAt int64                  `protobuf:"varint,10,opt,name=runtime_token_expires_at,json=runtimeTokenExpiresAt,proto3" json:"runtime_token_expires_at,omitempty"`                                                 // 运行期凭据过期时间戳
 	SnapshotComplete      bool                   `protobuf:"varint,11,opt,name=snapshot_complete,json=snapshotComplete,proto3" json:"snapshot_complete,omitempty"`                                                                    // 本轮同步快照是否完整
 	DomainVersions        map[string]string      `protobuf:"bytes,12,rep,name=domain_versions,json=domainVersions,proto3" json:"domain_versions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // 各控制面 domain 的版本
+	IpGroups              []*IPGroup             `protobuf:"bytes,20,rep,name=ip_groups,json=ipGroups,proto3" json:"ip_groups,omitempty"`                                                                                             // 策略引用的 IP Group 定义
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -474,6 +475,13 @@ func (x *SyncResponse) GetSnapshotComplete() bool {
 func (x *SyncResponse) GetDomainVersions() map[string]string {
 	if x != nil {
 		return x.DomainVersions
+	}
+	return nil
+}
+
+func (x *SyncResponse) GetIpGroups() []*IPGroup {
+	if x != nil {
+		return x.IpGroups
 	}
 	return nil
 }
@@ -596,15 +604,17 @@ func (x *PeerInfo) GetAdvertisedRoutes() []string {
 
 type ACLRule struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,9,opt,name=id,proto3" json:"id,omitempty"`                           // Controller policy rule ID
-	SrcNet        string                 `protobuf:"bytes,1,opt,name=src_net,json=srcNet,proto3" json:"src_net,omitempty"`     // 源 CIDR（如 "10.0.0.0/8"）
-	DstNet        string                 `protobuf:"bytes,2,opt,name=dst_net,json=dstNet,proto3" json:"dst_net,omitempty"`     // 目标 CIDR（如 "192.168.0.0/16"）
-	Protocol      uint32                 `protobuf:"varint,3,opt,name=protocol,proto3" json:"protocol,omitempty"`              // IP 协议（6=TCP, 17=UDP, 0=any）
-	MinPort       uint32                 `protobuf:"varint,4,opt,name=min_port,json=minPort,proto3" json:"min_port,omitempty"` // 最小端口（0=any）
-	MaxPort       uint32                 `protobuf:"varint,5,opt,name=max_port,json=maxPort,proto3" json:"max_port,omitempty"` // 最大端口（65535=any）
-	Action        string                 `protobuf:"bytes,6,opt,name=action,proto3" json:"action,omitempty"`                   // 动作：allow 或 deny
-	Direction     string                 `protobuf:"bytes,7,opt,name=direction,proto3" json:"direction,omitempty"`             // 方向：ingress、egress、both
-	Ports         string                 `protobuf:"bytes,8,opt,name=ports,proto3" json:"ports,omitempty"`                     // 端口 bitmap 规则（如 "80-82,443:0"）
+	Id            string                 `protobuf:"bytes,9,opt,name=id,proto3" json:"id,omitempty"`                                      // Controller policy rule ID
+	SrcNet        string                 `protobuf:"bytes,1,opt,name=src_net,json=srcNet,proto3" json:"src_net,omitempty"`                // 源 CIDR（如 "10.0.0.0/8"）
+	DstNet        string                 `protobuf:"bytes,2,opt,name=dst_net,json=dstNet,proto3" json:"dst_net,omitempty"`                // 目标 CIDR（如 "192.168.0.0/16"）
+	Protocol      uint32                 `protobuf:"varint,3,opt,name=protocol,proto3" json:"protocol,omitempty"`                         // IP 协议（6=TCP, 17=UDP, 0=any）
+	MinPort       uint32                 `protobuf:"varint,4,opt,name=min_port,json=minPort,proto3" json:"min_port,omitempty"`            // 最小端口（0=any）
+	MaxPort       uint32                 `protobuf:"varint,5,opt,name=max_port,json=maxPort,proto3" json:"max_port,omitempty"`            // 最大端口（65535=any）
+	Action        string                 `protobuf:"bytes,6,opt,name=action,proto3" json:"action,omitempty"`                              // 动作：allow 或 deny
+	Direction     string                 `protobuf:"bytes,7,opt,name=direction,proto3" json:"direction,omitempty"`                        // 方向：ingress、egress、both
+	Ports         string                 `protobuf:"bytes,8,opt,name=ports,proto3" json:"ports,omitempty"`                                // 端口 bitmap 规则（如 "80-82,443:0"）
+	SrcGroupId    string                 `protobuf:"bytes,10,opt,name=src_group_id,json=srcGroupId,proto3" json:"src_group_id,omitempty"` // 源 IP Group 产品 ID
+	DstGroupId    string                 `protobuf:"bytes,11,opt,name=dst_group_id,json=dstGroupId,proto3" json:"dst_group_id,omitempty"` // 目标 IP Group 产品 ID
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -702,6 +712,20 @@ func (x *ACLRule) GetPorts() string {
 	return ""
 }
 
+func (x *ACLRule) GetSrcGroupId() string {
+	if x != nil {
+		return x.SrcGroupId
+	}
+	return ""
+}
+
+func (x *ACLRule) GetDstGroupId() string {
+	if x != nil {
+		return x.DstGroupId
+	}
+	return ""
+}
+
 type QoSRule struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,12,opt,name=id,proto3" json:"id,omitempty"`                                            // Controller policy rule ID
@@ -716,6 +740,7 @@ type QoSRule struct {
 	BurstBytes    uint64                 `protobuf:"varint,9,opt,name=burst_bytes,json=burstBytes,proto3" json:"burst_bytes,omitempty"`          // 突发字节数
 	Priority      uint32                 `protobuf:"varint,10,opt,name=priority,proto3" json:"priority,omitempty"`                               // 优先级
 	Mode          string                 `protobuf:"bytes,11,opt,name=mode,proto3" json:"mode,omitempty"`                                        // policing 或 shaping
+	GroupId       string                 `protobuf:"bytes,13,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`                   // QoS IP Group 产品 ID
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -834,6 +859,81 @@ func (x *QoSRule) GetMode() string {
 	return ""
 }
 
+func (x *QoSRule) GetGroupId() string {
+	if x != nil {
+		return x.GroupId
+	}
+	return ""
+}
+
+type IPGroup struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`       // Controller IP Group ID
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`   // IP Group 名称
+	Cidrs         []string               `protobuf:"bytes,3,rep,name=cidrs,proto3" json:"cidrs,omitempty"` // 成员 CIDR
+	Kind          string                 `protobuf:"bytes,4,opt,name=kind,proto3" json:"kind,omitempty"`   // custom / inline / system
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IPGroup) Reset() {
+	*x = IPGroup{}
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IPGroup) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IPGroup) ProtoMessage() {}
+
+func (x *IPGroup) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IPGroup.ProtoReflect.Descriptor instead.
+func (*IPGroup) Descriptor() ([]byte, []int) {
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *IPGroup) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *IPGroup) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *IPGroup) GetCidrs() []string {
+	if x != nil {
+		return x.Cidrs
+	}
+	return nil
+}
+
+func (x *IPGroup) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
 type BlacklistRule struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Scope         string                 `protobuf:"bytes,1,opt,name=scope,proto3" json:"scope,omitempty"` // src, dst, ports
@@ -845,7 +945,7 @@ type BlacklistRule struct {
 
 func (x *BlacklistRule) Reset() {
 	*x = BlacklistRule{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[7]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -857,7 +957,7 @@ func (x *BlacklistRule) String() string {
 func (*BlacklistRule) ProtoMessage() {}
 
 func (x *BlacklistRule) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[7]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -870,7 +970,7 @@ func (x *BlacklistRule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BlacklistRule.ProtoReflect.Descriptor instead.
 func (*BlacklistRule) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{7}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *BlacklistRule) GetScope() string {
@@ -900,13 +1000,14 @@ type SyncConfigRequest struct {
 	AclRules       []*ACLRule             `protobuf:"bytes,2,rep,name=acl_rules,json=aclRules,proto3" json:"acl_rules,omitempty"`                   // ACL 规则
 	QosRules       []*QoSRule             `protobuf:"bytes,3,rep,name=qos_rules,json=qosRules,proto3" json:"qos_rules,omitempty"`                   // QoS 规则
 	BlacklistRules []*BlacklistRule       `protobuf:"bytes,4,rep,name=blacklist_rules,json=blacklistRules,proto3" json:"blacklist_rules,omitempty"` // 黑名单规则
+	IpGroups       []*IPGroup             `protobuf:"bytes,20,rep,name=ip_groups,json=ipGroups,proto3" json:"ip_groups,omitempty"`                  // 策略引用的 IP Group 定义
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SyncConfigRequest) Reset() {
 	*x = SyncConfigRequest{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[8]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -918,7 +1019,7 @@ func (x *SyncConfigRequest) String() string {
 func (*SyncConfigRequest) ProtoMessage() {}
 
 func (x *SyncConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[8]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -931,7 +1032,7 @@ func (x *SyncConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncConfigRequest.ProtoReflect.Descriptor instead.
 func (*SyncConfigRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{8}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SyncConfigRequest) GetPeers() []*PeerConfig {
@@ -962,6 +1063,13 @@ func (x *SyncConfigRequest) GetBlacklistRules() []*BlacklistRule {
 	return nil
 }
 
+func (x *SyncConfigRequest) GetIpGroups() []*IPGroup {
+	if x != nil {
+		return x.IpGroups
+	}
+	return nil
+}
+
 type SyncConfigResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
@@ -972,7 +1080,7 @@ type SyncConfigResponse struct {
 
 func (x *SyncConfigResponse) Reset() {
 	*x = SyncConfigResponse{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[9]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -984,7 +1092,7 @@ func (x *SyncConfigResponse) String() string {
 func (*SyncConfigResponse) ProtoMessage() {}
 
 func (x *SyncConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[9]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -997,7 +1105,7 @@ func (x *SyncConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncConfigResponse.ProtoReflect.Descriptor instead.
 func (*SyncConfigResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{9}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SyncConfigResponse) GetSuccess() bool {
@@ -1026,7 +1134,7 @@ type PeerConfig struct {
 
 func (x *PeerConfig) Reset() {
 	*x = PeerConfig{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[10]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1038,7 +1146,7 @@ func (x *PeerConfig) String() string {
 func (*PeerConfig) ProtoMessage() {}
 
 func (x *PeerConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[10]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1051,7 +1159,7 @@ func (x *PeerConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerConfig.ProtoReflect.Descriptor instead.
 func (*PeerConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{10}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *PeerConfig) GetPublicKey() string {
@@ -1091,7 +1199,7 @@ type HealthCheckRequest struct {
 
 func (x *HealthCheckRequest) Reset() {
 	*x = HealthCheckRequest{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[11]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1103,7 +1211,7 @@ func (x *HealthCheckRequest) String() string {
 func (*HealthCheckRequest) ProtoMessage() {}
 
 func (x *HealthCheckRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[11]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1116,7 +1224,7 @@ func (x *HealthCheckRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheckRequest.ProtoReflect.Descriptor instead.
 func (*HealthCheckRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{11}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *HealthCheckRequest) GetAgentId() string {
@@ -1137,7 +1245,7 @@ type HealthCheckResponse struct {
 
 func (x *HealthCheckResponse) Reset() {
 	*x = HealthCheckResponse{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[12]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1149,7 +1257,7 @@ func (x *HealthCheckResponse) String() string {
 func (*HealthCheckResponse) ProtoMessage() {}
 
 func (x *HealthCheckResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[12]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1162,7 +1270,7 @@ func (x *HealthCheckResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheckResponse.ProtoReflect.Descriptor instead.
 func (*HealthCheckResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{12}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *HealthCheckResponse) GetHealthy() bool {
@@ -1200,7 +1308,7 @@ type AgentStats struct {
 
 func (x *AgentStats) Reset() {
 	*x = AgentStats{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[13]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1212,7 +1320,7 @@ func (x *AgentStats) String() string {
 func (*AgentStats) ProtoMessage() {}
 
 func (x *AgentStats) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[13]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1225,7 +1333,7 @@ func (x *AgentStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentStats.ProtoReflect.Descriptor instead.
 func (*AgentStats) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{13}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *AgentStats) GetTotalPeers() uint64 {
@@ -1280,7 +1388,7 @@ type ReportStatsRequest struct {
 
 func (x *ReportStatsRequest) Reset() {
 	*x = ReportStatsRequest{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[14]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1292,7 +1400,7 @@ func (x *ReportStatsRequest) String() string {
 func (*ReportStatsRequest) ProtoMessage() {}
 
 func (x *ReportStatsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[14]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1305,7 +1413,7 @@ func (x *ReportStatsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportStatsRequest.ProtoReflect.Descriptor instead.
 func (*ReportStatsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{14}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ReportStatsRequest) GetAgentId() string {
@@ -1331,7 +1439,7 @@ type ReportStatsResponse struct {
 
 func (x *ReportStatsResponse) Reset() {
 	*x = ReportStatsResponse{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[15]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1343,7 +1451,7 @@ func (x *ReportStatsResponse) String() string {
 func (*ReportStatsResponse) ProtoMessage() {}
 
 func (x *ReportStatsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[15]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1356,7 +1464,7 @@ func (x *ReportStatsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportStatsResponse.ProtoReflect.Descriptor instead.
 func (*ReportStatsResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{15}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ReportStatsResponse) GetSuccess() bool {
@@ -1380,7 +1488,7 @@ type CommandRequest struct {
 
 func (x *CommandRequest) Reset() {
 	*x = CommandRequest{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[16]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1392,7 +1500,7 @@ func (x *CommandRequest) String() string {
 func (*CommandRequest) ProtoMessage() {}
 
 func (x *CommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[16]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1405,7 +1513,7 @@ func (x *CommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandRequest.ProtoReflect.Descriptor instead.
 func (*CommandRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{16}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *CommandRequest) GetCommandId() string {
@@ -1465,7 +1573,7 @@ type CommandResponse struct {
 
 func (x *CommandResponse) Reset() {
 	*x = CommandResponse{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[17]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1477,7 +1585,7 @@ func (x *CommandResponse) String() string {
 func (*CommandResponse) ProtoMessage() {}
 
 func (x *CommandResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[17]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1490,7 +1598,7 @@ func (x *CommandResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResponse.ProtoReflect.Descriptor instead.
 func (*CommandResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{17}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *CommandResponse) GetCommandId() string {
@@ -1576,7 +1684,7 @@ type MetricsReportRequest struct {
 
 func (x *MetricsReportRequest) Reset() {
 	*x = MetricsReportRequest{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[18]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1588,7 +1696,7 @@ func (x *MetricsReportRequest) String() string {
 func (*MetricsReportRequest) ProtoMessage() {}
 
 func (x *MetricsReportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[18]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1601,7 +1709,7 @@ func (x *MetricsReportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetricsReportRequest.ProtoReflect.Descriptor instead.
 func (*MetricsReportRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{18}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *MetricsReportRequest) GetAgentId() string {
@@ -1768,7 +1876,7 @@ type MetricsReportResponse struct {
 
 func (x *MetricsReportResponse) Reset() {
 	*x = MetricsReportResponse{}
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[19]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1780,7 +1888,7 @@ func (x *MetricsReportResponse) String() string {
 func (*MetricsReportResponse) ProtoMessage() {}
 
 func (x *MetricsReportResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[19]
+	mi := &file_pkg_grpc_agentpb_aria_agent_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1793,7 +1901,7 @@ func (x *MetricsReportResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetricsReportResponse.ProtoReflect.Descriptor instead.
 func (*MetricsReportResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{19}
+	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *MetricsReportResponse) GetSuccess() bool {
@@ -1851,7 +1959,7 @@ const file_pkg_grpc_agentpb_aria_agent_proto_rawDesc = "" +
 	"\x0eobserved_state\x18\x04 \x01(\tR\robservedState\x12)\n" +
 	"\x10observed_message\x18\x05 \x01(\tR\x0fobservedMessage\x12\x1b\n" +
 	"\tpublic_ip\x18\x06 \x01(\tR\bpublicIp\x12\x1a\n" +
-	"\bendpoint\x18\a \x01(\tR\bendpoint\"\xaf\x05\n" +
+	"\bendpoint\x18\a \x01(\tR\bendpoint\"\xe1\x05\n" +
 	"\fSyncResponse\x12*\n" +
 	"\x05peers\x18\x01 \x03(\v2\x14.aria.agent.PeerInfoR\x05peers\x12\x1f\n" +
 	"\vassigned_ip\x18\x02 \x01(\tR\n" +
@@ -1867,7 +1975,8 @@ const file_pkg_grpc_agentpb_aria_agent_proto_rawDesc = "" +
 	"\x18runtime_token_expires_at\x18\n" +
 	" \x01(\x03R\x15runtimeTokenExpiresAt\x12+\n" +
 	"\x11snapshot_complete\x18\v \x01(\bR\x10snapshotComplete\x12U\n" +
-	"\x0fdomain_versions\x18\f \x03(\v2,.aria.agent.SyncResponse.DomainVersionsEntryR\x0edomainVersions\x1aA\n" +
+	"\x0fdomain_versions\x18\f \x03(\v2,.aria.agent.SyncResponse.DomainVersionsEntryR\x0edomainVersions\x120\n" +
+	"\tip_groups\x18\x14 \x03(\v2\x13.aria.agent.IPGroupR\bipGroups\x1aA\n" +
 	"\x13DomainVersionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xae\x02\n" +
@@ -1885,7 +1994,7 @@ const file_pkg_grpc_agentpb_aria_agent_proto_rawDesc = "" +
 	"assignedIp\x12\x12\n" +
 	"\x04role\x18\t \x01(\tR\x04role\x12+\n" +
 	"\x11advertised_routes\x18\n" +
-	" \x03(\tR\x10advertisedRoutes\"\xe9\x01\n" +
+	" \x03(\tR\x10advertisedRoutes\"\xad\x02\n" +
 	"\aACLRule\x12\x0e\n" +
 	"\x02id\x18\t \x01(\tR\x02id\x12\x17\n" +
 	"\asrc_net\x18\x01 \x01(\tR\x06srcNet\x12\x17\n" +
@@ -1895,7 +2004,12 @@ const file_pkg_grpc_agentpb_aria_agent_proto_rawDesc = "" +
 	"\bmax_port\x18\x05 \x01(\rR\amaxPort\x12\x16\n" +
 	"\x06action\x18\x06 \x01(\tR\x06action\x12\x1c\n" +
 	"\tdirection\x18\a \x01(\tR\tdirection\x12\x14\n" +
-	"\x05ports\x18\b \x01(\tR\x05ports\"\xca\x02\n" +
+	"\x05ports\x18\b \x01(\tR\x05ports\x12 \n" +
+	"\fsrc_group_id\x18\n" +
+	" \x01(\tR\n" +
+	"srcGroupId\x12 \n" +
+	"\fdst_group_id\x18\v \x01(\tR\n" +
+	"dstGroupId\"\xe5\x02\n" +
 	"\aQoSRule\x12\x0e\n" +
 	"\x02id\x18\f \x01(\tR\x02id\x12\x15\n" +
 	"\x06src_ip\x18\x01 \x01(\tR\x05srcIp\x12\x15\n" +
@@ -1910,16 +2024,23 @@ const file_pkg_grpc_agentpb_aria_agent_proto_rawDesc = "" +
 	"burstBytes\x12\x1a\n" +
 	"\bpriority\x18\n" +
 	" \x01(\rR\bpriority\x12\x12\n" +
-	"\x04mode\x18\v \x01(\tR\x04mode\"M\n" +
+	"\x04mode\x18\v \x01(\tR\x04mode\x12\x19\n" +
+	"\bgroup_id\x18\r \x01(\tR\agroupId\"W\n" +
+	"\aIPGroup\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
+	"\x05cidrs\x18\x03 \x03(\tR\x05cidrs\x12\x12\n" +
+	"\x04kind\x18\x04 \x01(\tR\x04kind\"M\n" +
 	"\rBlacklistRule\x12\x14\n" +
 	"\x05scope\x18\x01 \x01(\tR\x05scope\x12\x12\n" +
 	"\x04cidr\x18\x02 \x01(\tR\x04cidr\x12\x12\n" +
-	"\x04port\x18\x03 \x01(\rR\x04port\"\xe9\x01\n" +
+	"\x04port\x18\x03 \x01(\rR\x04port\"\x9b\x02\n" +
 	"\x11SyncConfigRequest\x12,\n" +
 	"\x05peers\x18\x01 \x03(\v2\x16.aria.agent.PeerConfigR\x05peers\x120\n" +
 	"\tacl_rules\x18\x02 \x03(\v2\x13.aria.agent.ACLRuleR\baclRules\x120\n" +
 	"\tqos_rules\x18\x03 \x03(\v2\x13.aria.agent.QoSRuleR\bqosRules\x12B\n" +
-	"\x0fblacklist_rules\x18\x04 \x03(\v2\x19.aria.agent.BlacklistRuleR\x0eblacklistRules\"H\n" +
+	"\x0fblacklist_rules\x18\x04 \x03(\v2\x19.aria.agent.BlacklistRuleR\x0eblacklistRules\x120\n" +
+	"\tip_groups\x18\x14 \x03(\v2\x13.aria.agent.IPGroupR\bipGroups\"H\n" +
 	"\x12SyncConfigResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\x9b\x01\n" +
@@ -2033,7 +2154,7 @@ func file_pkg_grpc_agentpb_aria_agent_proto_rawDescGZIP() []byte {
 	return file_pkg_grpc_agentpb_aria_agent_proto_rawDescData
 }
 
-var file_pkg_grpc_agentpb_aria_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_pkg_grpc_agentpb_aria_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_pkg_grpc_agentpb_aria_agent_proto_goTypes = []any{
 	(*RegisterRequest)(nil),       // 0: aria.agent.RegisterRequest
 	(*RegisterResponse)(nil),      // 1: aria.agent.RegisterResponse
@@ -2042,58 +2163,61 @@ var file_pkg_grpc_agentpb_aria_agent_proto_goTypes = []any{
 	(*PeerInfo)(nil),              // 4: aria.agent.PeerInfo
 	(*ACLRule)(nil),               // 5: aria.agent.ACLRule
 	(*QoSRule)(nil),               // 6: aria.agent.QoSRule
-	(*BlacklistRule)(nil),         // 7: aria.agent.BlacklistRule
-	(*SyncConfigRequest)(nil),     // 8: aria.agent.SyncConfigRequest
-	(*SyncConfigResponse)(nil),    // 9: aria.agent.SyncConfigResponse
-	(*PeerConfig)(nil),            // 10: aria.agent.PeerConfig
-	(*HealthCheckRequest)(nil),    // 11: aria.agent.HealthCheckRequest
-	(*HealthCheckResponse)(nil),   // 12: aria.agent.HealthCheckResponse
-	(*AgentStats)(nil),            // 13: aria.agent.AgentStats
-	(*ReportStatsRequest)(nil),    // 14: aria.agent.ReportStatsRequest
-	(*ReportStatsResponse)(nil),   // 15: aria.agent.ReportStatsResponse
-	(*CommandRequest)(nil),        // 16: aria.agent.CommandRequest
-	(*CommandResponse)(nil),       // 17: aria.agent.CommandResponse
-	(*MetricsReportRequest)(nil),  // 18: aria.agent.MetricsReportRequest
-	(*MetricsReportResponse)(nil), // 19: aria.agent.MetricsReportResponse
-	nil,                           // 20: aria.agent.SyncResponse.DomainVersionsEntry
-	nil,                           // 21: aria.agent.CommandRequest.ParamsEntry
-	nil,                           // 22: aria.agent.CommandResponse.ResultEntry
-	nil,                           // 23: aria.agent.MetricsReportRequest.CustomMetricsEntry
+	(*IPGroup)(nil),               // 7: aria.agent.IPGroup
+	(*BlacklistRule)(nil),         // 8: aria.agent.BlacklistRule
+	(*SyncConfigRequest)(nil),     // 9: aria.agent.SyncConfigRequest
+	(*SyncConfigResponse)(nil),    // 10: aria.agent.SyncConfigResponse
+	(*PeerConfig)(nil),            // 11: aria.agent.PeerConfig
+	(*HealthCheckRequest)(nil),    // 12: aria.agent.HealthCheckRequest
+	(*HealthCheckResponse)(nil),   // 13: aria.agent.HealthCheckResponse
+	(*AgentStats)(nil),            // 14: aria.agent.AgentStats
+	(*ReportStatsRequest)(nil),    // 15: aria.agent.ReportStatsRequest
+	(*ReportStatsResponse)(nil),   // 16: aria.agent.ReportStatsResponse
+	(*CommandRequest)(nil),        // 17: aria.agent.CommandRequest
+	(*CommandResponse)(nil),       // 18: aria.agent.CommandResponse
+	(*MetricsReportRequest)(nil),  // 19: aria.agent.MetricsReportRequest
+	(*MetricsReportResponse)(nil), // 20: aria.agent.MetricsReportResponse
+	nil,                           // 21: aria.agent.SyncResponse.DomainVersionsEntry
+	nil,                           // 22: aria.agent.CommandRequest.ParamsEntry
+	nil,                           // 23: aria.agent.CommandResponse.ResultEntry
+	nil,                           // 24: aria.agent.MetricsReportRequest.CustomMetricsEntry
 }
 var file_pkg_grpc_agentpb_aria_agent_proto_depIdxs = []int32{
 	4,  // 0: aria.agent.SyncResponse.peers:type_name -> aria.agent.PeerInfo
 	5,  // 1: aria.agent.SyncResponse.acl_rules:type_name -> aria.agent.ACLRule
 	6,  // 2: aria.agent.SyncResponse.qos_rules:type_name -> aria.agent.QoSRule
-	7,  // 3: aria.agent.SyncResponse.blacklist_rules:type_name -> aria.agent.BlacklistRule
-	20, // 4: aria.agent.SyncResponse.domain_versions:type_name -> aria.agent.SyncResponse.DomainVersionsEntry
-	10, // 5: aria.agent.SyncConfigRequest.peers:type_name -> aria.agent.PeerConfig
-	5,  // 6: aria.agent.SyncConfigRequest.acl_rules:type_name -> aria.agent.ACLRule
-	6,  // 7: aria.agent.SyncConfigRequest.qos_rules:type_name -> aria.agent.QoSRule
-	7,  // 8: aria.agent.SyncConfigRequest.blacklist_rules:type_name -> aria.agent.BlacklistRule
-	13, // 9: aria.agent.HealthCheckResponse.stats:type_name -> aria.agent.AgentStats
-	13, // 10: aria.agent.ReportStatsRequest.stats:type_name -> aria.agent.AgentStats
-	21, // 11: aria.agent.CommandRequest.params:type_name -> aria.agent.CommandRequest.ParamsEntry
-	22, // 12: aria.agent.CommandResponse.result:type_name -> aria.agent.CommandResponse.ResultEntry
-	23, // 13: aria.agent.MetricsReportRequest.custom_metrics:type_name -> aria.agent.MetricsReportRequest.CustomMetricsEntry
-	0,  // 14: aria.agent.ControllerService.Register:input_type -> aria.agent.RegisterRequest
-	2,  // 15: aria.agent.ControllerService.Sync:input_type -> aria.agent.SyncRequest
-	17, // 16: aria.agent.ControllerService.CommandStream:input_type -> aria.agent.CommandResponse
-	18, // 17: aria.agent.ControllerService.ReportMetrics:input_type -> aria.agent.MetricsReportRequest
-	8,  // 18: aria.agent.AgentService.SyncConfig:input_type -> aria.agent.SyncConfigRequest
-	11, // 19: aria.agent.AgentService.HealthCheck:input_type -> aria.agent.HealthCheckRequest
-	14, // 20: aria.agent.AgentService.ReportStats:input_type -> aria.agent.ReportStatsRequest
-	1,  // 21: aria.agent.ControllerService.Register:output_type -> aria.agent.RegisterResponse
-	3,  // 22: aria.agent.ControllerService.Sync:output_type -> aria.agent.SyncResponse
-	16, // 23: aria.agent.ControllerService.CommandStream:output_type -> aria.agent.CommandRequest
-	19, // 24: aria.agent.ControllerService.ReportMetrics:output_type -> aria.agent.MetricsReportResponse
-	9,  // 25: aria.agent.AgentService.SyncConfig:output_type -> aria.agent.SyncConfigResponse
-	12, // 26: aria.agent.AgentService.HealthCheck:output_type -> aria.agent.HealthCheckResponse
-	15, // 27: aria.agent.AgentService.ReportStats:output_type -> aria.agent.ReportStatsResponse
-	21, // [21:28] is the sub-list for method output_type
-	14, // [14:21] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	8,  // 3: aria.agent.SyncResponse.blacklist_rules:type_name -> aria.agent.BlacklistRule
+	21, // 4: aria.agent.SyncResponse.domain_versions:type_name -> aria.agent.SyncResponse.DomainVersionsEntry
+	7,  // 5: aria.agent.SyncResponse.ip_groups:type_name -> aria.agent.IPGroup
+	11, // 6: aria.agent.SyncConfigRequest.peers:type_name -> aria.agent.PeerConfig
+	5,  // 7: aria.agent.SyncConfigRequest.acl_rules:type_name -> aria.agent.ACLRule
+	6,  // 8: aria.agent.SyncConfigRequest.qos_rules:type_name -> aria.agent.QoSRule
+	8,  // 9: aria.agent.SyncConfigRequest.blacklist_rules:type_name -> aria.agent.BlacklistRule
+	7,  // 10: aria.agent.SyncConfigRequest.ip_groups:type_name -> aria.agent.IPGroup
+	14, // 11: aria.agent.HealthCheckResponse.stats:type_name -> aria.agent.AgentStats
+	14, // 12: aria.agent.ReportStatsRequest.stats:type_name -> aria.agent.AgentStats
+	22, // 13: aria.agent.CommandRequest.params:type_name -> aria.agent.CommandRequest.ParamsEntry
+	23, // 14: aria.agent.CommandResponse.result:type_name -> aria.agent.CommandResponse.ResultEntry
+	24, // 15: aria.agent.MetricsReportRequest.custom_metrics:type_name -> aria.agent.MetricsReportRequest.CustomMetricsEntry
+	0,  // 16: aria.agent.ControllerService.Register:input_type -> aria.agent.RegisterRequest
+	2,  // 17: aria.agent.ControllerService.Sync:input_type -> aria.agent.SyncRequest
+	18, // 18: aria.agent.ControllerService.CommandStream:input_type -> aria.agent.CommandResponse
+	19, // 19: aria.agent.ControllerService.ReportMetrics:input_type -> aria.agent.MetricsReportRequest
+	9,  // 20: aria.agent.AgentService.SyncConfig:input_type -> aria.agent.SyncConfigRequest
+	12, // 21: aria.agent.AgentService.HealthCheck:input_type -> aria.agent.HealthCheckRequest
+	15, // 22: aria.agent.AgentService.ReportStats:input_type -> aria.agent.ReportStatsRequest
+	1,  // 23: aria.agent.ControllerService.Register:output_type -> aria.agent.RegisterResponse
+	3,  // 24: aria.agent.ControllerService.Sync:output_type -> aria.agent.SyncResponse
+	17, // 25: aria.agent.ControllerService.CommandStream:output_type -> aria.agent.CommandRequest
+	20, // 26: aria.agent.ControllerService.ReportMetrics:output_type -> aria.agent.MetricsReportResponse
+	10, // 27: aria.agent.AgentService.SyncConfig:output_type -> aria.agent.SyncConfigResponse
+	13, // 28: aria.agent.AgentService.HealthCheck:output_type -> aria.agent.HealthCheckResponse
+	16, // 29: aria.agent.AgentService.ReportStats:output_type -> aria.agent.ReportStatsResponse
+	23, // [23:30] is the sub-list for method output_type
+	16, // [16:23] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_pkg_grpc_agentpb_aria_agent_proto_init() }
@@ -2107,7 +2231,7 @@ func file_pkg_grpc_agentpb_aria_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_grpc_agentpb_aria_agent_proto_rawDesc), len(file_pkg_grpc_agentpb_aria_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

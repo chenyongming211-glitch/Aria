@@ -161,8 +161,9 @@ func TestSyncResponseIncludesSnapshotMetadata(t *testing.T) {
 	expectNodeByPublicKey(mock, publicKey, nodeID, tenantID, now)
 	expectReportNodeControlState(mock, tenantID, nodeID, "applied-1", "applied", "", now)
 	expectUpdateNodePublicIdentity(mock, nodeID, "82.156.48.111", "82.156.48.111:51820")
-	expectNodeByPublicKey(mock, publicKey, nodeID, tenantID, now)
+	expectEmptyACLRules(mock, tenantID, nodeID)
 	expectEmptyQoSRules(mock, tenantID, nodeID)
+	expectEmptyPolicyIPGroups(mock, tenantID, nodeID)
 	expectNodeByPublicKey(mock, publicKey, nodeID, tenantID, now)
 	expectEmptyBlacklistRules(mock, tenantID, nodeID)
 	expectGetNodeControlState(mock, tenantID, nodeID, "dsv-phase1", now)
@@ -299,6 +300,24 @@ func expectEmptyQoSRules(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 			"src_port", "dst_port", "protocol", "bandwidth_mbps", "direction",
 			"rate_bps", "burst_bytes", "priority", "mode", "enabled", "description",
 			"created_at", "updated_at",
+		}))
+}
+
+func expectEmptyACLRules(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
+	mock.ExpectQuery(`(?s)SELECT id, tenant_id, node_id, COALESCE\(name, ''\), action, src_group_id, dst_group_id, COALESCE\(src_cidr::text, src_net::text, ''\).*FROM acl_rules.*WHERE tenant_id = \$1 AND node_id = \$2 AND enabled = true`).
+		WithArgs(tenantID, nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "name", "action", "src_group_id", "dst_group_id",
+			"src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports",
+			"priority", "enabled", "description", "created_at", "updated_at",
+		}))
+}
+
+func expectEmptyPolicyIPGroups(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
+	mock.ExpectQuery(`(?s)SELECT DISTINCT g.id, g.tenant_id, g.name, COALESCE\(g.description, ''\), g.kind, g.created_by, g.created_at, g.updated_at.*FROM ip_groups g.*WHERE g.tenant_id = \$1.*node_id = \$2`).
+		WithArgs(tenantID, nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "name", "description", "kind", "created_by", "created_at", "updated_at",
 		}))
 }
 

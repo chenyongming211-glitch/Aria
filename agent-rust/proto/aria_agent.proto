@@ -99,6 +99,7 @@ message SyncResponse {
   int64 runtime_token_expires_at = 10;       // 运行期凭据过期时间戳
   bool snapshot_complete = 11;               // 本轮同步快照是否完整
   map<string, string> domain_versions = 12;  // 各控制面 domain 的版本
+  repeated IPGroup ip_groups = 20;           // 策略引用的 IP Group 定义
 }
 
 message PeerInfo {
@@ -124,6 +125,8 @@ message ACLRule {
   string action = 6;                  // 动作：allow 或 deny
   string direction = 7;               // 方向：ingress、egress、both
   string ports = 8;                   // 端口 bitmap 规则（如 "80-82,443:0"）
+  string src_group_id = 10;           // 源 IP Group 产品 ID
+  string dst_group_id = 11;           // 目标 IP Group 产品 ID
 }
 
 message QoSRule {
@@ -139,6 +142,14 @@ message QoSRule {
   uint64 burst_bytes = 9;             // 突发字节数
   uint32 priority = 10;               // 优先级
   string mode = 11;                   // policing 或 shaping
+  string group_id = 13;               // QoS IP Group 产品 ID
+}
+
+message IPGroup {
+  string id = 1;                      // Controller IP Group ID
+  string name = 2;                    // IP Group 名称
+  repeated string cidrs = 3;          // 成员 CIDR
+  string kind = 4;                    // custom / inline / system
 }
 
 message BlacklistRule {
@@ -154,6 +165,7 @@ message SyncConfigRequest {
   repeated ACLRule acl_rules = 2;     // ACL 规则
   repeated QoSRule qos_rules = 3;     // QoS 规则
   repeated BlacklistRule blacklist_rules = 4; // 黑名单规则
+  repeated IPGroup ip_groups = 20;    // 策略引用的 IP Group 定义
 }
 
 message SyncConfigResponse {
