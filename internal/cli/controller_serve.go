@@ -1561,10 +1561,13 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 		c.logger.Info("Removed route %s from node %s", req.CIDR, req.Hostname)
 	}
 
-	// Save to database
-	if err := c.store.SaveNode(targetNode); err != nil {
-		c.logger.Error("Failed to save node: %v", err)
-		http.Error(w, "Failed to save node", http.StatusInternalServerError)
+	if err := c.store.UpdateTenantNodeAdvertisedRoutes(targetNode.ID, targetNode.TenantID, targetNode.AdvertisedRoutes); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, fmt.Sprintf("node %s is not active", req.Hostname), http.StatusConflict)
+			return
+		}
+		c.logger.Error("Failed to update node advertised routes: %v", err)
+		http.Error(w, "Failed to update node routes", http.StatusInternalServerError)
 		return
 	}
 

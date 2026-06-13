@@ -88,6 +88,24 @@ func (m *PolicyMutationTx) UpdateTenantNodeRoutes(nodeID uuid.UUID, tenantID uui
 	return nil
 }
 
+func (s *Storage) UpdateTenantNodeAdvertisedRoutes(nodeID uuid.UUID, tenantID uuid.UUID, routes []string) error {
+	result, err := s.db.Exec(
+		`UPDATE nodes SET advertised_routes = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3 AND status NOT IN ('deleted', 'suspended', 'banned')`,
+		pq.Array(routes), nodeID, tenantID,
+	)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (s *Storage) MutatePolicyAndQueueSync(mutate func(*PolicyMutationTx) (PolicySyncRequest, error)) (*PolicySyncResult, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
