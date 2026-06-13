@@ -204,6 +204,21 @@ describe('router RBAC metadata', () => {
     expect(router.currentRoute.value.path).toBe('/nodes')
   })
 
+  it('blocks permission routes for non-super_admin users with stale wildcard permissions', async () => {
+    await router.replace('/login')
+    await router.isReady()
+
+    localStorage.setItem('aria_token', 'dummy-token')
+    localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
+    localStorage.setItem('aria_last_activity', `${Date.now()}`)
+    localStorage.setItem('aria_user', JSON.stringify({ role: 'custom-role', tenant_id: 'tenant-1' }))
+    localStorage.setItem('aria_permissions', JSON.stringify(['*']))
+
+    await router.push('/platform/tokens')
+
+    expect(router.currentRoute.value.path).not.toBe('/platform/tokens')
+  })
+
   it('blocks Settings navigation for non-super_admin users', async () => {
     localStorage.setItem('aria_token', 'dummy-token')
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)

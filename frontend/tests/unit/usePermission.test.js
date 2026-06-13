@@ -24,6 +24,16 @@ describe('usePermission', () => {
     expect(hasPermission('nodes:write')).toBe(false)
   })
 
+  it('ignores cached wildcard permissions for non-super_admin users', () => {
+    mockUserStore.user = { role: 'admin' }
+    mockUserStore.permissions = ['*']
+
+    const { hasPermission, hasAnyPermission } = usePermission()
+
+    expect(hasPermission('tokens:write')).toBe(false)
+    expect(hasAnyPermission(['nodes:read', 'settings:write'])).toBe(false)
+  })
+
   it('grants wildcard permissions', () => {
     mockUserStore.permissions = ['*']
     const { hasPermission, hasAllPermissions } = usePermission()
