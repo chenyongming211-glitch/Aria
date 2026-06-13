@@ -1418,7 +1418,7 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 			ruleForWrite.SrcCIDR = ""
 			ruleForWrite.DstCIDR = ""
 			ruleForValidation.GroupID = ruleForWrite.GroupID
-			if !groupChanged || body.GroupID != nil {
+			if body.GroupID != nil || (!groupChanged && rule.GroupID.Valid && strings.TrimSpace(rule.SrcCIDR) == "" && strings.TrimSpace(rule.DstCIDR) == "") {
 				if ruleForValidation.Group, err = tx.GetIPGroup(tenantID, ruleForWrite.GroupID.UUID); err != nil {
 					return nil, fmt.Errorf("load QoS IP group: %w", err)
 				}

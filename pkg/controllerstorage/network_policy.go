@@ -358,7 +358,8 @@ func createTenantNodeACLRule(q policyMutationExecutor, rule *ACLRuleRecord, bump
 		nullableInt(rule.DstPort), rule.Protocol, rule.Direction, rule.Ports,
 		rule.Priority, rule.Enabled, strings.TrimSpace(rule.Description), srcNet, dstNet, minPort, maxPort,
 	).Scan(
-		&created.ID, &created.TenantID, &created.NodeID, &created.Name, &created.Action, &created.SrcCIDR, &created.DstCIDR,
+		&created.ID, &created.TenantID, &created.NodeID, &created.Name, &created.Action,
+		&created.SrcGroupID, &created.DstGroupID, &created.SrcCIDR, &created.DstCIDR,
 		&created.DstPort, &created.Protocol, &created.Direction, &created.Ports,
 		&created.Priority, &created.Enabled, &created.Description,
 		&created.CreatedAt, &created.UpdatedAt,

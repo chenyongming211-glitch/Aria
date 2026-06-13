@@ -38,15 +38,15 @@ func TestGetQoSRulesIncludesAgentRuntimeContractFields(t *testing.T) {
 			"", now, now,
 		))
 
-	mock.ExpectQuery(`(?s)SELECT id, tenant_id, node_id, COALESCE\(src_cidr::text, ''\).*direction.*rate_bps.*burst_bytes.*priority.*mode.*FROM qos_rules.*WHERE tenant_id = \$1 AND node_id = \$2 AND enabled = true`).
+	mock.ExpectQuery(`(?s)SELECT id, tenant_id, node_id, group_id, COALESCE\(src_cidr::text, ''\).*direction.*rate_bps.*burst_bytes.*priority.*mode.*FROM qos_rules.*WHERE tenant_id = \$1 AND node_id = \$2 AND enabled = true`).
 		WithArgs(tenantID, nodeID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "src_cidr", "dst_cidr",
+			"id", "tenant_id", "node_id", "group_id", "src_cidr", "dst_cidr",
 			"src_port", "dst_port", "protocol", "bandwidth_mbps", "direction",
 			"rate_bps", "burst_bytes", "priority", "mode", "enabled", "description",
 			"created_at", "updated_at",
 		}).AddRow(
-			ruleID, tenantID, nodeID, "10.0.0.0/24", "192.0.2.0/24",
+			ruleID, tenantID, nodeID, nil, "10.0.0.0/24", "192.0.2.0/24",
 			0, 443, 6, 100, "egress",
 			uint64(250_000_000), uint64(4_000_000), 7, "shaping", true, "shape web",
 			now, now,
