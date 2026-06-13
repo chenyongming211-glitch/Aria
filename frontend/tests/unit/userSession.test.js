@@ -293,6 +293,36 @@ describe('user session persistence', () => {
     expect(JSON.parse(localStorage.getItem('aria_permissions'))).toEqual(userStore.permissions)
   })
 
+  it('matches fallback custom roles case-insensitively when auth permission lookup fails', async () => {
+    api.get.mockImplementation((url) => {
+      if (url === '/v2/auth/permissions') {
+        return Promise.reject(new Error('permission lookup unavailable'))
+      }
+      if (url === '/v2/tenants/tenant-1/roles') {
+        return Promise.resolve({
+          data: {
+            data: [
+              {
+                name: 'OpsRole',
+                permissions: ['nodes:read', 'qos:read']
+              }
+            ]
+          }
+        })
+      }
+      return Promise.reject(new Error(`unexpected URL: ${url}`))
+    })
+
+    const userStore = useUserStore()
+
+    await userStore.loadPermissions('tenant-1', 'opsrole')
+
+    expect(api.get).toHaveBeenCalledWith('/v2/auth/permissions')
+    expect(api.get).toHaveBeenCalledWith('/v2/tenants/tenant-1/roles')
+    expect(userStore.permissions).toEqual(['nodes:read', 'qos:read'])
+    expect(JSON.parse(localStorage.getItem('aria_permissions'))).toEqual(['nodes:read', 'qos:read'])
+  })
+
   it('restores role permissions immediately and refreshes them from the server', async () => {
     api.get.mockResolvedValue({
       data: {
