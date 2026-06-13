@@ -132,6 +132,8 @@ func (r *Router) HandleTenantScoped(w http.ResponseWriter, req *http.Request) {
 		r.handleTenantTokens(w, req, tenantID, role)
 	case strings.HasPrefix(rest, "roles"):
 		r.handleTenantRoles(w, req, tenantID)
+	case strings.HasPrefix(rest, "ip-groups"):
+		r.handleTenantIPGroups(w, req, tenantID)
 	case strings.HasPrefix(rest, "nodes"):
 		r.handleTenantNodes(w, req, tenantID, role)
 	case strings.HasPrefix(rest, "agents"):

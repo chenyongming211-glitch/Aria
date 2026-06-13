@@ -113,7 +113,36 @@ SD-WAN 核心物理与逻辑网络资产管理。
 
 基于 eBPF 的节点入向与出向内核级安全防护。
 
-### 5.1 ACL 策略管理（匹配 eBPF `POLICY_MAP`）
+### 5.1 IP Groups
+
+IP Group 是 ACL/QoS 的主要产品匹配模型。直接 CIDR 输入仅作为便捷路径，保存策略时应创建或复用系统管理的 inline IP Group。
+
+| 方法 | URL | 权限说明 |
+|---|---|---|
+| `GET` | `/api/v2/tenants/{tenant_id}/ip-groups` | `ip-groups:read` |
+| `POST` | `/api/v2/tenants/{tenant_id}/ip-groups` | `ip-groups:write` |
+| `GET` | `/api/v2/tenants/{tenant_id}/ip-groups/{group_id}` | `ip-groups:read` |
+| `PUT` | `/api/v2/tenants/{tenant_id}/ip-groups/{group_id}` | `ip-groups:write` |
+| `DELETE` | `/api/v2/tenants/{tenant_id}/ip-groups/{group_id}` | `ip-groups:write` |
+
+`POST /api/v2/tenants/{tenant_id}/ip-groups`
+
+```json
+{
+  "name": "office",
+  "description": "office IPv4 and IPv6 ranges",
+  "members": [
+    {"cidr": "10.10.0.0/16"},
+    {"cidr": "2001:db8:10::/48"}
+  ]
+}
+```
+
+Overlaps are allowed and returned as warnings. Exact duplicate CIDRs across two
+non-inline groups are rejected because the Agent/eBPF runtime can only assign
+one runtime group id to an exact LPM key.
+
+### 5.2 ACL 策略管理（匹配 eBPF `POLICY_MAP`）
 
 | 方法 | URL | 权限说明 |
 |---|---|---|
@@ -122,7 +151,7 @@ SD-WAN 核心物理与逻辑网络资产管理。
 | `PUT` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/security/acls/{rule_id}` | 租户管理员 |
 | `DELETE` | `/api/v2/tenants/{tenant_id}/nodes/{node_id}/security/acls/{rule_id}` | 租户管理员 |
 
-### 5.2 黑名单管理（匹配 eBPF `BLOCK_*_MAP`）
+### 5.3 黑名单管理（匹配 eBPF `BLOCK_*_MAP`）
 
 | 方法 | URL | 业务说明 |
 |---|---|---|
@@ -204,8 +233,8 @@ SD-WAN 核心物理与逻辑网络资产管理。
 | 租户管理域 | 租户生命周期与配额调整 |
 | IAM 域 | 租户成员管理、Enrollment Token、角色权限 |
 | 拓扑域 | 节点纳管、路由管理与连通性 |
-| 安全控制域 | ACL 与黑名单策略管理 |
-| QoS 域 | 分层流量整形与限速策略 |
+| 安全控制域 | IP Group、ACL 与黑名单策略管理 |
+| QoS 域 | 节点级 group + direction 流量限速策略 |
 | Policy Center | 租户统一策略读模型与交付状态视图 |
 | AI 域 | 智能运维对话与确认执行 |
 | 运维域 | 监控视图、告警处理、节点状态与远程命令 |

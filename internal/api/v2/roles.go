@@ -22,6 +22,8 @@ var allowedCustomRolePermissions = map[string]struct{}{
 	middleware.PermAclsWrite:      {},
 	middleware.PermQosRead:        {},
 	middleware.PermQosWrite:       {},
+	middleware.PermIPGroupsRead:   {},
+	middleware.PermIPGroupsWrite:  {},
 	middleware.PermBlacklistRead:  {},
 	middleware.PermBlacklistWrite: {},
 	middleware.PermMonitoringRead: {},

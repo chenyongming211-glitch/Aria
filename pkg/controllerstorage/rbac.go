@@ -31,6 +31,7 @@ var (
 		"routes:read", "routes:write",
 		"acls:read", "acls:write",
 		"qos:read", "qos:write",
+		"ip-groups:read", "ip-groups:write",
 		"blacklist:read", "blacklist:write",
 		"monitoring:read",
 		"commands:write",
@@ -47,6 +48,7 @@ var (
 		"routes:read", "routes:write",
 		"acls:read", "acls:write",
 		"qos:read", "qos:write",
+		"ip-groups:read", "ip-groups:write",
 		"blacklist:read", "blacklist:write",
 		"monitoring:read",
 		"commands:write",
@@ -59,6 +61,7 @@ var (
 		"routes:read",
 		"acls:read",
 		"qos:read",
+		"ip-groups:read",
 		"blacklist:read",
 		"monitoring:read",
 		"ai:use",
@@ -100,7 +103,11 @@ func (s *Storage) createSystemRoles(exec roleExec, tenantID uuid.UUID) error {
 		_, err := exec.Exec(`
 			INSERT INTO roles (tenant_id, name, description, is_system, permissions)
 			VALUES ($1, $2, $3, true, $4)
-			ON CONFLICT (tenant_id, name) DO NOTHING
+			ON CONFLICT (tenant_id, name) DO UPDATE SET
+				description = EXCLUDED.description,
+				is_system = true,
+				permissions = EXCLUDED.permissions,
+				updated_at = NOW()
 		`, tenantID, sr.name, sr.desc, pq.Array(sr.permissions))
 		if err != nil {
 			return fmt.Errorf("failed to create system role %s: %w", sr.name, err)

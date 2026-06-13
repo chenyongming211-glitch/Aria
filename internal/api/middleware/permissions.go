@@ -11,6 +11,8 @@ const (
 	PermAclsWrite      = "acls:write"
 	PermQosRead        = "qos:read"
 	PermQosWrite       = "qos:write"
+	PermIPGroupsRead   = "ip-groups:read"
+	PermIPGroupsWrite  = "ip-groups:write"
 	PermBlacklistRead  = "blacklist:read"
 	PermBlacklistWrite = "blacklist:write"
 	PermMonitoringRead = "monitoring:read"
