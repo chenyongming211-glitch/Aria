@@ -10,8 +10,8 @@ ports, volumes, and network.
 
 | Service | Container | Image | Ports |
 | --- | --- | --- | --- |
-| Frontend | `aria-frontend` | `nginx:1.27-alpine` | `18080:80` |
-| Controller | `aria-controller` | `ghcr.io/chenyongming211-glitch/aria-controller:0.2.35-test` | `50051:50051` |
+| Frontend | `aria-frontend` | `nginx:1.27-alpine` | `80:80`, `443:443` |
+| Controller | `aria-controller` | `ghcr.io/chenyongming211-glitch/aria-controller:<VERSION>` | `50051:50051` |
 | Postgres | `aria-postgres` | `postgres:16-alpine` | `127.0.0.1:15432:5432` |
 | Redis | `aria-redis` | `redis:7-alpine` | `127.0.0.1:16379:6379` |
 | VictoriaMetrics | `aria-victoriametrics` | `victoriametrics/victoria-metrics:latest` | `127.0.0.1:18428:8428` |
@@ -27,14 +27,15 @@ under `/assets/` can use long immutable caching.
 
 Do not build release binaries or Docker images locally. Use GitHub Actions.
 
-1. Merge the release branch into `master`.
-2. Confirm the push-triggered `Build` workflow passes Go, Rust Agent, and Frontend jobs.
-3. Trigger `workflow_dispatch` for the `Build` workflow on `master`.
-4. Confirm `Docker Build & Push` succeeds and publishes:
+1. Bump the root `VERSION` file for every shipped change.
+2. Merge the release branch into `master`.
+3. Confirm the push-triggered `Build` workflow passes Go, Rust Agent, and Frontend jobs.
+4. Trigger `workflow_dispatch` for the `Build` workflow on `master`.
+5. Confirm `Docker Build & Push` succeeds and publishes:
    - `ghcr.io/chenyongming211-glitch/aria-controller:latest`
    - `ghcr.io/chenyongming211-glitch/aria-controller:<VERSION>`
-5. Download the `frontend-dist` workflow artifact from the same run.
-6. Deploy the Controller image and frontend artifact to `/root/aria-controller`.
+6. Download the `frontend-dist` workflow artifact from the same run.
+7. Deploy the Controller image and frontend artifact to `/root/aria-controller`.
 
 Useful commands:
 
@@ -130,7 +131,8 @@ Pull and apply the Controller image:
 
 ```bash
 cd /root/aria-controller
-docker pull ghcr.io/chenyongming211-glitch/aria-controller:0.2.35-test
+VERSION=<VERSION>
+docker pull ghcr.io/chenyongming211-glitch/aria-controller:${VERSION}
 docker compose up -d aria-controller
 docker compose ps aria-controller
 docker logs --since 2m aria-controller
@@ -165,7 +167,7 @@ ssh root@8.152.163.101 '
 
 ```bash
 ssh root@8.152.163.101 'docker ps --format "{{.Names}}\t{{.Image}}\t{{.Status}}" | grep aria'
-ssh root@8.152.163.101 'curl -fsS http://127.0.0.1:18080/api/version'
+ssh root@8.152.163.101 'curl -k --resolve aria.yun:443:127.0.0.1 -fsS https://aria.yun/api/version'
 curl -fsS https://aria.yun/api/version
 ```
 

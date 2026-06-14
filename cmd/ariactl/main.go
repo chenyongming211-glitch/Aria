@@ -19,7 +19,7 @@ var (
 	controllerURL string
 	authToken     string
 	tenantID      string
-	version       = "0.2.26-test-7" // 默认开发版本，通过 ldflags 注入
+	version       = "0.2.36" // 默认开发版本，通过 ldflags 注入
 )
 
 var rootCmd = &cobra.Command{
