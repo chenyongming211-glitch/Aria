@@ -152,6 +152,7 @@ func aclRecordToProto(record *controllerstorage.ACLRuleRecord) *agentpb.ACLRule 
 		Action:    record.Action,
 		Direction: record.Direction,
 		Ports:     record.Ports,
+		Priority:  uint32(record.Priority),
 	}
 	if record.DstPort > 0 {
 		rule.MinPort = uint32(record.DstPort)
@@ -300,6 +301,7 @@ func aclRulesFromLegacyPayload(payload interface{}) ([]*agentpb.ACLRule, error) 
 			Action:    getString(raw, "action"),
 			Direction: getString(raw, "direction"),
 			Ports:     getString(raw, "ports"),
+			Priority:  getUint32(raw, "priority"),
 		})
 	}
 	return rules, nil
@@ -351,6 +353,7 @@ func compileACLRule(rule *agentpb.ACLRule) ([]*agentpb.ACLRule, error) {
 			Ports:      ports,
 			SrcGroupId: rule.GetSrcGroupId(),
 			DstGroupId: rule.GetDstGroupId(),
+			Priority:   rule.GetPriority(),
 		})
 	}
 	return compiled, nil

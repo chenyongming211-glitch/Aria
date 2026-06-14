@@ -615,6 +615,7 @@ type ACLRule struct {
 	Ports         string                 `protobuf:"bytes,8,opt,name=ports,proto3" json:"ports,omitempty"`                                // 端口 bitmap 规则（如 "80-82,443:0"）
 	SrcGroupId    string                 `protobuf:"bytes,10,opt,name=src_group_id,json=srcGroupId,proto3" json:"src_group_id,omitempty"` // 源 IP Group 产品 ID
 	DstGroupId    string                 `protobuf:"bytes,11,opt,name=dst_group_id,json=dstGroupId,proto3" json:"dst_group_id,omitempty"` // 目标 IP Group 产品 ID
+	Priority      uint32                 `protobuf:"varint,12,opt,name=priority,proto3" json:"priority,omitempty"`                        // 优先级，数字越小越优先
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -724,6 +725,13 @@ func (x *ACLRule) GetDstGroupId() string {
 		return x.DstGroupId
 	}
 	return ""
+}
+
+func (x *ACLRule) GetPriority() uint32 {
+	if x != nil {
+		return x.Priority
+	}
+	return 0
 }
 
 type QoSRule struct {
@@ -1994,7 +2002,7 @@ const file_pkg_grpc_agentpb_aria_agent_proto_rawDesc = "" +
 	"assignedIp\x12\x12\n" +
 	"\x04role\x18\t \x01(\tR\x04role\x12+\n" +
 	"\x11advertised_routes\x18\n" +
-	" \x03(\tR\x10advertisedRoutes\"\xad\x02\n" +
+	" \x03(\tR\x10advertisedRoutes\"\xc9\x02\n" +
 	"\aACLRule\x12\x0e\n" +
 	"\x02id\x18\t \x01(\tR\x02id\x12\x17\n" +
 	"\asrc_net\x18\x01 \x01(\tR\x06srcNet\x12\x17\n" +
@@ -2009,7 +2017,8 @@ const file_pkg_grpc_agentpb_aria_agent_proto_rawDesc = "" +
 	" \x01(\tR\n" +
 	"srcGroupId\x12 \n" +
 	"\fdst_group_id\x18\v \x01(\tR\n" +
-	"dstGroupId\"\xe5\x02\n" +
+	"dstGroupId\x12\x1a\n" +
+	"\bpriority\x18\f \x01(\rR\bpriority\"\xe5\x02\n" +
 	"\aQoSRule\x12\x0e\n" +
 	"\x02id\x18\f \x01(\tR\x02id\x12\x15\n" +
 	"\x06src_ip\x18\x01 \x01(\tR\x05srcIp\x12\x15\n" +

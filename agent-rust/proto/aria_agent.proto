@@ -127,6 +127,7 @@ message ACLRule {
   string ports = 8;                   // 端口 bitmap 规则（如 "80-82,443:0"）
   string src_group_id = 10;           // 源 IP Group 产品 ID
   string dst_group_id = 11;           // 目标 IP Group 产品 ID
+  uint32 priority = 12;               // 优先级，数字越小越优先
 }
 
 message QoSRule {

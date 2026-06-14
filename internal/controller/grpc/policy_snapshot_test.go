@@ -20,6 +20,7 @@ func TestCompilePolicySnapshotExpandsPortAclAndBlacklist(t *testing.T) {
 			"max_port":  443,
 			"action":    "drop",
 			"direction": "all",
+			"priority":  float64(200),
 		},
 	}
 
@@ -46,7 +47,8 @@ func TestCompilePolicySnapshotExpandsPortAclAndBlacklist(t *testing.T) {
 			rule.GetProtocol() != proto ||
 			rule.GetAction() != "deny" ||
 			rule.GetDirection() != "both" ||
-			rule.GetPorts() != "443" {
+			rule.GetPorts() != "443" ||
+			rule.GetPriority() != 200 {
 			t.Fatalf("unexpected expanded ACL rule %d: %#v", i, rule)
 		}
 	}
@@ -58,7 +60,8 @@ func TestCompilePolicySnapshotExpandsPortAclAndBlacklist(t *testing.T) {
 			rule.GetProtocol() != proto ||
 			rule.GetAction() != "deny" ||
 			rule.GetDirection() != "ingress" ||
-			rule.GetPorts() != "53" {
+			rule.GetPorts() != "53" ||
+			rule.GetPriority() != 0 {
 			t.Fatalf("unexpected blacklist-derived ACL rule %d: %#v", i, rule)
 		}
 	}
@@ -173,7 +176,9 @@ func TestCompilePolicySnapshotIncludesIPGroups(t *testing.T) {
 	if snapshot.IPGroups[0].GetId() != officeID || len(snapshot.IPGroups[0].GetCidrs()) != 2 {
 		t.Fatalf("office group was not compiled with members: %#v", snapshot.IPGroups[0])
 	}
-	if snapshot.ACLRules[0].GetSrcGroupId() != officeID || snapshot.ACLRules[0].GetDstGroupId() != prodID {
+	if snapshot.ACLRules[0].GetSrcGroupId() != officeID ||
+		snapshot.ACLRules[0].GetDstGroupId() != prodID ||
+		snapshot.ACLRules[0].GetPriority() != 100 {
 		t.Fatalf("ACL group ids not preserved: %#v", snapshot.ACLRules[0])
 	}
 	if snapshot.QoSRules[0].GetGroupId() != officeID {

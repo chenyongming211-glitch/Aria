@@ -40,11 +40,6 @@ const CERTIFICATE_RENEW_CHECK_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const TC_PRIORITY_ACL_EGRESS: u16 = 100;
 const TC_PRIORITY_QOS: u16 = 200;
 const BLACKLIST_ACL_PRIORITY: u16 = 0;
-const CONTROLLER_ACL_PRIORITY_BASE: u16 = 1024;
-
-fn controller_acl_order_priority(index: usize) -> u16 {
-    CONTROLLER_ACL_PRIORITY_BASE.saturating_add(u16::try_from(index).unwrap_or(u16::MAX))
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UnixRequest {
@@ -1506,7 +1501,7 @@ impl AgentRuntime {
             qos_enabled: true,
         };
 
-        for (idx, rule) in acl_rules.iter().enumerate() {
+        for rule in acl_rules.iter() {
             let policy = acl_policy_from_sync_rule(rule)?;
             for direction in requested_directions(policy.direction) {
                 snapshot.acl_rules.push(AclRuleSpec {
@@ -1517,7 +1512,7 @@ impl AgentRuntime {
                     dst_group_id: policy.dst_group_id.clone(),
                     proto: policy.proto,
                     action: policy.action,
-                    priority: controller_acl_order_priority(idx),
+                    priority: policy.priority,
                     direction,
                     ports: policy.ports.clone(),
                 });

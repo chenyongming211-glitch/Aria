@@ -305,6 +305,7 @@ impl GrpcClient {
                 action: r.action,
                 direction: r.direction,
                 ports: r.ports,
+                priority: r.priority,
             }).collect(),
             qos_rules: resp.qos_rules.into_iter().map(|r| QoSRule {
                 id: r.id,
@@ -525,6 +526,7 @@ pub struct AclRule {
     pub action: String,
     pub direction: String,
     pub ports: String,
+    pub priority: u32,
 }
 
 #[allow(dead_code)]
@@ -564,6 +566,7 @@ pub struct AgentAclPolicy {
     pub action: u8,
     pub direction: u8,
     pub ports: Option<String>,
+    pub priority: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -584,6 +587,7 @@ pub fn acl_policy_from_sync_rule(rule: &AclRule) -> Result<AgentAclPolicy> {
     let direction = direction_from_string_or_default(&rule.direction, 0)?;
     let ports = acl_ports_from_rule(rule)?;
     validate_acl_ports(proto, ports.as_deref())?;
+    let priority = u16::try_from(rule.priority).context("ACL priority must fit in u16")?;
 
     Ok(AgentAclPolicy {
         id: rule.id.clone(),
@@ -595,6 +599,7 @@ pub fn acl_policy_from_sync_rule(rule: &AclRule) -> Result<AgentAclPolicy> {
         action,
         direction,
         ports,
+        priority,
     })
 }
 
@@ -814,6 +819,7 @@ mod tests {
             action: "deny".to_string(),
             direction: "egress".to_string(),
             ports: String::new(),
+            priority: 100,
         })
         .expect("valid ACL sync rule");
 
@@ -823,6 +829,7 @@ mod tests {
         assert_eq!(policy.action, 1);
         assert_eq!(policy.direction, 1);
         assert_eq!(policy.ports.as_deref(), Some("80-82"));
+        assert_eq!(policy.priority, 100);
     }
 
     #[test]
@@ -839,6 +846,7 @@ mod tests {
             action: "allow".to_string(),
             direction: "ingress".to_string(),
             ports: String::new(),
+            priority: 100,
         });
 
         assert!(result.is_err());
@@ -858,6 +866,7 @@ mod tests {
             action: "deny".to_string(),
             direction: "egress".to_string(),
             ports: String::new(),
+            priority: 100,
         })
         .expect("valid ACL group rule");
 
