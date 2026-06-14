@@ -34,6 +34,8 @@ type PolicySyncResult struct {
 	Delivery            *PolicyDelivery
 }
 
+type IPGroupPolicySyncBuilder func(tx *PolicyMutationTx, updated *IPGroupRecord, nodes []*Node) ([]PolicySyncRequest, error)
+
 type PolicyMutationTx struct {
 	tx *sql.Tx
 }
@@ -151,6 +153,58 @@ func (s *Storage) MutatePolicyAndQueueSync(mutate func(*PolicyMutationTx) (Polic
 
 	s.recordCommandQueuedAudit(req, result.Command)
 	return result, nil
+}
+
+func (s *Storage) UpdateIPGroupAndQueuePolicySyncs(tenantID, groupID uuid.UUID, group *IPGroupRecord, build IPGroupPolicySyncBuilder) (*IPGroupRecord, []*PolicySyncResult, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	updated, err := updateIPGroupWith(tx, tenantID, groupID, group)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	nodes, err := s.listNodesReferencingIPGroupWith(tx, tenantID, groupID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var requests []PolicySyncRequest
+	if build != nil {
+		requests, err = build(&PolicyMutationTx{tx: tx}, updated, nodes)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	results := make([]*PolicySyncResult, 0, len(requests))
+	for _, req := range requests {
+		result, err := s.queuePolicySyncTx(tx, req)
+		if err != nil {
+			return nil, nil, err
+		}
+		results = append(results, result)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
+	committed = true
+
+	for i, req := range requests {
+		if i < len(results) && results[i] != nil {
+			s.recordCommandQueuedAudit(req, results[i].Command)
+		}
+	}
+	return updated, results, nil
 }
 
 func (s *Storage) QueuePolicySync(req PolicySyncRequest) (*PolicySyncResult, error) {

@@ -203,6 +203,23 @@ func (s *Storage) UpdateIPGroup(group *IPGroupRecord) (*IPGroupRecord, error) {
 }
 
 func (s *Storage) UpdateIPGroupByID(tenantID, groupID uuid.UUID, group *IPGroupRecord) (*IPGroupRecord, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer rollbackIfOpen(tx)
+
+	updated, err := updateIPGroupWith(tx, tenantID, groupID, group)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
+func updateIPGroupWith(q ipGroupExecutor, tenantID, groupID uuid.UUID, group *IPGroupRecord) (*IPGroupRecord, error) {
 	if group == nil {
 		return nil, fmt.Errorf("ip group cannot be nil")
 	}
@@ -212,18 +229,12 @@ func (s *Storage) UpdateIPGroupByID(tenantID, groupID uuid.UUID, group *IPGroupR
 	if err != nil {
 		return nil, err
 	}
-	if err := s.rejectExactDuplicateIPGroupMembers(tenantID, groupID, normalized.Members); err != nil {
+	if err := rejectExactDuplicateIPGroupMembersWith(q, tenantID, groupID, normalized.Members); err != nil {
 		return nil, err
 	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer rollbackIfOpen(tx)
 
 	updated := &IPGroupRecord{}
-	err = tx.QueryRow(
+	err = q.QueryRow(
 		`UPDATE ip_groups
 		    SET name = $3, description = $4, kind = $5, updated_at = NOW()
 		  WHERE tenant_id = $1 AND id = $2
@@ -247,16 +258,13 @@ func (s *Storage) UpdateIPGroupByID(tenantID, groupID uuid.UUID, group *IPGroupR
 		return nil, err
 	}
 
-	if _, err := tx.Exec(`DELETE FROM ip_group_members WHERE tenant_id = $1 AND group_id = $2`, tenantID, groupID); err != nil {
+	if _, err := q.Exec(`DELETE FROM ip_group_members WHERE tenant_id = $1 AND group_id = $2`, tenantID, groupID); err != nil {
 		return nil, err
 	}
-	if err := insertIPGroupMembers(tx, tenantID, groupID, normalized.Members, false); err != nil {
+	if err := insertIPGroupMembers(q, tenantID, groupID, normalized.Members, false); err != nil {
 		return nil, err
 	}
 	updated.Members = withIPGroupID(normalized.Members, groupID)
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
 	return updated, nil
 }
 
@@ -470,6 +478,50 @@ func rejectExactDuplicateIPGroupMembersWith(q ipGroupExecutor, tenantID, exclude
 
 func (s *Storage) listIPGroupMembers(tenantID, groupID uuid.UUID) ([]IPGroupMemberRecord, error) {
 	return listIPGroupMembersWith(s.db, tenantID, groupID)
+}
+
+func (s *Storage) ListNodesReferencingIPGroup(tenantID, groupID uuid.UUID) ([]*Node, error) {
+	return s.listNodesReferencingIPGroupWith(s.db, tenantID, groupID)
+}
+
+func (s *Storage) listNodesReferencingIPGroupWith(q ipGroupExecutor, tenantID, groupID uuid.UUID) ([]*Node, error) {
+	rows, err := q.Query(
+		`SELECT `+nodeSelectColumns+`
+		   FROM nodes
+		  WHERE tenant_id = $1
+		    AND status NOT IN ('deleted', 'suspended', 'banned')
+		    AND (
+		      EXISTS (
+		        SELECT 1 FROM acl_rules
+		         WHERE tenant_id = $1
+		           AND node_id = nodes.id
+		           AND (src_group_id = $2 OR dst_group_id = $2)
+		      )
+		      OR EXISTS (
+		        SELECT 1 FROM qos_rules
+		         WHERE tenant_id = $1
+		           AND node_id = nodes.id
+		           AND group_id = $2
+		      )
+		    )
+		  ORDER BY hostname ASC, public_key ASC`,
+		tenantID,
+		groupID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	nodes := make([]*Node, 0)
+	for rows.Next() {
+		node, err := s.scanNodeRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes, rows.Err()
 }
 
 func listIPGroupMembersWith(q ipGroupExecutor, tenantID, groupID uuid.UUID) ([]IPGroupMemberRecord, error) {

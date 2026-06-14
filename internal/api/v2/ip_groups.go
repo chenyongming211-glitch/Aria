@@ -143,7 +143,9 @@ func (r *Router) updateTenantIPGroup(w http.ResponseWriter, req *http.Request, t
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
 		return
 	}
-	updated, err := r.store.UpdateIPGroup(record)
+	updated, dispatchResults, err := r.store.UpdateIPGroupAndQueuePolicySyncs(tenantID, groupID, record, func(tx *controllerstorage.PolicyMutationTx, updated *controllerstorage.IPGroupRecord, nodes []*controllerstorage.Node) ([]controllerstorage.PolicySyncRequest, error) {
+		return r.buildIPGroupUpdateSyncRequests(tx, tenantID, updated, nodes)
+	})
 	if err != nil {
 		writeIPGroupError(w, "update", err)
 		return
@@ -152,7 +154,16 @@ func (r *Router) updateTenantIPGroup(w http.ResponseWriter, req *http.Request, t
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load IP group warnings: "+err.Error(), nil)
 		return
 	}
-	apibase.WriteSuccess(w, ipGroupResponse(updated), "IP group updated successfully")
+	payload := ipGroupResponse(updated)
+	dispatches := make([]map[string]interface{}, 0, len(dispatchResults))
+	for _, result := range dispatchResults {
+		if result == nil {
+			continue
+		}
+		dispatches = append(dispatches, policySyncDispatch(result))
+	}
+	payload["dispatches"] = dispatches
+	apibase.WriteSuccess(w, payload, "IP group updated successfully")
 }
 
 func (r *Router) deleteTenantIPGroup(w http.ResponseWriter, tenantID, groupID uuid.UUID) {
@@ -198,6 +209,63 @@ func (r *Router) attachIPGroupWarnings(tenantID uuid.UUID, group *controllerstor
 		return err
 	}
 	group.Warnings = warnings
+	return nil
+}
+
+func (r *Router) buildIPGroupUpdateSyncRequests(tx *controllerstorage.PolicyMutationTx, tenantID uuid.UUID, group *controllerstorage.IPGroupRecord, nodes []*controllerstorage.Node) ([]controllerstorage.PolicySyncRequest, error) {
+	if group == nil {
+		return nil, fmt.Errorf("ip group cannot be nil")
+	}
+
+	requests := make([]controllerstorage.PolicySyncRequest, 0, len(nodes))
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		if err := validateNodePolicyConflicts(tx, tenantID, node.ID); err != nil {
+			return nil, err
+		}
+		metadata := map[string]interface{}{
+			"group_id":   group.ID.String(),
+			"group_name": group.Name,
+		}
+		requests = append(requests, r.buildPolicySyncRequest(node, "ip-group", "update", group.ID.String(), group.Name, metadata))
+	}
+	return requests, nil
+}
+
+func validateNodePolicyConflicts(tx *controllerstorage.PolicyMutationTx, tenantID, nodeID uuid.UUID) error {
+	aclRules, err := tx.ListTenantNodeACLRules(tenantID, nodeID)
+	if err != nil {
+		return fmt.Errorf("load ACL rules for IP group conflict check: %w", err)
+	}
+	if err := hydrateACLRuleGroups(tx, tenantID, aclRules); err != nil {
+		return err
+	}
+	for _, rule := range aclRules {
+		if rule == nil {
+			continue
+		}
+		if err := controllerstorage.DetectACLPolicyConflict(aclRules, rule, rule.ID); err != nil {
+			return err
+		}
+	}
+
+	qosRules, err := tx.ListTenantNodeQoSRules(tenantID, nodeID)
+	if err != nil {
+		return fmt.Errorf("load QoS rules for IP group conflict check: %w", err)
+	}
+	if err := hydrateQoSRuleGroups(tx, tenantID, qosRules); err != nil {
+		return err
+	}
+	for _, rule := range qosRules {
+		if rule == nil {
+			continue
+		}
+		if err := controllerstorage.DetectQoSPolicyConflict(qosRules, rule, rule.ID); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -248,10 +316,13 @@ func writeIPGroupError(w http.ResponseWriter, action string, err error) {
 		apibase.WriteError(w, http.StatusConflict, apibase.CodeConflict, err.Error(), nil)
 	case strings.Contains(err.Error(), "ip group is referenced by policy rules"):
 		apibase.WriteError(w, http.StatusConflict, apibase.CodeConflict, err.Error(), nil)
+	case errors.Is(err, controllerstorage.ErrAmbiguousPolicyConflict):
+		apibase.WriteError(w, http.StatusConflict, apibase.CodeConflict, err.Error(), nil)
 	case strings.Contains(err.Error(), "invalid CIDR"),
 		strings.Contains(err.Error(), "ip group name is required"),
 		strings.Contains(err.Error(), "requires at least one CIDR"),
-		strings.Contains(err.Error(), "unsupported ip group kind"):
+		strings.Contains(err.Error(), "unsupported ip group kind"),
+		strings.Contains(err.Error(), "is reserved"):
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
 	default:
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to "+action+" IP group: "+err.Error(), nil)
