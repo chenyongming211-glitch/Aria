@@ -427,12 +427,25 @@ func expectInlineGroupResolve(mock sqlmock.Sqlmock, tenantID uuid.UUID, cidr str
 		WithArgs(tenantID, sqlmock.AnyArg(), "inline policy group", controllerstorage.IPGroupKindInline).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "name", "description", "kind", "created_by", "created_at", "updated_at"}).
 			AddRow(groupID, tenantID, "inline-test", "inline policy group", controllerstorage.IPGroupKindInline, nil, now, now))
+	expectNoInlineDuplicateIPGroupMember(mock, tenantID, groupID, cidr)
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO ip_group_members (tenant_id, group_id, cidr, note)
 		 VALUES ($1, $2, $3::cidr, $4)
 		 ON CONFLICT (group_id, cidr) DO UPDATE SET note = EXCLUDED.note`)).
 		WithArgs(tenantID, groupID, cidr, "inline").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	return groupID
+}
+
+func expectNoInlineDuplicateIPGroupMember(mock sqlmock.Sqlmock, tenantID, excludeGroupID uuid.UUID, cidr string) {
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT g.id, g.name, m.cidr::text
+		   FROM ip_group_members m
+		   JOIN ip_groups g ON g.id = m.group_id
+		  WHERE m.tenant_id = $1
+		    AND g.id <> $2
+		    AND m.cidr = $3::cidr
+		  LIMIT 1`)).
+		WithArgs(tenantID, excludeGroupID, cidr).
+		WillReturnError(sql.ErrNoRows)
 }
 
 func expectACLGetForUpdate(mock sqlmock.Sqlmock, tenantID, nodeID, ruleID uuid.UUID) {

@@ -271,6 +271,7 @@ func TestResolvePolicyGroupRefCreatesInlineGroupForDirectCIDR(t *testing.T) {
 		WithArgs(tenantID, inlineName, "inline policy group", IPGroupKindInline).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "name", "description", "kind", "created_by", "created_at", "updated_at"}).
 			AddRow(groupID, tenantID, inlineName, "inline policy group", IPGroupKindInline, nil, now, now))
+	expectNoExactDuplicateIPGroupMember(mock, tenantID, groupID, "10.10.0.0/16")
 	mock.ExpectExec(regexp.QuoteMeta(upsertIPGroupMemberSQL)).
 		WithArgs(tenantID, groupID, "10.10.0.0/16", "inline").
 		WillReturnResult(sqlmock.NewResult(0, 1))
