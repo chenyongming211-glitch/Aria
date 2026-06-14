@@ -111,9 +111,9 @@ func TestListTenantNodeQoSIncludesCompletedDeliveryStatus(t *testing.T) {
 func TestPolicyDeliveryErrorResolverUsesPolicyNameForRuntimeGroupCIDRConflict(t *testing.T) {
 	rawError := "sync failed: sync apply failed: acl_qos: Identity error: Invalid CIDR: CIDR 100.64.0.2/32 already belongs to runtime group 2"
 	delivery := &controllerstorage.PolicyDelivery{
-		PolicyDomain:  "acl",
-		PolicyRef:     "new-rule",
-		PolicyName:    "new deny rule",
+		PolicyDomain:  "qos",
+		PolicyRef:     "new-qos-rule",
+		PolicyName:    "new QoS rule",
 		CommandStatus: "failed",
 		LastError:     rawError,
 	}
@@ -126,9 +126,9 @@ func TestPolicyDeliveryErrorResolverUsesPolicyNameForRuntimeGroupCIDRConflict(t 
 			cidr:       "100.64.0.2/32",
 		},
 		{
-			policyRef:  "new-rule",
-			policyName: "new deny rule",
-			domain:     "acl",
+			policyRef:  "new-qos-rule",
+			policyName: "new QoS rule",
+			domain:     "qos",
 			cidr:       "100.64.0.2/32",
 		},
 	})

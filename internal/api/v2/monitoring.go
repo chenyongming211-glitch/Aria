@@ -180,8 +180,9 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 		return
 	}
 	pdItems := make([]map[string]interface{}, 0, len(deliveries))
+	policyDeliveryErrorResolver := r.policyDeliveryErrorResolverForNode(tenantID, node.ID)
 	for _, pd := range deliveries {
-		pdItems = append(pdItems, policyDeliveryToMap(pd))
+		pdItems = append(pdItems, policyDeliveryToMapWithErrorResolver(pd, policyDeliveryErrorResolver))
 	}
 	data["recent_policy_deliveries"] = pdItems
 

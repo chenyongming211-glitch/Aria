@@ -731,7 +731,7 @@ func (r *Router) listTenantNodeRoutes(w http.ResponseWriter, tenantID uuid.UUID,
 			"node_name": firstNonEmpty(node.Hostname, node.PublicKey, node.ID.String()),
 		})
 	}
-	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "route", routes, "id"); err != nil {
+	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "route", routes, "id", nil); err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeGetNodesFailed, "Failed to load route delivery history", nil)
 		return
 	}
@@ -1311,6 +1311,7 @@ func attachPolicyDeliveriesToItems(
 	domain string,
 	items []map[string]interface{},
 	refField string,
+	resolver policyDeliveryErrorResolver,
 ) error {
 	if len(items) == 0 {
 		return nil
@@ -1352,7 +1353,7 @@ func attachPolicyDeliveriesToItems(
 
 		serializedHistory := make([]map[string]interface{}, 0, len(history))
 		for _, h := range history {
-			serializedHistory = append(serializedHistory, policyDeliveryToMap(h))
+			serializedHistory = append(serializedHistory, policyDeliveryToMapWithErrorResolver(h, resolver))
 		}
 		item["delivery_history"] = serializedHistory
 		item["last_delivery"] = serializedHistory[0]
@@ -1576,7 +1577,7 @@ func (r *Router) buildTenantNodeACLPolicies(tenantID uuid.UUID, node *controller
 		})
 	}
 
-	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "acl", items, "id"); err != nil {
+	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "acl", items, "id", r.policyDeliveryErrorResolverForNodeRules(tenantID, node.ID, rules, nil)); err != nil {
 		return nil, err
 	}
 
@@ -1614,7 +1615,7 @@ func (r *Router) buildTenantNodeQoSPolicies(tenantID uuid.UUID, node *controller
 		})
 	}
 
-	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "qos", allPolicies, "id"); err != nil {
+	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "qos", allPolicies, "id", r.policyDeliveryErrorResolverForNodeRules(tenantID, node.ID, nil, rules)); err != nil {
 		return nil, err
 	}
 
@@ -1634,7 +1635,7 @@ func (r *Router) buildTenantNodeRoutePolicies(tenantID uuid.UUID, node *controll
 		})
 	}
 
-	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "route", items, "id"); err != nil {
+	if err := attachPolicyDeliveriesToItems(r.store, tenantID, node.ID, "route", items, "id", nil); err != nil {
 		return nil, err
 	}
 

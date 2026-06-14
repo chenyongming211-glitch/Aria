@@ -1055,7 +1055,7 @@ func (r *Router) attachQoSRuleStats(tenantID, nodeID uuid.UUID, rules []*control
 }
 
 func (r *Router) attachACLRuleDeliveryStatus(tenantID, nodeID uuid.UUID, rules []*controllerstorage.ACLRuleRecord) error {
-	statusByRef, err := r.loadPolicyDeliveryStatusByRef(tenantID, nodeID, "acl", r.aclPolicyDeliveryErrorResolver(tenantID, rules))
+	statusByRef, err := r.loadPolicyDeliveryStatusByRef(tenantID, nodeID, "acl", r.aclPolicyDeliveryErrorResolver(tenantID, nodeID, rules))
 	if err != nil {
 		return err
 	}
@@ -1070,7 +1070,7 @@ func (r *Router) attachACLRuleDeliveryStatus(tenantID, nodeID uuid.UUID, rules [
 }
 
 func (r *Router) attachQoSRuleDeliveryStatus(tenantID, nodeID uuid.UUID, rules []*controllerstorage.QoSRuleRecord) error {
-	statusByRef, err := r.loadPolicyDeliveryStatusByRef(tenantID, nodeID, "qos", r.qosPolicyDeliveryErrorResolver(tenantID, rules))
+	statusByRef, err := r.loadPolicyDeliveryStatusByRef(tenantID, nodeID, "qos", r.qosPolicyDeliveryErrorResolver(tenantID, nodeID, rules))
 	if err != nil {
 		return err
 	}
@@ -1142,7 +1142,63 @@ func (r *Router) loadPolicyDeliveryStatusByRef(tenantID, nodeID uuid.UUID, domai
 	return result, nil
 }
 
-func (r *Router) aclPolicyDeliveryErrorResolver(tenantID uuid.UUID, rules []*controllerstorage.ACLRuleRecord) policyDeliveryErrorResolver {
+func (r *Router) aclPolicyDeliveryErrorResolver(tenantID, nodeID uuid.UUID, rules []*controllerstorage.ACLRuleRecord) policyDeliveryErrorResolver {
+	return r.policyDeliveryErrorResolverForNodeRules(tenantID, nodeID, rules, nil)
+}
+
+func (r *Router) qosPolicyDeliveryErrorResolver(tenantID, nodeID uuid.UUID, rules []*controllerstorage.QoSRuleRecord) policyDeliveryErrorResolver {
+	return r.policyDeliveryErrorResolverForNodeRules(tenantID, nodeID, nil, rules)
+}
+
+func (r *Router) policyDeliveryErrorResolverForNode(tenantID, nodeID uuid.UUID) policyDeliveryErrorResolver {
+	return r.policyDeliveryErrorResolverForNodeRules(tenantID, nodeID, nil, nil)
+}
+
+func (r *Router) policyDeliveryErrorResolverForNodeRules(
+	tenantID, nodeID uuid.UUID,
+	knownACLRules []*controllerstorage.ACLRuleRecord,
+	knownQoSRules []*controllerstorage.QoSRuleRecord,
+) policyDeliveryErrorResolver {
+	var usages []policyCIDRUsage
+	loaded := false
+
+	return func(delivery *controllerstorage.PolicyDelivery, raw string) string {
+		if runtimeGroupConflictCIDR(raw) == "" {
+			return raw
+		}
+		if !loaded {
+			usages = r.policyCIDRUsagesForNode(tenantID, nodeID, knownACLRules, knownQoSRules)
+			loaded = true
+		}
+		return policyDeliveryCIDRErrorResolver(usages)(delivery, raw)
+	}
+}
+
+func (r *Router) policyCIDRUsagesForNode(
+	tenantID, nodeID uuid.UUID,
+	knownACLRules []*controllerstorage.ACLRuleRecord,
+	knownQoSRules []*controllerstorage.QoSRuleRecord,
+) []policyCIDRUsage {
+	aclRules := knownACLRules
+	if aclRules == nil {
+		if loaded, err := r.store.ListTenantNodeACLRules(tenantID, nodeID); err == nil {
+			aclRules = loaded
+		}
+	}
+	qosRules := knownQoSRules
+	if qosRules == nil {
+		if loaded, err := r.store.ListTenantNodeQoSRules(tenantID, nodeID); err == nil {
+			qosRules = loaded
+		}
+	}
+
+	usages := make([]policyCIDRUsage, 0, len(aclRules)*2+len(qosRules)*3)
+	usages = append(usages, r.aclPolicyCIDRUsages(tenantID, aclRules)...)
+	usages = append(usages, r.qosPolicyCIDRUsages(tenantID, qosRules)...)
+	return usages
+}
+
+func (r *Router) aclPolicyCIDRUsages(tenantID uuid.UUID, rules []*controllerstorage.ACLRuleRecord) []policyCIDRUsage {
 	usages := make([]policyCIDRUsage, 0, len(rules)*2)
 	for _, rule := range rules {
 		if rule == nil {
@@ -1162,10 +1218,10 @@ func (r *Router) aclPolicyDeliveryErrorResolver(tenantID uuid.UUID, rules []*con
 		usages = appendPolicyGroupCIDRUsages(usages, "acl", ref, name, r.policyIPGroupCIDRs(tenantID, rule.SrcGroupID, rule.SrcGroup)...)
 		usages = appendPolicyGroupCIDRUsages(usages, "acl", ref, name, r.policyIPGroupCIDRs(tenantID, rule.DstGroupID, rule.DstGroup)...)
 	}
-	return policyDeliveryCIDRErrorResolver(usages)
+	return usages
 }
 
-func (r *Router) qosPolicyDeliveryErrorResolver(tenantID uuid.UUID, rules []*controllerstorage.QoSRuleRecord) policyDeliveryErrorResolver {
+func (r *Router) qosPolicyCIDRUsages(tenantID uuid.UUID, rules []*controllerstorage.QoSRuleRecord) []policyCIDRUsage {
 	usages := make([]policyCIDRUsage, 0, len(rules)*3)
 	for _, rule := range rules {
 		if rule == nil {
@@ -1181,7 +1237,7 @@ func (r *Router) qosPolicyDeliveryErrorResolver(tenantID uuid.UUID, rules []*con
 		usages = appendPolicyCIDRUsage(usages, "qos", ref, name, rule.DstCIDR)
 		usages = appendPolicyGroupCIDRUsages(usages, "qos", ref, name, r.policyIPGroupCIDRs(tenantID, rule.GroupID, rule.Group)...)
 	}
-	return policyDeliveryCIDRErrorResolver(usages)
+	return usages
 }
 
 func (r *Router) policyIPGroupCIDRs(tenantID uuid.UUID, groupID uuid.NullUUID, group *controllerstorage.IPGroupRecord) []string {
