@@ -170,11 +170,15 @@ impl IdentityManager {
 
         for entry in cidrs {
             if let Some(existing_id) = self.cidr_to_id.get(entry) {
-                if *existing_id != id {
-                    return Err(IdentityError::InvalidCidr(format!(
-                        "CIDR {}/{} already belongs to runtime group {}",
-                        entry.network, entry.prefix_len, existing_id
-                    )));
+                let existing_id = *existing_id;
+                if existing_id != id {
+                    if self.group_owns_id(existing_id) {
+                        return Err(IdentityError::InvalidCidr(format!(
+                            "CIDR {}/{} already belongs to runtime group {}",
+                            entry.network, entry.prefix_len, existing_id
+                        )));
+                    }
+                    self.remove_standalone_cidr(entry, existing_id);
                 }
             }
             for map_set in &mut self.map_sets {
@@ -187,14 +191,33 @@ impl IdentityManager {
     }
 
     fn remove_group(&mut self, key: &str) {
+        let group_id = self.group_to_id.get(key).copied();
         let cidrs = self.group_to_cidrs.remove(key).unwrap_or_default();
         for entry in &cidrs {
-            for map_set in &mut self.map_sets {
-                map_set.remove(entry);
+            let mapped_to_group = match group_id {
+                Some(id) => self.cidr_to_id.get(entry) == Some(&id),
+                None => true,
+            };
+            if mapped_to_group {
+                for map_set in &mut self.map_sets {
+                    map_set.remove(entry);
+                }
+                self.cidr_to_id.remove(entry);
             }
-            self.cidr_to_id.remove(entry);
         }
         self.group_to_id.remove(key);
+    }
+
+    fn group_owns_id(&self, id: u32) -> bool {
+        self.group_to_id.values().any(|group_id| *group_id == id)
+    }
+
+    fn remove_standalone_cidr(&mut self, entry: &CidrEntry, id: u32) {
+        for map_set in &mut self.map_sets {
+            map_set.remove(entry);
+        }
+        self.cidr_to_id.remove(entry);
+        self.id_to_cidr.remove(&id);
     }
 
     #[allow(dead_code)]
@@ -345,4 +368,59 @@ pub fn parse_single_ip(ip: &str) -> Result<CidrEntry, IdentityError> {
 
     let prefix_len = if addr.is_ipv4() { 32 } else { 128 };
     Ok(CidrEntry { network: addr, prefix_len })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_identity_manager() -> IdentityManager {
+        IdentityManager {
+            map_sets: Vec::new(),
+            cidr_to_id: HashMap::new(),
+            id_to_cidr: HashMap::new(),
+            group_to_id: HashMap::new(),
+            group_to_cidrs: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn replace_groups_migrates_existing_standalone_cidr() {
+        let mut identity = test_identity_manager();
+        let standalone_id = identity
+            .assign_id("100.64.0.27/32")
+            .expect("standalone CIDR id");
+
+        let group_ids = identity
+            .replace_groups(&[RuntimeIPGroup {
+                key: "inline-group".to_string(),
+                cidrs: vec!["100.64.0.27/32".to_string()],
+            }])
+            .expect("replace groups should migrate standalone CIDR");
+        let group_id = *group_ids.get("inline-group").expect("group id");
+
+        assert_ne!(standalone_id, group_id);
+        assert_eq!(identity.get_id("100.64.0.27/32"), Some(group_id));
+        assert!(!identity.id_to_cidr.contains_key(&standalone_id));
+    }
+
+    #[test]
+    fn replace_groups_rejects_duplicate_cidr_across_product_groups() {
+        let mut identity = test_identity_manager();
+
+        let err = identity
+            .replace_groups(&[
+                RuntimeIPGroup {
+                    key: "group-a".to_string(),
+                    cidrs: vec!["100.64.0.27/32".to_string()],
+                },
+                RuntimeIPGroup {
+                    key: "group-b".to_string(),
+                    cidrs: vec!["100.64.0.27/32".to_string()],
+                },
+            ])
+            .expect_err("duplicate product group CIDR should fail");
+
+        assert!(format!("{err}").contains("duplicate CIDR"));
+    }
 }

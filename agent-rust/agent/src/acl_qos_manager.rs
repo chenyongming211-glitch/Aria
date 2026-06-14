@@ -672,9 +672,17 @@ impl AclQosManager {
         };
         let active_product_keys: std::collections::HashSet<String> =
             group_ids.keys().cloned().collect();
-        self.state
-            .groups
-            .retain(|key, _| is_legacy_group_key(key) || active_product_keys.contains(key));
+        let active_product_cidrs = normalized_product_group_cidrs(groups)?;
+        self.state.groups.retain(|key, group| {
+            if active_product_keys.contains(key) {
+                return true;
+            }
+            is_legacy_group_key(key)
+                && !group
+                    .cidrs
+                    .iter()
+                    .any(|cidr| active_product_cidrs.contains(cidr))
+        });
 
         for group in groups {
             let key = group.id.trim();
@@ -852,6 +860,21 @@ fn normalize_group_name(raw: &str) -> String {
 fn is_legacy_group_key(key: &str) -> bool {
     let key = key.trim();
     key == "any" || normalize_cidr(key).is_ok()
+}
+
+fn normalized_product_group_cidrs(
+    groups: &[IPGroupSpec],
+) -> Result<std::collections::HashSet<String>, AclQosError> {
+    let mut cidrs = std::collections::HashSet::new();
+    for group in groups {
+        if group.id.trim().is_empty() {
+            continue;
+        }
+        for cidr in &group.cidrs {
+            cidrs.insert(normalize_cidr(cidr)?);
+        }
+    }
+    Ok(cidrs)
 }
 
 fn normalize_cidr(raw: &str) -> Result<String, AclQosError> {
