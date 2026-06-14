@@ -78,6 +78,38 @@ func TestSettingsBackupsLifecycle(t *testing.T) {
 	}
 }
 
+func TestSettingsBackupIncludesIPGroupPolicyColumns(t *testing.T) {
+	exportQueries := map[string]string{}
+	for _, table := range backupExportTables {
+		exportQueries[table.Name] = table.Query
+	}
+	for _, table := range []string{"ip_groups", "ip_group_members"} {
+		if strings.TrimSpace(exportQueries[table]) == "" {
+			t.Fatalf("backup export must include %s", table)
+		}
+	}
+	if !strings.Contains(exportQueries["acl_rules"], "src_group_id") ||
+		!strings.Contains(exportQueries["acl_rules"], "dst_group_id") {
+		t.Fatalf("ACL backup export must include group ids: %s", exportQueries["acl_rules"])
+	}
+	if !strings.Contains(exportQueries["qos_rules"], "group_id") {
+		t.Fatalf("QoS backup export must include group_id: %s", exportQueries["qos_rules"])
+	}
+
+	restoreColumns := map[string][]string{}
+	for _, table := range backupRestoreTables {
+		restoreColumns[table.Name] = table.Columns
+	}
+	for _, table := range []string{"ip_groups", "ip_group_members"} {
+		if len(restoreColumns[table]) == 0 {
+			t.Fatalf("backup restore must include %s", table)
+		}
+	}
+	assertColumnPresent(t, restoreColumns["acl_rules"], "src_group_id")
+	assertColumnPresent(t, restoreColumns["acl_rules"], "dst_group_id")
+	assertColumnPresent(t, restoreColumns["qos_rules"], "group_id")
+}
+
 func TestSettingsBackupsRequireSuperAdmin(t *testing.T) {
 	cases := []struct {
 		name string
@@ -133,6 +165,8 @@ func TestSettingsBackupUploadStoresValidatedFile(t *testing.T) {
 	    "roles":[],
 	    "tokens":[],
 	    "nodes":[],
+	    "ip_groups":[],
+	    "ip_group_members":[],
 	    "acl_rules":[],
 	    "qos_rules":[],
 	    "blacklist_rules":[]
@@ -198,6 +232,8 @@ func TestSettingsBackupRestoreAppliesManifest(t *testing.T) {
 	    "roles":[],
 	    "tokens":[],
 	    "nodes":[],
+	    "ip_groups":[],
+	    "ip_group_members":[],
 	    "acl_rules":[],
 	    "qos_rules":[],
 	    "blacklist_rules":[]
@@ -299,4 +335,14 @@ func decodeBackupID(t *testing.T, body []byte) string {
 		t.Fatalf("failed to decode backup response: %v", err)
 	}
 	return payload.Data.ID
+}
+
+func assertColumnPresent(t *testing.T, columns []string, expected string) {
+	t.Helper()
+	for _, column := range columns {
+		if column == expected {
+			return
+		}
+	}
+	t.Fatalf("expected column %q in %#v", expected, columns)
 }
