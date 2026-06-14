@@ -42,11 +42,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { useMonitorApi } from '@/composables/useMonitorApi'
+import { computeTopologyNodePositions, getTopologyChartSize } from '@/utils/topologyLayout'
 import { t } from '@/i18n'
 
 const loading = ref(false)
@@ -54,12 +54,13 @@ const errorMsg = ref('')
 const isEmpty = ref(true)
 const topologyChartRef = ref(null)
 let chartInstance = null
+let lastTopology = { nodes: [], links: [] }
 
 // 节点 id → hostname 映射（用于连接 tooltip）
 let nodeMap = {}
 
 const initChart = () => {
-  if (topologyChartRef.value) {
+  if (topologyChartRef.value && !chartInstance) {
     chartInstance = echarts.init(topologyChartRef.value)
     window.addEventListener('resize', handleResize)
   }
@@ -67,6 +68,9 @@ const initChart = () => {
 
 const handleResize = () => {
   chartInstance?.resize()
+  if (lastTopology.nodes.length > 0 && !isEmpty.value) {
+    renderChart(lastTopology.nodes, lastTopology.links)
+  }
 }
 
 const fetchTopology = async () => {
@@ -79,13 +83,19 @@ const fetchTopology = async () => {
 
     if (nodes.length === 0) {
       isEmpty.value = true
+      lastTopology = { nodes: [], links: [] }
+      chartInstance?.clear()
       return
     }
 
     isEmpty.value = false
+    lastTopology = { nodes, links }
     nodeMap = {}
     nodes.forEach(n => { nodeMap[n.id] = n })
 
+    await nextTick()
+    initChart()
+    chartInstance?.resize()
     renderChart(nodes, links)
   } catch (error) {
     console.error('获取拓扑数据失败:', error)
@@ -99,18 +109,23 @@ const fetchTopology = async () => {
 const renderChart = (nodes, links) => {
   if (!chartInstance) return
 
-  const chartNodes = nodes.map(n => ({
+  const chartSize = getTopologyChartSize(topologyChartRef.value)
+  const chartNodes = computeTopologyNodePositions(nodes, chartSize).map(n => ({
     id: n.id,
     name: n.hostname || n.id,
-    symbolSize: 40,
+    x: n.x,
+    y: n.y,
+    symbolSize: 44,
     itemStyle: {
       color: n.status === 'online' ? '#22C55E' : '#EF4444'
     },
     label: {
       show: true,
       position: 'bottom',
-      fontSize: 12,
-      color: '#475569'
+      fontSize: 13,
+      color: '#475569',
+      overflow: 'truncate',
+      width: 180
     },
     // 存储原始数据用于 tooltip
     _raw: n
@@ -181,14 +196,9 @@ const renderChart = (nodes, links) => {
     },
     series: [{
       type: 'graph',
-      layout: 'force',
+      layout: 'none',
       roam: true,
       draggable: true,
-      force: {
-        repulsion: 300,
-        edgeLength: [120, 200],
-        gravity: 0.1
-      },
       data: chartNodes,
       links: chartLinks,
       emphasis: {
@@ -198,7 +208,9 @@ const renderChart = (nodes, links) => {
       label: {
         show: true,
         position: 'bottom',
-        fontSize: 12
+        fontSize: 13,
+        overflow: 'truncate',
+        width: 180
       }
     }]
   }
@@ -211,7 +223,6 @@ const refreshTopology = () => {
 }
 
 onMounted(() => {
-  initChart()
   fetchTopology()
 })
 
@@ -246,7 +257,8 @@ onBeforeUnmount(() => {
 
 .topology-chart {
   width: 100%;
-  height: 600px;
+  min-height: 520px;
+  height: clamp(520px, calc(100vh - 260px), 760px);
 }
 
 .topology-placeholder {
