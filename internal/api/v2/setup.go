@@ -1368,9 +1368,22 @@ func attachPolicyDeliveriesToItems(
 	return nil
 }
 
+type policyDeliveryErrorResolver func(*controllerstorage.PolicyDelivery, string) string
+
 func policyDeliveryToMap(delivery *controllerstorage.PolicyDelivery) map[string]interface{} {
+	return policyDeliveryToMapWithErrorResolver(delivery, nil)
+}
+
+func policyDeliveryToMapWithErrorResolver(delivery *controllerstorage.PolicyDelivery, resolver policyDeliveryErrorResolver) map[string]interface{} {
 	if delivery == nil {
 		return nil
+	}
+
+	lastError := delivery.LastError
+	if resolver != nil && strings.TrimSpace(lastError) != "" {
+		if resolved := strings.TrimSpace(resolver(delivery, lastError)); resolved != "" && resolved != lastError {
+			lastError = resolved
+		}
 	}
 
 	payload := map[string]interface{}{
@@ -1383,10 +1396,13 @@ func policyDeliveryToMap(delivery *controllerstorage.PolicyDelivery) map[string]
 		"action":         delivery.Action,
 		"command_id":     delivery.CommandID,
 		"command_status": delivery.CommandStatus,
-		"last_error":     delivery.LastError,
+		"last_error":     lastError,
 		"metadata":       delivery.Metadata,
 		"created_at":     delivery.CreatedAt,
 		"updated_at":     delivery.UpdatedAt,
+	}
+	if lastError != delivery.LastError && strings.TrimSpace(delivery.LastError) != "" {
+		payload["raw_last_error"] = delivery.LastError
 	}
 	if delivery.CompletedAt != nil {
 		payload["completed_at"] = delivery.CompletedAt

@@ -108,6 +108,46 @@ func TestListTenantNodeQoSIncludesCompletedDeliveryStatus(t *testing.T) {
 	}
 }
 
+func TestPolicyDeliveryErrorResolverUsesPolicyNameForRuntimeGroupCIDRConflict(t *testing.T) {
+	rawError := "sync failed: sync apply failed: acl_qos: Identity error: Invalid CIDR: CIDR 100.64.0.2/32 already belongs to runtime group 2"
+	delivery := &controllerstorage.PolicyDelivery{
+		PolicyDomain:  "acl",
+		PolicyRef:     "new-rule",
+		PolicyName:    "new deny rule",
+		CommandStatus: "failed",
+		LastError:     rawError,
+	}
+
+	resolver := policyDeliveryCIDRErrorResolver([]policyCIDRUsage{
+		{
+			policyRef:  "existing-rule",
+			policyName: "two-node-icmp-allow",
+			domain:     "acl",
+			cidr:       "100.64.0.2/32",
+		},
+		{
+			policyRef:  "new-rule",
+			policyName: "new deny rule",
+			domain:     "acl",
+			cidr:       "100.64.0.2/32",
+		},
+	})
+
+	payload := policyDeliveryToMapWithErrorResolver(delivery, resolver)
+	lastError, _ := payload["last_error"].(string)
+	rawLastError, _ := payload["raw_last_error"].(string)
+
+	if !strings.Contains(lastError, "two-node-icmp-allow") {
+		t.Fatalf("expected friendly error to include existing policy name, got %q", lastError)
+	}
+	if strings.Contains(lastError, "runtime group 2") {
+		t.Fatalf("friendly error should not expose runtime group id, got %q", lastError)
+	}
+	if rawLastError != rawError {
+		t.Fatalf("expected raw_last_error to preserve original error, got %q", rawLastError)
+	}
+}
+
 func TestListTenantNodeACLsReturnsStatsLoadError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

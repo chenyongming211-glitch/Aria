@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -1054,7 +1055,7 @@ func (r *Router) attachQoSRuleStats(tenantID, nodeID uuid.UUID, rules []*control
 }
 
 func (r *Router) attachACLRuleDeliveryStatus(tenantID, nodeID uuid.UUID, rules []*controllerstorage.ACLRuleRecord) error {
-	statusByRef, err := r.loadPolicyDeliveryStatusByRef(tenantID, nodeID, "acl")
+	statusByRef, err := r.loadPolicyDeliveryStatusByRef(tenantID, nodeID, "acl", r.aclPolicyDeliveryErrorResolver(tenantID, rules))
 	if err != nil {
 		return err
 	}
@@ -1069,7 +1070,7 @@ func (r *Router) attachACLRuleDeliveryStatus(tenantID, nodeID uuid.UUID, rules [
 }
 
 func (r *Router) attachQoSRuleDeliveryStatus(tenantID, nodeID uuid.UUID, rules []*controllerstorage.QoSRuleRecord) error {
-	statusByRef, err := r.loadPolicyDeliveryStatusByRef(tenantID, nodeID, "qos")
+	statusByRef, err := r.loadPolicyDeliveryStatusByRef(tenantID, nodeID, "qos", r.qosPolicyDeliveryErrorResolver(tenantID, rules))
 	if err != nil {
 		return err
 	}
@@ -1091,7 +1092,16 @@ type policyDeliveryFields struct {
 	lastError string
 }
 
-func (r *Router) loadPolicyDeliveryStatusByRef(tenantID, nodeID uuid.UUID, domain string) (map[string]policyDeliveryFields, error) {
+var runtimeGroupCIDRConflictRe = regexp.MustCompile(`CIDR\s+([^\s]+)\s+already belongs to runtime group\s+\d+`)
+
+type policyCIDRUsage struct {
+	policyRef  string
+	policyName string
+	domain     string
+	cidr       string
+}
+
+func (r *Router) loadPolicyDeliveryStatusByRef(tenantID, nodeID uuid.UUID, domain string, resolver policyDeliveryErrorResolver) (map[string]policyDeliveryFields, error) {
 	const limit = 100
 	deliveries, err := r.store.ListPolicyDeliveriesByNodeAndDomain(tenantID, nodeID, domain, limit)
 	if err != nil {
@@ -1118,7 +1128,7 @@ func (r *Router) loadPolicyDeliveryStatusByRef(tenantID, nodeID uuid.UUID, domai
 		serializedHistory := make([]map[string]interface{}, 0, len(history))
 		pendingCount := 0
 		for _, delivery := range history {
-			serializedHistory = append(serializedHistory, policyDeliveryToMap(delivery))
+			serializedHistory = append(serializedHistory, policyDeliveryToMapWithErrorResolver(delivery, resolver))
 			pendingCount += pendingCountForCommandStatus(delivery.CommandStatus)
 		}
 		result[ref] = policyDeliveryFields{
@@ -1126,10 +1136,185 @@ func (r *Router) loadPolicyDeliveryStatusByRef(tenantID, nodeID uuid.UUID, domai
 			pending:   pendingCount,
 			last:      serializedHistory[0],
 			history:   serializedHistory,
-			lastError: history[0].LastError,
+			lastError: stringifyPolicyValue(serializedHistory[0]["last_error"]),
 		}
 	}
 	return result, nil
+}
+
+func (r *Router) aclPolicyDeliveryErrorResolver(tenantID uuid.UUID, rules []*controllerstorage.ACLRuleRecord) policyDeliveryErrorResolver {
+	usages := make([]policyCIDRUsage, 0, len(rules)*2)
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		ref := rule.ID.String()
+		name := strings.TrimSpace(rule.Name)
+		if name == "" {
+			name = strings.TrimSpace(rule.Description)
+		}
+		if name == "" {
+			name = ref
+		}
+
+		usages = appendPolicyCIDRUsage(usages, "acl", ref, name, rule.SrcCIDR)
+		usages = appendPolicyCIDRUsage(usages, "acl", ref, name, rule.DstCIDR)
+		usages = appendPolicyGroupCIDRUsages(usages, "acl", ref, name, r.policyIPGroupCIDRs(tenantID, rule.SrcGroupID, rule.SrcGroup)...)
+		usages = appendPolicyGroupCIDRUsages(usages, "acl", ref, name, r.policyIPGroupCIDRs(tenantID, rule.DstGroupID, rule.DstGroup)...)
+	}
+	return policyDeliveryCIDRErrorResolver(usages)
+}
+
+func (r *Router) qosPolicyDeliveryErrorResolver(tenantID uuid.UUID, rules []*controllerstorage.QoSRuleRecord) policyDeliveryErrorResolver {
+	usages := make([]policyCIDRUsage, 0, len(rules)*3)
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		ref := rule.ID.String()
+		name := strings.TrimSpace(rule.Description)
+		if name == "" {
+			name = ref
+		}
+
+		usages = appendPolicyCIDRUsage(usages, "qos", ref, name, rule.SrcCIDR)
+		usages = appendPolicyCIDRUsage(usages, "qos", ref, name, rule.DstCIDR)
+		usages = appendPolicyGroupCIDRUsages(usages, "qos", ref, name, r.policyIPGroupCIDRs(tenantID, rule.GroupID, rule.Group)...)
+	}
+	return policyDeliveryCIDRErrorResolver(usages)
+}
+
+func (r *Router) policyIPGroupCIDRs(tenantID uuid.UUID, groupID uuid.NullUUID, group *controllerstorage.IPGroupRecord) []string {
+	if group == nil && groupID.Valid {
+		loaded, err := r.store.GetIPGroup(tenantID, groupID.UUID)
+		if err == nil {
+			group = loaded
+		}
+	}
+	if group == nil {
+		return nil
+	}
+
+	cidrs := make([]string, 0, len(group.Members))
+	for _, member := range group.Members {
+		cidrs = append(cidrs, member.CIDR)
+	}
+	return cidrs
+}
+
+func appendPolicyGroupCIDRUsages(usages []policyCIDRUsage, domain, ref, name string, cidrs ...string) []policyCIDRUsage {
+	for _, cidr := range cidrs {
+		usages = appendPolicyCIDRUsage(usages, domain, ref, name, cidr)
+	}
+	return usages
+}
+
+func appendPolicyCIDRUsage(usages []policyCIDRUsage, domain, ref, name, cidr string) []policyCIDRUsage {
+	cidr = strings.TrimSpace(cidr)
+	if policyErrorCIDRIsAny(cidr) {
+		return usages
+	}
+	return append(usages, policyCIDRUsage{
+		policyRef:  strings.TrimSpace(ref),
+		policyName: strings.TrimSpace(name),
+		domain:     strings.TrimSpace(strings.ToLower(domain)),
+		cidr:       cidr,
+	})
+}
+
+func policyDeliveryCIDRErrorResolver(usages []policyCIDRUsage) policyDeliveryErrorResolver {
+	return func(delivery *controllerstorage.PolicyDelivery, raw string) string {
+		cidr := runtimeGroupConflictCIDR(raw)
+		if cidr == "" {
+			return raw
+		}
+
+		matches := policyCIDRUsageMatches(usages, cidr, delivery, true)
+		if len(matches) == 0 {
+			matches = policyCIDRUsageMatches(usages, cidr, delivery, false)
+		}
+		if len(matches) == 0 {
+			return raw
+		}
+		return formatPolicyCIDRConflictError(cidr, matches)
+	}
+}
+
+func runtimeGroupConflictCIDR(raw string) string {
+	match := runtimeGroupCIDRConflictRe.FindStringSubmatch(raw)
+	if len(match) != 2 {
+		return ""
+	}
+	return strings.TrimSpace(match[1])
+}
+
+func policyCIDRUsageMatches(usages []policyCIDRUsage, cidr string, delivery *controllerstorage.PolicyDelivery, excludeCurrent bool) []policyCIDRUsage {
+	currentRef := ""
+	if delivery != nil {
+		currentRef = strings.TrimSpace(delivery.PolicyRef)
+	}
+
+	matches := make([]policyCIDRUsage, 0, 2)
+	seen := make(map[string]struct{})
+	for _, usage := range usages {
+		if !strings.EqualFold(strings.TrimSpace(usage.cidr), cidr) {
+			continue
+		}
+		if excludeCurrent && currentRef != "" && strings.EqualFold(strings.TrimSpace(usage.policyRef), currentRef) {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(usage.domain)) + "\x00" + strings.TrimSpace(usage.policyRef) + "\x00" + strings.TrimSpace(usage.policyName)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		matches = append(matches, usage)
+	}
+	return matches
+}
+
+func formatPolicyCIDRConflictError(cidr string, matches []policyCIDRUsage) string {
+	labels := make([]string, 0, len(matches))
+	for _, match := range matches {
+		name := strings.TrimSpace(match.policyName)
+		if name == "" {
+			name = strings.TrimSpace(match.policyRef)
+		}
+		if name == "" {
+			continue
+		}
+		labels = append(labels, fmt.Sprintf("%s 策略 %q", policyDomainLabel(match.domain), name))
+	}
+	if len(labels) == 0 {
+		return ""
+	}
+	if len(labels) == 1 {
+		return fmt.Sprintf("CIDR %s 已被 %s 使用，请修改或删除该策略后再同步。", cidr, labels[0])
+	}
+	return fmt.Sprintf("CIDR %s 已被多个策略使用：%s，请修改或删除冲突策略后再同步。", cidr, strings.Join(labels, "、"))
+}
+
+func policyDomainLabel(domain string) string {
+	switch strings.ToLower(strings.TrimSpace(domain)) {
+	case "acl":
+		return "ACL"
+	case "qos":
+		return "QoS"
+	default:
+		if strings.TrimSpace(domain) == "" {
+			return "Policy"
+		}
+		return strings.ToUpper(strings.TrimSpace(domain))
+	}
+}
+
+func policyErrorCIDRIsAny(cidr string) bool {
+	switch strings.ToLower(strings.TrimSpace(cidr)) {
+	case "", "any", "0.0.0.0/0", "::/0":
+		return true
+	default:
+		return false
+	}
 }
 
 func applyPolicyDeliveryFields(
