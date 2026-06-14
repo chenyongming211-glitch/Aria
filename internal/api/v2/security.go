@@ -1092,7 +1092,10 @@ type policyDeliveryFields struct {
 	lastError string
 }
 
-var runtimeGroupCIDRConflictRe = regexp.MustCompile(`CIDR\s+([^\s]+)\s+already belongs to runtime group\s+\d+`)
+var runtimeGroupCIDRConflictRes = []*regexp.Regexp{
+	regexp.MustCompile(`CIDR\s+([^\s]+)\s+already belongs to runtime group\s+\d+`),
+	regexp.MustCompile(`duplicate CIDR\s+([^\s]+)\s+in runtime groups\s+\S+\s+and\s+\S+`),
+}
 
 type policyCIDRUsage struct {
 	policyRef  string
@@ -1297,11 +1300,13 @@ func policyDeliveryCIDRErrorResolver(usages []policyCIDRUsage) policyDeliveryErr
 }
 
 func runtimeGroupConflictCIDR(raw string) string {
-	match := runtimeGroupCIDRConflictRe.FindStringSubmatch(raw)
-	if len(match) != 2 {
-		return ""
+	for _, re := range runtimeGroupCIDRConflictRes {
+		match := re.FindStringSubmatch(raw)
+		if len(match) == 2 {
+			return strings.TrimSpace(match[1])
+		}
 	}
-	return strings.TrimSpace(match[1])
+	return ""
 }
 
 func policyCIDRUsageMatches(usages []policyCIDRUsage, cidr string, delivery *controllerstorage.PolicyDelivery, excludeCurrent bool) []policyCIDRUsage {

@@ -168,6 +168,10 @@ func decodeIPGroupPayload(req *http.Request, tenantID, groupID uuid.UUID) (*cont
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		return nil, fmt.Errorf("invalid request body")
 	}
+	kind := strings.TrimSpace(body.Kind)
+	if kind != "" && !strings.EqualFold(kind, controllerstorage.IPGroupKindCustom) {
+		return nil, fmt.Errorf("ip group kind %q is reserved", kind)
+	}
 	members := make([]controllerstorage.IPGroupMemberRecord, 0, len(body.Members))
 	for _, member := range body.Members {
 		members = append(members, controllerstorage.IPGroupMemberRecord{
@@ -180,7 +184,7 @@ func decodeIPGroupPayload(req *http.Request, tenantID, groupID uuid.UUID) (*cont
 		TenantID:    tenantID,
 		Name:        body.Name,
 		Description: body.Description,
-		Kind:        body.Kind,
+		Kind:        controllerstorage.IPGroupKindCustom,
 		Members:     members,
 	}, nil
 }

@@ -21,13 +21,12 @@ const (
 )
 
 const exactDuplicateIPGroupMemberSQL = `SELECT g.id, g.name, m.cidr::text
-	   FROM ip_group_members m
-	   JOIN ip_groups g ON g.id = m.group_id
-	  WHERE m.tenant_id = $1
-	    AND g.id <> $2
-	    AND g.kind <> 'inline'
-	    AND m.cidr = $3::cidr
-	  LIMIT 1`
+		   FROM ip_group_members m
+		   JOIN ip_groups g ON g.id = m.group_id
+		  WHERE m.tenant_id = $1
+		    AND g.id <> $2
+		    AND m.cidr = $3::cidr
+		  LIMIT 1`
 
 const insertIPGroupSQL = `INSERT INTO ip_groups (tenant_id, name, description, kind, created_by)
 		 VALUES ($1, $2, $3, $4, $5)
@@ -104,7 +103,7 @@ func (s *Storage) CreateIPGroup(group *IPGroupRecord) (*IPGroupRecord, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := s.rejectExactDuplicateIPGroupMembers(normalized.TenantID, uuid.Nil, normalized.Kind, normalized.Members); err != nil {
+	if err := s.rejectExactDuplicateIPGroupMembers(normalized.TenantID, uuid.Nil, normalized.Members); err != nil {
 		return nil, err
 	}
 
@@ -213,7 +212,7 @@ func (s *Storage) UpdateIPGroupByID(tenantID, groupID uuid.UUID, group *IPGroupR
 	if err != nil {
 		return nil, err
 	}
-	if err := s.rejectExactDuplicateIPGroupMembers(tenantID, groupID, normalized.Kind, normalized.Members); err != nil {
+	if err := s.rejectExactDuplicateIPGroupMembers(tenantID, groupID, normalized.Members); err != nil {
 		return nil, err
 	}
 
@@ -400,6 +399,10 @@ func ensureInlineIPGroupWith(q ipGroupExecutor, tenantID uuid.UUID, cidrs []stri
 		return nil, err
 	}
 
+	if err := rejectExactDuplicateIPGroupMembersWith(q, tenantID, group.ID, normalizedMembers); err != nil {
+		return nil, err
+	}
+
 	if err := insertIPGroupMembers(q, tenantID, group.ID, normalizedMembers, true); err != nil {
 		return nil, err
 	}
@@ -445,15 +448,16 @@ func (s *Storage) FindIPGroupOverlapWarnings(tenantID, excludeGroupID uuid.UUID,
 	return warnings, nil
 }
 
-func (s *Storage) rejectExactDuplicateIPGroupMembers(tenantID, excludeGroupID uuid.UUID, kind string, members []IPGroupMemberRecord) error {
-	if kind == IPGroupKindInline {
-		return nil
-	}
+func (s *Storage) rejectExactDuplicateIPGroupMembers(tenantID, excludeGroupID uuid.UUID, members []IPGroupMemberRecord) error {
+	return rejectExactDuplicateIPGroupMembersWith(s.db, tenantID, excludeGroupID, members)
+}
+
+func rejectExactDuplicateIPGroupMembersWith(q ipGroupExecutor, tenantID, excludeGroupID uuid.UUID, members []IPGroupMemberRecord) error {
 	for _, member := range members {
 		var existingID uuid.UUID
 		var existingName string
 		var existingCIDR string
-		err := s.db.QueryRow(exactDuplicateIPGroupMemberSQL, tenantID, excludeGroupID, member.CIDR).Scan(&existingID, &existingName, &existingCIDR)
+		err := q.QueryRow(exactDuplicateIPGroupMemberSQL, tenantID, excludeGroupID, member.CIDR).Scan(&existingID, &existingName, &existingCIDR)
 		if err == nil {
 			return fmt.Errorf("duplicate CIDR %s already belongs to IP group %s (%s)", existingCIDR, existingName, existingID)
 		}

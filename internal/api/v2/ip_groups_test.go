@@ -39,6 +39,29 @@ func TestIPGroupCreateRejectsInvalidCIDR(t *testing.T) {
 	}
 }
 
+func TestIPGroupCreateRejectsReservedKind(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	tenantID := uuid.New()
+	req := withAuthContext(
+		httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/ip-groups", strings.NewReader(`{"name":"reserved","kind":"inline","members":[{"cidr":"10.10.0.0/16"}]}`)),
+		"admin",
+		tenantID,
+	)
+	rec := httptest.NewRecorder()
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	router.createTenantIPGroup(rec, req, tenantID)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandleTenantIPGroupsListsWithReadPermission(t *testing.T) {
 	t.Setenv("RBAC_ENFORCEMENT", "enforce")
 

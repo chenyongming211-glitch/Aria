@@ -102,6 +102,8 @@ func TestEnsureInlineIPGroupUsesDeterministicName(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "name", "description", "kind", "created_by", "created_at", "updated_at",
 		}).AddRow(groupID, tenantID, name, "inline policy group", IPGroupKindInline, sql.NullString{}, now, now))
+	expectNoExactDuplicateIPGroupMember(mock, tenantID, groupID, "10.10.0.0/16")
+	expectNoExactDuplicateIPGroupMember(mock, tenantID, groupID, "192.0.2.4/32")
 	mock.ExpectExec(regexp.QuoteMeta(upsertIPGroupMemberSQL)).
 		WithArgs(tenantID, groupID, "10.10.0.0/16", "inline").
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -116,6 +118,41 @@ func TestEnsureInlineIPGroupUsesDeterministicName(t *testing.T) {
 	}
 	if group.ID != groupID || group.Name != name || group.Kind != IPGroupKindInline || len(group.Members) != 2 {
 		t.Fatalf("unexpected inline group: %#v", group)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestEnsureInlineIPGroupRejectsExactDuplicateCIDRAgainstExistingCustomGroup(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	store := NewStorageWithDB(db)
+	tenantID := uuid.New()
+	inlineGroupID := uuid.New()
+	existingCustomGroupID := uuid.New()
+	now := time.Now()
+	name := inlineIPGroupName([]string{"10.10.0.0/16"})
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(upsertInlineIPGroupSQL)).
+		WithArgs(tenantID, name, "inline policy group", IPGroupKindInline).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "name", "description", "kind", "created_by", "created_at", "updated_at",
+		}).AddRow(inlineGroupID, tenantID, name, "inline policy group", IPGroupKindInline, sql.NullString{}, now, now))
+	mock.ExpectQuery(regexp.QuoteMeta(exactDuplicateIPGroupMemberSQL)).
+		WithArgs(tenantID, inlineGroupID, "10.10.0.0/16").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "cidr"}).
+			AddRow(existingCustomGroupID, "office", "10.10.0.0/16"))
+	mock.ExpectRollback()
+
+	_, err = store.EnsureInlineIPGroup(tenantID, []string{"10.10.0.8/16"})
+	if err == nil || !strings.Contains(err.Error(), "duplicate CIDR") {
+		t.Fatalf("expected duplicate CIDR error, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
