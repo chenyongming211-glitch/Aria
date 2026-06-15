@@ -303,15 +303,36 @@ fn choose_qos_config(
 
 fn apply_qos_bucket(key: &QosKey, config: QosConfig, pkt_len: u64, direction: u8) -> bool {
     let now = unsafe { bpf_ktime_get_ns() };
-    let mut bucket = match unsafe { QOS_TOKEN_BUCKET.get(key) } {
-        Some(existing) => *existing,
-        None => TokenBucket {
-            tokens: config.burst_bytes,
-            last_refill_ns: now,
-            last_edt: now,
-        },
-    };
+    let rate_bytes_per_sec = config.rate_bps / 8;
 
+    if let Some(bucket_ptr) = QOS_TOKEN_BUCKET.get_ptr_mut(key) {
+        let bucket = unsafe { &mut *bucket_ptr };
+        let (passed, dropped, shaped) =
+            decide_qos_bucket(bucket, config, pkt_len, direction, now, rate_bytes_per_sec);
+        update_qos_stats(key, pkt_len, dropped, shaped);
+        return passed;
+    }
+
+    let mut bucket = TokenBucket {
+        tokens: config.burst_bytes,
+        last_refill_ns: now,
+        last_edt: now,
+    };
+    let (passed, dropped, shaped) =
+        decide_qos_bucket(&mut bucket, config, pkt_len, direction, now, rate_bytes_per_sec);
+    let _ = QOS_TOKEN_BUCKET.insert(key, &bucket, 0);
+    update_qos_stats(key, pkt_len, dropped, shaped);
+    passed
+}
+
+fn decide_qos_bucket(
+    bucket: &mut TokenBucket,
+    config: QosConfig,
+    pkt_len: u64,
+    direction: u8,
+    now: u64,
+    rate_bytes_per_sec: u64,
+) -> (bool, bool, bool) {
     let elapsed = if now > bucket.last_refill_ns {
         now - bucket.last_refill_ns
     } else {
@@ -322,7 +343,6 @@ fn apply_qos_bucket(key: &QosKey, config: QosConfig, pkt_len: u64, direction: u8
     } else {
         elapsed
     };
-    let rate_bytes_per_sec = config.rate_bps / 8;
     let refill = mul_div(elapsed, rate_bytes_per_sec, NS_PER_SEC);
     let tokens = bucket.tokens.saturating_add(refill);
     bucket.tokens = if tokens > config.burst_bytes {
@@ -336,25 +356,18 @@ fn apply_qos_bucket(key: &QosKey, config: QosConfig, pkt_len: u64, direction: u8
         bucket.tokens -= pkt_len;
         if config.mode == QOS_MODE_SHAPING && direction == DIRECTION_EGRESS {
             bucket.last_edt = now;
-            let _ = QOS_TOKEN_BUCKET.insert(key, &bucket, 0);
-            update_qos_stats(key, pkt_len, false, true);
+            return (true, false, true);
         } else {
-            let _ = QOS_TOKEN_BUCKET.insert(key, &bucket, 0);
-            update_qos_stats(key, pkt_len, false, false);
+            return (true, false, false);
         }
-        return true;
     }
 
     if config.mode == QOS_MODE_SHAPING && direction == DIRECTION_EGRESS {
         bucket.last_edt = next_edt(bucket.last_edt, now, pkt_len, rate_bytes_per_sec);
-        let _ = QOS_TOKEN_BUCKET.insert(key, &bucket, 0);
-        update_qos_stats(key, pkt_len, false, true);
-        return true;
+        return (true, false, true);
     }
 
-    let _ = QOS_TOKEN_BUCKET.insert(key, &bucket, 0);
-    update_qos_stats(key, pkt_len, true, false);
-    false
+    (false, true, false)
 }
 
 fn update_qos_stats(key: &QosKey, pkt_len: u64, dropped: bool, shaped: bool) {
