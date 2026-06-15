@@ -1,10 +1,10 @@
-# Policy Generation Atomic Apply and QoS Locked Bucket Implementation Plan
+# Policy Generation Atomic Apply and QoS Bucket Follow-up Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make ACL and QoS snapshots apply as one generation so they either become active together or not at all, then make each QoS rule's aggregate token bucket accurate across CPUs and all `aria*` tunnels.
+**Goal:** Make ACL and QoS snapshots apply as one generation so they either become active together or not at all. QoS aggregate bucket precision remains a separate follow-up because the initial Aya `bpf_spin_lock` approach failed online verifier validation.
 
-**Architecture:** Phase 1 adds policy generation to the shared Agent/eBPF ABI. The Agent writes a complete next generation into ACL and QoS maps, flips the active generation only after every map write and qdisc operation succeeds, then garbage-collects old generation entries. Phase 2 changes the QoS token bucket value to carry a kernel spin lock while keeping per-cpu stats, so one QoS rule has one aggregate bandwidth bucket across all tunnel interfaces.
+**Architecture:** Phase 1 adds policy generation to the shared Agent/eBPF ABI. The Agent writes a complete next generation into ACL and QoS maps, flips the active generation only after every map write and qdisc operation succeeds, then garbage-collects old generation entries. The rejected Phase 2 prototype changed the QoS token bucket value to carry a kernel spin lock, but Linux 6.8 rejected the loaded program because `QOS_TOKEN_BUCKET` did not have map value BTF available to the verifier.
 
 **Tech Stack:** Rust Agent, Aya eBPF, shared `aria_shared` ABI structs, GitHub Actions for Rust/eBPF/Controller/frontend verification. No local compile/build validation.
 
@@ -18,7 +18,7 @@
 - QoS remains rule-level aggregate bandwidth on a node. It is not per interface and it does not restore old service/peers/ip QoS categories.
 - A node can have multiple `aria0..ariaN` WireGuard tunnels, but one QoS rule's limit applies to their combined traffic.
 - Stats stay aggregated by product rule id, not by tunnel interface.
-- Phase 1 must not add `bpf_spin_lock`; Phase 2 owns that ABI risk.
+- Phase 1 must not add `bpf_spin_lock`; the attempted Aya 0.13.1 / aya-ebpf 0.1 spin-lock map path failed online verifier validation with `QOS_TOKEN_BUCKET has to have BTF in order to use bpf_spin_lock`.
 
 ## Batch 1: ACL/QoS Generation Atomic Apply
 
@@ -57,23 +57,27 @@
   - a failed candidate snapshot does not replace the active generation/state;
   - active stats only aggregate current-generation keys.
 
-## Batch 2: QoS Shared Locked Bucket
+## Batch 2: QoS Aggregate Bucket Follow-up
+
+Status: deferred. Do not merge a `bpf_spin_lock` implementation through the current Aya 0.13.1 / aya-ebpf 0.1 path until the map value BTF requirement is proven in online gray validation.
 
 **Files:**
 
 - Modify `agent-rust/shared/src/lib.rs`
-  - Add a lock field to `TokenBucket` using the Aya-supported BTF/spin-lock representation.
+  - Keep the current 24-byte `TokenBucket` ABI for this branch.
+  - Evaluate a future lock-capable representation only after proving map BTF support on the target kernel.
   - Update ABI size tests.
 - Modify `agent-rust/ebpf/src/qos.rs`
-  - Use the lock around token refill, consume, shaping, and drop accounting.
+  - Keep the current verifier-compatible bucket logic in this branch.
   - Keep `QOS_STATS` as per-cpu stats.
 - Modify `agent-rust/agent/src/acl_qos_maps.rs`
-  - Initialize locked bucket values for new generation entries.
+  - Initialize current bucket values for new generation entries.
 
 **Verification:**
 
 - CI must build the eBPF verifier target.
-- Online gray validation must create one QoS rule, generate traffic across both Agents, and confirm stats increase while the limit is aggregate across all `aria*` tunnels.
+- Online gray validation for this branch must prove generation atomic switch and real ACL/QoS stats.
+- A future aggregate bucket branch must prove its lock or alternative concurrency design on Linux 6.8 before merge.
 
 ## Online Gray Validation
 
@@ -93,4 +97,4 @@
 
 - If Batch 1 CI fails, do not start Batch 2.
 - If a deployed Agent cannot load new pinned maps because ABI changed, stop Agent, remove only Aria ACL/QoS pinned maps under `/sys/fs/bpf/aria`, restart Agent, and repeat gray validation.
-- If QoS locked bucket verifier fails, keep Batch 1 and split Phase 2 into a separate verifier-focused branch.
+- If QoS aggregate bucket verifier fails, keep Batch 1 and split Phase 2 into a separate verifier-focused branch. This happened with the initial `bpf_spin_lock` prototype, so this branch intentionally keeps Batch 1 only.
