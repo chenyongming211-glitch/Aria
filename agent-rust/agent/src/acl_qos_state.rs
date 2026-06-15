@@ -74,6 +74,8 @@ pub struct FirewallState {
     pub acl_enabled: bool,
     #[serde(default = "default_true")]
     pub qos_enabled: bool,
+    #[serde(default)]
+    pub policy_generation: u32,
 }
 
 impl Default for FirewallState {
@@ -91,6 +93,7 @@ impl Default for FirewallState {
             qos_rules: Vec::new(),
             acl_enabled: true,
             qos_enabled: true,
+            policy_generation: 0,
         }
     }
 }

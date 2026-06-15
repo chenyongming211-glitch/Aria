@@ -11,6 +11,10 @@ use thiserror::Error;
 
 static ID_COUNTER: AtomicU32 = AtomicU32::new(1);
 pub const ID_WILDCARD: u32 = 0;
+const GENERATION_PREFIX_BITS: u32 = 32;
+
+type Ipv4IdentityKey = [u8; 8];
+type Ipv6IdentityKey = [u8; 20];
 
 #[derive(Error, Debug)]
 pub enum IdentityError {
@@ -34,10 +38,10 @@ pub struct CidrEntry {
 }
 
 struct IdentityMapSet {
-    src_ipv4_id_map: AyaLpmTrie<MapData, u32, u32>,
-    dst_ipv4_id_map: AyaLpmTrie<MapData, u32, u32>,
-    src_ipv6_id_map: AyaLpmTrie<MapData, [u8; 16], u32>,
-    dst_ipv6_id_map: AyaLpmTrie<MapData, [u8; 16], u32>,
+    src_ipv4_id_map: AyaLpmTrie<MapData, Ipv4IdentityKey, u32>,
+    dst_ipv4_id_map: AyaLpmTrie<MapData, Ipv4IdentityKey, u32>,
+    src_ipv6_id_map: AyaLpmTrie<MapData, Ipv6IdentityKey, u32>,
+    dst_ipv6_id_map: AyaLpmTrie<MapData, Ipv6IdentityKey, u32>,
 }
 
 pub struct IdentityManager {
@@ -46,12 +50,22 @@ pub struct IdentityManager {
     id_to_cidr: HashMap<u32, CidrEntry>,
     group_to_id: HashMap<String, u32>,
     group_to_cidrs: HashMap<String, Vec<CidrEntry>>,
+    generation_to_cidrs: HashMap<u32, HashSet<CidrEntry>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeIPGroup {
     pub key: String,
     pub cidrs: Vec<String>,
+}
+
+#[derive(Clone)]
+pub struct IdentityMetadataSnapshot {
+    cidr_to_id: HashMap<CidrEntry, u32>,
+    id_to_cidr: HashMap<u32, CidrEntry>,
+    group_to_id: HashMap<String, u32>,
+    group_to_cidrs: HashMap<String, Vec<CidrEntry>>,
+    generation_to_cidrs: HashMap<u32, HashSet<CidrEntry>>,
 }
 
 impl IdentityManager {
@@ -67,22 +81,47 @@ impl IdentityManager {
             id_to_cidr: HashMap::new(),
             group_to_id: HashMap::new(),
             group_to_cidrs: HashMap::new(),
+            generation_to_cidrs: HashMap::new(),
         })
     }
 
     pub fn assign_id(&mut self, cidr: &str) -> Result<u32, IdentityError> {
+        self.assign_id_for_generation(0, cidr)
+    }
+
+    pub fn metadata_snapshot(&self) -> IdentityMetadataSnapshot {
+        IdentityMetadataSnapshot {
+            cidr_to_id: self.cidr_to_id.clone(),
+            id_to_cidr: self.id_to_cidr.clone(),
+            group_to_id: self.group_to_id.clone(),
+            group_to_cidrs: self.group_to_cidrs.clone(),
+            generation_to_cidrs: self.generation_to_cidrs.clone(),
+        }
+    }
+
+    pub fn restore_metadata(&mut self, snapshot: IdentityMetadataSnapshot) {
+        self.cidr_to_id = snapshot.cidr_to_id;
+        self.id_to_cidr = snapshot.id_to_cidr;
+        self.group_to_id = snapshot.group_to_id;
+        self.group_to_cidrs = snapshot.group_to_cidrs;
+        self.generation_to_cidrs = snapshot.generation_to_cidrs;
+    }
+
+    pub fn assign_id_for_generation(
+        &mut self,
+        generation: u32,
+        cidr: &str,
+    ) -> Result<u32, IdentityError> {
         let entry = parse_cidr(cidr)?;
 
         if let Some(&id) = self.cidr_to_id.get(&entry) {
+            self.insert_for_generation(generation, &entry, id)?;
             return Ok(id);
         }
 
         let id = ID_COUNTER.fetch_add(1, Ordering::SeqCst);
 
-        for map_set in &mut self.map_sets {
-            map_set.insert(&entry, id)?;
-        }
-
+        self.insert_for_generation(generation, &entry, id)?;
         self.cidr_to_id.insert(entry.clone(), id);
         self.id_to_cidr.insert(id, entry);
 
@@ -91,6 +130,14 @@ impl IdentityManager {
 
     pub fn replace_groups(
         &mut self,
+        groups: &[RuntimeIPGroup],
+    ) -> Result<HashMap<String, u32>, IdentityError> {
+        self.replace_groups_for_generation(0, groups)
+    }
+
+    pub fn replace_groups_for_generation(
+        &mut self,
+        generation: u32,
         groups: &[RuntimeIPGroup],
     ) -> Result<HashMap<String, u32>, IdentityError> {
         let mut normalized_groups = Vec::with_capacity(groups.len());
@@ -137,7 +184,7 @@ impl IdentityManager {
         let mut result = HashMap::new();
         for (key, cidrs) in normalized_groups {
             let id = self.assign_group_id(&key);
-            self.replace_group_cidrs(&key, id, &cidrs)?;
+            self.replace_group_cidrs_for_generation(generation, &key, id, &cidrs)?;
             result.insert(key, id);
         }
         Ok(result)
@@ -152,22 +199,13 @@ impl IdentityManager {
         id
     }
 
-    fn replace_group_cidrs(
+    fn replace_group_cidrs_for_generation(
         &mut self,
+        generation: u32,
         key: &str,
         id: u32,
         cidrs: &[CidrEntry],
     ) -> Result<(), IdentityError> {
-        let old = self.group_to_cidrs.remove(key).unwrap_or_default();
-        for entry in &old {
-            if !cidrs.contains(entry) {
-                for map_set in &mut self.map_sets {
-                    map_set.remove(entry);
-                }
-                self.cidr_to_id.remove(entry);
-            }
-        }
-
         for entry in cidrs {
             if let Some(existing_id) = self.cidr_to_id.get(entry) {
                 let existing_id = *existing_id;
@@ -181,13 +219,43 @@ impl IdentityManager {
                     self.remove_standalone_cidr(entry, existing_id);
                 }
             }
-            for map_set in &mut self.map_sets {
-                map_set.insert(entry, id)?;
-            }
+            self.insert_for_generation(generation, entry, id)?;
             self.cidr_to_id.insert(entry.clone(), id);
         }
         self.group_to_cidrs.insert(key.to_string(), cidrs.to_vec());
         Ok(())
+    }
+
+    fn insert_for_generation(
+        &mut self,
+        generation: u32,
+        entry: &CidrEntry,
+        id: u32,
+    ) -> Result<(), IdentityError> {
+        for idx in 0..self.map_sets.len() {
+            if let Err(error) = self.map_sets[idx].insert(generation, entry, id) {
+                for rollback_idx in 0..idx {
+                    self.map_sets[rollback_idx].remove(generation, entry);
+                }
+                return Err(error);
+            }
+        }
+        self.generation_to_cidrs
+            .entry(generation)
+            .or_default()
+            .insert(entry.clone());
+        Ok(())
+    }
+
+    pub fn cleanup_generation(&mut self, generation: u32) {
+        let Some(entries) = self.generation_to_cidrs.remove(&generation) else {
+            return;
+        };
+        for entry in entries {
+            for map_set in &mut self.map_sets {
+                map_set.remove(generation, &entry);
+            }
+        }
     }
 
     fn remove_group(&mut self, key: &str) {
@@ -199,9 +267,6 @@ impl IdentityManager {
                 None => true,
             };
             if mapped_to_group {
-                for map_set in &mut self.map_sets {
-                    map_set.remove(entry);
-                }
                 self.cidr_to_id.remove(entry);
             }
         }
@@ -213,9 +278,6 @@ impl IdentityManager {
     }
 
     fn remove_standalone_cidr(&mut self, entry: &CidrEntry, id: u32) {
-        for map_set in &mut self.map_sets {
-            map_set.remove(entry);
-        }
         self.cidr_to_id.remove(entry);
         self.id_to_cidr.remove(&id);
     }
@@ -224,10 +286,6 @@ impl IdentityManager {
     pub fn remove_id(&mut self, id: u32) -> Result<(), IdentityError> {
         let entry = self.id_to_cidr.remove(&id)
             .ok_or_else(|| IdentityError::IdNotFound(id))?;
-
-        for map_set in &mut self.map_sets {
-            map_set.remove(&entry);
-        }
 
         self.cidr_to_id.remove(&entry);
 
@@ -258,22 +316,22 @@ impl IdentityManager {
 
 impl IdentityMapSet {
     fn take(ebpf: &mut Ebpf) -> Result<Self, IdentityError> {
-        let src_ipv4_id_map: AyaLpmTrie<_, u32, u32> = ebpf
+        let src_ipv4_id_map: AyaLpmTrie<_, Ipv4IdentityKey, u32> = ebpf
             .take_map("SRC_IPV4_ID_MAP")
             .ok_or_else(|| IdentityError::MapNotFound("SRC_IPV4_ID_MAP".to_string()))?
             .try_into()?;
 
-        let dst_ipv4_id_map: AyaLpmTrie<_, u32, u32> = ebpf
+        let dst_ipv4_id_map: AyaLpmTrie<_, Ipv4IdentityKey, u32> = ebpf
             .take_map("DST_IPV4_ID_MAP")
             .ok_or_else(|| IdentityError::MapNotFound("DST_IPV4_ID_MAP".to_string()))?
             .try_into()?;
 
-        let src_ipv6_id_map: AyaLpmTrie<_, [u8; 16], u32> = ebpf
+        let src_ipv6_id_map: AyaLpmTrie<_, Ipv6IdentityKey, u32> = ebpf
             .take_map("SRC_IPV6_ID_MAP")
             .ok_or_else(|| IdentityError::MapNotFound("SRC_IPV6_ID_MAP".to_string()))?
             .try_into()?;
 
-        let dst_ipv6_id_map: AyaLpmTrie<_, [u8; 16], u32> = ebpf
+        let dst_ipv6_id_map: AyaLpmTrie<_, Ipv6IdentityKey, u32> = ebpf
             .take_map("DST_IPV6_ID_MAP")
             .ok_or_else(|| IdentityError::MapNotFound("DST_IPV6_ID_MAP".to_string()))?
             .try_into()?;
@@ -286,17 +344,28 @@ impl IdentityMapSet {
         })
     }
 
-    fn insert(&mut self, entry: &CidrEntry, id: u32) -> Result<(), IdentityError> {
+    fn insert(
+        &mut self,
+        generation: u32,
+        entry: &CidrEntry,
+        id: u32,
+    ) -> Result<(), IdentityError> {
         match entry.network {
             IpAddr::V4(ipv4) => {
                 let ip = u32::from_be_bytes(ipv4.octets());
-                let key = Key::new(entry.prefix_len as u32, ip);
+                let key = Key::new(
+                    GENERATION_PREFIX_BITS + entry.prefix_len as u32,
+                    ipv4_identity_key(generation, ip),
+                );
                 self.src_ipv4_id_map.insert(&key, id, 0)?;
                 self.dst_ipv4_id_map.insert(&key, id, 0)?;
             }
             IpAddr::V6(ipv6) => {
                 let ip = ipv6.octets();
-                let key = Key::new(entry.prefix_len as u32, ip);
+                let key = Key::new(
+                    GENERATION_PREFIX_BITS + entry.prefix_len as u32,
+                    ipv6_identity_key(generation, ip),
+                );
                 self.src_ipv6_id_map.insert(&key, id, 0)?;
                 self.dst_ipv6_id_map.insert(&key, id, 0)?;
             }
@@ -304,22 +373,69 @@ impl IdentityMapSet {
         Ok(())
     }
 
-    fn remove(&mut self, entry: &CidrEntry) {
+    fn remove(&mut self, generation: u32, entry: &CidrEntry) {
         match entry.network {
             IpAddr::V4(ipv4) => {
                 let ip = u32::from_be_bytes(ipv4.octets());
-                let key = Key::new(entry.prefix_len as u32, ip);
+                let key = Key::new(
+                    GENERATION_PREFIX_BITS + entry.prefix_len as u32,
+                    ipv4_identity_key(generation, ip),
+                );
                 let _ = self.src_ipv4_id_map.remove(&key);
                 let _ = self.dst_ipv4_id_map.remove(&key);
             }
             IpAddr::V6(ipv6) => {
                 let ip = ipv6.octets();
-                let key = Key::new(entry.prefix_len as u32, ip);
+                let key = Key::new(
+                    GENERATION_PREFIX_BITS + entry.prefix_len as u32,
+                    ipv6_identity_key(generation, ip),
+                );
                 let _ = self.src_ipv6_id_map.remove(&key);
                 let _ = self.dst_ipv6_id_map.remove(&key);
             }
         }
     }
+}
+
+fn ipv4_identity_key(generation: u32, ip: u32) -> Ipv4IdentityKey {
+    let generation_bytes = generation.to_be_bytes();
+    let ip_bytes = ip.to_be_bytes();
+    [
+        generation_bytes[0],
+        generation_bytes[1],
+        generation_bytes[2],
+        generation_bytes[3],
+        ip_bytes[0],
+        ip_bytes[1],
+        ip_bytes[2],
+        ip_bytes[3],
+    ]
+}
+
+fn ipv6_identity_key(generation: u32, ip: [u8; 16]) -> Ipv6IdentityKey {
+    let generation_bytes = generation.to_be_bytes();
+    [
+        generation_bytes[0],
+        generation_bytes[1],
+        generation_bytes[2],
+        generation_bytes[3],
+        ip[0],
+        ip[1],
+        ip[2],
+        ip[3],
+        ip[4],
+        ip[5],
+        ip[6],
+        ip[7],
+        ip[8],
+        ip[9],
+        ip[10],
+        ip[11],
+        ip[12],
+        ip[13],
+        ip[14],
+        ip[15],
+    ]
 }
 
 fn parse_cidr(cidr: &str) -> Result<CidrEntry, IdentityError> {
@@ -381,6 +497,7 @@ mod tests {
             id_to_cidr: HashMap::new(),
             group_to_id: HashMap::new(),
             group_to_cidrs: HashMap::new(),
+            generation_to_cidrs: HashMap::new(),
         }
     }
 
@@ -422,5 +539,73 @@ mod tests {
             .expect_err("duplicate product group CIDR should fail");
 
         assert!(format!("{err}").contains("duplicate CIDR"));
+    }
+
+    #[test]
+    fn generation_cleanup_is_scoped_to_requested_generation() {
+        let mut identity = test_identity_manager();
+
+        let group_ids = identity
+            .replace_groups_for_generation(
+                7,
+                &[RuntimeIPGroup {
+                    key: "office".to_string(),
+                    cidrs: vec!["100.64.0.27/32".to_string()],
+                }],
+            )
+            .expect("generation 7 groups");
+        identity
+            .replace_groups_for_generation(
+                8,
+                &[RuntimeIPGroup {
+                    key: "office".to_string(),
+                    cidrs: vec!["100.64.0.27/32".to_string()],
+                }],
+            )
+            .expect("generation 8 groups");
+
+        assert_eq!(group_ids.get("office"), identity.group_to_id.get("office"));
+        assert!(identity.generation_to_cidrs.contains_key(&7));
+        assert!(identity.generation_to_cidrs.contains_key(&8));
+
+        identity.cleanup_generation(7);
+
+        assert!(!identity.generation_to_cidrs.contains_key(&7));
+        assert!(identity.generation_to_cidrs.contains_key(&8));
+        assert_eq!(identity.get_id("100.64.0.27/32"), identity.group_to_id.get("office").copied());
+    }
+
+    #[test]
+    fn metadata_snapshot_restores_candidate_group_changes() {
+        let mut identity = test_identity_manager();
+        identity
+            .replace_groups_for_generation(
+                1,
+                &[RuntimeIPGroup {
+                    key: "office".to_string(),
+                    cidrs: vec!["100.64.0.27/32".to_string()],
+                }],
+            )
+            .expect("initial group");
+        let snapshot = identity.metadata_snapshot();
+
+        identity
+            .replace_groups_for_generation(
+                2,
+                &[RuntimeIPGroup {
+                    key: "guest".to_string(),
+                    cidrs: vec!["100.64.0.28/32".to_string()],
+                }],
+            )
+            .expect("candidate group");
+        assert!(identity.group_to_id.contains_key("guest"));
+
+        identity.cleanup_generation(2);
+        identity.restore_metadata(snapshot);
+
+        assert!(identity.group_to_id.contains_key("office"));
+        assert!(!identity.group_to_id.contains_key("guest"));
+        assert!(identity.generation_to_cidrs.contains_key(&1));
+        assert!(!identity.generation_to_cidrs.contains_key(&2));
     }
 }

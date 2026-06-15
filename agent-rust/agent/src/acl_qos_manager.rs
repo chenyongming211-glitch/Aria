@@ -6,9 +6,9 @@ use aya::Ebpf;
 use thiserror::Error;
 
 use crate::acl_qos_maps::{
-    add_policy_to_maps, add_qos_rule_to_maps, cleanup_root_qdisc, delete_policy_from_maps,
-    delete_port_set_from_maps, delete_qos_rule_from_maps, ensure_fq_qdisc, get_qos_stats,
-    get_rule_stats, sync_runtime_config, AclQosMapHandles, TapMapRuntime,
+    add_policy_to_maps, add_qos_rule_to_maps, cleanup_policy_generation, cleanup_root_qdisc,
+    delete_policy_from_maps, delete_port_set_from_maps, delete_qos_rule_from_maps, ensure_fq_qdisc,
+    get_qos_stats, get_rule_stats, sync_runtime_config, AclQosMapHandles, TapMapRuntime,
 };
 use crate::acl_qos_state::{requested_directions, FirewallState, GroupInfo, QosRuleInfo};
 use crate::identity::{parse_single_ip, IdentityManager, RuntimeIPGroup, ID_WILDCARD};
@@ -307,6 +307,14 @@ fn group_selector<'a>(group_id: &'a str, fallback: &'a str) -> &'a str {
     }
 }
 
+pub fn next_policy_generation(current: u32) -> u32 {
+    match current {
+        0 => 1,
+        u32::MAX => 1,
+        value => value + 1,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct GroupMatch {
     name: String,
@@ -481,19 +489,64 @@ impl AclQosManager {
         }
 
         let snapshot_cache = snapshot.clone();
-        self.ensure_snapshot_groups(&snapshot)?;
-        let compiled_acl_rules =
-            compile_acl_rules_for_groups(&snapshot.acl_rules, &self.state.groups)?;
-        let compiled_qos_rules =
-            compile_qos_rules_for_groups(&snapshot.qos_rules, &self.state.groups)?;
+        let previous_runtime = self.runtime;
+        let next_generation = next_policy_generation(previous_runtime.policy_generation);
+        let next_runtime = previous_runtime.with_generation(next_generation);
+        let identity_metadata = {
+            let identity = self.identity_mgr.lock().map_err(|_| AclQosError::Lock)?;
+            identity.metadata_snapshot()
+        };
 
-        self.clear_all_acl_rules()?;
-        self.clear_all_qos_rules()?;
-        self.state.acl_enabled = snapshot.acl_enabled;
-        self.state.qos_enabled = snapshot.qos_enabled;
+        let candidate_state = match self.apply_snapshot_generation(&snapshot, next_runtime) {
+            Ok(state) => state,
+            Err(error) => {
+                let _ = cleanup_policy_generation(&mut self.maps, next_runtime);
+                if let Ok(mut identity) = self.identity_mgr.lock() {
+                    identity.cleanup_generation(next_generation);
+                    identity.restore_metadata(identity_metadata);
+                }
+                return Err(error);
+            }
+        };
+
+        let _ = cleanup_policy_generation(&mut self.maps, previous_runtime);
+        if previous_runtime.policy_generation != next_runtime.policy_generation {
+            if let Ok(mut identity) = self.identity_mgr.lock() {
+                identity.cleanup_generation(previous_runtime.policy_generation);
+            }
+        }
+        self.runtime = next_runtime;
+        self.state = candidate_state;
+        if !self.state.qos_rules.iter().any(|rule| rule.mode == 1) {
+            for iface in &self.interfaces {
+                let _ = cleanup_root_qdisc(iface);
+            }
+        }
+        self.last_snapshot = Some(snapshot_cache);
+        Ok(())
+    }
+
+    fn apply_snapshot_generation(
+        &mut self,
+        snapshot: &AclQosSnapshot,
+        runtime: TapMapRuntime,
+    ) -> Result<FirewallState, AclQosError> {
+        let mut candidate_state = self.state.clone();
+        self.ensure_snapshot_groups(&mut candidate_state, snapshot, runtime.policy_generation)?;
+        let compiled_acl_rules =
+            compile_acl_rules_for_groups(&snapshot.acl_rules, &candidate_state.groups)?;
+        let compiled_qos_rules =
+            compile_qos_rules_for_groups(&snapshot.qos_rules, &candidate_state.groups)?;
+
+        Self::reset_policy_state(&mut candidate_state, snapshot, runtime.policy_generation);
 
         for rule in compiled_acl_rules {
-            self.apply_compiled_policy(&rule)?;
+            Self::apply_compiled_policy(
+                &mut self.maps,
+                runtime,
+                &mut candidate_state,
+                &rule,
+            )?;
         }
 
         let mut has_shaping = false;
@@ -501,30 +554,40 @@ impl AclQosManager {
             if rule.mode == 1 {
                 has_shaping = true;
             }
-            self.apply_compiled_qos(&rule)?;
+            Self::apply_compiled_qos(&mut self.maps, runtime, &mut candidate_state, &rule)?;
         }
 
         if has_shaping {
             for iface in &self.interfaces {
                 ensure_fq_qdisc(iface).map_err(AclQosError::Kernel)?;
             }
-        } else {
-            for iface in &self.interfaces {
-                let _ = cleanup_root_qdisc(iface);
-            }
         }
 
-        let qos_enabled = snapshot.qos_enabled && !self.state.qos_rules.is_empty();
+        let qos_enabled = snapshot.qos_enabled && !candidate_state.qos_rules.is_empty();
         sync_runtime_config(
             &mut self.maps,
-            self.runtime,
+            runtime,
             Some(snapshot.acl_enabled),
             Some(qos_enabled),
         )
         .map_err(AclQosError::Kernel)?;
 
-        self.last_snapshot = Some(snapshot_cache);
-        Ok(())
+        Ok(candidate_state)
+    }
+
+    fn reset_policy_state(
+        state: &mut FirewallState,
+        snapshot: &AclQosSnapshot,
+        policy_generation: u32,
+    ) {
+        state.rules.clear();
+        state.port_sets.clear();
+        state.free_bitmap_indices.clear();
+        state.next_bitmap_idx = 0;
+        state.qos_rules.clear();
+        state.acl_enabled = snapshot.acl_enabled;
+        state.qos_enabled = snapshot.qos_enabled;
+        state.policy_generation = policy_generation;
     }
 
     pub fn get_all_rule_stats(&self) -> Result<Vec<(u32, &'static str, u64, u64)>, AclQosError> {
@@ -638,25 +701,35 @@ impl AclQosManager {
             .collect())
     }
 
-    fn ensure_snapshot_groups(&mut self, snapshot: &AclQosSnapshot) -> Result<(), AclQosError> {
-        self.replace_snapshot_ip_groups(&snapshot.ip_groups)?;
+    fn ensure_snapshot_groups(
+        &mut self,
+        state: &mut FirewallState,
+        snapshot: &AclQosSnapshot,
+        policy_generation: u32,
+    ) -> Result<(), AclQosError> {
+        self.replace_snapshot_ip_groups(state, policy_generation, &snapshot.ip_groups)?;
         for rule in &snapshot.acl_rules {
             if rule.src_group_id.trim().is_empty() {
-                self.ensure_group(&rule.src_group)?;
+                self.ensure_group(state, policy_generation, &rule.src_group)?;
             }
             if rule.dst_group_id.trim().is_empty() {
-                self.ensure_group(&rule.dst_group)?;
+                self.ensure_group(state, policy_generation, &rule.dst_group)?;
             }
         }
         for rule in &snapshot.qos_rules {
             if rule.group_id.trim().is_empty() {
-                self.ensure_group(&rule.group)?;
+                self.ensure_group(state, policy_generation, &rule.group)?;
             }
         }
         Ok(())
     }
 
-    fn replace_snapshot_ip_groups(&mut self, groups: &[IPGroupSpec]) -> Result<(), AclQosError> {
+    fn replace_snapshot_ip_groups(
+        &mut self,
+        state: &mut FirewallState,
+        policy_generation: u32,
+        groups: &[IPGroupSpec],
+    ) -> Result<(), AclQosError> {
         let runtime_groups: Vec<_> = groups
             .iter()
             .filter(|group| !group.id.trim().is_empty())
@@ -668,12 +741,12 @@ impl AclQosManager {
 
         let group_ids = {
             let mut identity = self.identity_mgr.lock().map_err(|_| AclQosError::Lock)?;
-            identity.replace_groups(&runtime_groups)?
+            identity.replace_groups_for_generation(policy_generation, &runtime_groups)?
         };
         let active_product_keys: std::collections::HashSet<String> =
             group_ids.keys().cloned().collect();
         let active_product_cidrs = normalized_product_group_cidrs(groups)?;
-        self.state.groups.retain(|key, group| {
+        state.groups.retain(|key, group| {
             if active_product_keys.contains(key) {
                 return true;
             }
@@ -697,7 +770,7 @@ impl AclQosManager {
                 .iter()
                 .map(|cidr| normalize_cidr(cidr))
                 .collect::<Result<Vec<_>, _>>()?;
-            self.state.groups.insert(
+            state.groups.insert(
                 key.to_string(),
                 GroupInfo {
                     id,
@@ -709,9 +782,13 @@ impl AclQosManager {
         Ok(())
     }
 
-    fn apply_compiled_policy(&mut self, rule: &CompiledAclRule) -> Result<(), AclQosError> {
-        let result = self
-            .state
+    fn apply_compiled_policy(
+        maps: &mut AclQosMapHandles,
+        runtime: TapMapRuntime,
+        state: &mut FirewallState,
+        rule: &CompiledAclRule,
+    ) -> Result<(), AclQosError> {
+        let result = state
             .apply_add_rule(
                 &rule.rule_id,
                 rule.src_group_id,
@@ -724,8 +801,8 @@ impl AclQosManager {
             )
             .map_err(AclQosError::Validation)?;
         add_policy_to_maps(
-            &mut self.maps,
-            self.runtime,
+            maps,
+            runtime,
             rule.src_group_id,
             rule.dst_group_id,
             rule.proto,
@@ -738,16 +815,21 @@ impl AclQosManager {
         )
         .map_err(AclQosError::Kernel)?;
         if let Some((idx, ports_normalized)) = result.old_port_set_released {
-            let _ = delete_port_set_from_maps(&mut self.maps, self.runtime, idx, &ports_normalized);
+            let _ = delete_port_set_from_maps(maps, runtime, idx, &ports_normalized);
         }
         Ok(())
     }
 
-    fn apply_compiled_qos(&mut self, rule: &CompiledQosRule) -> Result<(), AclQosError> {
-        self.state
+    fn apply_compiled_qos(
+        maps: &mut AclQosMapHandles,
+        runtime: TapMapRuntime,
+        state: &mut FirewallState,
+        rule: &CompiledQosRule,
+    ) -> Result<(), AclQosError> {
+        state
             .qos_rules
             .retain(|r| !(r.group_id == rule.group_id && r.direction == rule.direction));
-        self.state.qos_rules.push(QosRuleInfo {
+        state.qos_rules.push(QosRuleInfo {
             rule_id: rule.rule_id.clone(),
             group_name: rule.group_name.clone(),
             group_id: rule.group_id,
@@ -758,15 +840,14 @@ impl AclQosManager {
             mode: rule.mode,
         });
         add_qos_rule_to_maps(
-            &mut self.maps,
-            self.runtime,
+            maps,
+            runtime,
             rule.group_id,
             rule.direction,
             rule.rate_bps,
             rule.burst_bytes,
             rule.priority,
             rule.mode,
-            true,
         )
         .map_err(AclQosError::Kernel)?;
         Ok(())
@@ -817,21 +898,26 @@ impl AclQosManager {
         Ok(())
     }
 
-    fn ensure_group(&mut self, raw: &str) -> Result<u32, AclQosError> {
+    fn ensure_group(
+        &mut self,
+        state: &mut FirewallState,
+        policy_generation: u32,
+        raw: &str,
+    ) -> Result<u32, AclQosError> {
         let name = normalize_group_name(raw);
         if name == "any" {
             return Ok(ID_WILDCARD);
         }
-        if let Some(group) = self.state.groups.get(&name) {
+        if let Some(group) = state.groups.get(&name) {
             return Ok(group.id);
         }
 
         let cidr = normalize_cidr(&name)?;
         let id = {
             let mut identity = self.identity_mgr.lock().map_err(|_| AclQosError::Lock)?;
-            identity.assign_id(&cidr)?
+            identity.assign_id_for_generation(policy_generation, &cidr)?
         };
-        self.state.groups.insert(
+        state.groups.insert(
             name.clone(),
             GroupInfo {
                 id,
@@ -892,6 +978,56 @@ fn normalize_cidr(raw: &str) -> Result<String, AclQosError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn policy_generation_advances_without_reusing_zero() {
+        assert_eq!(next_policy_generation(0), 1);
+        assert_eq!(next_policy_generation(1), 2);
+        assert_eq!(next_policy_generation(u32::MAX), 1);
+    }
+
+    #[test]
+    fn reset_policy_state_keeps_groups_but_replaces_policy_runtime() {
+        let mut state = FirewallState::default();
+        state.groups.insert(
+            "office".to_string(),
+            GroupInfo {
+                id: 42,
+                name: "office".to_string(),
+                cidrs: vec!["100.64.0.2/32".to_string()],
+            },
+        );
+        state
+            .apply_add_rule("old", 42, ID_WILDCARD, 1, 1, 10, None, 0)
+            .expect("old rule");
+        state.qos_rules.push(QosRuleInfo {
+            rule_id: "old-qos".to_string(),
+            group_name: "office".to_string(),
+            group_id: 42,
+            direction: 1,
+            rate_bps: 1_000_000,
+            burst_bytes: 1500,
+            priority: 100,
+            mode: 0,
+        });
+
+        AclQosManager::reset_policy_state(
+            &mut state,
+            &AclQosSnapshot {
+                acl_enabled: false,
+                qos_enabled: true,
+                ..Default::default()
+            },
+            9,
+        );
+
+        assert_eq!(state.groups.get("office").map(|group| group.id), Some(42));
+        assert!(state.rules.is_empty());
+        assert!(state.qos_rules.is_empty());
+        assert!(!state.acl_enabled);
+        assert!(state.qos_enabled);
+        assert_eq!(state.policy_generation, 9);
+    }
 
     #[test]
     fn acl_runtime_stats_merge_by_rule_id() {

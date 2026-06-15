@@ -36,6 +36,7 @@ use crate::runtime_credential::RuntimeCredentialStore;
 use crate::wireguard::{PeerConfig, WireGuardManager};
 
 const BPF_FS_PATH: &str = "/sys/fs/bpf/aria";
+const BPF_PIN_FALLBACK_PATH: &str = "/sys/fs/bpf";
 const CERTIFICATE_RENEW_CHECK_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const TC_PRIORITY_ACL_EGRESS: u16 = 100;
 const TC_PRIORITY_QOS: u16 = 200;
@@ -216,6 +217,7 @@ impl AgentRuntime {
     fn load_ebpf_programs(
         interface: &str,
     ) -> Result<(Arc<Mutex<AclQosManager>>, Arc<StdMutex<IdentityManager>>)> {
+        Self::cleanup_pinned_acl_qos_maps();
         tracing::info!("Step 1: Loading eBPF bytecodes...");
         let acl_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/acl"));
         let qos_bytes = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/qos"));
@@ -345,6 +347,7 @@ impl AgentRuntime {
     fn load_ebpf_programs_multi(
         interfaces: &[String],
     ) -> Result<(Arc<Mutex<AclQosManager>>, Arc<StdMutex<IdentityManager>>)> {
+        Self::cleanup_pinned_acl_qos_maps();
         tracing::info!(
             "Loading eBPF programs for {} interfaces: {:?}",
             interfaces.len(),
@@ -445,6 +448,38 @@ impl AgentRuntime {
         let acl_qos_mgr = Arc::new(Mutex::new(acl_qos_mgr));
 
         Ok((acl_qos_mgr, identity_mgr))
+    }
+
+    fn cleanup_pinned_acl_qos_maps() {
+        let map_names = [
+            "SRC_IPV4_ID_MAP",
+            "DST_IPV4_ID_MAP",
+            "SRC_IPV6_ID_MAP",
+            "DST_IPV6_ID_MAP",
+            "POLICY_TABLE",
+            "PORT_BITMAP_POOL",
+            "RULE_STATS",
+            "QOS_CONFIG",
+            "QOS_TOKEN_BUCKET",
+            "QOS_STATS",
+            "FIREWALL_CONFIG",
+            "TAP_CONFIG_MAP",
+        ];
+
+        for base_path in [BPF_FS_PATH, BPF_PIN_FALLBACK_PATH] {
+            for map_name in map_names {
+                let pin_path = format!("{}/{}", base_path, map_name);
+                if std::path::Path::new(&pin_path).exists() {
+                    if let Err(error) = std::fs::remove_file(&pin_path) {
+                        tracing::debug!(
+                            "Failed to remove old pinned eBPF map {}: {}",
+                            pin_path,
+                            error
+                        );
+                    }
+                }
+            }
+        }
     }
 
     fn attach_tc_program(
