@@ -119,6 +119,7 @@ vi.mock('@/composables/useQosApi', () => ({
     getQoSRules: vi.fn(async () => []),
     getQoSRulesByNode: vi.fn(async () => []),
     createQoSRule: vi.fn(async () => ({})),
+    updateQoSRule: vi.fn(async () => ({})),
     deleteQoSRule: vi.fn(async () => ({})),
     getProtocolName: vi.fn((protocol) => String(protocol))
   }
@@ -513,6 +514,7 @@ describe('page-level RBAC button visibility', () => {
     await flushPromises()
     const allowedButtons = allowed.findAll('button').map((button) => button.text())
     expect(allowedButtons).toContain('添加规则')
+    expect(allowedButtons).toContain('编辑')
     expect(allowedButtons).toContain('删除')
     expect(allowedButtons).toContain('保存并应用')
 
@@ -521,6 +523,7 @@ describe('page-level RBAC button visibility', () => {
     await flushPromises()
     const deniedButtons = denied.findAll('button').map((button) => button.text())
     expect(deniedButtons).not.toContain('添加规则')
+    expect(deniedButtons).not.toContain('编辑')
     expect(deniedButtons).not.toContain('删除')
     expect(deniedButtons).not.toContain('保存并应用')
   })

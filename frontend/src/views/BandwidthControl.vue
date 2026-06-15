@@ -88,8 +88,9 @@
             <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">{{ formatPolicyStatus(row.policyStatus) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column v-if="hasPermission('qos:write')" label="操作" width="120" fixed="right">
+        <el-table-column v-if="hasPermission('qos:write')" label="操作" width="150" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" @click="handleEdit(row)">编辑</el-button>
             <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -98,7 +99,7 @@
 
     <el-dialog
       v-model="dialogVisible"
-      title="添加 QoS 规则"
+      :title="dialogTitle"
       width="520px"
       @closed="resetForm"
     >
@@ -193,16 +194,19 @@ const tenantNodes = ref([])
 const ipGroups = ref([])
 const rules = ref([])
 const formRef = ref(null)
+const editingOriginal = ref(null)
 const selectedNodeName = computed(() => {
   const node = tenantNodes.value.find(item => item.id === selectedNodeId.value)
   return node?.hostname || node?.id || ''
 })
+const dialogTitle = computed(() => form.id ? '编辑 QoS 规则' : '添加 QoS 规则')
 const qosEmptyText = computed(() => {
   if (!selectedNodeId.value) return '请选择节点'
   return `${selectedNodeName.value || '当前节点'} 暂无 QoS 规则`
 })
 
 const form = reactive({
+  id: null,
   description: '',
   group_id: '',
   group_cidr: '',
@@ -211,7 +215,8 @@ const form = reactive({
   rate_bps: 0,
   burst_bytes: 0,
   priority: 100,
-  mode: 'policing'
+  mode: 'policing',
+  enabled: true
 })
 
 const formRules = {
@@ -317,11 +322,13 @@ const formatGroupRef = (groupId, fallback) => {
 }
 
 const showAddDialog = () => {
+  resetForm()
   dialogVisible.value = true
 }
 
 const resetForm = () => {
   Object.assign(form, {
+    id: null,
     description: '',
     group_id: '',
     group_cidr: '',
@@ -330,9 +337,66 @@ const resetForm = () => {
     rate_bps: 0,
     burst_bytes: 0,
     priority: 100,
-    mode: 'policing'
+    mode: 'policing',
+    enabled: true
   })
+  editingOriginal.value = null
   if (formRef.value) formRef.value.resetFields()
+}
+
+const directGroupCidrForEdit = (row) => {
+  if (row.group_id) return ''
+  const direction = row.direction || 'egress'
+  const cidr = row.group_cidr ||
+    (direction === 'ingress' ? row.src_cidr : row.dst_cidr) ||
+    row.src_cidr ||
+    row.dst_cidr ||
+    ''
+  return cidr === 'any' ? '' : cidr
+}
+
+const handleEdit = (row) => {
+  const bandwidthMbps = Number(row.bandwidth_mbps ?? row.bandwidth ?? 100)
+  const rateBps = Number(row.rate_bps || 0)
+  const burstBytes = Number(row.burst_bytes || 0)
+
+  Object.assign(form, {
+    id: row.id,
+    description: row.description || '',
+    group_id: row.group_id || '',
+    group_cidr: directGroupCidrForEdit(row),
+    bandwidth_mbps: bandwidthMbps,
+    direction: row.direction || 'egress',
+    rate_bps: rateBps,
+    burst_bytes: burstBytes,
+    priority: Number(row.priority ?? 100),
+    mode: row.mode || 'policing',
+    enabled: row.enabled !== false
+  })
+  editingOriginal.value = {
+    bandwidth_mbps: bandwidthMbps,
+    rate_bps: rateBps,
+    burst_bytes: burstBytes
+  }
+  dialogVisible.value = true
+}
+
+const buildSavePayload = () => {
+  const payload = { ...form }
+  const original = editingOriginal.value
+  if (
+    form.id &&
+    original &&
+    Number(payload.bandwidth_mbps) !== Number(original.bandwidth_mbps)
+  ) {
+    if (Number(payload.rate_bps || 0) === Number(original.rate_bps || 0)) {
+      payload.rate_bps = 0
+    }
+    if (Number(payload.burst_bytes || 0) === Number(original.burst_bytes || 0)) {
+      payload.burst_bytes = 0
+    }
+  }
+  return payload
 }
 
 const handleSave = async () => {
@@ -346,8 +410,14 @@ const handleSave = async () => {
     await formRef.value.validate()
     submitting.value = true
 
-    await useQosApi.createQoSRule(selectedNodeId.value, form)
-    ElMessage.success('规则已创建并排队下发')
+    const payload = buildSavePayload()
+    if (form.id) {
+      await useQosApi.updateQoSRule(selectedNodeId.value, form.id, payload)
+      ElMessage.success('规则已更新并排队下发')
+    } else {
+      await useQosApi.createQoSRule(selectedNodeId.value, payload)
+      ElMessage.success('规则已创建并排队下发')
+    }
     dialogVisible.value = false
     refreshData()
   } catch (error) {
