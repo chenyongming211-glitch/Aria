@@ -22,6 +22,19 @@ destination port matching, and `shaping` mode. Those fields may remain in older
 database rows, protobuf structs, or eBPF structs for compatibility and future
 work, but they are not current product capabilities.
 
+Runtime enforcement is direction-aware:
+
+- `egress` QoS uses EDT pacing on TC egress. The eBPF program computes a packet
+  timestamp, writes `skb->tstamp`, and requires `fq` qdisc on each `aria*`
+  interface. This is required for TCP throughput accuracy and is the preferred
+  path for the 90% minimum / 98% target SLO.
+- `ingress` QoS uses policing. Ingress packets cannot be reliably delayed at
+  the receiving interface, so ingress enforcement may drop packets when the
+  bucket is empty.
+- The API still exposes one QoS mode, `policing`, until the product has a
+  separate operator-facing shaping/pacing concept. Internally, egress pacing is
+  an implementation detail for precision, not a new three-tier QoS model.
+
 The Controller remains responsible for SaaS tenant isolation and compiles
 tenant/node QoS policy records into an Agent-local snapshot. The Agent does not
 evaluate tenant ids; it only applies the snapshot for its own node.
@@ -51,14 +64,15 @@ current Aya 0.13.1 / aya-ebpf 0.1 toolchain.
 QoS precision is a product SLO, not an absolute mathematical guarantee:
 
 - Minimum acceptable long-running throughput accuracy is 90% of the configured
-  rate under controlled VPN traffic tests.
+  rate under controlled VPN traffic tests. A release candidate that misses 90%
+  for representative egress TCP tests must not be merged.
 - Target long-running throughput accuracy is 98% or better when traffic,
   kernel scheduling, MTU, and WireGuard overhead allow it.
 - Short bursts within `burst_bytes` are expected and must not be treated as
   precision failures.
 - Test results must report the configured rate, measured goodput, measured
   wire bytes when available, duration, packet size, direction, and whether the
-  rule used policing or shaping semantics.
+  rule used ingress policing or egress EDT pacing semantics.
 
 `bpf_spin_lock` is not a current release requirement. Linux requires BTF-style
 maps for `bpf_spin_lock`, while the current Aya map macro emits a map layout
@@ -209,9 +223,11 @@ Every ACL/QoS release candidate must be verified in this order:
    - create a QoS rule from the Controller/API or UI;
    - wait for Agent sync and map updates;
    - generate sustained traffic for at least 60 seconds;
-   - confirm measured long-running throughput is at least 90% accurate and
-     preferably 98% or better for representative 1 Mbps, 5 Mbps, and 10 Mbps
-     policies;
+   - confirm measured long-running egress TCP throughput is at least 90%
+     accurate, preferably 98% or better, for representative 1 Mbps, 5 Mbps, and
+     10 Mbps policies;
+   - record ingress policing separately if tested, because ingress can only
+     enforce by drop;
    - confirm `QOS_STATS` pass/drop/shape counters increase and the UI displays
      the aggregated values.
 6. Verify rollback/edit behavior:

@@ -4,7 +4,7 @@
 
 **Goal:** Close the current ACL/QoS implementation around the product model in `docs/qos-product-decision.md`, including IP Group semantics, generation atomic apply, UI stats/edit/status behavior, and real two-Agent QoS precision validation.
 
-**Architecture:** Keep Aria SD-WAN's Controller/Agent/IP Group/generation model. Use a lock-free shared QoS token bucket as the current production design, borrowing the practical runtime tradeoff from `aria-firewall` while preserving Aria SD-WAN's ACL/QoS generation atomic switch. `bpf_spin_lock` remains deferred until the Aya/BTF verifier path is proven online.
+**Architecture:** Keep Aria SD-WAN's Controller/Agent/IP Group/generation model. Use a lock-free shared QoS token bucket plus egress EDT pacing as the current production design, borrowing the practical runtime tradeoff from `aria-firewall` while preserving Aria SD-WAN's ACL/QoS generation atomic switch. `bpf_spin_lock` remains deferred until the Aya/BTF verifier path is proven online.
 
 **Tech Stack:** Go Controller and storage, Rust Agent and Aya eBPF, Vue 3 frontend, GitHub Actions for build/test. No local compile/build validation.
 
@@ -15,6 +15,7 @@
 - QoS is not the old service/peers/ip three-tier model.
 - A QoS rule applies aggregate bandwidth on one Agent node. All `aria0..ariaN` WireGuard tunnels on that Agent share the same compiled rule bucket.
 - Current production bucket design is lock-free shared `HashMap<QosKey, TokenBucket>` plus per-cpu `QOS_STATS`.
+- Egress QoS must use EDT pacing with `fq` qdisc; ingress QoS remains policing.
 - Minimum acceptable long-running QoS accuracy is 90% of configured rate under controlled VPN traffic tests.
 - Target long-running QoS accuracy is 98% or better when traffic and kernel conditions allow it.
 - ACL/QoS must apply by generation: a snapshot either becomes active together or not at all.
@@ -91,7 +92,9 @@
 - [ ] Confirm `TokenBucket` stays lock-free and ABI-compatible with the deployed map value size.
 - [ ] Ensure each compiled QoS rule uses one shared bucket across all `aria*` interfaces.
 - [ ] Ensure QoS edit/delete clears stale bucket state for the affected current-generation key.
-- [ ] Ensure stats stay per-cpu and are aggregated by product rule id before reporting to Controller/UI.
+- [ ] Ensure egress QoS writes EDT timestamps and installs `fq` qdisc for any egress rule.
+- [ ] Ensure ingress QoS remains policing-only.
+- [ ] Ensure stats stay per-cpu, are created even when user-space insertion misses a key, and are aggregated by product rule id before reporting to Controller/UI.
 - [ ] Ensure human-facing errors mention policy names or IP Group names, never raw runtime group ids.
 - [ ] Add or update Agent unit tests for rate edit bucket reset and stats ownership.
 - [ ] Commit Batch 2.
@@ -100,7 +103,7 @@
 **Verification:**
 
 - GitHub Actions must pass.
-- Online gray validation for this batch must show QoS map entries and stats for one created rule before continuing if the code changes runtime behavior.
+- Online gray validation for this batch must show QoS map entries, `fq` qdisc, stats for one created rule, and a 5 Mbps egress TCP test above the 90% floor before continuing if the code changes runtime behavior.
 
 ## Batch 3: ACL/QoS Generation Atomic Apply Hardening
 

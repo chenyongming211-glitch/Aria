@@ -10,7 +10,9 @@ use crate::acl_qos_maps::{
     delete_policy_from_maps, delete_port_set_from_maps, delete_qos_rule_from_maps, ensure_fq_qdisc,
     get_qos_stats, get_rule_stats, sync_runtime_config, AclQosMapHandles, TapMapRuntime,
 };
-use crate::acl_qos_state::{requested_directions, FirewallState, GroupInfo, QosRuleInfo};
+use crate::acl_qos_state::{
+    requested_directions, FirewallState, GroupInfo, QosRuleInfo, DIRECTION_EGRESS,
+};
 use crate::identity::{parse_single_ip, IdentityManager, RuntimeIPGroup, ID_WILDCARD};
 
 #[derive(Error, Debug)]
@@ -315,6 +317,14 @@ pub fn next_policy_generation(current: u32) -> u32 {
     }
 }
 
+fn compiled_qos_rule_requires_fq(rule: &CompiledQosRule) -> bool {
+    rule.direction == DIRECTION_EGRESS
+}
+
+fn qos_rules_require_fq(rules: &[QosRuleInfo]) -> bool {
+    rules.iter().any(|rule| rule.direction == DIRECTION_EGRESS)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct GroupMatch {
     name: String,
@@ -517,7 +527,7 @@ impl AclQosManager {
         }
         self.runtime = next_runtime;
         self.state = candidate_state;
-        if !self.state.qos_rules.iter().any(|rule| rule.mode == 1) {
+        if !qos_rules_require_fq(&self.state.qos_rules) {
             for iface in &self.interfaces {
                 let _ = cleanup_root_qdisc(iface);
             }
@@ -549,15 +559,15 @@ impl AclQosManager {
             )?;
         }
 
-        let mut has_shaping = false;
+        let mut requires_fq = false;
         for rule in compiled_qos_rules {
-            if rule.mode == 1 {
-                has_shaping = true;
+            if compiled_qos_rule_requires_fq(&rule) {
+                requires_fq = true;
             }
             Self::apply_compiled_qos(&mut self.maps, runtime, &mut candidate_state, &rule)?;
         }
 
-        if has_shaping {
+        if requires_fq {
             for iface in &self.interfaces {
                 ensure_fq_qdisc(iface).map_err(AclQosError::Kernel)?;
             }
@@ -1062,6 +1072,31 @@ mod tests {
         assert_eq!(merged.passed_bytes, 1500);
         assert_eq!(merged.dropped_bytes, 150);
         assert_eq!(merged.shaped_bytes, 15);
+    }
+
+    #[test]
+    fn egress_qos_rules_require_fq_for_edt_pacing() {
+        assert!(!qos_rules_require_fq(&[]));
+        assert!(!qos_rules_require_fq(&[QosRuleInfo {
+            rule_id: "ingress".to_string(),
+            group_name: "office".to_string(),
+            group_id: 10,
+            direction: 0,
+            rate_bps: 5_000_000,
+            burst_bytes: 625_000,
+            priority: 100,
+            mode: 0,
+        }]));
+        assert!(qos_rules_require_fq(&[QosRuleInfo {
+            rule_id: "egress".to_string(),
+            group_name: "office".to_string(),
+            group_id: 10,
+            direction: DIRECTION_EGRESS,
+            rate_bps: 5_000_000,
+            burst_bytes: 625_000,
+            priority: 100,
+            mode: 0,
+        }]));
     }
 
     #[test]

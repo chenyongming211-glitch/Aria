@@ -32,17 +32,21 @@ The accepted production design is still lock-free, but it should follow the
 Expected benefit: smaller race window, fewer helper calls in the hot path, and
 clearer alignment with the production-proven reference design.
 
-### G2: QoS precision needs explicit gray validation evidence
+### G2: QoS precision missed the hard floor in gray validation
 
-The current code can plausibly meet the product target, but the repo does not
-yet contain durable evidence for the new SLO:
+Drop-only egress policing did not meet the product SLO in gray validation. A
+5 Mbps TCP test delivered roughly 71.6% of the configured rate, below the 90%
+minimum floor. The runtime must use egress EDT pacing with `fq` qdisc before the
+branch can be merged.
+
+The follow-up gray validation must record:
 
 - minimum long-running accuracy: 90%;
 - target long-running accuracy: 98% or better when environment allows;
 - representative rates: 1 Mbps, 5 Mbps, 10 Mbps;
 - real traffic over at least two Agents connected through the WireGuard overlay.
 
-This is a validation gap, not necessarily a code bug.
+This is a runtime correctness gap until the two-Agent tests meet the 90% floor.
 
 ### G3: Frontend QoS failure text is wrong for edits
 

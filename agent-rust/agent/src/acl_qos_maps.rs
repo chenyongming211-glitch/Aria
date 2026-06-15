@@ -335,8 +335,6 @@ pub fn add_qos_rule_to_maps(
             .qos_config
             .insert(key, config, 0)
             .map_err(|e| format!("QOS_CONFIG insert: {:?}", e))?;
-    }
-    if handles.qos_stats.get(&key, 0).is_err() {
         handles
             .qos_stats
             .insert(key, zero_per_cpu_values::<QosStatsValue>()?, 0)

@@ -2,10 +2,12 @@
 #![no_main]
 
 use aya_ebpf::{
+    bindings::__sk_buff,
     helpers::bpf_ktime_get_ns,
     macros::{classifier, map},
-    maps::{lpm_trie::Key, HashMap, LpmTrie, PerCpuHashMap},
+    maps::{lpm_trie::Key, HashMap, LpmTrie, PerCpuArray, PerCpuHashMap},
     programs::TcContext,
+    EbpfContext,
 };
 use network_types::{
     eth::EthHdr,
@@ -24,7 +26,6 @@ const TAP_ID_UNASSIGNED: u32 = 0;
 const ID_WILDCARD: u32 = 0;
 const DIRECTION_INGRESS: u8 = 0;
 const DIRECTION_EGRESS: u8 = 1;
-const QOS_MODE_SHAPING: u8 = 1;
 const IPV4_IDENTITY_LOOKUP_BITS: u32 = 64;
 const IPV6_IDENTITY_LOOKUP_BITS: u32 = 160;
 
@@ -120,6 +121,9 @@ static QOS_TOKEN_BUCKET: HashMap<QosKey, TokenBucket> = HashMap::with_max_entrie
 #[map(name = "QOS_STATS", pin)]
 static QOS_STATS: PerCpuHashMap<QosKey, QosStatsValue> = PerCpuHashMap::with_max_entries(65536, 0);
 
+#[map(name = "QOS_STATS_BUF")]
+static QOS_STATS_BUF: PerCpuArray<QosStatsValue> = PerCpuArray::with_max_entries(1, 0);
+
 #[map(name = "FIREWALL_CONFIG", pin)]
 static FIREWALL_CONFIG: HashMap<u32, FirewallConfig> = HashMap::with_max_entries(1, 0);
 
@@ -192,7 +196,7 @@ fn try_tc_qos_ipv4(
         generation,
         u32::from_be_bytes(ip.dst_addr),
     );
-    apply_qos_for_ids(generation, src_id, dst_id, direction, pkt_len)
+    apply_qos_for_ids(ctx, generation, src_id, dst_id, direction, pkt_len)
 }
 
 #[inline(always)]
@@ -206,11 +210,12 @@ fn try_tc_qos_ipv6(
     let generation = active_policy_generation(TAP_ID_UNASSIGNED);
     let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, generation, ip.src_addr);
     let dst_id = lookup_ipv6_id(&DST_IPV6_ID_MAP, generation, ip.dst_addr);
-    apply_qos_for_ids(generation, src_id, dst_id, direction, pkt_len)
+    apply_qos_for_ids(ctx, generation, src_id, dst_id, direction, pkt_len)
 }
 
 #[inline(always)]
 fn apply_qos_for_ids(
+    ctx: &TcContext,
     generation: u32,
     src_id: u32,
     dst_id: u32,
@@ -226,8 +231,11 @@ fn apply_qos_for_ids(
     if let Some((key, config)) =
         lookup_qos_config(TAP_ID_UNASSIGNED, generation, group_id, direction)
     {
-        let passed = apply_qos_bucket(&key, config, pkt_len, direction);
-        return Ok(if passed { TC_ACT_OK } else { TC_ACT_SHOT });
+        let (action, edt, priority) = apply_qos_bucket(&key, config, pkt_len, direction);
+        if action == TC_ACT_OK && edt != 0 {
+            apply_edt_prio(ctx, edt, priority);
+        }
+        return Ok(action);
     }
 
     Ok(TC_ACT_OK)
@@ -301,28 +309,45 @@ fn choose_qos_config(
     }
 }
 
-fn apply_qos_bucket(key: &QosKey, config: QosConfig, pkt_len: u64, direction: u8) -> bool {
+fn apply_qos_bucket(
+    key: &QosKey,
+    config: QosConfig,
+    pkt_len: u64,
+    direction: u8,
+) -> (i32, u64, u8) {
     let now = unsafe { bpf_ktime_get_ns() };
-    let rate_bytes_per_sec = config.rate_bps / 8;
+    let rate_bytes_per_sec = if config.rate_bps >= 8 {
+        config.rate_bps / 8
+    } else {
+        1
+    };
 
     if let Some(bucket_ptr) = QOS_TOKEN_BUCKET.get_ptr_mut(key) {
         let bucket = unsafe { &mut *bucket_ptr };
-        let (passed, dropped, shaped) =
+        let (passed, dropped, shaped, edt) =
             decide_qos_bucket(bucket, config, pkt_len, direction, now, rate_bytes_per_sec);
         update_qos_stats(key, pkt_len, dropped, shaped);
-        return passed;
+        return if passed {
+            (TC_ACT_OK, edt, config.priority)
+        } else {
+            (TC_ACT_SHOT, 0, config.priority)
+        };
     }
 
     let mut bucket = TokenBucket {
         tokens: config.burst_bytes,
         last_refill_ns: now,
-        last_edt: now,
+        last_edt: 0,
     };
-    let (passed, dropped, shaped) =
+    let (passed, dropped, shaped, edt) =
         decide_qos_bucket(&mut bucket, config, pkt_len, direction, now, rate_bytes_per_sec);
     let _ = QOS_TOKEN_BUCKET.insert(key, &bucket, 0);
     update_qos_stats(key, pkt_len, dropped, shaped);
-    passed
+    if passed {
+        (TC_ACT_OK, edt, config.priority)
+    } else {
+        (TC_ACT_SHOT, 0, config.priority)
+    }
 }
 
 fn decide_qos_bucket(
@@ -332,7 +357,7 @@ fn decide_qos_bucket(
     direction: u8,
     now: u64,
     rate_bytes_per_sec: u64,
-) -> (bool, bool, bool) {
+) -> (bool, bool, bool, u64) {
     let elapsed = if now > bucket.last_refill_ns {
         now - bucket.last_refill_ns
     } else {
@@ -352,22 +377,23 @@ fn decide_qos_bucket(
     };
     bucket.last_refill_ns = now;
 
+    if direction == DIRECTION_EGRESS {
+        let edt = next_edt(bucket.last_edt, now, pkt_len, rate_bytes_per_sec);
+        bucket.last_edt = edt;
+        if bucket.tokens >= pkt_len {
+            bucket.tokens -= pkt_len;
+            return (true, false, false, edt);
+        }
+        bucket.tokens = 0;
+        return (true, false, true, edt);
+    }
+
     if bucket.tokens >= pkt_len {
         bucket.tokens -= pkt_len;
-        if config.mode == QOS_MODE_SHAPING && direction == DIRECTION_EGRESS {
-            bucket.last_edt = now;
-            return (true, false, true);
-        } else {
-            return (true, false, false);
-        }
+        return (true, false, false, 0);
     }
 
-    if config.mode == QOS_MODE_SHAPING && direction == DIRECTION_EGRESS {
-        bucket.last_edt = next_edt(bucket.last_edt, now, pkt_len, rate_bytes_per_sec);
-        return (true, false, true);
-    }
-
-    (false, true, false)
+    (false, true, false, 0)
 }
 
 fn update_qos_stats(key: &QosKey, pkt_len: u64, dropped: bool, shaped: bool) {
@@ -384,6 +410,41 @@ fn update_qos_stats(key: &QosKey, pkt_len: u64, dropped: bool, shaped: bool) {
         if shaped {
             stats.shaped_packets = stats.shaped_packets.wrapping_add(1);
             stats.shaped_bytes = stats.shaped_bytes.wrapping_add(pkt_len);
+        }
+        return;
+    }
+
+    if let Some(stats_ptr) = QOS_STATS_BUF.get_ptr_mut(0) {
+        let stats = unsafe { &mut *stats_ptr };
+        stats.passed_packets = 0;
+        stats.passed_bytes = 0;
+        stats.dropped_packets = 0;
+        stats.dropped_bytes = 0;
+        stats.shaped_packets = 0;
+        stats.shaped_bytes = 0;
+
+        if dropped {
+            stats.dropped_packets = 1;
+            stats.dropped_bytes = pkt_len;
+        } else {
+            stats.passed_packets = 1;
+            stats.passed_bytes = pkt_len;
+            if shaped {
+                stats.shaped_packets = 1;
+                stats.shaped_bytes = pkt_len;
+            }
+        }
+        let _ = QOS_STATS.insert(key, &*stats, 0);
+    }
+}
+
+#[inline(always)]
+fn apply_edt_prio(ctx: &TcContext, edt: u64, priority: u8) {
+    let skb = ctx.as_ptr() as *mut __sk_buff;
+    unsafe {
+        (*skb).tstamp = edt;
+        if priority != 0 {
+            (*skb).priority = priority as u32;
         }
     }
 }
