@@ -82,7 +82,7 @@ describe('useAclApi', () => {
         data: {
           success: true,
           data: [{
-            id: 1,
+            id: 99,
             name: 'group-acl',
             action: 'deny',
             src_group_id: 'src-group-id',
