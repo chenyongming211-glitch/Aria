@@ -1,6 +1,6 @@
 # QoS Product Decision
 
-Last updated: 2026-06-13
+Last updated: 2026-06-15
 
 Aria SD-WAN no longer uses the old "three-tier QoS" model. Do not describe QoS
 as `service / peers / ip`, and do not introduce new UI, API, Controller, or
@@ -36,16 +36,38 @@ explicit:
 
 QoS is also enforced at node scope. All attached aria interfaces consume the
 same `QOS_TOKEN_BUCKET` entry for a compiled QoS rule. This means bandwidth is
-interpreted as node total bandwidth for the matching rule, not as independent
-per-interface bandwidth. Runtime packet counters stay in `QOS_STATS` as per-cpu
-stats and are aggregated by the Agent when reported to the Controller/UI.
+interpreted as rule-level aggregate bandwidth on the Agent node, not as
+independent per-interface bandwidth. If a node uses `aria0..ariaN` to spread
+traffic across multiple WireGuard tunnels, those tunnels share the same rule
+bucket. Runtime packet counters stay in `QOS_STATS` as per-cpu stats and are
+aggregated by the Agent when reported to the Controller/UI.
 
-The preferred long-term QoS bucket implementation is a shared locked bucket.
-However, Linux requires BTF-style maps for `bpf_spin_lock`, while the current
-Aya map macro emits legacy map definitions. Attempting to use `bpf_spin_lock`
-with `QOS_TOKEN_BUCKET` is rejected by the kernel verifier with `has to have BTF
-in order to use bpf_spin_lock`. Do not reintroduce `bpf_spin_lock` until the
-Agent eBPF toolchain supports BTF-style maps or a verified equivalent.
+The current production QoS bucket design is a lock-free shared bucket, following
+the same practical tradeoff as `aria-firewall`: one shared `HashMap` bucket per
+compiled QoS rule and per-cpu stats for counters. This avoids the much larger
+long-term error of per-cpu full-rate buckets while staying compatible with the
+current Aya 0.13.1 / aya-ebpf 0.1 toolchain.
+
+QoS precision is a product SLO, not an absolute mathematical guarantee:
+
+- Minimum acceptable long-running throughput accuracy is 90% of the configured
+  rate under controlled VPN traffic tests.
+- Target long-running throughput accuracy is 98% or better when traffic,
+  kernel scheduling, MTU, and WireGuard overhead allow it.
+- Short bursts within `burst_bytes` are expected and must not be treated as
+  precision failures.
+- Test results must report the configured rate, measured goodput, measured
+  wire bytes when available, duration, packet size, direction, and whether the
+  rule used policing or shaping semantics.
+
+`bpf_spin_lock` is not a current release requirement. Linux requires BTF-style
+maps for `bpf_spin_lock`, while the current Aya map macro emits a map layout
+that online Linux 6.8 verifier validation rejects for `QOS_TOKEN_BUCKET` with
+`has to have BTF in order to use bpf_spin_lock`. Do not reintroduce
+`bpf_spin_lock` until the Agent eBPF toolchain supports BTF-style map value
+metadata or a verified equivalent. If real gray tests cannot maintain the 90%
+minimum SLO with the lock-free shared bucket, the next project is the eBPF
+toolchain/BTF path, not another product-level QoS model rewrite.
 
 ## IP Group Product Model
 
@@ -167,6 +189,37 @@ The only valid northbound QoS route shape is node-scoped:
 
 Future work should keep Controller, Agent, frontend, docs, and tests on the
 unified rule model above.
+
+## Verification And Acceptance
+
+Every ACL/QoS release candidate must be verified in this order:
+
+1. GitHub Actions build/test passes. Local compilation is not required and must
+   not be used as the authoritative build gate.
+2. Deploy the branch artifact to gray validation before merging to `master`.
+3. Verify ACL/QoS generation semantics: a new snapshot becomes active only
+   after ACL maps, QoS maps, runtime config, and attachment health are all
+   valid. If any write fails, the old generation remains active.
+4. Verify ACL behavior with real traffic:
+   - allow rule passes traffic and increments pass stats;
+   - deny rule drops traffic and increments drop stats;
+   - `both` expands into ingress XDP and egress TC behavior.
+5. Verify QoS behavior with real traffic across at least two Agents connected
+   by the WireGuard overlay:
+   - create a QoS rule from the Controller/API or UI;
+   - wait for Agent sync and map updates;
+   - generate sustained traffic for at least 60 seconds;
+   - confirm measured long-running throughput is at least 90% accurate and
+     preferably 98% or better for representative 1 Mbps, 5 Mbps, and 10 Mbps
+     policies;
+   - confirm `QOS_STATS` pass/drop/shape counters increase and the UI displays
+     the aggregated values.
+6. Verify rollback/edit behavior:
+   - editing a QoS rate clears stale bucket state for that rule;
+   - deleting ACL/QoS policies removes stale config, bucket, and stats ownership
+     from the current generation;
+   - failed delivery surfaces a human-readable rule or IP Group name rather than
+     an internal runtime group id.
 
 ## Current Implementation Status
 
