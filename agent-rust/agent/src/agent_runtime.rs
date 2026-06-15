@@ -67,6 +67,43 @@ fn current_unix_timestamp() -> i64 {
         .as_secs() as i64
 }
 
+fn canonicalize_acl_qos_snapshot(snapshot: &mut AclQosSnapshot) {
+    for group in &mut snapshot.ip_groups {
+        group.cidrs.sort();
+    }
+    snapshot.ip_groups.sort_by(|left, right| {
+        left.id
+            .cmp(&right.id)
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.kind.cmp(&right.kind))
+            .then_with(|| left.cidrs.cmp(&right.cidrs))
+    });
+    snapshot.acl_rules.sort_by(|left, right| {
+        left.id
+            .cmp(&right.id)
+            .then_with(|| left.src_group.cmp(&right.src_group))
+            .then_with(|| left.dst_group.cmp(&right.dst_group))
+            .then_with(|| left.src_group_id.cmp(&right.src_group_id))
+            .then_with(|| left.dst_group_id.cmp(&right.dst_group_id))
+            .then_with(|| left.proto.cmp(&right.proto))
+            .then_with(|| left.action.cmp(&right.action))
+            .then_with(|| left.priority.cmp(&right.priority))
+            .then_with(|| left.direction.cmp(&right.direction))
+            .then_with(|| left.ports.cmp(&right.ports))
+    });
+    snapshot.qos_rules.sort_by(|left, right| {
+        left.id
+            .cmp(&right.id)
+            .then_with(|| left.group.cmp(&right.group))
+            .then_with(|| left.group_id.cmp(&right.group_id))
+            .then_with(|| left.direction.cmp(&right.direction))
+            .then_with(|| left.rate_bps.cmp(&right.rate_bps))
+            .then_with(|| left.burst_bytes.cmp(&right.burst_bytes))
+            .then_with(|| left.priority.cmp(&right.priority))
+            .then_with(|| left.mode.cmp(&right.mode))
+    });
+}
+
 pub struct AgentRuntime {
     config: AgentConfig,
     config_path: String,
@@ -1620,6 +1657,8 @@ impl AgentRuntime {
             }
         }
 
+        canonicalize_acl_qos_snapshot(&mut snapshot);
+
         let acl_qos_mgr = self.acl_qos_mgr.clone();
         let applied_counts = (snapshot.acl_rules.len(), snapshot.qos_rules.len());
         tokio::task::spawn_blocking(move || -> Result<()> {
@@ -2465,7 +2504,10 @@ fn build_failed_command_response_with_result(
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_runtime_token_from_sync, fail_route_sync_if_needed};
+    use super::{
+        apply_runtime_token_from_sync, canonicalize_acl_qos_snapshot, fail_route_sync_if_needed,
+    };
+    use crate::acl_qos_manager::{AclQosSnapshot, AclRuleSpec, IPGroupSpec, QosRuleSpec};
     use crate::config::AgentConfig;
     use crate::grpc_client::SyncResult;
     use crate::runtime_credential::RuntimeCredentialStore;
@@ -2537,5 +2579,88 @@ mod tests {
         assert!(message.contains("2 route operations failed"));
         assert!(message.contains("add 10.10.0.0/16"));
         assert!(message.contains("remove 10.20.0.0/16"));
+    }
+
+    #[test]
+    fn acl_qos_snapshot_canonicalization_removes_order_noise() {
+        let mut left = AclQosSnapshot {
+            ip_groups: vec![
+                IPGroupSpec {
+                    id: "group-b".to_string(),
+                    name: "Group B".to_string(),
+                    cidrs: vec!["100.64.0.2/32".to_string(), "100.64.0.27/32".to_string()],
+                    kind: "inline".to_string(),
+                },
+                IPGroupSpec {
+                    id: "group-a".to_string(),
+                    name: "Group A".to_string(),
+                    cidrs: vec!["10.0.1.0/24".to_string(), "10.0.0.0/24".to_string()],
+                    kind: "custom".to_string(),
+                },
+            ],
+            acl_rules: vec![
+                AclRuleSpec {
+                    id: "acl-b".to_string(),
+                    src_group: "group-b".to_string(),
+                    dst_group: "any".to_string(),
+                    src_group_id: "group-b".to_string(),
+                    dst_group_id: String::new(),
+                    proto: 1,
+                    action: 0,
+                    priority: 20,
+                    direction: 1,
+                    ports: None,
+                },
+                AclRuleSpec {
+                    id: "acl-a".to_string(),
+                    src_group: "group-a".to_string(),
+                    dst_group: "group-b".to_string(),
+                    src_group_id: "group-a".to_string(),
+                    dst_group_id: "group-b".to_string(),
+                    proto: 0,
+                    action: 1,
+                    priority: 10,
+                    direction: 0,
+                    ports: Some("443".to_string()),
+                },
+            ],
+            qos_rules: vec![
+                QosRuleSpec {
+                    id: "qos-b".to_string(),
+                    group: "group-b".to_string(),
+                    group_id: "group-b".to_string(),
+                    direction: 1,
+                    rate_bps: 5_000_000,
+                    burst_bytes: 625_000,
+                    priority: 20,
+                    mode: 0,
+                },
+                QosRuleSpec {
+                    id: "qos-a".to_string(),
+                    group: "group-a".to_string(),
+                    group_id: "group-a".to_string(),
+                    direction: 0,
+                    rate_bps: 1_000_000,
+                    burst_bytes: 125_000,
+                    priority: 10,
+                    mode: 0,
+                },
+            ],
+            acl_enabled: true,
+            qos_enabled: true,
+        };
+        let mut right = AclQosSnapshot {
+            ip_groups: left.ip_groups.iter().cloned().rev().collect(),
+            acl_rules: left.acl_rules.iter().cloned().rev().collect(),
+            qos_rules: left.qos_rules.iter().cloned().rev().collect(),
+            acl_enabled: true,
+            qos_enabled: true,
+        };
+        right.ip_groups[1].cidrs.reverse();
+
+        canonicalize_acl_qos_snapshot(&mut left);
+        canonicalize_acl_qos_snapshot(&mut right);
+
+        assert_eq!(left, right);
     }
 }
