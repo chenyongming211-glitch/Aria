@@ -61,6 +61,15 @@ pub struct PolicyValue {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+struct PolicyLookup {
+    key: PolicyKey,
+    value: PolicyValue,
+    found: u8,
+    pad: [u8; 3],
+}
+
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PortKey {
     pub tap_id: u32,
@@ -332,11 +341,24 @@ fn acl_policy_action(
     pkt_len: u64,
     direction: u8,
 ) -> u8 {
-    if let Some((key, policy)) =
-        lookup_policy(generation, src_id, dst_id, proto, direction)
-    {
-        let action = policy_action(generation, policy, dst_port);
-        update_rule_stats(&key, pkt_len, action == ACTION_DROP);
+    let mut lookup = PolicyLookup {
+        key: PolicyKey {
+            tap_id: TAP_ID_UNASSIGNED,
+            generation,
+            src_id: ID_WILDCARD,
+            dst_id: ID_WILDCARD,
+            proto: PROTO_WILDCARD,
+            direction,
+            pad: [0; 2],
+        },
+        value: PolicyValue::default(),
+        found: 0,
+        pad: [0; 3],
+    };
+
+    if lookup_policy(&mut lookup, src_id, dst_id, proto) {
+        let action = policy_action(generation, lookup.value, dst_port);
+        update_rule_stats(&lookup.key, pkt_len, action == ACTION_DROP);
         return action;
     }
 
@@ -369,101 +391,69 @@ fn active_policy_generation(tap_id: u32) -> u32 {
     0
 }
 
-fn lookup_policy(
-    generation: u32,
-    src_id: u32,
-    dst_id: u32,
-    proto: u8,
-    direction: u8,
-) -> Option<(PolicyKey, PolicyValue)> {
-    let mut best = lookup_policy_for_proto(generation, src_id, dst_id, proto, direction);
+fn lookup_policy(result: &mut PolicyLookup, src_id: u32, dst_id: u32, proto: u8) -> bool {
+    lookup_policy_for_proto(result, src_id, dst_id, proto);
 
     if proto != PROTO_WILDCARD {
-        if let Some(policy) = lookup_policy_for_proto(
-            generation,
-            src_id,
-            dst_id,
-            PROTO_WILDCARD,
-            direction,
-        )
-        {
-            best = choose_policy(best, policy);
-        }
+        lookup_policy_for_proto(result, src_id, dst_id, PROTO_WILDCARD);
     }
 
-    best
+    result.found != 0
 }
 
-fn lookup_policy_for_proto(
-    generation: u32,
-    src_id: u32,
-    dst_id: u32,
-    proto: u8,
-    direction: u8,
-) -> Option<(PolicyKey, PolicyValue)> {
-    let mut best: Option<(PolicyKey, PolicyValue)> = None;
+fn lookup_policy_for_proto(result: &mut PolicyLookup, src_id: u32, dst_id: u32, proto: u8) {
     let exact_key = PolicyKey {
         tap_id: TAP_ID_UNASSIGNED,
-        generation,
+        generation: result.key.generation,
         src_id,
         dst_id,
         proto,
-        direction,
+        direction: result.key.direction,
         pad: [0; 2],
     };
-    if let Some(policy) = unsafe { POLICY_TABLE.get(&exact_key) } {
-        best = choose_policy(best, (exact_key, *policy));
-    }
+    consider_policy(result, &exact_key);
 
     let wildcard_src_key = PolicyKey {
         tap_id: TAP_ID_UNASSIGNED,
-        generation,
+        generation: result.key.generation,
         src_id: ID_WILDCARD,
         dst_id,
         proto,
-        direction,
+        direction: result.key.direction,
         pad: [0; 2],
     };
-    if let Some(policy) = unsafe { POLICY_TABLE.get(&wildcard_src_key) } {
-        best = choose_policy(best, (wildcard_src_key, *policy));
-    }
+    consider_policy(result, &wildcard_src_key);
 
     let wildcard_dst_key = PolicyKey {
         tap_id: TAP_ID_UNASSIGNED,
-        generation,
+        generation: result.key.generation,
         src_id,
         dst_id: ID_WILDCARD,
         proto,
-        direction,
+        direction: result.key.direction,
         pad: [0; 2],
     };
-    if let Some(policy) = unsafe { POLICY_TABLE.get(&wildcard_dst_key) } {
-        best = choose_policy(best, (wildcard_dst_key, *policy));
-    }
+    consider_policy(result, &wildcard_dst_key);
 
     let full_wildcard_key = PolicyKey {
         tap_id: TAP_ID_UNASSIGNED,
-        generation,
+        generation: result.key.generation,
         src_id: ID_WILDCARD,
         dst_id: ID_WILDCARD,
         proto,
-        direction,
+        direction: result.key.direction,
         pad: [0; 2],
     };
-    if let Some(policy) = unsafe { POLICY_TABLE.get(&full_wildcard_key) } {
-        best = choose_policy(best, (full_wildcard_key, *policy));
-    }
-
-    best
+    consider_policy(result, &full_wildcard_key);
 }
 
-fn choose_policy(
-    current: Option<(PolicyKey, PolicyValue)>,
-    candidate: (PolicyKey, PolicyValue),
-) -> Option<(PolicyKey, PolicyValue)> {
-    match current {
-        Some(existing) if existing.1.priority <= candidate.1.priority => Some(existing),
-        _ => Some(candidate),
+fn consider_policy(result: &mut PolicyLookup, candidate_key: &PolicyKey) {
+    if let Some(policy) = unsafe { POLICY_TABLE.get(candidate_key) } {
+        if result.found == 0 || policy.priority < result.value.priority {
+            result.key = *candidate_key;
+            result.value = *policy;
+            result.found = 1;
+        }
     }
 }
 
