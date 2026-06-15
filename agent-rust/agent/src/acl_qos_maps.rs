@@ -15,12 +15,23 @@ pub const PORT_ACTION_PASS: u8 = 2;
 #[derive(Debug, Clone, Copy)]
 pub struct TapMapRuntime {
     pub tap_id: u32,
+    pub policy_generation: u32,
 }
 
 impl Default for TapMapRuntime {
     fn default() -> Self {
         Self {
             tap_id: TAP_ID_UNASSIGNED,
+            policy_generation: 0,
+        }
+    }
+}
+
+impl TapMapRuntime {
+    pub fn with_generation(self, policy_generation: u32) -> Self {
+        Self {
+            policy_generation,
+            ..self
         }
     }
 }
@@ -205,6 +216,7 @@ pub fn add_policy_to_maps(
                 for port in start..=end {
                     let key = PortKey {
                         tap_id: runtime.tap_id,
+                        generation: runtime.policy_generation,
                         idx,
                         port,
                         pad: 0,
@@ -220,6 +232,7 @@ pub fn add_policy_to_maps(
 
     let key = PolicyKey {
         tap_id: runtime.tap_id,
+        generation: runtime.policy_generation,
         src_id,
         dst_id,
         proto,
@@ -252,6 +265,7 @@ pub fn delete_policy_from_maps(
 ) -> Result<(), String> {
     let key = PolicyKey {
         tap_id: runtime.tap_id,
+        generation: runtime.policy_generation,
         src_id,
         dst_id,
         proto,
@@ -278,6 +292,7 @@ pub fn delete_port_set_from_maps(
         for port in start..=end {
             let key = PortKey {
                 tap_id: runtime.tap_id,
+                generation: runtime.policy_generation,
                 idx: bitmap_idx,
                 port,
                 pad: 0,
@@ -297,10 +312,10 @@ pub fn add_qos_rule_to_maps(
     burst_bytes: u64,
     priority: u8,
     mode: u8,
-    user_qos_enabled: bool,
 ) -> Result<(), String> {
     let key = QosKey {
         tap_id: runtime.tap_id,
+        generation: runtime.policy_generation,
         group_id,
         direction,
         pad: [0; 3],
@@ -321,8 +336,7 @@ pub fn add_qos_rule_to_maps(
     handles
         .qos_stats
         .insert(key, zero_per_cpu_values::<QosStatsValue>()?, 0)
-        .map_err(|e| format!("QOS_STATS insert: {:?}", e))?;
-    sync_runtime_config(handles, runtime, None, Some(user_qos_enabled))
+        .map_err(|e| format!("QOS_STATS insert: {:?}", e))
 }
 
 pub fn delete_qos_rule_from_maps(
@@ -334,6 +348,7 @@ pub fn delete_qos_rule_from_maps(
 ) -> Result<(), String> {
     let key = QosKey {
         tap_id: runtime.tap_id,
+        generation: runtime.policy_generation,
         group_id,
         direction,
         pad: [0; 3],
@@ -365,6 +380,7 @@ pub fn sync_runtime_config(
         tcprt_enabled: 0,
         ssl_enabled: 0,
         lb_enabled: 0,
+        policy_generation: runtime.policy_generation,
     };
 
     if runtime.tap_id == TAP_ID_UNASSIGNED {
@@ -388,6 +404,7 @@ pub fn sync_runtime_config(
         tcprt_enabled: 0,
         lb_enabled: 0,
         pad: [0; 1],
+        policy_generation: runtime.policy_generation,
     };
     handles
         .acl_tap_config
@@ -401,9 +418,71 @@ pub fn sync_runtime_config(
 
 fn has_qos_rules(handles: &AclQosMapHandles, runtime: TapMapRuntime) -> bool {
     handles.qos_config.iter().any(|item| {
-        item.map(|(key, _)| key.tap_id == runtime.tap_id)
+        item.map(|(key, _)| {
+            key.tap_id == runtime.tap_id && key.generation == runtime.policy_generation
+        })
             .unwrap_or(false)
     })
+}
+
+pub fn cleanup_policy_generation(
+    handles: &mut AclQosMapHandles,
+    runtime: TapMapRuntime,
+) -> Result<(), String> {
+    let policy_keys: Vec<PolicyKey> = handles
+        .policy_table
+        .iter()
+        .filter_map(|item| item.ok().map(|(key, _)| key))
+        .filter(|key| key.tap_id == runtime.tap_id && key.generation == runtime.policy_generation)
+        .collect();
+    for key in policy_keys {
+        let _ = handles.policy_table.remove(&key);
+        let _ = handles.rule_stats.remove(&key);
+    }
+
+    let stat_keys: Vec<PolicyKey> = handles
+        .rule_stats
+        .iter()
+        .filter_map(|item| item.ok().map(|(key, _)| key))
+        .filter(|key| key.tap_id == runtime.tap_id && key.generation == runtime.policy_generation)
+        .collect();
+    for key in stat_keys {
+        let _ = handles.rule_stats.remove(&key);
+    }
+
+    let port_keys: Vec<PortKey> = handles
+        .port_bitmap_pool
+        .iter()
+        .filter_map(|item| item.ok().map(|(key, _)| key))
+        .filter(|key| key.tap_id == runtime.tap_id && key.generation == runtime.policy_generation)
+        .collect();
+    for key in port_keys {
+        let _ = handles.port_bitmap_pool.remove(&key);
+    }
+
+    let qos_keys: Vec<QosKey> = handles
+        .qos_config
+        .iter()
+        .filter_map(|item| item.ok().map(|(key, _)| key))
+        .filter(|key| key.tap_id == runtime.tap_id && key.generation == runtime.policy_generation)
+        .collect();
+    for key in qos_keys {
+        let _ = handles.qos_config.remove(&key);
+        let _ = handles.qos_token_bucket.remove(&key);
+        let _ = handles.qos_stats.remove(&key);
+    }
+
+    let qos_stat_keys: Vec<QosKey> = handles
+        .qos_stats
+        .iter()
+        .filter_map(|item| item.ok().map(|(key, _)| key))
+        .filter(|key| key.tap_id == runtime.tap_id && key.generation == runtime.policy_generation)
+        .collect();
+    for key in qos_stat_keys {
+        let _ = handles.qos_stats.remove(&key);
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -435,7 +514,7 @@ pub fn get_rule_stats(
         let Ok((key, values)) = item else {
             continue;
         };
-        if key.tap_id != runtime.tap_id {
+        if key.tap_id != runtime.tap_id || key.generation != runtime.policy_generation {
             continue;
         }
         let mut stat = AclRuleStat {
@@ -465,7 +544,7 @@ pub fn get_qos_stats(
         let Ok((key, values)) = item else {
             continue;
         };
-        if key.tap_id != runtime.tap_id {
+        if key.tap_id != runtime.tap_id || key.generation != runtime.policy_generation {
             continue;
         }
         let mut stat = QosRuleStat {

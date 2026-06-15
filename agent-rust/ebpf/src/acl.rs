@@ -33,11 +33,17 @@ const ACTION_ALLOW: u8 = 0;
 const ACTION_DROP: u8 = 1;
 const PORT_ACTION_DROP: u8 = 1;
 const PORT_ACTION_PASS: u8 = 2;
+const IPV4_IDENTITY_LOOKUP_BITS: u32 = 64;
+const IPV6_IDENTITY_LOOKUP_BITS: u32 = 160;
+
+type Ipv4IdentityKey = [u8; 8];
+type Ipv6IdentityKey = [u8; 20];
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PolicyKey {
     pub tap_id: u32,
+    pub generation: u32,
     pub src_id: u32,
     pub dst_id: u32,
     pub proto: u8,
@@ -58,6 +64,7 @@ pub struct PolicyValue {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PortKey {
     pub tap_id: u32,
+    pub generation: u32,
     pub idx: u32,
     pub port: u16,
     pub pad: u16,
@@ -84,6 +91,7 @@ pub struct FirewallConfig {
     pub tcprt_enabled: u8,
     pub ssl_enabled: u8,
     pub lb_enabled: u8,
+    pub policy_generation: u32,
 }
 
 #[repr(C)]
@@ -97,19 +105,20 @@ pub struct TapConfig {
     pub tcprt_enabled: u8,
     pub lb_enabled: u8,
     pub pad: [u8; 1],
+    pub policy_generation: u32,
 }
 
 #[map(name = "SRC_IPV4_ID_MAP", pin)]
-static SRC_IPV4_ID_MAP: LpmTrie<u32, u32> = LpmTrie::with_max_entries(10000, 0);
+static SRC_IPV4_ID_MAP: LpmTrie<Ipv4IdentityKey, u32> = LpmTrie::with_max_entries(10000, 0);
 
 #[map(name = "DST_IPV4_ID_MAP", pin)]
-static DST_IPV4_ID_MAP: LpmTrie<u32, u32> = LpmTrie::with_max_entries(10000, 0);
+static DST_IPV4_ID_MAP: LpmTrie<Ipv4IdentityKey, u32> = LpmTrie::with_max_entries(10000, 0);
 
 #[map(name = "SRC_IPV6_ID_MAP", pin)]
-static SRC_IPV6_ID_MAP: LpmTrie<[u8; 16], u32> = LpmTrie::with_max_entries(10000, 0);
+static SRC_IPV6_ID_MAP: LpmTrie<Ipv6IdentityKey, u32> = LpmTrie::with_max_entries(10000, 0);
 
 #[map(name = "DST_IPV6_ID_MAP", pin)]
-static DST_IPV6_ID_MAP: LpmTrie<[u8; 16], u32> = LpmTrie::with_max_entries(10000, 0);
+static DST_IPV6_ID_MAP: LpmTrie<Ipv6IdentityKey, u32> = LpmTrie::with_max_entries(10000, 0);
 
 #[map(name = "POLICY_TABLE", pin)]
 static POLICY_TABLE: HashMap<PolicyKey, PolicyValue> = HashMap::with_max_entries(65536, 0);
@@ -209,9 +218,19 @@ fn try_tc_egress_acl(ctx: TcContext) -> Result<i32, u64> {
 fn try_xdp_ingress_acl_ipv4(ctx: &XdpContext, pkt_len: u64, ip_offset: usize) -> Result<u32, u64> {
     let ip = ptr_at::<Ipv4Hdr>(ctx, ip_offset)?;
     let (_, dst_port) = parse_ports_ipv4(ctx, ip_offset, ip)?;
-    let src_id = lookup_ipv4_id(&SRC_IPV4_ID_MAP, u32::from_be_bytes(ip.src_addr));
-    let dst_id = lookup_ipv4_id(&DST_IPV4_ID_MAP, u32::from_be_bytes(ip.dst_addr));
+    let generation = active_policy_generation(TAP_ID_UNASSIGNED);
+    let src_id = lookup_ipv4_id(
+        &SRC_IPV4_ID_MAP,
+        generation,
+        u32::from_be_bytes(ip.src_addr),
+    );
+    let dst_id = lookup_ipv4_id(
+        &DST_IPV4_ID_MAP,
+        generation,
+        u32::from_be_bytes(ip.dst_addr),
+    );
     let action = acl_policy_action(
+        generation,
         src_id,
         dst_id,
         ip.proto as u8,
@@ -230,9 +249,11 @@ fn try_xdp_ingress_acl_ipv4(ctx: &XdpContext, pkt_len: u64, ip_offset: usize) ->
 fn try_xdp_ingress_acl_ipv6(ctx: &XdpContext, pkt_len: u64, ip_offset: usize) -> Result<u32, u64> {
     let ip = ptr_at::<Ipv6Hdr>(ctx, ip_offset)?;
     let (_, dst_port) = parse_ports_ipv6(ctx, ip_offset, ip)?;
-    let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, ip.src_addr);
-    let dst_id = lookup_ipv6_id(&DST_IPV6_ID_MAP, ip.dst_addr);
+    let generation = active_policy_generation(TAP_ID_UNASSIGNED);
+    let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, generation, ip.src_addr);
+    let dst_id = lookup_ipv6_id(&DST_IPV6_ID_MAP, generation, ip.dst_addr);
     let action = acl_policy_action(
+        generation,
         src_id,
         dst_id,
         ip.next_hdr as u8,
@@ -251,9 +272,19 @@ fn try_xdp_ingress_acl_ipv6(ctx: &XdpContext, pkt_len: u64, ip_offset: usize) ->
 fn try_tc_egress_acl_ipv4(ctx: &TcContext, pkt_len: u64, ip_offset: usize) -> Result<i32, u64> {
     let ip = ptr_at_tc::<Ipv4Hdr>(ctx, ip_offset)?;
     let (_, dst_port) = parse_ports_ipv4_tc(ctx, ip_offset, ip)?;
-    let src_id = lookup_ipv4_id(&SRC_IPV4_ID_MAP, u32::from_be_bytes(ip.src_addr));
-    let dst_id = lookup_ipv4_id(&DST_IPV4_ID_MAP, u32::from_be_bytes(ip.dst_addr));
+    let generation = active_policy_generation(TAP_ID_UNASSIGNED);
+    let src_id = lookup_ipv4_id(
+        &SRC_IPV4_ID_MAP,
+        generation,
+        u32::from_be_bytes(ip.src_addr),
+    );
+    let dst_id = lookup_ipv4_id(
+        &DST_IPV4_ID_MAP,
+        generation,
+        u32::from_be_bytes(ip.dst_addr),
+    );
     let action = acl_policy_action(
+        generation,
         src_id,
         dst_id,
         ip.proto as u8,
@@ -272,9 +303,11 @@ fn try_tc_egress_acl_ipv4(ctx: &TcContext, pkt_len: u64, ip_offset: usize) -> Re
 fn try_tc_egress_acl_ipv6(ctx: &TcContext, pkt_len: u64, ip_offset: usize) -> Result<i32, u64> {
     let ip = ptr_at_tc::<Ipv6Hdr>(ctx, ip_offset)?;
     let (_, dst_port) = parse_ports_ipv6_tc(ctx, ip_offset, ip)?;
-    let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, ip.src_addr);
-    let dst_id = lookup_ipv6_id(&DST_IPV6_ID_MAP, ip.dst_addr);
+    let generation = active_policy_generation(TAP_ID_UNASSIGNED);
+    let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, generation, ip.src_addr);
+    let dst_id = lookup_ipv6_id(&DST_IPV6_ID_MAP, generation, ip.dst_addr);
     let action = acl_policy_action(
+        generation,
         src_id,
         dst_id,
         ip.next_hdr as u8,
@@ -291,6 +324,7 @@ fn try_tc_egress_acl_ipv6(ctx: &TcContext, pkt_len: u64, ip_offset: usize) -> Re
 
 #[inline(always)]
 fn acl_policy_action(
+    generation: u32,
     src_id: u32,
     dst_id: u32,
     proto: u8,
@@ -298,9 +332,10 @@ fn acl_policy_action(
     pkt_len: u64,
     direction: u8,
 ) -> u8 {
-    if let Some((key, policy)) = lookup_policy(TAP_ID_UNASSIGNED, src_id, dst_id, proto, direction)
+    if let Some((key, policy)) =
+        lookup_policy(TAP_ID_UNASSIGNED, generation, src_id, dst_id, proto, direction)
     {
-        let action = policy_action(TAP_ID_UNASSIGNED, policy, dst_port);
+        let action = policy_action(TAP_ID_UNASSIGNED, generation, policy, dst_port);
         update_rule_stats(&key, pkt_len, action == ACTION_DROP);
         return action;
     }
@@ -321,18 +356,38 @@ fn acl_enabled(tap_id: u32) -> bool {
     true
 }
 
+fn active_policy_generation(tap_id: u32) -> u32 {
+    if let Some(tap) = unsafe { TAP_CONFIG_MAP.get(&tap_id) } {
+        return tap.policy_generation;
+    }
+
+    let key = 0;
+    if let Some(config) = unsafe { FIREWALL_CONFIG.get(&key) } {
+        return config.policy_generation;
+    }
+
+    0
+}
+
 fn lookup_policy(
     tap_id: u32,
+    generation: u32,
     src_id: u32,
     dst_id: u32,
     proto: u8,
     direction: u8,
 ) -> Option<(PolicyKey, PolicyValue)> {
-    let mut best = lookup_policy_for_proto(tap_id, src_id, dst_id, proto, direction);
+    let mut best = lookup_policy_for_proto(tap_id, generation, src_id, dst_id, proto, direction);
 
     if proto != PROTO_WILDCARD {
-        if let Some(policy) =
-            lookup_policy_for_proto(tap_id, src_id, dst_id, PROTO_WILDCARD, direction)
+        if let Some(policy) = lookup_policy_for_proto(
+            tap_id,
+            generation,
+            src_id,
+            dst_id,
+            PROTO_WILDCARD,
+            direction,
+        )
         {
             best = choose_policy(best, policy);
         }
@@ -343,6 +398,7 @@ fn lookup_policy(
 
 fn lookup_policy_for_proto(
     tap_id: u32,
+    generation: u32,
     src_id: u32,
     dst_id: u32,
     proto: u8,
@@ -351,6 +407,7 @@ fn lookup_policy_for_proto(
     let mut best: Option<(PolicyKey, PolicyValue)> = None;
     let exact_key = PolicyKey {
         tap_id,
+        generation,
         src_id,
         dst_id,
         proto,
@@ -363,6 +420,7 @@ fn lookup_policy_for_proto(
 
     let wildcard_src_key = PolicyKey {
         tap_id,
+        generation,
         src_id: ID_WILDCARD,
         dst_id,
         proto,
@@ -375,6 +433,7 @@ fn lookup_policy_for_proto(
 
     let wildcard_dst_key = PolicyKey {
         tap_id,
+        generation,
         src_id,
         dst_id: ID_WILDCARD,
         proto,
@@ -387,6 +446,7 @@ fn lookup_policy_for_proto(
 
     let full_wildcard_key = PolicyKey {
         tap_id,
+        generation,
         src_id: ID_WILDCARD,
         dst_id: ID_WILDCARD,
         proto,
@@ -410,7 +470,7 @@ fn choose_policy(
     }
 }
 
-fn policy_action(tap_id: u32, policy: PolicyValue, dst_port: u16) -> u8 {
+fn policy_action(tap_id: u32, generation: u32, policy: PolicyValue, dst_port: u16) -> u8 {
     if policy.has_port_filter == 0 {
         return policy.action;
     }
@@ -421,6 +481,7 @@ fn policy_action(tap_id: u32, policy: PolicyValue, dst_port: u16) -> u8 {
 
     let port_key = PortKey {
         tap_id,
+        generation,
         idx: policy.bitmap_idx,
         port: dst_port,
         pad: 0,
@@ -450,20 +511,61 @@ fn update_rule_stats(key: &PolicyKey, pkt_len: u64, dropped: bool) {
     }
 }
 
-fn lookup_ipv4_id(map: &LpmTrie<u32, u32>, ip: u32) -> u32 {
-    let key = Key::new(32, ip);
+fn lookup_ipv4_id(map: &LpmTrie<Ipv4IdentityKey, u32>, generation: u32, ip: u32) -> u32 {
+    let key = Key::new(IPV4_IDENTITY_LOOKUP_BITS, ipv4_identity_key(generation, ip));
     if let Some(id) = map.get(&key) {
         return *id;
     }
     ID_WILDCARD
 }
 
-fn lookup_ipv6_id(map: &LpmTrie<[u8; 16], u32>, ip: [u8; 16]) -> u32 {
-    let key = Key::new(128, ip);
+fn lookup_ipv6_id(map: &LpmTrie<Ipv6IdentityKey, u32>, generation: u32, ip: [u8; 16]) -> u32 {
+    let key = Key::new(IPV6_IDENTITY_LOOKUP_BITS, ipv6_identity_key(generation, ip));
     if let Some(id) = map.get(&key) {
         return *id;
     }
     ID_WILDCARD
+}
+
+fn ipv4_identity_key(generation: u32, ip: u32) -> Ipv4IdentityKey {
+    let generation_bytes = generation.to_be_bytes();
+    let ip_bytes = ip.to_be_bytes();
+    [
+        generation_bytes[0],
+        generation_bytes[1],
+        generation_bytes[2],
+        generation_bytes[3],
+        ip_bytes[0],
+        ip_bytes[1],
+        ip_bytes[2],
+        ip_bytes[3],
+    ]
+}
+
+fn ipv6_identity_key(generation: u32, ip: [u8; 16]) -> Ipv6IdentityKey {
+    let generation_bytes = generation.to_be_bytes();
+    [
+        generation_bytes[0],
+        generation_bytes[1],
+        generation_bytes[2],
+        generation_bytes[3],
+        ip[0],
+        ip[1],
+        ip[2],
+        ip[3],
+        ip[4],
+        ip[5],
+        ip[6],
+        ip[7],
+        ip[8],
+        ip[9],
+        ip[10],
+        ip[11],
+        ip[12],
+        ip[13],
+        ip[14],
+        ip[15],
+    ]
 }
 
 fn parse_ports_ipv4(ctx: &XdpContext, ip_offset: usize, ip: &Ipv4Hdr) -> Result<(u16, u16), u64> {

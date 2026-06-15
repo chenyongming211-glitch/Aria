@@ -94,6 +94,7 @@ pub const RULE_TYPE_QOS: u32 = 1;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PolicyKey {
     pub tap_id: u32,
+    pub generation: u32,
     pub src_id: u32,
     pub dst_id: u32,
     pub proto: u8,
@@ -118,6 +119,7 @@ unsafe impl aya::Pod for PolicyValue {}
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct PortKey {
     pub tap_id: u32,
+    pub generation: u32,
     pub idx: u32,
     pub port: u16,
     pub pad: u16,
@@ -129,6 +131,7 @@ unsafe impl aya::Pod for PortKey {}
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct QosKey {
     pub tap_id: u32,
+    pub generation: u32,
     pub group_id: u32,
     pub direction: u8,
     pub pad: [u8; 3],
@@ -194,6 +197,7 @@ pub struct FirewallConfig {
     pub tcprt_enabled: u8,
     pub ssl_enabled: u8,
     pub lb_enabled: u8,
+    pub policy_generation: u32,
 }
 
 unsafe impl aya::Pod for FirewallConfig {}
@@ -209,6 +213,7 @@ pub struct TapConfig {
     pub tcprt_enabled: u8,
     pub lb_enabled: u8,
     pub pad: [u8; 1],
+    pub policy_generation: u32,
 }
 
 unsafe impl aya::Pod for TapConfig {}
@@ -230,13 +235,13 @@ mod tests {
         assert_eq!(core::mem::size_of::<DropEvent>(), 32);
         assert_eq!(core::mem::size_of::<PolicyKey>(), 20);
         assert_eq!(core::mem::size_of::<PolicyValue>(), 8);
-        assert_eq!(core::mem::size_of::<PortKey>(), 12);
-        assert_eq!(core::mem::size_of::<QosKey>(), 12);
+        assert_eq!(core::mem::size_of::<PortKey>(), 16);
+        assert_eq!(core::mem::size_of::<QosKey>(), 16);
         assert_eq!(core::mem::size_of::<QosConfig>(), 24);
         assert_eq!(core::mem::size_of::<TokenBucket>(), 24);
         assert_eq!(core::mem::size_of::<RuleStatsValue>(), 32);
         assert_eq!(core::mem::size_of::<QosStatsValue>(), 48);
-        assert_eq!(core::mem::size_of::<FirewallConfig>(), 10);
-        assert_eq!(core::mem::size_of::<TapConfig>(), 8);
+        assert_eq!(core::mem::size_of::<FirewallConfig>(), 16);
+        assert_eq!(core::mem::size_of::<TapConfig>(), 12);
     }
 }

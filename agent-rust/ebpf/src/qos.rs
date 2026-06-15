@@ -25,11 +25,17 @@ const ID_WILDCARD: u32 = 0;
 const DIRECTION_INGRESS: u8 = 0;
 const DIRECTION_EGRESS: u8 = 1;
 const QOS_MODE_SHAPING: u8 = 1;
+const IPV4_IDENTITY_LOOKUP_BITS: u32 = 64;
+const IPV6_IDENTITY_LOOKUP_BITS: u32 = 160;
+
+type Ipv4IdentityKey = [u8; 8];
+type Ipv6IdentityKey = [u8; 20];
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct QosKey {
     pub tap_id: u32,
+    pub generation: u32,
     pub group_id: u32,
     pub direction: u8,
     pub pad: [u8; 3],
@@ -76,6 +82,7 @@ pub struct FirewallConfig {
     pub tcprt_enabled: u8,
     pub ssl_enabled: u8,
     pub lb_enabled: u8,
+    pub policy_generation: u32,
 }
 
 #[repr(C)]
@@ -89,19 +96,20 @@ pub struct TapConfig {
     pub tcprt_enabled: u8,
     pub lb_enabled: u8,
     pub pad: [u8; 1],
+    pub policy_generation: u32,
 }
 
 #[map(name = "SRC_IPV4_ID_MAP", pin)]
-static SRC_IPV4_ID_MAP: LpmTrie<u32, u32> = LpmTrie::with_max_entries(10000, 0);
+static SRC_IPV4_ID_MAP: LpmTrie<Ipv4IdentityKey, u32> = LpmTrie::with_max_entries(10000, 0);
 
 #[map(name = "DST_IPV4_ID_MAP", pin)]
-static DST_IPV4_ID_MAP: LpmTrie<u32, u32> = LpmTrie::with_max_entries(10000, 0);
+static DST_IPV4_ID_MAP: LpmTrie<Ipv4IdentityKey, u32> = LpmTrie::with_max_entries(10000, 0);
 
 #[map(name = "SRC_IPV6_ID_MAP", pin)]
-static SRC_IPV6_ID_MAP: LpmTrie<[u8; 16], u32> = LpmTrie::with_max_entries(10000, 0);
+static SRC_IPV6_ID_MAP: LpmTrie<Ipv6IdentityKey, u32> = LpmTrie::with_max_entries(10000, 0);
 
 #[map(name = "DST_IPV6_ID_MAP", pin)]
-static DST_IPV6_ID_MAP: LpmTrie<[u8; 16], u32> = LpmTrie::with_max_entries(10000, 0);
+static DST_IPV6_ID_MAP: LpmTrie<Ipv6IdentityKey, u32> = LpmTrie::with_max_entries(10000, 0);
 
 #[map(name = "QOS_CONFIG", pin)]
 static QOS_CONFIG: HashMap<QosKey, QosConfig> = HashMap::with_max_entries(65536, 0);
@@ -173,9 +181,18 @@ fn try_tc_qos_ipv4(
     ip_offset: usize,
 ) -> Result<i32, u64> {
     let ip = ptr_at::<Ipv4Hdr>(ctx, ip_offset)?;
-    let src_id = lookup_ipv4_id(&SRC_IPV4_ID_MAP, u32::from_be_bytes(ip.src_addr));
-    let dst_id = lookup_ipv4_id(&DST_IPV4_ID_MAP, u32::from_be_bytes(ip.dst_addr));
-    apply_qos_for_ids(src_id, dst_id, direction, pkt_len)
+    let generation = active_policy_generation(TAP_ID_UNASSIGNED);
+    let src_id = lookup_ipv4_id(
+        &SRC_IPV4_ID_MAP,
+        generation,
+        u32::from_be_bytes(ip.src_addr),
+    );
+    let dst_id = lookup_ipv4_id(
+        &DST_IPV4_ID_MAP,
+        generation,
+        u32::from_be_bytes(ip.dst_addr),
+    );
+    apply_qos_for_ids(generation, src_id, dst_id, direction, pkt_len)
 }
 
 #[inline(always)]
@@ -186,20 +203,29 @@ fn try_tc_qos_ipv6(
     ip_offset: usize,
 ) -> Result<i32, u64> {
     let ip = ptr_at::<Ipv6Hdr>(ctx, ip_offset)?;
-    let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, ip.src_addr);
-    let dst_id = lookup_ipv6_id(&DST_IPV6_ID_MAP, ip.dst_addr);
-    apply_qos_for_ids(src_id, dst_id, direction, pkt_len)
+    let generation = active_policy_generation(TAP_ID_UNASSIGNED);
+    let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, generation, ip.src_addr);
+    let dst_id = lookup_ipv6_id(&DST_IPV6_ID_MAP, generation, ip.dst_addr);
+    apply_qos_for_ids(generation, src_id, dst_id, direction, pkt_len)
 }
 
 #[inline(always)]
-fn apply_qos_for_ids(src_id: u32, dst_id: u32, direction: u8, pkt_len: u64) -> Result<i32, u64> {
+fn apply_qos_for_ids(
+    generation: u32,
+    src_id: u32,
+    dst_id: u32,
+    direction: u8,
+    pkt_len: u64,
+) -> Result<i32, u64> {
     let group_id = if direction == DIRECTION_EGRESS {
         dst_id
     } else {
         src_id
     };
 
-    if let Some((key, config)) = lookup_qos_config(TAP_ID_UNASSIGNED, group_id, direction) {
+    if let Some((key, config)) =
+        lookup_qos_config(TAP_ID_UNASSIGNED, generation, group_id, direction)
+    {
         let passed = apply_qos_bucket(&key, config, pkt_len, direction);
         return Ok(if passed { TC_ACT_OK } else { TC_ACT_SHOT });
     }
@@ -220,10 +246,29 @@ fn qos_enabled(tap_id: u32) -> bool {
     true
 }
 
-fn lookup_qos_config(tap_id: u32, group_id: u32, direction: u8) -> Option<(QosKey, QosConfig)> {
+fn active_policy_generation(tap_id: u32) -> u32 {
+    if let Some(tap) = unsafe { TAP_CONFIG_MAP.get(&tap_id) } {
+        return tap.policy_generation;
+    }
+
+    let key = 0;
+    if let Some(config) = unsafe { FIREWALL_CONFIG.get(&key) } {
+        return config.policy_generation;
+    }
+
+    0
+}
+
+fn lookup_qos_config(
+    tap_id: u32,
+    generation: u32,
+    group_id: u32,
+    direction: u8,
+) -> Option<(QosKey, QosConfig)> {
     let mut best: Option<(QosKey, QosConfig)> = None;
     let exact_key = QosKey {
         tap_id,
+        generation,
         group_id,
         direction,
         pad: [0; 3],
@@ -234,6 +279,7 @@ fn lookup_qos_config(tap_id: u32, group_id: u32, direction: u8) -> Option<(QosKe
 
     let fallback_key = QosKey {
         tap_id,
+        generation,
         group_id: ID_WILDCARD,
         direction,
         pad: [0; 3],
@@ -329,20 +375,61 @@ fn update_qos_stats(key: &QosKey, pkt_len: u64, dropped: bool, shaped: bool) {
     }
 }
 
-fn lookup_ipv4_id(map: &LpmTrie<u32, u32>, ip: u32) -> u32 {
-    let key = Key::new(32, ip);
+fn lookup_ipv4_id(map: &LpmTrie<Ipv4IdentityKey, u32>, generation: u32, ip: u32) -> u32 {
+    let key = Key::new(IPV4_IDENTITY_LOOKUP_BITS, ipv4_identity_key(generation, ip));
     if let Some(id) = map.get(&key) {
         return *id;
     }
     ID_WILDCARD
 }
 
-fn lookup_ipv6_id(map: &LpmTrie<[u8; 16], u32>, ip: [u8; 16]) -> u32 {
-    let key = Key::new(128, ip);
+fn lookup_ipv6_id(map: &LpmTrie<Ipv6IdentityKey, u32>, generation: u32, ip: [u8; 16]) -> u32 {
+    let key = Key::new(IPV6_IDENTITY_LOOKUP_BITS, ipv6_identity_key(generation, ip));
     if let Some(id) = map.get(&key) {
         return *id;
     }
     ID_WILDCARD
+}
+
+fn ipv4_identity_key(generation: u32, ip: u32) -> Ipv4IdentityKey {
+    let generation_bytes = generation.to_be_bytes();
+    let ip_bytes = ip.to_be_bytes();
+    [
+        generation_bytes[0],
+        generation_bytes[1],
+        generation_bytes[2],
+        generation_bytes[3],
+        ip_bytes[0],
+        ip_bytes[1],
+        ip_bytes[2],
+        ip_bytes[3],
+    ]
+}
+
+fn ipv6_identity_key(generation: u32, ip: [u8; 16]) -> Ipv6IdentityKey {
+    let generation_bytes = generation.to_be_bytes();
+    [
+        generation_bytes[0],
+        generation_bytes[1],
+        generation_bytes[2],
+        generation_bytes[3],
+        ip[0],
+        ip[1],
+        ip[2],
+        ip[3],
+        ip[4],
+        ip[5],
+        ip[6],
+        ip[7],
+        ip[8],
+        ip[9],
+        ip[10],
+        ip[11],
+        ip[12],
+        ip[13],
+        ip[14],
+        ip[15],
+    ]
 }
 
 fn next_edt(last_edt: u64, now: u64, pkt_len: u64, rate_bytes_per_sec: u64) -> u64 {
