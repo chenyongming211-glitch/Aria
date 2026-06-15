@@ -32,7 +32,7 @@ The accepted production design is still lock-free, but it should follow the
 Expected benefit: smaller race window, fewer helper calls in the hot path, and
 clearer alignment with the production-proven reference design.
 
-### G2: QoS precision missed the hard floor in gray validation
+### G2: QoS precision missed the hard floor in early gray validation
 
 Drop-only egress policing did not meet the product SLO in gray validation. A
 5 Mbps TCP test delivered roughly 71.6% of the configured rate, below the 90%
@@ -47,6 +47,36 @@ The follow-up gray validation must record:
 - real traffic over at least two Agents connected through the WireGuard overlay.
 
 This is a runtime correctness gap until the two-Agent tests meet the 90% floor.
+
+#### Gray Validation Evidence: egress EDT pacing
+
+Run context:
+
+- branch: `codex/qos-acl-precision-plan`
+- commit: `617a8a9`
+- GitHub Actions run: `27561311535`
+- Controller: `8.152.163.101`
+- Agent 1: `82.156.48.111`, VPN IP `100.64.0.2`
+- Agent 2: `43.143.245.123`, VPN IP `100.64.0.27`
+- QoS rule: `a61cd5af-665b-44d8-80ce-76f94e3795f6`
+- direction: Agent 2 egress to Agent 1
+- datapath: `tc_egress_qos` with `fq` qdisc on `aria0..aria3`
+
+TCP was not used as the final precision gate for this gray pass because the
+same two-node path showed heavy retransmits even with a high 100 Mbps QoS rate.
+The precision gate therefore used UDP saturation traffic and compared receiver
+throughput plus Controller-reported `QOS_STATS` deltas.
+
+| Configured rate | iperf UDP receive | Receiver accuracy | Controller stats delta | Stats accuracy |
+| --- | ---: | ---: | ---: | ---: |
+| 1 Mbps | 1.057 Mbps | 105.7% | 8,102,391 B over 64.806s | 100.0% |
+| 5 Mbps | 4.938 Mbps | 98.8% | 37,827,587 B over 60.525s | 100.0% |
+| 10 Mbps | 9.861 Mbps | 98.6% | 75,540,194 B over 60.434s | 100.0% |
+
+Result: the egress EDT pacing implementation meets the 90% hard floor in this
+gray environment and reaches the 98% target at 5 Mbps and 10 Mbps. The 1 Mbps
+receiver result is slightly above the configured rate, while the Agent-side
+stats are effectively on target.
 
 ### G3: Frontend QoS failure text is wrong for edits
 
