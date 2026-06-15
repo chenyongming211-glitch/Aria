@@ -59,13 +59,6 @@ UUIDs are less severe than runtime group ids, but the UI should still prefer
 group names or inline CIDRs and show a clear unknown-group label rather than a
 bare opaque id.
 
-### G5: Runtime group conflict resolver has a duplicate return
-
-`internal/api/v2/security.go` formats CIDR conflict errors with policy names,
-which matches the product requirement. The function currently contains a
-duplicate unreachable return. This does not change behavior but should be
-cleaned up while touching delivery error/status code.
-
 ## Already Aligned
 
 - ACL ingress is handled by `xdp_ingress_acl`.
@@ -79,7 +72,7 @@ cleaned up while touching delivery error/status code.
 ## Batch Mapping
 
 - Batch 1: keep old three-tier QoS residue out of production and docs.
-- Batch 2: fix G1 and G5, and add focused Agent tests where possible.
+- Batch 2: fix G1 and add focused Agent tests where possible.
 - Batch 3: add/confirm generation rollback and active-generation tests.
 - Batch 4: fix G3 and G4 with frontend tests.
 - Batch 5: close G2 through two-Agent gray validation evidence.

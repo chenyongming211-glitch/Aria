@@ -370,50 +370,138 @@ pub fn sync_runtime_config(
     acl_enabled: Option<bool>,
     qos_enabled: Option<bool>,
 ) -> Result<(), String> {
-    let firewall_cfg = FirewallConfig {
+    if runtime.tap_id == TAP_ID_UNASSIGNED {
+        let key = 0u32;
+        let previous_acl = handles.acl_firewall_config.get(&key, 0).ok();
+        let previous_qos = handles.qos_firewall_config.get(&key, 0).ok();
+        let acl_cfg = merge_firewall_config(previous_acl, runtime, acl_enabled, qos_enabled);
+        let qos_cfg = merge_firewall_config(previous_qos, runtime, acl_enabled, qos_enabled);
+
+        handles
+            .acl_firewall_config
+            .insert(key, acl_cfg, 0)
+            .map_err(|e| format!("ACL FIREWALL_CONFIG insert: {:?}", e))?;
+        if let Err(error) = handles.qos_firewall_config.insert(key, qos_cfg, 0) {
+            restore_firewall_config(&mut handles.acl_firewall_config, key, previous_acl)
+                .map_err(|rollback| {
+                    format!(
+                        "QoS FIREWALL_CONFIG insert: {:?}; ACL rollback failed: {}",
+                        error, rollback
+                    )
+                })?;
+            return Err(format!("QoS FIREWALL_CONFIG insert: {:?}", error));
+        }
+        return Ok(());
+    }
+
+    let previous_acl = handles.acl_tap_config.get(&runtime.tap_id, 0).ok();
+    let previous_qos = handles.qos_tap_config.get(&runtime.tap_id, 0).ok();
+    let acl_cfg = merge_tap_config(previous_acl, runtime, acl_enabled, qos_enabled);
+    let qos_cfg = merge_tap_config(previous_qos, runtime, acl_enabled, qos_enabled);
+
+    handles
+        .acl_tap_config
+        .insert(runtime.tap_id, acl_cfg, 0)
+        .map_err(|e| format!("ACL TAP_CONFIG_MAP insert: {:?}", e))?;
+    if let Err(error) = handles.qos_tap_config.insert(runtime.tap_id, qos_cfg, 0) {
+        restore_tap_config(&mut handles.acl_tap_config, runtime.tap_id, previous_acl).map_err(
+            |rollback| {
+                format!(
+                    "QoS TAP_CONFIG_MAP insert: {:?}; ACL rollback failed: {}",
+                    error, rollback
+                )
+            },
+        )?;
+        return Err(format!("QoS TAP_CONFIG_MAP insert: {:?}", error));
+    }
+    Ok(())
+}
+
+fn merge_firewall_config(
+    existing: Option<FirewallConfig>,
+    runtime: TapMapRuntime,
+    acl_enabled: Option<bool>,
+    qos_enabled: Option<bool>,
+) -> FirewallConfig {
+    let mut config = existing.unwrap_or_else(|| FirewallConfig {
         conntrack_enabled: 1,
         monitoring_enabled: 1,
         num_cpus: 1,
-        qos_enabled: qos_enabled.unwrap_or(false) as u8,
-        acl_enabled: acl_enabled.unwrap_or(true) as u8,
+        qos_enabled: 0,
+        acl_enabled: 1,
         mirror_enabled: 0,
         tcprt_enabled: 0,
         ssl_enabled: 0,
         lb_enabled: 0,
         policy_generation: runtime.policy_generation,
-    };
-
-    if runtime.tap_id == TAP_ID_UNASSIGNED {
-        handles
-            .acl_firewall_config
-            .insert(0u32, firewall_cfg, 0)
-            .map_err(|e| format!("ACL FIREWALL_CONFIG insert: {:?}", e))?;
-        handles
-            .qos_firewall_config
-            .insert(0u32, firewall_cfg, 0)
-            .map_err(|e| format!("QoS FIREWALL_CONFIG insert: {:?}", e))?;
-        return Ok(());
+    });
+    if let Some(enabled) = acl_enabled {
+        config.acl_enabled = enabled as u8;
     }
+    if let Some(enabled) = qos_enabled {
+        config.qos_enabled = enabled as u8;
+    }
+    config.policy_generation = runtime.policy_generation;
+    config
+}
 
-    let tap_cfg = TapConfig {
+fn merge_tap_config(
+    existing: Option<TapConfig>,
+    runtime: TapMapRuntime,
+    acl_enabled: Option<bool>,
+    qos_enabled: Option<bool>,
+) -> TapConfig {
+    let mut config = existing.unwrap_or_else(|| TapConfig {
         conntrack_enabled: 1,
         monitoring_enabled: 1,
-        acl_enabled: acl_enabled.unwrap_or(true) as u8,
-        qos_enabled: qos_enabled.unwrap_or(false) as u8,
+        acl_enabled: 1,
+        qos_enabled: 0,
         mirror_enabled: 0,
         tcprt_enabled: 0,
         lb_enabled: 0,
         pad: [0; 1],
         policy_generation: runtime.policy_generation,
-    };
-    handles
-        .acl_tap_config
-        .insert(runtime.tap_id, tap_cfg, 0)
-        .map_err(|e| format!("ACL TAP_CONFIG_MAP insert: {:?}", e))?;
-    handles
-        .qos_tap_config
-        .insert(runtime.tap_id, tap_cfg, 0)
-        .map_err(|e| format!("QoS TAP_CONFIG_MAP insert: {:?}", e))
+    });
+    if let Some(enabled) = acl_enabled {
+        config.acl_enabled = enabled as u8;
+    }
+    if let Some(enabled) = qos_enabled {
+        config.qos_enabled = enabled as u8;
+    }
+    config.policy_generation = runtime.policy_generation;
+    config
+}
+
+fn restore_firewall_config(
+    map: &mut AyaHashMap<MapData, u32, FirewallConfig>,
+    key: u32,
+    previous: Option<FirewallConfig>,
+) -> Result<(), String> {
+    match previous {
+        Some(config) => map
+            .insert(key, config, 0)
+            .map_err(|e| format!("FIREWALL_CONFIG restore: {:?}", e)),
+        None => {
+            let _ = map.remove(&key);
+            Ok(())
+        }
+    }
+}
+
+fn restore_tap_config(
+    map: &mut AyaHashMap<MapData, u32, TapConfig>,
+    key: u32,
+    previous: Option<TapConfig>,
+) -> Result<(), String> {
+    match previous {
+        Some(config) => map
+            .insert(key, config, 0)
+            .map_err(|e| format!("TAP_CONFIG_MAP restore: {:?}", e)),
+        None => {
+            let _ = map.remove(&key);
+            Ok(())
+        }
+    }
 }
 
 fn has_qos_rules(handles: &AclQosMapHandles, runtime: TapMapRuntime) -> bool {
@@ -567,6 +655,88 @@ pub fn get_qos_stats(
         entries.push(stat);
     }
     Ok(entries)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn firewall_config_partial_update_preserves_other_switches() {
+        let existing = FirewallConfig {
+            conntrack_enabled: 1,
+            monitoring_enabled: 1,
+            num_cpus: 1,
+            qos_enabled: 0,
+            acl_enabled: 0,
+            mirror_enabled: 0,
+            tcprt_enabled: 0,
+            ssl_enabled: 0,
+            lb_enabled: 0,
+            policy_generation: 7,
+        };
+
+        let config = merge_firewall_config(
+            Some(existing),
+            TapMapRuntime {
+                tap_id: TAP_ID_UNASSIGNED,
+                policy_generation: 8,
+            },
+            None,
+            Some(true),
+        );
+
+        assert_eq!(config.policy_generation, 8);
+        assert_eq!(config.acl_enabled, 0);
+        assert_eq!(config.qos_enabled, 1);
+    }
+
+    #[test]
+    fn tap_config_generation_update_preserves_acl_and_qos_switches() {
+        let existing = TapConfig {
+            conntrack_enabled: 1,
+            monitoring_enabled: 1,
+            acl_enabled: 0,
+            qos_enabled: 1,
+            mirror_enabled: 0,
+            tcprt_enabled: 0,
+            lb_enabled: 0,
+            pad: [0; 1],
+            policy_generation: 15,
+        };
+
+        let config = merge_tap_config(
+            Some(existing),
+            TapMapRuntime {
+                tap_id: 42,
+                policy_generation: 16,
+            },
+            None,
+            None,
+        );
+
+        assert_eq!(config.policy_generation, 16);
+        assert_eq!(config.acl_enabled, 0);
+        assert_eq!(config.qos_enabled, 1);
+    }
+
+    #[test]
+    fn missing_runtime_config_uses_product_defaults() {
+        let runtime = TapMapRuntime {
+            tap_id: TAP_ID_UNASSIGNED,
+            policy_generation: 3,
+        };
+
+        let firewall = merge_firewall_config(None, runtime, None, None);
+        assert_eq!(firewall.policy_generation, 3);
+        assert_eq!(firewall.acl_enabled, 1);
+        assert_eq!(firewall.qos_enabled, 0);
+
+        let tap = merge_tap_config(None, runtime, None, None);
+        assert_eq!(tap.policy_generation, 3);
+        assert_eq!(tap.acl_enabled, 1);
+        assert_eq!(tap.qos_enabled, 0);
+    }
 }
 
 pub fn ensure_fq_qdisc(iface: &str) -> Result<(), String> {
