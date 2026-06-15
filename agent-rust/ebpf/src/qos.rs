@@ -2,7 +2,9 @@
 #![no_main]
 
 use aya_ebpf::{
+    bindings::bpf_spin_lock as BpfSpinLock,
     helpers::bpf_ktime_get_ns,
+    helpers::gen::{bpf_spin_lock, bpf_spin_unlock},
     macros::{classifier, map},
     maps::{lpm_trie::Key, HashMap, LpmTrie, PerCpuHashMap},
     programs::TcContext,
@@ -52,8 +54,9 @@ pub struct QosConfig {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TokenBucket {
+    pub lock: BpfSpinLock,
+    pub pad: u32,
     pub tokens: u64,
     pub last_refill_ns: u64,
     pub last_edt: u64,
@@ -303,14 +306,26 @@ fn choose_qos_config(
 
 fn apply_qos_bucket(key: &QosKey, config: QosConfig, pkt_len: u64, direction: u8) -> bool {
     let now = unsafe { bpf_ktime_get_ns() };
-    let mut bucket = match unsafe { QOS_TOKEN_BUCKET.get(key) } {
-        Some(existing) => *existing,
-        None => TokenBucket {
-            tokens: config.burst_bytes,
-            last_refill_ns: now,
-            last_edt: now,
-        },
+    let rate_bytes_per_sec = config.rate_bps / 8;
+    let delay_ns = if rate_bytes_per_sec == 0 {
+        0
+    } else {
+        let whole = pkt_len / rate_bytes_per_sec;
+        let rem = pkt_len % rate_bytes_per_sec;
+        (whole * NS_PER_SEC) + ((rem * NS_PER_SEC) / rate_bytes_per_sec)
     };
+    let bucket_ptr = match QOS_TOKEN_BUCKET.get_ptr_mut(key) {
+        Some(ptr) => ptr,
+        None => {
+            update_qos_stats(key, pkt_len, false, false);
+            return true;
+        }
+    };
+
+    let bucket = unsafe { &mut *bucket_ptr };
+    unsafe {
+        bpf_spin_lock(&mut bucket.lock as *mut BpfSpinLock);
+    }
 
     let elapsed = if now > bucket.last_refill_ns {
         now - bucket.last_refill_ns
@@ -322,8 +337,11 @@ fn apply_qos_bucket(key: &QosKey, config: QosConfig, pkt_len: u64, direction: u8
     } else {
         elapsed
     };
-    let rate_bytes_per_sec = config.rate_bps / 8;
-    let refill = mul_div(elapsed, rate_bytes_per_sec, NS_PER_SEC);
+    let refill = {
+        let whole = elapsed / NS_PER_SEC;
+        let rem = elapsed % NS_PER_SEC;
+        (whole * rate_bytes_per_sec) + ((rem * rate_bytes_per_sec) / NS_PER_SEC)
+    };
     let tokens = bucket.tokens.saturating_add(refill);
     bucket.tokens = if tokens > config.burst_bytes {
         config.burst_bytes
@@ -332,29 +350,37 @@ fn apply_qos_bucket(key: &QosKey, config: QosConfig, pkt_len: u64, direction: u8
     };
     bucket.last_refill_ns = now;
 
+    let mut passed = true;
+    let mut dropped = false;
+    let mut shaped = false;
+
     if bucket.tokens >= pkt_len {
         bucket.tokens -= pkt_len;
         if config.mode == QOS_MODE_SHAPING && direction == DIRECTION_EGRESS {
             bucket.last_edt = now;
-            let _ = QOS_TOKEN_BUCKET.insert(key, &bucket, 0);
-            update_qos_stats(key, pkt_len, false, true);
+            shaped = true;
         } else {
-            let _ = QOS_TOKEN_BUCKET.insert(key, &bucket, 0);
-            update_qos_stats(key, pkt_len, false, false);
+            shaped = false;
         }
-        return true;
+    } else if config.mode == QOS_MODE_SHAPING && direction == DIRECTION_EGRESS {
+        let base = if bucket.last_edt > now {
+            bucket.last_edt
+        } else {
+            now
+        };
+        bucket.last_edt = base.saturating_add(delay_ns);
+        shaped = true;
+    } else {
+        passed = false;
+        dropped = true;
     }
 
-    if config.mode == QOS_MODE_SHAPING && direction == DIRECTION_EGRESS {
-        bucket.last_edt = next_edt(bucket.last_edt, now, pkt_len, rate_bytes_per_sec);
-        let _ = QOS_TOKEN_BUCKET.insert(key, &bucket, 0);
-        update_qos_stats(key, pkt_len, false, true);
-        return true;
+    unsafe {
+        bpf_spin_unlock(&mut bucket.lock as *mut BpfSpinLock);
     }
 
-    let _ = QOS_TOKEN_BUCKET.insert(key, &bucket, 0);
-    update_qos_stats(key, pkt_len, true, false);
-    false
+    update_qos_stats(key, pkt_len, dropped, shaped);
+    passed
 }
 
 fn update_qos_stats(key: &QosKey, pkt_len: u64, dropped: bool, shaped: bool) {
@@ -430,25 +456,6 @@ fn ipv6_identity_key(generation: u32, ip: [u8; 16]) -> Ipv6IdentityKey {
         ip[14],
         ip[15],
     ]
-}
-
-fn next_edt(last_edt: u64, now: u64, pkt_len: u64, rate_bytes_per_sec: u64) -> u64 {
-    if rate_bytes_per_sec == 0 {
-        return now;
-    }
-    let base = if last_edt > now { last_edt } else { now };
-    let delay_ns = mul_div(pkt_len, NS_PER_SEC, rate_bytes_per_sec);
-    base.saturating_add(delay_ns)
-}
-
-#[inline(always)]
-fn mul_div(left: u64, right: u64, divisor: u64) -> u64 {
-    if divisor == 0 {
-        return 0;
-    }
-    let whole = left / divisor;
-    let rem = left % divisor;
-    (whole * right) + ((rem * right) / divisor)
 }
 
 #[inline(always)]
