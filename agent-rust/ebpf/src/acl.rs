@@ -333,9 +333,9 @@ fn acl_policy_action(
     direction: u8,
 ) -> u8 {
     if let Some((key, policy)) =
-        lookup_policy(TAP_ID_UNASSIGNED, generation, src_id, dst_id, proto, direction)
+        lookup_policy(generation, src_id, dst_id, proto, direction)
     {
-        let action = policy_action(TAP_ID_UNASSIGNED, generation, policy, dst_port);
+        let action = policy_action(generation, policy, dst_port);
         update_rule_stats(&key, pkt_len, action == ACTION_DROP);
         return action;
     }
@@ -370,18 +370,16 @@ fn active_policy_generation(tap_id: u32) -> u32 {
 }
 
 fn lookup_policy(
-    tap_id: u32,
     generation: u32,
     src_id: u32,
     dst_id: u32,
     proto: u8,
     direction: u8,
 ) -> Option<(PolicyKey, PolicyValue)> {
-    let mut best = lookup_policy_for_proto(tap_id, generation, src_id, dst_id, proto, direction);
+    let mut best = lookup_policy_for_proto(generation, src_id, dst_id, proto, direction);
 
     if proto != PROTO_WILDCARD {
         if let Some(policy) = lookup_policy_for_proto(
-            tap_id,
             generation,
             src_id,
             dst_id,
@@ -397,7 +395,6 @@ fn lookup_policy(
 }
 
 fn lookup_policy_for_proto(
-    tap_id: u32,
     generation: u32,
     src_id: u32,
     dst_id: u32,
@@ -406,7 +403,7 @@ fn lookup_policy_for_proto(
 ) -> Option<(PolicyKey, PolicyValue)> {
     let mut best: Option<(PolicyKey, PolicyValue)> = None;
     let exact_key = PolicyKey {
-        tap_id,
+        tap_id: TAP_ID_UNASSIGNED,
         generation,
         src_id,
         dst_id,
@@ -419,7 +416,7 @@ fn lookup_policy_for_proto(
     }
 
     let wildcard_src_key = PolicyKey {
-        tap_id,
+        tap_id: TAP_ID_UNASSIGNED,
         generation,
         src_id: ID_WILDCARD,
         dst_id,
@@ -432,7 +429,7 @@ fn lookup_policy_for_proto(
     }
 
     let wildcard_dst_key = PolicyKey {
-        tap_id,
+        tap_id: TAP_ID_UNASSIGNED,
         generation,
         src_id,
         dst_id: ID_WILDCARD,
@@ -445,7 +442,7 @@ fn lookup_policy_for_proto(
     }
 
     let full_wildcard_key = PolicyKey {
-        tap_id,
+        tap_id: TAP_ID_UNASSIGNED,
         generation,
         src_id: ID_WILDCARD,
         dst_id: ID_WILDCARD,
@@ -470,7 +467,7 @@ fn choose_policy(
     }
 }
 
-fn policy_action(tap_id: u32, generation: u32, policy: PolicyValue, dst_port: u16) -> u8 {
+fn policy_action(generation: u32, policy: PolicyValue, dst_port: u16) -> u8 {
     if policy.has_port_filter == 0 {
         return policy.action;
     }
@@ -480,7 +477,7 @@ fn policy_action(tap_id: u32, generation: u32, policy: PolicyValue, dst_port: u1
     }
 
     let port_key = PortKey {
-        tap_id,
+        tap_id: TAP_ID_UNASSIGNED,
         generation,
         idx: policy.bitmap_idx,
         port: dst_port,
