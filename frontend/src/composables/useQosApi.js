@@ -74,9 +74,6 @@ function normalizeRulePayload(rule) {
   const payload = {
     src_cidr: srcCIDR,
     dst_cidr: dstCIDR,
-    src_port: Number(rule.src_port || 0),
-    dst_port: Number(rule.dst_port || 0),
-    protocol: Number(rule.protocol || 0),
     bandwidth_mbps: bandwidthMbps,
     direction,
     rate_bps: rateBps,

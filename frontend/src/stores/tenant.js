@@ -5,6 +5,11 @@ import api from '@/composables/useApi'
 import { API_ENDPOINTS } from '@/config/api'
 import useUserStore from '@/stores/user'
 
+function isSwitchableTenant(tenant) {
+  const status = String(tenant?.status || 'active').toLowerCase()
+  return status === 'active'
+}
+
 export default defineStore('tenant', () => {
   const currentTenant = ref(null)
   const tenants = ref([])
@@ -15,7 +20,8 @@ export default defineStore('tenant', () => {
     try {
       const response = await api.get(API_ENDPOINTS.TENANT.LIST)
       console.log('[Tenant] API response:', response.data)
-      tenants.value = response.data?.data || response.data || []
+      const allTenants = response.data?.data || response.data || []
+      tenants.value = allTenants.filter(isSwitchableTenant)
 
       // Restore from localStorage
       const saved = localStorage.getItem('aria-current-tenant')
@@ -57,6 +63,11 @@ export default defineStore('tenant', () => {
   }
 
   async function switchTenant(tenant) {
+    if (tenant && !isSwitchableTenant(tenant)) {
+      console.warn('Refusing to switch to inactive tenant:', tenant)
+      return
+    }
+
     currentTenant.value = tenant
     if (tenant?.id) {
       localStorage.setItem('aria-current-tenant', JSON.stringify(tenant))

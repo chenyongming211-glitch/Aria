@@ -109,6 +109,33 @@ func TestDetectACLPolicyConflictAllowsMoreSpecificSamePriorityRule(t *testing.T)
 	}
 }
 
+func TestDetectACLPolicyConflictRejectsPortOnlyRuntimeKeyVariants(t *testing.T) {
+	existing := []*ACLRuleRecord{{
+		ID:        uuid.New(),
+		SrcCIDR:   "10.10.0.0/16",
+		DstCIDR:   "0.0.0.0/0",
+		Protocol:  6,
+		Direction: "egress",
+		Ports:     "80",
+		Priority:  200,
+		Enabled:   true,
+	}}
+	candidate := &ACLRuleRecord{
+		SrcCIDR:   "10.10.0.0/16",
+		DstCIDR:   "0.0.0.0/0",
+		Protocol:  6,
+		Direction: "egress",
+		Ports:     "443",
+		Priority:  100,
+		Enabled:   true,
+	}
+
+	err := DetectACLPolicyConflict(existing, candidate, uuid.Nil)
+	if !errors.Is(err, ErrAmbiguousPolicyConflict) {
+		t.Fatalf("expected runtime key conflict for port-only ACL variant, got %v", err)
+	}
+}
+
 func TestDetectQoSPolicyConflictRejectsAmbiguousSamePriorityOverlap(t *testing.T) {
 	existing := []*QoSRuleRecord{{
 		DstCIDR:   "100.64.0.0/24",

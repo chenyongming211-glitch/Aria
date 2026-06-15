@@ -9,6 +9,7 @@ vi.mock('@/composables/useApi', () => ({
 
 import useTenantStore from '@/stores/tenant'
 import useUserStore from '@/stores/user'
+import api from '@/composables/useApi'
 
 describe('tenant store', () => {
   let storage
@@ -46,5 +47,39 @@ describe('tenant store', () => {
       name: 'Tenant 2'
     })
     expect(tenantChanged).toHaveBeenCalledTimes(1)
+  })
+
+  it('only selects active tenants for the global tenant context', async () => {
+    api.get.mockResolvedValueOnce({
+      data: {
+        data: [
+          { id: 'tenant-deleted', name: 'Deleted', status: 'deleted' },
+          { id: 'tenant-suspended', name: 'Suspended', status: 'suspended' },
+          { id: 'tenant-active', name: 'Active', status: 'active' }
+        ]
+      }
+    })
+    localStorage.setItem('aria-current-tenant', JSON.stringify({
+      id: 'tenant-deleted',
+      name: 'Deleted',
+      status: 'deleted'
+    }))
+
+    const tenantStore = useTenantStore()
+    await tenantStore.loadTenants()
+
+    expect(tenantStore.tenants).toEqual([
+      { id: 'tenant-active', name: 'Active', status: 'active' }
+    ])
+    expect(tenantStore.currentTenant).toEqual({
+      id: 'tenant-active',
+      name: 'Active',
+      status: 'active'
+    })
+    expect(JSON.parse(localStorage.getItem('aria-current-tenant'))).toEqual({
+      id: 'tenant-active',
+      name: 'Active',
+      status: 'active'
+    })
   })
 })

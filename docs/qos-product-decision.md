@@ -128,6 +128,11 @@ before queueing Agent delivery:
 
 - ACL conflict key: tenant, node, expanded direction, protocol, overlapping
   ports, overlapping source IP Groups, and overlapping destination IP Groups.
+- Because the current eBPF `PolicyKey` does not include ports, two enabled ACL
+  rules with the same runtime direction/protocol/source/destination key are
+  rejected even if their port filters or priorities differ. Supporting multiple
+  independent port policies for the same runtime key requires a data-plane ABI
+  change first.
 - QoS conflict key: tenant, node, expanded direction, overlapping IP Group, and
   same priority.
 - Exact duplicate enabled ACL/QoS match scopes at the same priority are rejected,

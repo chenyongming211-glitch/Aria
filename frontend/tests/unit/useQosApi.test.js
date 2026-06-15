@@ -52,9 +52,6 @@ describe('useQosApi', () => {
     expect(api.post).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/qos', {
       src_cidr: '',
       dst_cidr: '10.0.0.0/24',
-      src_port: 0,
-      dst_port: 0,
-      protocol: 0,
       bandwidth_mbps: 200,
       direction: 'egress',
       rate_bps: 200000000,
@@ -86,6 +83,26 @@ describe('useQosApi', () => {
       dst_cidr: '',
       priority: 20
     }))
+  })
+
+  it('不应下发旧版 QoS protocol/port 匹配字段', async () => {
+    api.post.mockResolvedValue({
+      data: { success: true, data: { id: 'rule-1' } }
+    })
+
+    await useQosApi.createQoSRule('node-1', {
+      group_cidr: '10.0.0.0/24',
+      direction: 'egress',
+      bandwidth_mbps: 10,
+      protocol: 6,
+      src_port: 1000,
+      dst_port: 443
+    })
+
+    const payload = api.post.mock.calls[0][1]
+    expect(payload).not.toHaveProperty('protocol')
+    expect(payload).not.toHaveProperty('src_port')
+    expect(payload).not.toHaveProperty('dst_port')
   })
 
   it('应该拒绝 0 Mbps 的 QoS 规则', async () => {

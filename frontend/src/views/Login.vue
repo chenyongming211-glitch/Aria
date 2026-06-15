@@ -208,7 +208,11 @@ const handleLogin = async () => {
       }
 
       const tenants = await userStore.loadTenants()
-      if (tenants && tenants.length > 0) {
+      const switchableTenants = (tenants || []).filter((tenant) => {
+        const status = String(tenant?.status || 'active').toLowerCase()
+        return status === 'active'
+      })
+      if (switchableTenants.length > 0) {
         let loginTenantId = ''
         try {
           const currentUser = JSON.parse(localStorage.getItem('aria_user') || '{}')
@@ -218,10 +222,10 @@ const handleLogin = async () => {
         }
 
         const selectedTenant = loginTenantId
-          ? tenants.find((tenant) => tenant.id === loginTenantId)
+          ? switchableTenants.find((tenant) => tenant.id === loginTenantId)
           : null
 
-        localStorage.setItem('aria-current-tenant', JSON.stringify(selectedTenant || tenants[0]))
+        localStorage.setItem('aria-current-tenant', JSON.stringify(selectedTenant || switchableTenants[0]))
       } else {
         localStorage.removeItem('aria-current-tenant')
       }

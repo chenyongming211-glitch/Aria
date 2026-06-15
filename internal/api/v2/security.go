@@ -51,11 +51,11 @@ func validateQoSModeField(value string) error {
 	}
 }
 
-func validateQoSMatchFields(protocol, srcPort, dstPort int) error {
-	if protocol != 0 {
+func validateQoSMatchFields(protocol, srcPort, dstPort *int) error {
+	if protocol != nil {
 		return fmt.Errorf("qos protocol matching is not supported yet")
 	}
-	if srcPort != 0 || dstPort != 0 {
+	if srcPort != nil || dstPort != nil {
 		return fmt.Errorf("qos port matching is not supported yet")
 	}
 	return nil
@@ -1405,9 +1405,9 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		Group         string     `json:"group"`
 		SrcCIDR       string     `json:"src_cidr"`
 		DstCIDR       string     `json:"dst_cidr"`
-		SrcPort       int        `json:"src_port"`
-		DstPort       int        `json:"dst_port"`
-		Protocol      int        `json:"protocol"`
+		SrcPort       *int       `json:"src_port"`
+		DstPort       *int       `json:"dst_port"`
+		Protocol      *int       `json:"protocol"`
 		BandwidthMbps int        `json:"bandwidth_mbps"`
 		Direction     string     `json:"direction"`
 		RateBps       uint64     `json:"rate_bps"`
@@ -1429,9 +1429,6 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "bandwidth_mbps must be greater than 0", nil)
 		return
 	}
-	if writePolicyValidationError(w, validatePolicyByteField("protocol", body.Protocol)) {
-		return
-	}
 	if writePolicyValidationError(w, validateQoSMatchFields(body.Protocol, body.SrcPort, body.DstPort)) {
 		return
 	}
@@ -1451,9 +1448,6 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		NodeID:        node.ID,
 		SrcCIDR:       body.SrcCIDR,
 		DstCIDR:       body.DstCIDR,
-		SrcPort:       body.SrcPort,
-		DstPort:       body.DstPort,
-		Protocol:      body.Protocol,
 		BandwidthMbps: body.BandwidthMbps,
 		Direction:     body.Direction,
 		RateBps:       body.RateBps,
@@ -1592,15 +1586,12 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		rule.DstCIDR = ""
 		groupChanged = true
 	}
-	if body.SrcPort != nil {
-		rule.SrcPort = *body.SrcPort
+	if writePolicyValidationError(w, validateQoSMatchFields(body.Protocol, body.SrcPort, body.DstPort)) {
+		return
 	}
-	if body.DstPort != nil {
-		rule.DstPort = *body.DstPort
-	}
-	if body.Protocol != nil {
-		rule.Protocol = *body.Protocol
-	}
+	rule.SrcPort = 0
+	rule.DstPort = 0
+	rule.Protocol = 0
 	if body.BandwidthMbps != nil {
 		if *body.BandwidthMbps <= 0 {
 			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "bandwidth_mbps must be greater than 0", nil)
@@ -1628,12 +1619,6 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	}
 	if body.Enabled != nil {
 		rule.Enabled = *body.Enabled
-	}
-	if writePolicyValidationError(w, validatePolicyByteField("protocol", rule.Protocol)) {
-		return
-	}
-	if writePolicyValidationError(w, validateQoSMatchFields(rule.Protocol, rule.SrcPort, rule.DstPort)) {
-		return
 	}
 	if writePolicyValidationError(w, validatePolicyByteField("priority", rule.Priority)) {
 		return

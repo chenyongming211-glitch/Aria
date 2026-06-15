@@ -737,6 +737,9 @@ func DetectACLPolicyConflict(existing []*ACLRuleRecord, candidate *ACLRuleRecord
 		if candidateID != uuid.Nil && rule.ID == candidateID {
 			continue
 		}
+		if aclRuntimeScopeConflicts(rule, candidate) {
+			return fmt.Errorf("%w: ACL rule conflicts with rule %s on the same runtime key", ErrAmbiguousPolicyConflict, rule.ID.String())
+		}
 		if rule.Priority != candidate.Priority {
 			continue
 		}
@@ -771,6 +774,32 @@ func DetectACLPolicyConflict(existing []*ACLRuleRecord, candidate *ACLRuleRecord
 		}
 	}
 	return nil
+}
+
+func aclRuntimeScopeConflicts(existing, candidate *ACLRuleRecord) bool {
+	if !directionsOverlap(existing.Direction, candidate.Direction) {
+		return false
+	}
+	if !protocolsOverlap(existing.Protocol, candidate.Protocol) {
+		return false
+	}
+	for _, candidateSrc := range aclSourceCIDRs(candidate) {
+		for _, existingSrc := range aclSourceCIDRs(existing) {
+			srcRel, ok := cidrSpecificityRelation(candidateSrc, existingSrc)
+			if !ok || srcRel.candidateStrict || srcRel.existingStrict {
+				continue
+			}
+			for _, candidateDst := range aclDestinationCIDRs(candidate) {
+				for _, existingDst := range aclDestinationCIDRs(existing) {
+					dstRel, ok := cidrSpecificityRelation(candidateDst, existingDst)
+					if ok && !dstRel.candidateStrict && !dstRel.existingStrict {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 func DetectQoSPolicyConflict(existing []*QoSRuleRecord, candidate *QoSRuleRecord, candidateID uuid.UUID) error {

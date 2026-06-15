@@ -1552,8 +1552,16 @@ func TestQoSWriteRejectsRuntimeCompilerInvalidFields(t *testing.T) {
 			payload: `{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":1,"protocol":6}`,
 		},
 		{
+			name:    "legacy zero protocol field unsupported",
+			payload: `{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":1,"protocol":0}`,
+		},
+		{
 			name:    "port matching unsupported",
 			payload: `{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":1,"dst_port":443}`,
+		},
+		{
+			name:    "legacy zero port field unsupported",
+			payload: `{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":1,"dst_port":0}`,
 		},
 		{
 			name:    "invalid direction",
