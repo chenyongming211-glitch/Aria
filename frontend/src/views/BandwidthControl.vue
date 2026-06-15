@@ -77,9 +77,14 @@
         </el-table-column>
         <el-table-column label="Stats" width="180">
           <template #default="{ row }">
-            <div class="qos-runtime-cell">
+            <div v-if="row.stats?.load_error" class="qos-runtime-cell">
+              <span class="stats-error">读取失败</span>
+              <small>{{ row.stats.load_error }}</small>
+            </div>
+            <div v-else class="qos-runtime-cell">
               <span>pass {{ formatBytes(row.stats?.passed_bytes) }}</span>
               <small>drop {{ formatBytes(row.stats?.dropped_bytes) }}</small>
+              <small>shape {{ formatBytes(row.stats?.shaped_bytes) }}</small>
             </div>
           </template>
         </el-table-column>
@@ -274,12 +279,30 @@ const onNodeChange = () => {
 }
 
 const getPolicyTagType = (status) => {
-  const map = { applied: 'success', pending: 'warning', in_progress: 'warning', error: 'danger', idle: 'info' }
+  const map = {
+    applied: 'success',
+    pending: 'warning',
+    queued: 'warning',
+    sent: 'warning',
+    in_progress: 'warning',
+    failed: 'danger',
+    error: 'danger',
+    idle: 'info'
+  }
   return map[status] || 'info'
 }
 
 const formatPolicyStatus = (status) => {
-  const map = { applied: '已收敛', pending: '同步中', in_progress: '同步中', error: '异常', idle: '空闲' }
+  const map = {
+    applied: '已应用',
+    pending: '待下发',
+    queued: '排队中',
+    sent: '已发送',
+    in_progress: '同步中',
+    failed: '失败',
+    error: '失败',
+    idle: '空闲'
+  }
   return map[status] || status || '待同步'
 }
 
@@ -316,7 +339,9 @@ const formatGroupOption = (group) => {
 const formatGroupRef = (groupId, fallback) => {
   if (groupId) {
     const group = groupById.value.get(groupId)
-    return group ? group.name : groupId
+    if (group) return group.name
+    if (fallback && fallback !== groupId) return fallback
+    return '未知 IP Group'
   }
   return fallback || 'any'
 }
@@ -422,7 +447,8 @@ const handleSave = async () => {
     refreshData()
   } catch (error) {
     if (error !== false) {
-      ElMessage.error('创建失败: ' + (error.message || '未知错误'))
+      const action = form.id ? '更新失败' : '创建失败'
+      ElMessage.error(`${action}: ${error.message || '未知错误'}`)
     }
   } finally {
     submitting.value = false
@@ -476,5 +502,6 @@ useTenantChangeReload(reloadTenantScopedData)
 .form-help { font-size: 12px; color: #909399; margin-top: 5px; }
 .qos-runtime-cell { display: flex; flex-direction: column; gap: 4px; line-height: 1.25; }
 .qos-runtime-cell small { color: var(--aria-text-muted, #8a93a6); }
+.stats-error { color: var(--aria-danger, #f56c6c); }
 code { background: #f4f4f5; padding: 2px 4px; border-radius: 4px; color: #cf9236; font-family: monospace; }
 </style>

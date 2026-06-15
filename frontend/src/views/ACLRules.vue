@@ -524,7 +524,10 @@ const formatPolicyStatus = (status) => {
   const map = {
     applied: '已应用',
     pending: '待下发',
+    queued: '排队中',
+    sent: '已发送',
     in_progress: '下发中',
+    failed: '失败',
     error: '失败',
     idle: '空闲'
   }
@@ -535,7 +538,10 @@ const getPolicyTagType = (status) => {
   const map = {
     applied: 'success',
     pending: 'warning',
+    queued: 'warning',
+    sent: 'warning',
     in_progress: 'warning',
+    failed: 'danger',
     error: 'danger',
     idle: 'info'
   }
@@ -550,7 +556,9 @@ const formatGroupOption = (group) => {
 const formatGroupRef = (groupId, fallback) => {
   if (groupId) {
     const group = groupById.value.get(groupId)
-    return group ? group.name : groupId
+    if (group) return group.name
+    if (fallback && fallback !== groupId) return fallback
+    return '未知 IP Group'
   }
   return fallback || 'any'
 }

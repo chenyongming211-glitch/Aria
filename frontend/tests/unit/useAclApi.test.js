@@ -77,6 +77,27 @@ describe('useAclApi', () => {
       expect(rules[0]).toMatchObject({ id: 1, name: 'allow-web', action: 'allow', node_id: 'node-1' })
     })
 
+    it('缺少 IP Group 元数据时不应把 group id 当成用户可读名称', async () => {
+      api.get.mockResolvedValue({
+        data: {
+          success: true,
+          data: [{
+            id: 1,
+            name: 'group-acl',
+            action: 'deny',
+            src_group_id: 'src-group-id',
+            dst_group_id: 'dst-group-id',
+            direction: 'ingress'
+          }]
+        }
+      })
+
+      const rules = await useAclApi.getACLRulesByNode('node-1')
+
+      expect(rules[0].runtime_src_group).toBe('未知 IP Group')
+      expect(rules[0].runtime_dst_group).toBe('未知 IP Group')
+    })
+
   })
 
   describe('createACLRule', () => {

@@ -72,6 +72,7 @@ vi.mock('element-plus', () => ({
 }))
 
 import BandwidthControl from '@/views/BandwidthControl.vue'
+import { ElMessage } from 'element-plus'
 
 const stubs = {
   'el-card': { template: '<div><slot name="header" /><slot /></div>' },
@@ -169,5 +170,41 @@ describe('BandwidthControl edit behavior', () => {
       burst_bytes: 0
     }))
     expect(qosApiMock.createQoSRule).not.toHaveBeenCalled()
+  })
+
+  it('shows update failure text when editing an existing QoS rule fails', async () => {
+    qosApiMock.updateQoSRule.mockRejectedValueOnce(new Error('apply failed'))
+    const wrapper = mount(BandwidthControl, {
+      global: {
+        stubs,
+        directives: {
+          loading: {}
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const handleEdit = wrapper.vm.handleEdit || wrapper.vm.$.setupState.handleEdit
+    const handleSave = wrapper.vm.handleSave || wrapper.vm.$.setupState.handleSave
+
+    handleEdit({
+      id: 'qos-1',
+      description: 'limit vpn peer',
+      group_id: 'group-1',
+      bandwidth_mbps: 1,
+      direction: 'egress',
+      rate_bps: 1000000,
+      burst_bytes: 1500,
+      priority: 10,
+      mode: 'policing',
+      enabled: true
+    })
+    await nextTick()
+
+    await handleSave()
+    await flushPromises()
+
+    expect(ElMessage.error).toHaveBeenCalledWith('更新失败: apply failed')
   })
 })

@@ -85,6 +85,51 @@ describe('useQosApi', () => {
     }))
   })
 
+  it('应该显示 inline IP Group 的 CIDR 成员而不是 inline 名称', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        success: true,
+        data: [{
+          id: 'qos-1',
+          group_id: 'group-inline',
+          group: {
+            id: 'group-inline',
+            name: 'inline-100-64-0-2',
+            kind: 'inline',
+            members: [{ cidr: '100.64.0.2/32' }]
+          },
+          direction: 'egress',
+          bandwidth_mbps: 1,
+          enabled: true
+        }]
+      }
+    })
+
+    const rules = await useQosApi.getQoSRulesByNode('node-1')
+
+    expect(rules[0].runtime_group).toBe('100.64.0.2/32')
+    expect(rules[0].group_cidr).toBe('100.64.0.2/32')
+  })
+
+  it('缺少 IP Group 元数据时不应把 group_id 当成用户可读名称', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        success: true,
+        data: [{
+          id: 'qos-1',
+          group_id: '9bd2f0aa-08f5-4b7a-a743-1eddb8e1c955',
+          direction: 'egress',
+          bandwidth_mbps: 1,
+          enabled: true
+        }]
+      }
+    })
+
+    const rules = await useQosApi.getQoSRulesByNode('node-1')
+
+    expect(rules[0].runtime_group).toBe('未知 IP Group')
+  })
+
   it('不应下发旧版 QoS protocol/port 匹配字段', async () => {
     api.post.mockResolvedValue({
       data: { success: true, data: { id: 'rule-1' } }

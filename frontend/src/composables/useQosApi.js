@@ -49,7 +49,8 @@ function normalizeStats(rule) {
     dropped_packets: Number(stats.dropped_packets ?? 0),
     dropped_bytes: Number(stats.dropped_bytes ?? 0),
     shaped_packets: Number(stats.shaped_packets ?? 0),
-    shaped_bytes: Number(stats.shaped_bytes ?? 0)
+    shaped_bytes: Number(stats.shaped_bytes ?? 0),
+    load_error: rule.stats_error || rule.datapath_stats_error || stats.error || ''
   }
 }
 
@@ -57,10 +58,19 @@ function qosGroupForRule(rule) {
   const direction = normalizeDirection(rule)
   const src = rule.src_cidr || rule.src_net || ''
   const dst = rule.dst_cidr || rule.dst_net || ''
-  const explicit = rule.group_name || rule.group_id || rule.group_cidr || rule.group || rule.runtime_group || ''
-  if (explicit) return explicit
+  const members = Array.isArray(rule.group?.members) ? rule.group.members : []
+  const memberCIDRs = members.map(member => member.cidr).filter(Boolean)
+  if (memberCIDRs.length > 0) return memberCIDRs.join(', ')
+  const groupName = rule.group_name || rule.group?.name || ''
+  if (groupName && rule.group?.kind !== 'inline') return groupName
+  const directGroup = typeof rule.group === 'string' ? rule.group : ''
+  const explicit = rule.group_cidr || directGroup || rule.runtime_group || ''
+  if (explicit && explicit !== rule.group_id) return explicit
   if (direction === 'ingress') return src || dst || 'any'
-  return dst || src || 'any'
+  const cidr = dst || src
+  if (cidr) return cidr
+  if (rule.group_id) return '未知 IP Group'
+  return 'any'
 }
 
 function normalizeRulePayload(rule) {

@@ -36,13 +36,25 @@ function normalizeRuleRecord(rule, nodeId) {
     dst_port: dstPort,
     src_net: srcCIDR,
     dst_net: dstCIDR,
-    runtime_src_group: rule.src_group_name || srcGroupID || cidrOrAny(srcCIDR),
-    runtime_dst_group: rule.dst_group_name || dstGroupID || cidrOrAny(dstCIDR),
+    runtime_src_group: groupLabel(rule.src_group, rule.src_group_name, srcGroupID, srcCIDR),
+    runtime_dst_group: groupLabel(rule.dst_group, rule.dst_group_name, dstGroupID, dstCIDR),
     runtime_ports: ports || 'all',
     stats: normalizeStats(rule),
     min_port: dstPort > 0 ? dstPort : 0,
     max_port: dstPort > 0 ? dstPort : 65535
   }
+}
+
+function groupLabel(group, groupName, groupId, cidr) {
+  const members = Array.isArray(group?.members) ? group.members : []
+  const memberCIDRs = members.map(member => member.cidr).filter(Boolean)
+  if (memberCIDRs.length > 0) return memberCIDRs.join(', ')
+  if (groupName && group?.kind !== 'inline') return groupName
+  if (group?.name && group.kind !== 'inline') return group.name
+  const normalizedCIDR = cidrOrAny(cidr)
+  if (normalizedCIDR !== 'any') return normalizedCIDR
+  if (groupId) return '未知 IP Group'
+  return 'any'
 }
 
 function applyFilters(rules, filters = {}) {
