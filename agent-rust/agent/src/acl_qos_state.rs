@@ -6,6 +6,9 @@ pub const DIRECTION_INGRESS: u8 = 0;
 pub const DIRECTION_EGRESS: u8 = 1;
 pub const DIRECTION_BOTH: u8 = 2;
 
+pub const QOS_MODE_POLICING: u8 = 0;
+pub const QOS_MODE_SHAPING: u8 = 1;
+
 pub const ACTION_DROP: u8 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

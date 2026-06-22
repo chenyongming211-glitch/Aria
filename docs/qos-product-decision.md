@@ -1,6 +1,6 @@
 # QoS Product Decision
 
-Last updated: 2026-06-15
+Last updated: 2026-06-22
 
 Aria SD-WAN no longer uses the old "three-tier QoS" model. Do not describe QoS
 as `service / peers / ip`, and do not introduce new UI, API, Controller, or
@@ -24,16 +24,15 @@ work, but they are not current product capabilities.
 
 Runtime enforcement is direction-aware:
 
-- `egress` QoS uses EDT pacing on TC egress. The eBPF program computes a packet
-  timestamp, writes `skb->tstamp`, and requires `fq` qdisc on each `aria*`
-  interface. This is required for TCP throughput accuracy and is the preferred
-  path for the 90% minimum / 98% target SLO.
+- `egress` QoS currently uses policing. When the rule bucket is empty, the TC
+  egress program drops packets and does not write `skb->tstamp`.
 - `ingress` QoS uses policing. Ingress packets cannot be reliably delayed at
   the receiving interface, so ingress enforcement may drop packets when the
   bucket is empty.
 - The API still exposes one QoS mode, `policing`, until the product has a
-  separate operator-facing shaping/pacing concept. Internally, egress pacing is
-  an implementation detail for precision, not a new three-tier QoS model.
+  separate operator-facing shaping/pacing concept. `shaping` remains a runtime
+  compatibility path only: it may set EDT on TC egress and requires `fq` qdisc,
+  but it must bound EDT so packets are not scheduled beyond the qdisc horizon.
 
 The Controller remains responsible for SaaS tenant isolation and compiles
 tenant/node QoS policy records into an Agent-local snapshot. The Agent does not
@@ -72,7 +71,7 @@ QoS precision is a product SLO, not an absolute mathematical guarantee:
   precision failures.
 - Test results must report the configured rate, measured goodput, measured
   wire bytes when available, duration, packet size, direction, and whether the
-  rule used ingress policing or egress EDT pacing semantics.
+  rule used policing or shaping semantics.
 
 `bpf_spin_lock` is not a current release requirement. Linux requires BTF-style
 maps for `bpf_spin_lock`, while the current Aya map macro emits a map layout

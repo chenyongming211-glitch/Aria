@@ -12,6 +12,7 @@ use crate::acl_qos_maps::{
 };
 use crate::acl_qos_state::{
     requested_directions, FirewallState, GroupInfo, QosRuleInfo, DIRECTION_EGRESS,
+    QOS_MODE_SHAPING,
 };
 use crate::identity::{parse_single_ip, IdentityManager, RuntimeIPGroup, ID_WILDCARD};
 
@@ -318,11 +319,13 @@ pub fn next_policy_generation(current: u32) -> u32 {
 }
 
 fn compiled_qos_rule_requires_fq(rule: &CompiledQosRule) -> bool {
-    rule.direction == DIRECTION_EGRESS
+    rule.direction == DIRECTION_EGRESS && rule.mode == QOS_MODE_SHAPING
 }
 
 fn qos_rules_require_fq(rules: &[QosRuleInfo]) -> bool {
-    rules.iter().any(|rule| rule.direction == DIRECTION_EGRESS)
+    rules
+        .iter()
+        .any(|rule| rule.direction == DIRECTION_EGRESS && rule.mode == QOS_MODE_SHAPING)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -780,9 +780,10 @@ fn default_qos_burst(rate_bps: u64) -> u64 {
 
 fn qos_mode_from_string(mode: &str) -> Result<u8> {
     match mode.trim().to_ascii_lowercase().as_str() {
-        "" | "policing" | "shaping" => Ok(0),
+        "" | "policing" => Ok(crate::acl_qos_state::QOS_MODE_POLICING),
+        "shaping" => Ok(crate::acl_qos_state::QOS_MODE_SHAPING),
         other => Err(anyhow::anyhow!(
-            "invalid QoS mode '{}': must be policing",
+            "invalid QoS mode '{}': must be policing or shaping",
             other
         )),
     }

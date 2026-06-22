@@ -26,6 +26,8 @@ const TAP_ID_UNASSIGNED: u32 = 0;
 const ID_WILDCARD: u32 = 0;
 const DIRECTION_INGRESS: u8 = 0;
 const DIRECTION_EGRESS: u8 = 1;
+const QOS_MODE_SHAPING: u8 = 1;
+const QOS_EDT_MAX_DELAY_NS: u64 = 9_000_000_000;
 const IPV4_IDENTITY_LOOKUP_BITS: u32 = 64;
 const IPV6_IDENTITY_LOOKUP_BITS: u32 = 160;
 
@@ -377,8 +379,12 @@ fn decide_qos_bucket(
     };
     bucket.last_refill_ns = now;
 
-    if direction == DIRECTION_EGRESS {
+    if direction == DIRECTION_EGRESS && config.mode == QOS_MODE_SHAPING {
         let edt = next_edt(bucket.last_edt, now, pkt_len, rate_bytes_per_sec);
+        if edt == 0 {
+            bucket.tokens = 0;
+            return (false, true, false, 0);
+        }
         bucket.last_edt = edt;
         if bucket.tokens >= pkt_len {
             bucket.tokens -= pkt_len;
@@ -512,7 +518,13 @@ fn next_edt(last_edt: u64, now: u64, pkt_len: u64, rate_bytes_per_sec: u64) -> u
     }
     let base = if last_edt > now { last_edt } else { now };
     let delay_ns = mul_div(pkt_len, NS_PER_SEC, rate_bytes_per_sec);
-    base.saturating_add(delay_ns)
+    let edt = base.saturating_add(delay_ns);
+    let max_edt = now.saturating_add(QOS_EDT_MAX_DELAY_NS);
+    if edt > max_edt {
+        0
+    } else {
+        edt
+    }
 }
 
 #[inline(always)]
