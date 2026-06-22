@@ -1075,7 +1075,7 @@ mod tests {
     }
 
     #[test]
-    fn egress_qos_rules_require_fq_for_edt_pacing() {
+    fn only_egress_shaping_qos_rules_require_fq_for_edt_pacing() {
         assert!(!qos_rules_require_fq(&[]));
         assert!(!qos_rules_require_fq(&[QosRuleInfo {
             rule_id: "ingress".to_string(),
@@ -1087,8 +1087,8 @@ mod tests {
             priority: 100,
             mode: 0,
         }]));
-        assert!(qos_rules_require_fq(&[QosRuleInfo {
-            rule_id: "egress".to_string(),
+        assert!(!qos_rules_require_fq(&[QosRuleInfo {
+            rule_id: "egress-policing".to_string(),
             group_name: "office".to_string(),
             group_id: 10,
             direction: DIRECTION_EGRESS,
@@ -1096,6 +1096,16 @@ mod tests {
             burst_bytes: 625_000,
             priority: 100,
             mode: 0,
+        }]));
+        assert!(qos_rules_require_fq(&[QosRuleInfo {
+            rule_id: "egress-shaping".to_string(),
+            group_name: "office".to_string(),
+            group_id: 10,
+            direction: DIRECTION_EGRESS,
+            rate_bps: 5_000_000,
+            burst_bytes: 625_000,
+            priority: 100,
+            mode: 1,
         }]));
     }
 

@@ -900,7 +900,7 @@ mod tests {
         assert_eq!(policy.rate_bps, 250_000_000);
         assert_eq!(policy.burst_bytes, 4_000_000);
         assert_eq!(policy.priority, 7);
-        assert_eq!(policy.mode, 0);
+        assert_eq!(policy.mode, 1);
     }
 
     #[test]
