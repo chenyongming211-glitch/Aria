@@ -83,14 +83,19 @@ func TestCompilePolicySnapshotNormalizesQoSForAgentGroups(t *testing.T) {
 				BurstBytes: 4_000_000,
 				Mode:       "shaping",
 			},
+			{
+				DstIp:         "100.64.0.2/32",
+				BandwidthMbps: 10,
+				Mode:          "auto",
+			},
 		},
 		nil,
 	)
 	if err != nil {
 		t.Fatalf("compileAgentPolicySnapshot failed: %v", err)
 	}
-	if len(snapshot.QoSRules) != 2 {
-		t.Fatalf("expected 2 QoS rules, got %#v", snapshot.QoSRules)
+	if len(snapshot.QoSRules) != 3 {
+		t.Fatalf("expected 3 QoS rules, got %#v", snapshot.QoSRules)
 	}
 
 	egress := snapshot.QoSRules[0]
@@ -110,8 +115,15 @@ func TestCompilePolicySnapshotNormalizesQoSForAgentGroups(t *testing.T) {
 		ingress.GetDstIp() != "" ||
 		ingress.GetRateBps() != 250_000_000 ||
 		ingress.GetBurstBytes() != 4_000_000 ||
-		ingress.GetMode() != "policing" {
+		ingress.GetMode() != "shaping" {
 		t.Fatalf("unexpected ingress QoS rule: %#v", ingress)
+	}
+
+	auto := snapshot.QoSRules[2]
+	if auto.GetDirection() != "egress" ||
+		auto.GetDstIp() != "100.64.0.2/32" ||
+		auto.GetMode() != "auto" {
+		t.Fatalf("unexpected auto QoS rule: %#v", auto)
 	}
 }
 

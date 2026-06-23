@@ -128,6 +128,40 @@ describe('BandwidthControl edit behavior', () => {
     vi.clearAllMocks()
   })
 
+  it('defaults new QoS rules to auto mode and allows shaping selection', async () => {
+    const wrapper = mount(BandwidthControl, {
+      global: {
+        stubs,
+        directives: {
+          loading: {}
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const showAddDialog = wrapper.vm.showAddDialog || wrapper.vm.$.setupState.showAddDialog
+    const handleSave = wrapper.vm.handleSave || wrapper.vm.$.setupState.handleSave
+    const form = wrapper.vm.form || wrapper.vm.$.setupState.form
+
+    showAddDialog()
+    await nextTick()
+
+    expect(form.mode).toBe('auto')
+
+    form.description = 'smooth vpn peer'
+    form.group_id = 'group-1'
+    form.bandwidth_mbps = 2
+    form.mode = 'shaping'
+    await handleSave()
+    await flushPromises()
+
+    expect(qosApiMock.createQoSRule).toHaveBeenCalledWith('node-1', expect.objectContaining({
+      mode: 'shaping',
+      bandwidth_mbps: 2
+    }))
+  })
+
   it('updates an existing QoS rule instead of creating a new one', async () => {
     const wrapper = mount(BandwidthControl, {
       global: {

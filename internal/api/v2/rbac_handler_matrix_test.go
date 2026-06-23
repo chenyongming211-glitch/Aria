@@ -399,6 +399,10 @@ func expectQoSCreateSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 }
 
 func expectQoSCreateSuccessWithEnabled(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, enabled bool) {
+	expectQoSCreateSuccessWithModeAndEnabled(mock, tenantID, nodeID, "auto", enabled)
+}
+
+func expectQoSCreateSuccessWithModeAndEnabled(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, mode string, enabled bool) {
 	now := time.Now()
 	groupID := expectInlineGroupResolve(mock, tenantID, "10.0.0.0/24")
 	expectQoSConflictCheckEmpty(mock, tenantID, nodeID)
@@ -411,10 +415,10 @@ func expectQoSCreateSuccessWithEnabled(mock sqlmock.Sqlmock, tenantID, nodeID uu
 		           COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
 		           COALESCE(priority, 0), COALESCE(mode, 'policing'),
 		           enabled, COALESCE(description, ''), created_at, updated_at`)).
-		WithArgs(tenantID, nodeID, groupID, "", "", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), 200, "egress", uint64(200000000), uint64(2500000), 100, "policing", enabled, "qos web").
+		WithArgs(tenantID, nodeID, groupID, "", "", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), 200, "egress", uint64(200000000), uint64(2500000), 100, mode, enabled, "qos web").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "group_id", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at",
-		}).AddRow(uuid.New(), tenantID, nodeID, groupID, "", "", 0, 0, 0, 200, "egress", uint64(200000000), uint64(2500000), 100, "policing", enabled, "qos web", now, now))
+		}).AddRow(uuid.New(), tenantID, nodeID, groupID, "", "", 0, 0, 0, 200, "egress", uint64(200000000), uint64(2500000), 100, mode, enabled, "qos web", now, now))
 }
 
 func expectInlineGroupResolve(mock sqlmock.Sqlmock, tenantID uuid.UUID, cidr string) uuid.UUID {
@@ -1455,6 +1459,45 @@ func TestQoSCreateHonorsDisabledPayload(t *testing.T) {
 	}
 }
 
+func TestQoSCreateAllowsShapingMode(t *testing.T) {
+	t.Setenv("RBAC_ENFORCEMENT", "enforce")
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/qos"
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	expectTenantStatusActive(mock, tenantID)
+	expectPermissionLookup(mock, tenantID, "admin", []string{"qos:write"})
+	mock.ExpectBegin()
+	expectQoSCreateSuccessWithModeAndEnabled(mock, tenantID, nodeID, "shaping", true)
+	expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
+	mock.ExpectCommit()
+	expectPolicyDispatchPostCommitSummary(mock, tenantID, nodeID)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withAuthContext(httptest.NewRequest(
+		http.MethodPost,
+		path,
+		strings.NewReader(`{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":200,"priority":100,"mode":"shaping","description":"qos web"}`),
+	), "admin", tenantID)
+	rr := httptest.NewRecorder()
+	router.HandleTenantScoped(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestQoSUpdatePreservesOmittedFields(t *testing.T) {
 	t.Setenv("RBAC_ENFORCEMENT", "enforce")
 
@@ -1570,10 +1613,6 @@ func TestQoSWriteRejectsRuntimeCompilerInvalidFields(t *testing.T) {
 		{
 			name:    "invalid mode",
 			payload: `{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":1,"mode":"burst-only"}`,
-		},
-		{
-			name:    "shaping unsupported",
-			payload: `{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":1,"mode":"shaping"}`,
 		},
 	}
 

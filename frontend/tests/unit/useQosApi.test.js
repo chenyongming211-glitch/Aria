@@ -57,10 +57,29 @@ describe('useQosApi', () => {
       rate_bps: 200000000,
       burst_bytes: 2500000,
       priority: 100,
-      mode: 'policing',
+      mode: 'auto',
       description: 'https limit',
       enabled: true
     })
+  })
+
+  it('应该允许显式创建 shaping 模式 QoS 规则', async () => {
+    api.post.mockResolvedValue({
+      data: { success: true, data: { id: 'rule-shaping' } }
+    })
+
+    await useQosApi.createQoSRule('node-1', {
+      group_cidr: '10.0.0.0/24',
+      direction: 'egress',
+      bandwidth_mbps: 50,
+      mode: 'shaping',
+      description: 'smooth tcp'
+    })
+
+    expect(api.post).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/qos', expect.objectContaining({
+      mode: 'shaping',
+      rate_bps: 50000000
+    }))
   })
 
   it('应该优先发送 IP Group ID 并清空直接 CIDR', async () => {

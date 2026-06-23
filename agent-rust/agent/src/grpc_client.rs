@@ -926,4 +926,48 @@ mod tests {
         assert_eq!(policy.group_id, "office-group");
         assert_eq!(policy.group, "");
     }
+
+    #[test]
+    fn qos_auto_mode_uses_shaping_for_egress() {
+        let policy = qos_policy_from_sync_rule(&QoSRule {
+            id: "qos-auto-egress".to_string(),
+            src_ip: String::new(),
+            dst_ip: "100.64.0.2/32".to_string(),
+            group_id: String::new(),
+            src_port: 0,
+            dst_port: 0,
+            protocol: 0,
+            bandwidth_mbps: 10,
+            direction: "egress".to_string(),
+            rate_bps: 10_000_000,
+            burst_bytes: 1500,
+            priority: 7,
+            mode: "auto".to_string(),
+        })
+        .expect("auto egress QoS rule");
+
+        assert_eq!(policy.mode, crate::acl_qos_state::QOS_MODE_SHAPING);
+    }
+
+    #[test]
+    fn qos_auto_mode_uses_policing_for_ingress() {
+        let policy = qos_policy_from_sync_rule(&QoSRule {
+            id: "qos-auto-ingress".to_string(),
+            src_ip: "100.64.0.2/32".to_string(),
+            dst_ip: String::new(),
+            group_id: String::new(),
+            src_port: 0,
+            dst_port: 0,
+            protocol: 0,
+            bandwidth_mbps: 10,
+            direction: "ingress".to_string(),
+            rate_bps: 10_000_000,
+            burst_bytes: 1500,
+            priority: 7,
+            mode: "auto".to_string(),
+        })
+        .expect("auto ingress QoS rule");
+
+        assert_eq!(policy.mode, crate::acl_qos_state::QOS_MODE_POLICING);
+    }
 }
