@@ -238,7 +238,6 @@ func NewGetNodeDetailTool(store *controllerstorage.Storage) Tool {
 				"status":            node.Status,
 				"last_seen":         node.LastSeen,
 				"advertised_routes": node.AdvertisedRoutes,
-				"enrolled_token":    node.EnrolledWithToken,
 				"registered_at":     node.RegisteredAt,
 				"created_at":        node.CreatedAt,
 				"updated_at":        node.UpdatedAt,

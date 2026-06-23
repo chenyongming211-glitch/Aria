@@ -182,8 +182,6 @@ export default defineStore('user', () => {
     try {
       // 调用真实的登录 API
       const response = await api.post(API_ENDPOINTS.AUTH.LOGIN, credentials)
-      
-      console.log('[Login] Response:', response.data)
 
       // 后端返回格式: { success, data: { token, user, require_password_change }, message, code }
       const token = response.data?.data?.token || response.data?.token

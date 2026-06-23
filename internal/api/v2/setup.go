@@ -539,7 +539,6 @@ func (r *Router) buildTenantNodeResponse(node *controllerstorage.Node) map[strin
 		"status":              node.Status,
 		"availability_status": nodeAvailabilityStatus(node),
 		"advertised_routes":   node.AdvertisedRoutes,
-		"enrolled_with_token": node.EnrolledWithToken,
 		"created_at":          node.CreatedAt,
 		"updated_at":          node.UpdatedAt,
 	}

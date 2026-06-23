@@ -66,12 +66,9 @@ export default defineStore('node', () => {
   async function loadNodes() {
     loading.value = true
     try {
-      console.log('[Node Store] Loading nodes...')
-      
       // 使用租户节点 API
       const tenantId = requireCurrentTenantId()
       const response = await api.get(API_ENDPOINTS.TENANT.NODES(tenantId))
-      console.log('[Node Store] Response:', response.data)
       
       let nodeData = []
       const result = response.data
@@ -84,8 +81,6 @@ export default defineStore('node', () => {
       } else if (result && result.success && Array.isArray(result.data)) {
         nodeData = result.data
       }
-      
-      console.log('[Node Store] Parsed node data:', nodeData)
       
       if (nodeData.length > 0) {
         nodes.value = nodeData.map(node => normalizeNodeRecord(node))
