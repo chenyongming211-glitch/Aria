@@ -780,10 +780,11 @@ fn default_qos_burst(rate_bps: u64) -> u64 {
 
 fn qos_mode_from_string(mode: &str) -> Result<u8> {
     match mode.trim().to_ascii_lowercase().as_str() {
-        "" | "policing" => Ok(crate::acl_qos_state::QOS_MODE_POLICING),
+        "" | "auto" => Ok(crate::acl_qos_state::QOS_MODE_AUTO),
+        "policing" => Ok(crate::acl_qos_state::QOS_MODE_POLICING),
         "shaping" => Ok(crate::acl_qos_state::QOS_MODE_SHAPING),
         other => Err(anyhow::anyhow!(
-            "invalid QoS mode '{}': must be policing or shaping",
+            "invalid QoS mode '{}': must be auto, policing, or shaping",
             other
         )),
     }
@@ -928,7 +929,7 @@ mod tests {
     }
 
     #[test]
-    fn qos_auto_mode_uses_shaping_for_egress() {
+    fn qos_auto_mode_is_preserved_for_runtime_capability_detection() {
         let policy = qos_policy_from_sync_rule(&QoSRule {
             id: "qos-auto-egress".to_string(),
             src_ip: String::new(),
@@ -946,28 +947,28 @@ mod tests {
         })
         .expect("auto egress QoS rule");
 
-        assert_eq!(policy.mode, crate::acl_qos_state::QOS_MODE_SHAPING);
+        assert_eq!(policy.mode, crate::acl_qos_state::QOS_MODE_AUTO);
     }
 
     #[test]
-    fn qos_auto_mode_uses_policing_for_ingress() {
+    fn qos_empty_mode_uses_auto_default() {
         let policy = qos_policy_from_sync_rule(&QoSRule {
-            id: "qos-auto-ingress".to_string(),
-            src_ip: "100.64.0.2/32".to_string(),
-            dst_ip: String::new(),
+            id: "qos-default-mode".to_string(),
+            src_ip: String::new(),
+            dst_ip: "100.64.0.2/32".to_string(),
             group_id: String::new(),
             src_port: 0,
             dst_port: 0,
             protocol: 0,
             bandwidth_mbps: 10,
-            direction: "ingress".to_string(),
+            direction: "egress".to_string(),
             rate_bps: 10_000_000,
             burst_bytes: 1500,
             priority: 7,
-            mode: "auto".to_string(),
+            mode: String::new(),
         })
-        .expect("auto ingress QoS rule");
+        .expect("default mode QoS rule");
 
-        assert_eq!(policy.mode, crate::acl_qos_state::QOS_MODE_POLICING);
+        assert_eq!(policy.mode, crate::acl_qos_state::QOS_MODE_AUTO);
     }
 }

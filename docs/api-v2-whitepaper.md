@@ -200,7 +200,7 @@ QoS 新建/更新优先使用 IP Group：
   "bandwidth_mbps": 100,
   "rate_bps": 100000000,
   "burst_bytes": 1250000,
-  "mode": "policing",
+  "mode": "auto",
   "priority": 100,
   "enabled": true
 }

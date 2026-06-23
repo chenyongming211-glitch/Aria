@@ -41,7 +41,7 @@
       <el-alert
         title="Agent QoS 运行模型"
         type="warning"
-        description="每条 QoS 规则直接下发为 group + direction + rate_bps + burst_bytes。Group 可以是 CIDR，也可以是 any；当前只支持 policing。"
+        description="每条 QoS 规则直接下发为 group + direction + rate_bps + burst_bytes + mode。默认 auto 会在 egress 优先使用 shaping；内核/qdisc 不支持时降级为 policing。"
         :closable="false"
         show-icon
         style="margin-bottom: 20px;"
@@ -146,9 +146,12 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="模式" prop="mode">
-              <el-select v-model="form.mode" style="width: 100%" disabled>
+              <el-select v-model="form.mode" style="width: 100%">
+                <el-option label="自动 auto（优先 Shaping）" value="auto" />
+                <el-option label="Shaping" value="shaping" />
                 <el-option label="Policing" value="policing" />
               </el-select>
+              <div class="form-help">auto 会在 egress 使用 shaping；ingress 或不支持 fq/EDT 时使用 policing。</div>
             </el-form-item>
           </el-col>
         </el-row>
@@ -220,7 +223,7 @@ const form = reactive({
   rate_bps: 0,
   burst_bytes: 0,
   priority: 100,
-  mode: 'policing',
+  mode: 'auto',
   enabled: true
 })
 
@@ -312,8 +315,8 @@ const formatDirection = (direction) => {
 }
 
 const formatMode = (mode) => {
-  const map = { policing: 'Policing', shaping: 'Shaping(未启用)' }
-  return map[mode] || mode || 'Policing'
+  const map = { auto: 'Auto', policing: 'Policing', shaping: 'Shaping' }
+  return map[mode] || mode || 'Auto'
 }
 
 const formatRate = (rateBps) => {
@@ -362,7 +365,7 @@ const resetForm = () => {
     rate_bps: 0,
     burst_bytes: 0,
     priority: 100,
-    mode: 'policing',
+    mode: 'auto',
     enabled: true
   })
   editingOriginal.value = null
@@ -395,7 +398,7 @@ const handleEdit = (row) => {
     rate_bps: rateBps,
     burst_bytes: burstBytes,
     priority: Number(row.priority ?? 100),
-    mode: row.mode || 'policing',
+    mode: row.mode || 'auto',
     enabled: row.enabled !== false
   })
   editingOriginal.value = {

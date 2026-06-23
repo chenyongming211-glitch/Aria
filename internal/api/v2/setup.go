@@ -1608,7 +1608,7 @@ func (r *Router) buildTenantNodeQoSPolicies(tenantID uuid.UUID, node *controller
 			"rate_bps":       rule.RateBps,
 			"burst_bytes":    rule.BurstBytes,
 			"priority":       rule.Priority,
-			"mode":           "policing",
+			"mode":           qosModeOrDefault(rule.Mode),
 			"enabled":        rule.Enabled,
 			"created_at":     rule.CreatedAt,
 			"updated_at":     rule.UpdatedAt,

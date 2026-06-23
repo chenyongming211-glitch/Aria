@@ -81,7 +81,7 @@ func TestListTenantNodeQoSIncludesCompletedDeliveryStatus(t *testing.T) {
 		        bandwidth_mbps, COALESCE(direction, 'egress'),
 		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
 		        COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
-		        COALESCE(priority, 0), COALESCE(mode, 'policing'),
+		        COALESCE(priority, 0), COALESCE(mode, 'auto'),
 		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE tenant_id = $1 AND node_id = $2
@@ -249,7 +249,7 @@ func TestListTenantNodeQoSReturnsStatsLoadError(t *testing.T) {
 			        bandwidth_mbps, COALESCE(direction, 'egress'),
 			        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
 			        COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
-			        COALESCE(priority, 0), COALESCE(mode, 'policing'),
+			        COALESCE(priority, 0), COALESCE(mode, 'auto'),
 			        enabled, COALESCE(description, ''), created_at, updated_at
 			   FROM qos_rules
 			  WHERE tenant_id = $1 AND node_id = $2

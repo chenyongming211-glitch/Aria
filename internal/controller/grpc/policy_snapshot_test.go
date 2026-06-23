@@ -105,7 +105,7 @@ func TestCompilePolicySnapshotNormalizesQoSForAgentGroups(t *testing.T) {
 		egress.GetRateBps() != 100_000_000 ||
 		egress.GetBurstBytes() != 1_250_000 ||
 		egress.GetPriority() != 7 ||
-		egress.GetMode() != "policing" {
+		egress.GetMode() != "auto" {
 		t.Fatalf("unexpected egress QoS rule: %#v", egress)
 	}
 

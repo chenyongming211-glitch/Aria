@@ -142,7 +142,7 @@ message QoSRule {
   uint64 rate_bps = 8;                // 精确速率（bps）
   uint64 burst_bytes = 9;             // 突发字节数
   uint32 priority = 10;               // 优先级
-  string mode = 11;                   // policing 或 shaping
+  string mode = 11;                   // auto / policing / shaping
   string group_id = 13;               // QoS IP Group 产品 ID
 }
 

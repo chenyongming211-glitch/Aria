@@ -303,7 +303,7 @@ func expectQoSListSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 		        bandwidth_mbps, COALESCE(direction, 'egress'),
 		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
 		        COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
-		        COALESCE(priority, 0), COALESCE(mode, 'policing'),
+		        COALESCE(priority, 0), COALESCE(mode, 'auto'),
 		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE tenant_id = $1 AND node_id = $2
@@ -322,7 +322,7 @@ func expectQoSConflictCheckEmpty(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUI
 		        bandwidth_mbps, COALESCE(direction, 'egress'),
 		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
 		        COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
-		        COALESCE(priority, 0), COALESCE(mode, 'policing'),
+		        COALESCE(priority, 0), COALESCE(mode, 'auto'),
 		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE tenant_id = $1 AND node_id = $2
@@ -413,7 +413,7 @@ func expectQoSCreateSuccessWithModeAndEnabled(mock sqlmock.Sqlmock, tenantID, no
 		           bandwidth_mbps, COALESCE(direction, 'egress'),
 		           COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
 		           COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
-		           COALESCE(priority, 0), COALESCE(mode, 'policing'),
+		           COALESCE(priority, 0), COALESCE(mode, 'auto'),
 		           enabled, COALESCE(description, ''), created_at, updated_at`)).
 		WithArgs(tenantID, nodeID, groupID, "", "", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), 200, "egress", uint64(200000000), uint64(2500000), 100, mode, enabled, "qos web").
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -486,7 +486,7 @@ func expectQoSGetForUpdate(mock sqlmock.Sqlmock, tenantID, nodeID, ruleID uuid.U
 		        bandwidth_mbps, COALESCE(direction, 'egress'),
 		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
 		        COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
-		        COALESCE(priority, 0), COALESCE(mode, 'policing'),
+		        COALESCE(priority, 0), COALESCE(mode, 'auto'),
 		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE id = $1 AND tenant_id = $2 AND node_id = $3`)).

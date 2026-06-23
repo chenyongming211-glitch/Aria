@@ -18,15 +18,17 @@ function normalizeDirection(rule) {
 
 function normalizeMode(rule) {
   const value = String(rule.mode || '').trim().toLowerCase()
-  return value === 'shaping' ? 'shaping' : 'policing'
+  if (['auto', 'policing', 'shaping'].includes(value)) return value
+  return 'auto'
 }
 
 function normalizePayloadMode(rule) {
   const value = String(rule.mode || '').trim().toLowerCase()
-  if (value && value !== 'policing') {
-    throw new Error('当前 QoS 只支持 policing 模式')
+  if (!value) return 'auto'
+  if (!['auto', 'policing', 'shaping'].includes(value)) {
+    throw new Error('QoS mode must be auto, policing, or shaping')
   }
-  return 'policing'
+  return value
 }
 
 function normalizeRateBps(rule, bandwidthMbps) {

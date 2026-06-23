@@ -41,13 +41,18 @@ func validatePolicyDirectionField(value string) error {
 }
 
 func validateQoSModeField(value string) error {
+	_, err := normalizeQoSModeField(value, "auto")
+	return err
+}
+
+func normalizeQoSModeField(value, defaultMode string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "policing":
-		return nil
-	case "shaping":
-		return fmt.Errorf("mode shaping is not supported yet; use policing")
+	case "":
+		return defaultMode, nil
+	case "auto", "policing", "shaping":
+		return strings.ToLower(strings.TrimSpace(value)), nil
 	default:
-		return fmt.Errorf("mode must be policing")
+		return "", fmt.Errorf("mode must be auto, policing, or shaping")
 	}
 }
 
@@ -215,12 +220,20 @@ func qosRuleResponse(rule *controllerstorage.QoSRuleRecord, nodeID uuid.UUID) ma
 		"rate_bps":       rule.RateBps,
 		"burst_bytes":    rule.BurstBytes,
 		"priority":       rule.Priority,
-		"mode":           rule.Mode,
+		"mode":           qosModeOrDefault(rule.Mode),
 		"enabled":        rule.Enabled,
 		"description":    rule.Description,
 		"created_at":     rule.CreatedAt,
 		"updated_at":     rule.UpdatedAt,
 	}
+}
+
+func qosModeOrDefault(mode string) string {
+	normalized, err := normalizeQoSModeField(mode, "auto")
+	if err != nil {
+		return "auto"
+	}
+	return normalized
 }
 
 func nullableUUIDString(value uuid.NullUUID) interface{} {
@@ -1439,7 +1452,8 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	if writePolicyValidationError(w, validatePolicyDirectionField(body.Direction)) {
 		return
 	}
-	if writePolicyValidationError(w, validateQoSModeField(body.Mode)) {
+	mode, modeErr := normalizeQoSModeField(body.Mode, "auto")
+	if writePolicyValidationError(w, modeErr) {
 		return
 	}
 
@@ -1453,7 +1467,7 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		RateBps:       body.RateBps,
 		BurstBytes:    body.BurstBytes,
 		Priority:      priority,
-		Mode:          body.Mode,
+		Mode:          mode,
 		Enabled:       boolValueOrDefault(body.Enabled, true),
 		Description:   body.Description,
 	}
@@ -1612,7 +1626,11 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 		rule.Priority = *body.Priority
 	}
 	if body.Mode != nil {
-		rule.Mode = *body.Mode
+		mode, err := normalizeQoSModeField(*body.Mode, "auto")
+		if writePolicyValidationError(w, err) {
+			return
+		}
+		rule.Mode = mode
 	}
 	if body.Description != nil {
 		rule.Description = *body.Description

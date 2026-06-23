@@ -116,7 +116,7 @@ func listTenantNodeQoSRules(q policyMutationExecutor, tenantID, nodeID uuid.UUID
 		        bandwidth_mbps, COALESCE(direction, 'egress'),
 		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
 		        COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
-		        COALESCE(priority, 0), COALESCE(mode, 'policing'),
+		        COALESCE(priority, 0), COALESCE(mode, 'auto'),
 		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE tenant_id = $1 AND node_id = $2`+enabledClause+`
@@ -154,7 +154,7 @@ func createTenantNodeQoSRule(q policyMutationExecutor, rule *QoSRuleRecord, bump
 		           bandwidth_mbps, COALESCE(direction, 'egress'),
 		           COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
 		           COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
-		           COALESCE(priority, 0), COALESCE(mode, 'policing'),
+		           COALESCE(priority, 0), COALESCE(mode, 'auto'),
 		           enabled, COALESCE(description, ''), created_at, updated_at`,
 		rule.TenantID,
 		rule.NodeID,
@@ -242,7 +242,7 @@ func (s *Storage) GetTenantNodeQoSRule(tenantID, nodeID, ruleID uuid.UUID) (*QoS
 		        bandwidth_mbps, COALESCE(direction, 'egress'),
 		        COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
 		        COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
-		        COALESCE(priority, 0), COALESCE(mode, 'policing'),
+		        COALESCE(priority, 0), COALESCE(mode, 'auto'),
 		        enabled, COALESCE(description, ''), created_at, updated_at
 		   FROM qos_rules
 		  WHERE id = $1 AND tenant_id = $2 AND node_id = $3`,
@@ -700,7 +700,7 @@ func normalizeQoSRuntimeFields(rule *QoSRuleRecord) {
 		rule.BurstBytes = defaultQoSBurst(rule.RateBps)
 	}
 	if strings.TrimSpace(rule.Mode) == "" {
-		rule.Mode = "policing"
+		rule.Mode = "auto"
 	}
 }
 

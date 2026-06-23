@@ -747,7 +747,7 @@ type QoSRule struct {
 	RateBps       uint64                 `protobuf:"varint,8,opt,name=rate_bps,json=rateBps,proto3" json:"rate_bps,omitempty"`                   // 精确速率（bps）
 	BurstBytes    uint64                 `protobuf:"varint,9,opt,name=burst_bytes,json=burstBytes,proto3" json:"burst_bytes,omitempty"`          // 突发字节数
 	Priority      uint32                 `protobuf:"varint,10,opt,name=priority,proto3" json:"priority,omitempty"`                               // 优先级
-	Mode          string                 `protobuf:"bytes,11,opt,name=mode,proto3" json:"mode,omitempty"`                                        // policing 或 shaping
+	Mode          string                 `protobuf:"bytes,11,opt,name=mode,proto3" json:"mode,omitempty"`                                        // auto / policing / shaping
 	GroupId       string                 `protobuf:"bytes,13,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`                   // QoS IP Group 产品 ID
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

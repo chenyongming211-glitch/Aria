@@ -567,8 +567,10 @@ func qosCIDRFallbackForDirection(rule *agentpb.QoSRule, direction string) string
 
 func normalizeQoSMode(mode string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "", "policing", "shaping":
-		return "policing", nil
+	case "":
+		return "auto", nil
+	case "auto", "policing", "shaping":
+		return strings.ToLower(strings.TrimSpace(mode)), nil
 	default:
 		return "", fmt.Errorf("invalid QoS mode %q", mode)
 	}

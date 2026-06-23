@@ -8,6 +8,7 @@ pub const DIRECTION_BOTH: u8 = 2;
 
 pub const QOS_MODE_POLICING: u8 = 0;
 pub const QOS_MODE_SHAPING: u8 = 1;
+pub const QOS_MODE_AUTO: u8 = 2;
 
 pub const ACTION_DROP: u8 = 1;
 

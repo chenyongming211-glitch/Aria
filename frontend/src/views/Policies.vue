@@ -416,7 +416,7 @@ const summarizePolicy = (policy) => {
     case 'acl':
       return `${spec.src_net || '*'} -> ${spec.dst_net || '*'} / proto ${spec.protocol ?? 0} / ports ${spec.min_port ?? 0}-${spec.max_port ?? 65535}`
     case 'qos':
-      return `${spec.direction || 'egress'} / group ${spec.dst_cidr || spec.src_cidr || 'any'} / ${spec.rate_bps || 0} bps / ${spec.mode || 'policing'}`
+      return `${spec.direction || 'egress'} / group ${spec.dst_cidr || spec.src_cidr || 'any'} / ${spec.rate_bps || 0} bps / ${spec.mode || 'auto'}`
     case 'route':
       return spec.cidr || policy.policyRef || '-'
     default:

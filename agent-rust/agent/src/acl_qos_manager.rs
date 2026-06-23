@@ -12,7 +12,7 @@ use crate::acl_qos_maps::{
 };
 use crate::acl_qos_state::{
     requested_directions, FirewallState, GroupInfo, QosRuleInfo, DIRECTION_EGRESS,
-    QOS_MODE_SHAPING,
+    QOS_MODE_AUTO, QOS_MODE_POLICING, QOS_MODE_SHAPING,
 };
 use crate::identity::{parse_single_ip, IdentityManager, RuntimeIPGroup, ID_WILDCARD};
 
@@ -319,13 +319,34 @@ pub fn next_policy_generation(current: u32) -> u32 {
 }
 
 fn compiled_qos_rule_requires_fq(rule: &CompiledQosRule) -> bool {
-    rule.direction == DIRECTION_EGRESS && rule.mode == QOS_MODE_SHAPING
+    rule.direction == DIRECTION_EGRESS
+        && (rule.mode == QOS_MODE_SHAPING || rule.mode == QOS_MODE_AUTO)
 }
 
 fn qos_rules_require_fq(rules: &[QosRuleInfo]) -> bool {
     rules
         .iter()
         .any(|rule| rule.direction == DIRECTION_EGRESS && rule.mode == QOS_MODE_SHAPING)
+}
+
+fn compiled_qos_rules_have_strict_shaping(rules: &[CompiledQosRule]) -> bool {
+    rules
+        .iter()
+        .any(|rule| rule.direction == DIRECTION_EGRESS && rule.mode == QOS_MODE_SHAPING)
+}
+
+fn effective_qos_mode(mode: u8, direction: u8, fq_available: bool) -> u8 {
+    if direction != DIRECTION_EGRESS {
+        return QOS_MODE_POLICING;
+    }
+    if mode != QOS_MODE_AUTO {
+        return mode;
+    }
+    if fq_available {
+        QOS_MODE_SHAPING
+    } else {
+        QOS_MODE_POLICING
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -550,6 +571,7 @@ impl AclQosManager {
             compile_acl_rules_for_groups(&snapshot.acl_rules, &candidate_state.groups)?;
         let compiled_qos_rules =
             compile_qos_rules_for_groups(&snapshot.qos_rules, &candidate_state.groups)?;
+        let fq_available = self.ensure_fq_for_compiled_qos(&compiled_qos_rules)?;
 
         Self::reset_policy_state(&mut candidate_state, snapshot, runtime.policy_generation);
 
@@ -562,18 +584,14 @@ impl AclQosManager {
             )?;
         }
 
-        let mut requires_fq = false;
         for rule in compiled_qos_rules {
-            if compiled_qos_rule_requires_fq(&rule) {
-                requires_fq = true;
-            }
-            Self::apply_compiled_qos(&mut self.maps, runtime, &mut candidate_state, &rule)?;
-        }
-
-        if requires_fq {
-            for iface in &self.interfaces {
-                ensure_fq_qdisc(iface).map_err(AclQosError::Kernel)?;
-            }
+            Self::apply_compiled_qos(
+                &mut self.maps,
+                runtime,
+                &mut candidate_state,
+                &rule,
+                fq_available,
+            )?;
         }
 
         let qos_enabled = snapshot.qos_enabled && !candidate_state.qos_rules.is_empty();
@@ -586,6 +604,26 @@ impl AclQosManager {
         .map_err(AclQosError::Kernel)?;
 
         Ok(candidate_state)
+    }
+
+    fn ensure_fq_for_compiled_qos(&self, rules: &[CompiledQosRule]) -> Result<bool, AclQosError> {
+        if !rules.iter().any(compiled_qos_rule_requires_fq) {
+            return Ok(false);
+        }
+
+        let strict_shaping = compiled_qos_rules_have_strict_shaping(rules);
+        for iface in &self.interfaces {
+            if let Err(error) = ensure_fq_qdisc(iface) {
+                if strict_shaping {
+                    return Err(AclQosError::Kernel(error));
+                }
+                for cleanup_iface in &self.interfaces {
+                    let _ = cleanup_root_qdisc(cleanup_iface);
+                }
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     fn reset_policy_state(
@@ -838,7 +876,9 @@ impl AclQosManager {
         runtime: TapMapRuntime,
         state: &mut FirewallState,
         rule: &CompiledQosRule,
+        fq_available: bool,
     ) -> Result<(), AclQosError> {
+        let mode = effective_qos_mode(rule.mode, rule.direction, fq_available);
         state
             .qos_rules
             .retain(|r| !(r.group_id == rule.group_id && r.direction == rule.direction));
@@ -850,7 +890,7 @@ impl AclQosManager {
             rate_bps: rule.rate_bps,
             burst_bytes: rule.burst_bytes,
             priority: rule.priority,
-            mode: rule.mode,
+            mode,
         });
         add_qos_rule_to_maps(
             maps,
@@ -860,7 +900,7 @@ impl AclQosManager {
             rule.rate_bps,
             rule.burst_bytes,
             rule.priority,
-            rule.mode,
+            mode,
         )
         .map_err(AclQosError::Kernel)?;
         Ok(())
@@ -1110,6 +1150,42 @@ mod tests {
             priority: 100,
             mode: 1,
         }]));
+    }
+
+    #[test]
+    fn qos_auto_mode_resolves_by_direction_and_fq_capability() {
+        assert_eq!(
+            effective_qos_mode(QOS_MODE_AUTO, DIRECTION_EGRESS, true),
+            QOS_MODE_SHAPING
+        );
+        assert_eq!(
+            effective_qos_mode(QOS_MODE_AUTO, DIRECTION_EGRESS, false),
+            QOS_MODE_POLICING
+        );
+        assert_eq!(
+            effective_qos_mode(
+                QOS_MODE_AUTO,
+                crate::acl_qos_state::DIRECTION_INGRESS,
+                true,
+            ),
+            QOS_MODE_POLICING
+        );
+        assert_eq!(
+            effective_qos_mode(QOS_MODE_POLICING, DIRECTION_EGRESS, true),
+            QOS_MODE_POLICING
+        );
+        assert_eq!(
+            effective_qos_mode(QOS_MODE_SHAPING, DIRECTION_EGRESS, false),
+            QOS_MODE_SHAPING
+        );
+        assert_eq!(
+            effective_qos_mode(
+                QOS_MODE_SHAPING,
+                crate::acl_qos_state::DIRECTION_INGRESS,
+                true,
+            ),
+            QOS_MODE_POLICING
+        );
     }
 
     #[test]

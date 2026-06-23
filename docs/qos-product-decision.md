@@ -1,6 +1,6 @@
 # QoS Product Decision
 
-Last updated: 2026-06-22
+Last updated: 2026-06-23
 
 Aria SD-WAN no longer uses the old "three-tier QoS" model. Do not describe QoS
 as `service / peers / ip`, and do not introduce new UI, API, Controller, or
@@ -15,24 +15,28 @@ QoS is a unified node-scoped rule model. A rule matches traffic by fields such a
 - destination CIDR
 - bandwidth
 - burst
-- mode: `policing`
+- mode: `auto`, `policing`, or `shaping`
 
-The current northbound API intentionally rejects protocol matching, source or
-destination port matching, and `shaping` mode. Those fields may remain in older
-database rows, protobuf structs, or eBPF structs for compatibility and future
-work, but they are not current product capabilities.
+The current northbound API intentionally rejects protocol matching and source or
+destination port matching. QoS mode is a current product capability:
+
+- `auto` is the default. It prefers egress shaping when the Agent can install
+  the required `fq` qdisc/EDT path and otherwise falls back to policing.
+- `shaping` is an explicit operator request for egress shaping. If the Agent
+  cannot enable the required kernel/qdisc support, policy apply fails and the
+  delivery error must explain the reason.
+- `policing` explicitly uses drop-based policing and does not require `fq`.
 
 Runtime enforcement is direction-aware:
 
-- `egress` QoS currently uses policing. When the rule bucket is empty, the TC
-  egress program drops packets and does not write `skb->tstamp`.
+- `egress` QoS can use shaping or policing. Shaping sets EDT on TC egress and
+  requires `fq` qdisc; policing drops packets when the rule bucket is empty.
 - `ingress` QoS uses policing. Ingress packets cannot be reliably delayed at
   the receiving interface, so ingress enforcement may drop packets when the
   bucket is empty.
-- The API still exposes one QoS mode, `policing`, until the product has a
-  separate operator-facing shaping/pacing concept. `shaping` remains a runtime
-  compatibility path only: it may set EDT on TC egress and requires `fq` qdisc,
-  but it must bound EDT so packets are not scheduled beyond the qdisc horizon.
+- `both` is expanded by the Agent into ingress and egress runtime rules. In
+  `auto`, the egress side can shape while the ingress side remains policing.
+- EDT must stay bounded so packets are not scheduled beyond the qdisc horizon.
 
 The Controller remains responsible for SaaS tenant isolation and compiles
 tenant/node QoS policy records into an Agent-local snapshot. The Agent does not
@@ -245,11 +249,16 @@ v2 REST API, gRPC Sync snapshots, Agent runtime mapping, and Vue frontend:
 - ACL create/update accepts `src_group_id` / `dst_group_id` and direct
   `src_cidr` / `dst_cidr` fallback.
 - QoS create/update accepts `group_id` and direct CIDR fallback.
+- QoS create/update accepts `mode=auto|policing|shaping`; omitted mode defaults
+  to `auto`.
 - Direct CIDR fallback is normalized into inline IP Groups before policy
   compilation.
 - Sync snapshots include referenced IP Groups and product group ids.
 - Agent maps product group ids to local runtime group ids and writes all group
   CIDRs into the LPM maps.
+- Agent keeps `auto` as a runtime management mode until apply time. Egress auto
+  resolves to shaping when `fq` qdisc setup succeeds and to policing when it
+  cannot be enabled; ingress auto resolves to policing.
 - Frontend includes an IP Group management page, ACL source/destination group
   selectors, and QoS group selector.
 
