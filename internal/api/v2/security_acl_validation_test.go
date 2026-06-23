@@ -53,3 +53,30 @@ func TestCreateTenantNodeACLRejectsInvalidPortFilterSyntax(t *testing.T) {
 		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestCreateTenantNodeBlacklistRejectsInvalidPortRange(t *testing.T) {
+	for _, body := range []string{
+		`{"port":-1,"description":"negative"}`,
+		`{"port":70000,"description":"too high"}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			db, _, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New failed: %v", err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+
+			tenantID := uuid.New()
+			node := &controllerstorage.Node{ID: uuid.New(), TenantID: tenantID, PublicKey: "node-key"}
+			router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+			rr := httptest.NewRecorder()
+
+			router.createTenantNodeBlacklistRule(rr, req, tenantID, node, controllerstorage.BlacklistScopePorts)
+
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+			}
+		})
+	}
+}

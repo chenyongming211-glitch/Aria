@@ -202,3 +202,63 @@ func TestCreateTenantTokenDefaultsMaxUsesToOneWhenOmitted(t *testing.T) {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
+
+func TestCreateTenantTokenHonorsRequestedTTL(t *testing.T) {
+	tenantID := uuid.New()
+	tokenID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO tokens (token, tag, tenant_id, max_uses, used_count, expires_at, created_by, status)
+		         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		         RETURNING id`)).
+		WithArgs(sqlmock.AnyArg(), "edge", tenantID.String(), 1, 0, sqlmock.AnyArg(), "", token.StatusActive).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(tokenID))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db), tokenStore: token.NewStore(db)}
+	before := time.Now().UTC()
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/tokens", strings.NewReader(`{"tag":"edge","ttl":"24h"}`))
+	rr := httptest.NewRecorder()
+	router.createTenantToken(rr, req, tenantID)
+	after := time.Now().UTC()
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp apibase.APIResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	data := resp.Data.(map[string]interface{})
+	expiresAt, err := time.Parse(time.RFC3339Nano, data["expires_at"].(string))
+	if err != nil {
+		t.Fatalf("parse expires_at failed: %v", err)
+	}
+	if expiresAt.Before(before.Add(23*time.Hour)) || expiresAt.After(after.Add(25*time.Hour)) {
+		t.Fatalf("expected token to expire near requested 24h TTL, got %s", expiresAt)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestCreateTenantTokenRejectsInvalidTTL(t *testing.T) {
+	tenantID := uuid.New()
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db), tokenStore: token.NewStore(db)}
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/tokens", strings.NewReader(`{"tag":"edge","ttl":"not-a-duration"}`))
+	rr := httptest.NewRecorder()
+	router.createTenantToken(rr, req, tenantID)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
