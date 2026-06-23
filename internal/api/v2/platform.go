@@ -135,6 +135,7 @@ func (r *Router) createTenantToken(w http.ResponseWriter, req *http.Request, ten
 	var body struct {
 		Tag     string `json:"tag"`
 		MaxUses *int   `json:"max_uses"`
+		TTL     string `json:"ttl"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
@@ -148,13 +149,18 @@ func (r *Router) createTenantToken(w http.ResponseWriter, req *http.Request, ten
 		}
 		maxUses = *body.MaxUses
 	}
+	ttl, err := parseTenantTokenTTL(body.TTL)
+	if err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
+		return
+	}
 
 	// 调用 internal/token 中的 Generate 顶级函数
 	t, err := token.Generate(token.GenerateOptions{
 		Tag:      body.Tag,
 		TenantID: tenantID.String(),
 		MaxUses:  maxUses,
-		TTL:      30 * 24 * time.Hour, // 默认 30 天
+		TTL:      ttl,
 	})
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to generate token: "+err.Error(), nil)
@@ -168,6 +174,29 @@ func (r *Router) createTenantToken(w http.ResponseWriter, req *http.Request, ten
 	}
 
 	apibase.WriteSuccess(w, t, "Token created successfully")
+}
+
+const (
+	defaultTenantTokenTTL = 30 * 24 * time.Hour
+	maxTenantTokenTTL     = 365 * 24 * time.Hour
+)
+
+func parseTenantTokenTTL(raw string) (time.Duration, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultTenantTokenTTL, nil
+	}
+	ttl, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid ttl format; use values like 1h, 24h, or 168h")
+	}
+	if ttl <= 0 {
+		return 0, fmt.Errorf("ttl must be greater than 0")
+	}
+	if ttl > maxTenantTokenTTL {
+		return 0, fmt.Errorf("ttl cannot exceed 8760h")
+	}
+	return ttl, nil
 }
 
 func (r *Router) getTenantTokenDetail(w http.ResponseWriter, tenantID uuid.UUID, tokenIDStr string) {

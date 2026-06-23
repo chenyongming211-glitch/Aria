@@ -881,8 +881,8 @@ func (r *Router) createTenantNodeBlacklistRule(w http.ResponseWriter, req *http.
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "CIDR is required for src/dst scope", nil)
 		return
 	}
-	if scope == "ports" && body.Port == 0 {
-		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Port is required for ports scope", nil)
+	if scope == "ports" && (body.Port < 1 || body.Port > 65535) {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Port must be in range 1..65535 for ports scope", nil)
 		return
 	}
 

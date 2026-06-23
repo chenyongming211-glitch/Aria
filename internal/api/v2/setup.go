@@ -10,8 +10,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -461,20 +463,21 @@ func (r *Router) listSingleTenant(w http.ResponseWriter, tenantID uuid.UUID) {
 	}, "Tenant retrieved")
 }
 
-func (r *Router) updateTenant(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, role string) {
-	var body struct {
-		Name          string                 `json:"name"`
-		Code          string                 `json:"code"`
-		Status        string                 `json:"status"`
-		ResourceQuota map[string]interface{} `json:"resource_quota"`
-	}
+type tenantUpdateRequest struct {
+	Name          string                 `json:"name"`
+	Code          string                 `json:"code"`
+	Status        string                 `json:"status"`
+	ResourceQuota map[string]interface{} `json:"resource_quota"`
+}
 
+func (r *Router) updateTenant(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID, role string) {
+	var body tenantUpdateRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
 		return
 	}
-	if strings.EqualFold(strings.TrimSpace(body.Status), "deleted") {
-		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Tenant deletion must use DELETE /api/v2/tenants/{id}", nil)
+	if err := normalizeTenantUpdateRequest(&body); err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
 		return
 	}
 
@@ -507,6 +510,52 @@ func (r *Router) updateTenant(w http.ResponseWriter, req *http.Request, tenantID
 	}
 
 	apibase.WriteSuccess(w, map[string]string{"id": tenantID.String()}, "Tenant updated successfully")
+}
+
+var tenantUpdateCodePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
+
+func normalizeTenantUpdateRequest(body *tenantUpdateRequest) error {
+	rawName := body.Name
+	rawCode := body.Code
+	rawStatus := body.Status
+
+	body.Name = strings.TrimSpace(body.Name)
+	body.Code = strings.TrimSpace(body.Code)
+	body.Status = strings.ToLower(strings.TrimSpace(body.Status))
+
+	if rawName != "" && body.Name == "" {
+		return fmt.Errorf("tenant name cannot be blank")
+	}
+	if body.Name != "" {
+		nameLen := utf8.RuneCountInString(body.Name)
+		if nameLen < 2 || nameLen > 50 {
+			return fmt.Errorf("tenant name must be between 2 and 50 characters")
+		}
+	}
+
+	if rawCode != "" && body.Code == "" {
+		return fmt.Errorf("tenant code cannot be blank")
+	}
+	if body.Code != "" {
+		if len(body.Code) < 2 || len(body.Code) > 20 {
+			return fmt.Errorf("tenant code must be between 2 and 20 characters")
+		}
+		if !tenantUpdateCodePattern.MatchString(body.Code) {
+			return fmt.Errorf("tenant code must start and end with a lowercase alphanumeric character and may contain hyphens")
+		}
+	}
+
+	if rawStatus != "" && body.Status == "" {
+		return fmt.Errorf("tenant status cannot be blank")
+	}
+	switch body.Status {
+	case "", "active", "suspended":
+		return nil
+	case "deleted":
+		return fmt.Errorf("tenant deletion must use DELETE /api/v2/tenants/{id}")
+	default:
+		return fmt.Errorf("tenant status must be active or suspended")
+	}
 }
 
 func (r *Router) getTenantNodeByID(w http.ResponseWriter, tenantID uuid.UUID, nodeID string) {
