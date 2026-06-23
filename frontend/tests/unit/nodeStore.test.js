@@ -27,6 +27,29 @@ describe('node store', () => {
     vi.clearAllMocks()
   })
 
+  it('does not log tenant node API payloads to the browser console', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    api.get.mockResolvedValue({
+      data: {
+        success: true,
+        data: [{
+          id: 'node-1',
+          hostname: 'edge-1',
+          assigned_ip: '100.64.0.2',
+          enrolled_with_token: 'tk_sensitive_enrollment_token'
+        }]
+      }
+    })
+
+    const store = useNodeStore()
+
+    await store.loadNodes()
+
+    expect(logSpy).not.toHaveBeenCalled()
+    expect(store.nodes[0].hostname).toBe('edge-1')
+    logSpy.mockRestore()
+  })
+
   it('deletes nodes through the tenant-scoped backend API', async () => {
     api.delete.mockResolvedValue({ data: { success: true } })
     const store = useNodeStore()

@@ -207,6 +207,34 @@ describe('user session persistence', () => {
     })
   })
 
+  it('does not log login responses containing bearer tokens', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    api.post.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          token: 'jwt.secret.value',
+          expires_in: 7200,
+          require_password_change: false,
+          user: {
+            id: 'user-1',
+            username: 'sysadmin',
+            role: 'super_admin',
+            tenant_id: ''
+          }
+        }
+      }
+    })
+
+    const userStore = useUserStore()
+
+    const result = await userStore.login({ username: 'sysadmin', password: 'secret' })
+
+    expect(result.success).toBe(true)
+    expect(logSpy).not.toHaveBeenCalled()
+    logSpy.mockRestore()
+  })
+
   it('derives missing login user data from JWT claims instead of defaulting to admin', async () => {
     api.post.mockResolvedValue({
       data: {
