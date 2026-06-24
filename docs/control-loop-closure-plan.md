@@ -21,6 +21,23 @@
 
 第一阶段重点是把现有 `desired/applied/observed`、`agent_commands`、`policy_deliveries`、`audit_events` 和前端 Nodes / Policy Center / Monitoring 贯通。
 
+## v0.1.0 闭环终点
+
+控制闭环第一阶段的终点是：
+
+```text
+前端创建 / 更新 / 删除 ACL、QoS 或 Route
+-> Controller 校验并写 desired_state_version
+-> Controller 生成 command_id / policy_delivery
+-> Agent 执行
+-> Agent 回写 applied_state_version 或 failed reason
+-> Policy Center / Nodes / Monitoring 看到同一个结果
+```
+
+到这里即视为 v0.1.0 控制闭环完成，可以停止扩展。第一阶段不继续追求多节点强事务、策略历史回滚 UI、AI 自动生成并自动下发策略、ACE 大重构或所有策略模型重写。
+
+停止规则：HTTP 成功不再被当作执行成功；用户能看到每次策略或命令是否真的被 Agent 应用，失败时能看到同一个失败原因。
+
 ## 控制对象范围
 
 第一阶段纳入闭环的对象：

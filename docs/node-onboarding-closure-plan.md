@@ -21,6 +21,25 @@
 
 v0.1.0 的验收标准是“自助接入可演示、可回放、可排障”。自动证书签发、低风险自愈、多 Controller 编排不进入第一阶段的必做范围。
 
+## v0.1.0 闭环终点
+
+接入闭环第一阶段的终点是：
+
+```text
+管理员生成 Enrollment Token
+-> 复制 init 命令
+-> Agent 注册
+-> Controller 创建 node + assigned_ip + runtime token
+-> Agent 完成首次 Sync
+-> 前端 30 秒内看到 online 或 degraded
+-> 节点详情能解释 last_sync / desired / applied / error
+-> 全流程有审计事件
+```
+
+到这里即视为 v0.1.0 接入闭环完成，可以停止扩展。第一阶段不继续追求完整证书生命周期、多 Controller 注册、复杂机器证明恢复、无人值守自愈或大而全安装器。
+
+停止规则：一台新机器从 0 接入后，控制台能判断它是真 `online` 还是 `degraded`，并能展示原因和审计记录。
+
 ## 2. 接入状态机
 
 前后端需要共享一套接入状态语义，避免把“注册成功”误显示成“运行正常”。

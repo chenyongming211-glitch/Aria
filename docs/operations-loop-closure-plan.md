@@ -22,6 +22,25 @@ Monitoring 发现节点离线、同步失败、策略失败、证书风险或命
 
 第一阶段应复用现有 Monitoring API、AI tools、`alerts`、`audit_events`、`ai_audit_logs`、`agent_commands` 和 `policy_deliveries`，先把闭环跑通，再扩展更复杂的自动化。
 
+## v0.1.0 闭环终点
+
+运维闭环第一阶段的终点是先跑通一条代表性链路，而不是做完整智能运维平台：
+
+```text
+Monitoring 发现 sync_failed、policy_failed 或 node_offline
+-> Controller 生成 active alert
+-> 用户点进 alert 看到证据
+-> Ask AI 生成解释和建议
+-> 用户在控制台确认 sync 或 health_check
+-> Controller 执行命令
+-> Agent 回写结果
+-> alert / event / audit / node detail 都能看到处理结果
+```
+
+到这里即视为 v0.1.0 运维闭环完成，可以停止扩展。第一阶段优先用 `sync_failed` 跑通样板链路，再复制到 `policy_failed` 和 `node_offline`。IM 卡片确认、无人值守自动修复、复杂 ML 异常检测、多步骤 ActionPlan、自动回滚和熔断系统都不进入第一阶段终点。
+
+停止规则：用户能从一个告警出发，完成一次“诊断 -> 确认 -> 执行 -> 留痕”，并且成功和失败都可见。
+
 ## 事件输入范围
 
 第一阶段纳入运维闭环的异常来源：
