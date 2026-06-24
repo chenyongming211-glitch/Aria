@@ -113,6 +113,52 @@ func TestFailIncompleteAgentCommandsForNodeMarksCommandsAndDeliveriesFailed(t *t
 	}
 }
 
+func TestFailTimedOutAgentCommandsForNodeMarksCommandsAndDeliveriesFailed(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	store := NewStorageWithDB(db)
+	nodePublicKey := "stream-node-key"
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE policy_deliveries")).
+		WithArgs(
+			nodePublicKey,
+			AgentCommandStatusFailed,
+			"command timed out waiting for agent result",
+			AgentCommandStatusPending,
+			AgentCommandStatusSent,
+			AgentCommandStatusAcknowledged,
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE agent_commands")).
+		WithArgs(
+			nodePublicKey,
+			AgentCommandStatusFailed,
+			"command timed out waiting for agent result",
+			AgentCommandStatusPending,
+			AgentCommandStatusSent,
+			AgentCommandStatusAcknowledged,
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	affected, err := store.FailTimedOutAgentCommandsForNode(nodePublicKey)
+	if err != nil {
+		t.Fatalf("FailTimedOutAgentCommandsForNode returned error: %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("expected 1 affected command, got %d", affected)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestUpdateAgentCommandStatusForNodeRejectsMismatchedNode(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

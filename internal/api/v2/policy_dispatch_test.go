@@ -187,6 +187,120 @@ func TestWritePolicyMutationSuccessWritesPolicyChangedAudit(t *testing.T) {
 	}
 }
 
+func TestRetryPolicySyncQueuesFreshDelivery(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	now := time.Now().UTC()
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	ruleID := uuid.New()
+	commandID := uuid.New().String()
+	deliveryID := uuid.New()
+
+	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, tenant_id, node_id, COALESCE(name, ''), action, src_group_id, dst_group_id, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+		        COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
+		        COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+		        priority, enabled, COALESCE(description, ''),
+		        created_at, updated_at
+		   FROM acl_rules
+		  WHERE id = $1 AND tenant_id = $2 AND node_id = $3`)).
+		WithArgs(ruleID, tenantID, nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "name", "action", "src_group_id", "dst_group_id", "src_cidr", "dst_cidr",
+			"dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(ruleID, tenantID, nodeID, "allow-icmp", "allow", nil, nil, "", "", 0, 1, "egress", "", 10, true, "Allow ICMP", now, now))
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO node_control_states")).
+		WithArgs(tenantID, nodeID, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(nodeControlStateRowsFor(tenantID, nodeID, "dsv-retry", now))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE agent_commands ac")).
+		WithArgs("pub-key-1", controllerstorage.AgentCommandStatusStale, sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged, tenantID, nodeID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE policy_deliveries")).
+		WithArgs(tenantID, nodeID, controllerstorage.AgentCommandStatusStale, sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO agent_commands")).
+		WithArgs("pub-key-1", "sync", sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, 1, 60).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow(commandID, now, now))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO policy_deliveries")).
+		WithArgs(tenantID, nodeID, "acl", ruleID.String(), "allow-icmp", "retry", commandID, controllerstorage.AgentCommandStatusPending, "", sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "policy_domain", "policy_ref", "policy_name",
+			"action", "command_id", "command_status", "last_error", "metadata", "created_at", "updated_at", "completed_at",
+		}).AddRow(
+			deliveryID, tenantID, nodeID, "acl", ruleID.String(), "allow-icmp",
+			"retry", commandID, controllerstorage.AgentCommandStatusPending, "", []byte(`{}`), now, now, nil,
+		))
+	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, tenant_id, node_id, event_type, actor, summary, detail, created_at
+	`)).
+		WithArgs(tenantID, nodeID, controllerstorage.AuditCommandQueued, "controller", "Command queued: sync", sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at",
+		}).AddRow(uuid.New(), tenantID, nodeID, controllerstorage.AuditCommandQueued, "controller", "Command queued: sync", []byte(`{}`), now))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, tenant_id, node_id, event_type, actor, summary, detail, created_at
+	`)).
+		WithArgs(tenantID, nodeID, controllerstorage.AuditPolicyChanged, "user", "Policy changed", jsonDetailContains{
+			"policy_domain": "acl",
+			"policy_ref":    ruleID.String(),
+			"policy_name":   "allow-icmp",
+			"action":        "retry",
+			"source":        "api.v2",
+			"command_id":    commandID,
+		}).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at",
+		}).AddRow(uuid.New(), tenantID, nodeID, controllerstorage.AuditPolicyChanged, "user", "Policy changed", []byte(`{}`), now))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	body := fmt.Sprintf(`{"node_id":"%s","policy_domain":"acl","policy_ref":"%s"}`, nodeID, ruleID)
+	req := withAuthContext(
+		httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/policies/retry", strings.NewReader(body)),
+		"super_admin",
+		tenantID,
+	)
+	rr := httptest.NewRecorder()
+	router.handleTenantPolicies(rr, req, tenantID)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var resp apibase.APIResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !resp.Success {
+		t.Fatalf("expected success response: %#v", resp)
+	}
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected data map, got %#v", resp.Data)
+	}
+	dispatch, ok := data["dispatch"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected dispatch in response, got %#v", data)
+	}
+	if dispatch["command_id"] != commandID {
+		t.Fatalf("expected command id %s, got %#v", commandID, dispatch["command_id"])
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func nodeControlStateRows() *sqlmock.Rows {
 	now := time.Now()
 	return nodeControlStateRowsFor(uuid.New(), uuid.New(), "dsv-test", now)
