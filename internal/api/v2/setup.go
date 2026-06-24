@@ -1548,6 +1548,15 @@ func attachPolicyDeliveriesToItems(
 			item["delivery_history"] = []map[string]interface{}{}
 			continue
 		}
+		if _, exists := item["policy_ref"]; !exists {
+			item["policy_ref"] = ref
+		}
+		if _, exists := item["policy_id"]; !exists {
+			item["policy_id"] = fmt.Sprintf("%s:%s", domain, ref)
+		}
+		if _, exists := item["policy_domain"]; !exists {
+			item["policy_domain"] = domain
+		}
 
 		history := byRef[ref]
 		if len(history) == 0 {
