@@ -93,6 +93,19 @@
             <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">{{ formatPolicyStatus(row.policyStatus) }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="最近命令" width="150">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.last_delivery_command_id"
+              :content="row.last_delivery_command_id"
+              placement="top"
+            >
+              <span>{{ shortCommandId(row.last_delivery_command_id) }}</span>
+            </el-tooltip>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="last_command_error" label="失败原因" min-width="180" show-overflow-tooltip />
         <el-table-column v-if="hasPermission('qos:write')" label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="handleEdit(row)">编辑</el-button>
@@ -332,6 +345,11 @@ const formatBytes = (bytes) => {
   if (value >= 1048576) return `${(value / 1048576).toFixed(1)} MB`
   if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${value} B`
+}
+
+const shortCommandId = (commandId) => {
+  if (!commandId) return '-'
+  return String(commandId).slice(0, 8)
 }
 
 const formatGroupOption = (group) => {

@@ -149,16 +149,65 @@ function normalizeStats(rule) {
   }
 }
 
+function mapCommandStatusToPolicyStatus(status) {
+  const normalized = String(status || '').trim().toLowerCase()
+  if (normalized === 'pending') return 'pending'
+  if (['sent', 'acknowledged', 'queued', 'in_progress'].includes(normalized)) return 'in_progress'
+  if (normalized === 'completed') return 'applied'
+  if (normalized === 'failed') return 'error'
+  return ''
+}
+
+function pendingCountForCommandStatus(status) {
+  return ['pending', 'sent', 'acknowledged', 'queued', 'in_progress'].includes(String(status || '').trim().toLowerCase()) ? 1 : 0
+}
+
 function normalizeDeliveryFields(rule, nodeState = {}) {
+  const dispatch = rule.dispatch || {}
+  const lastDelivery = rule.last_delivery || dispatch.last_delivery || null
+  const deliveryHistory = Array.isArray(rule.delivery_history)
+    ? rule.delivery_history
+    : (lastDelivery ? [lastDelivery] : [])
+  const deliveryStatus = lastDelivery?.command_status || dispatch.status || ''
+  const policyStatus = rule.policy_status ||
+    mapCommandStatusToPolicyStatus(deliveryStatus) ||
+    nodeState.configuration_status ||
+    'idle'
+  const pendingCmds = typeof rule.pending_cmds === 'number'
+    ? rule.pending_cmds
+    : (deliveryHistory.length > 0
+        ? deliveryHistory.reduce((total, delivery) => total + pendingCountForCommandStatus(delivery?.command_status), 0)
+        : pendingCountForCommandStatus(dispatch.status) || nodeState.pending_cmds || 0)
+  const lastError = rule.last_delivery_error ||
+    lastDelivery?.last_error ||
+    rule.last_command_error ||
+    nodeState.last_command_error ||
+    ''
+
   return {
-    policy_status: rule.policy_status || nodeState.configuration_status || 'idle',
-    pending_cmds: typeof rule.pending_cmds === 'number' ? rule.pending_cmds : (nodeState.pending_cmds || 0),
-    last_command_error: rule.last_delivery_error || rule.last_command_error || nodeState.last_command_error || '',
-    last_sync_at: rule.last_delivery_at || rule.last_sync_at || nodeState.last_sync_at || null,
-    last_delivery: rule.last_delivery || null,
-    delivery_history: Array.isArray(rule.delivery_history) ? rule.delivery_history : [],
-    last_delivery_command_id: rule.last_delivery_command_id || rule.last_delivery?.command_id || '',
-    last_delivery_action: rule.last_delivery_action || rule.last_delivery?.action || ''
+    dispatch,
+    policy_status: policyStatus,
+    pending_cmds: pendingCmds,
+    desired_state_version: rule.desired_state_version || dispatch.desired_state_version || '',
+    desired_state_updated_at: rule.desired_state_updated_at || dispatch.desired_state_updated_at || '',
+    last_command_error: lastError,
+    last_delivery_error: lastError,
+    last_sync_at: rule.last_delivery_at || rule.last_sync_at || lastDelivery?.updated_at || nodeState.last_sync_at || null,
+    last_delivery: lastDelivery,
+    delivery_history: deliveryHistory,
+    last_delivery_command_id: rule.last_delivery_command_id || lastDelivery?.command_id || dispatch.command_id || '',
+    last_delivery_action: rule.last_delivery_action || lastDelivery?.action || ''
+  }
+}
+
+function normalizeACLMutationResult(data, nodeId, includeRuleFields = true) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data
+  const hasDeliverySignal = data.dispatch || data.last_delivery || Array.isArray(data.delivery_history) || data.policy_status
+  if (!hasDeliverySignal) return data
+  const base = includeRuleFields ? normalizeRuleRecord(data, nodeId) : { ...data, node_id: nodeId || data.node_id || '' }
+  return {
+    ...base,
+    ...normalizeDeliveryFields(data)
   }
 }
 
@@ -235,7 +284,7 @@ export const useAclApi = {
         API_ENDPOINTS.TENANT.NODE_ACLS(tenantId, rule.node_id),
         normalizeRulePayload(rule)
       )
-      return response.data?.data || response.data
+      return normalizeACLMutationResult(response.data?.data || response.data, rule.node_id)
     } catch (error) {
       console.error('创建 ACL 规则失败:', error)
       throw error
@@ -256,7 +305,7 @@ export const useAclApi = {
         API_ENDPOINTS.TENANT.NODE_ACL(tenantId, nodeId, ruleId),
         normalizeRulePayload({ ...mapping?.rule, ...rule, node_id: nodeId })
       )
-      return response.data?.data || response.data
+      return normalizeACLMutationResult(response.data?.data || response.data, nodeId)
     } catch (error) {
       console.error('更新 ACL 规则失败:', error)
       throw error
@@ -275,7 +324,7 @@ export const useAclApi = {
 
       const response = await api.delete(API_ENDPOINTS.TENANT.NODE_ACL(tenantId, resolvedNodeId, ruleId))
       aclRuleNodeMap.delete(aclRuleKey(tenantId, ruleId))
-      return response.data?.data || response.data
+      return normalizeACLMutationResult(response.data?.data || response.data, resolvedNodeId, false)
     } catch (error) {
       console.error('删除 ACL 规则失败:', error)
       throw error

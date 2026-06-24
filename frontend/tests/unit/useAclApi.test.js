@@ -163,6 +163,56 @@ describe('useAclApi', () => {
         direction: 'egress'
       }))
     })
+
+    it('应该把创建返回的 dispatch 归一化为待下发状态', async () => {
+      api.post.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            id: 'acl-1',
+            name: 'allow-icmp',
+            action: 'allow',
+            dispatch: {
+              command_id: 'cmd-1',
+              status: 'pending',
+              desired_state_version: 'dsv-1',
+              last_delivery: {
+                id: 'delivery-1',
+                command_id: 'cmd-1',
+                command_status: 'pending',
+                action: 'create'
+              }
+            },
+            last_delivery: {
+              id: 'delivery-1',
+              command_id: 'cmd-1',
+              command_status: 'pending',
+              action: 'create'
+            },
+            delivery_history: [{
+              id: 'delivery-1',
+              command_id: 'cmd-1',
+              command_status: 'pending',
+              action: 'create'
+            }]
+          }
+        }
+      })
+
+      const result = await useAclApi.createACLRule({
+        node_id: 'node-1',
+        name: 'allow-icmp',
+        action: 'allow',
+        protocol: 1,
+        direction: 'egress'
+      })
+
+      expect(result.policy_status).toBe('pending')
+      expect(result.pending_cmds).toBe(1)
+      expect(result.last_delivery_command_id).toBe('cmd-1')
+      expect(result.delivery_history).toHaveLength(1)
+      expect(result.desired_state_version).toBe('dsv-1')
+    })
   })
 
   describe('updateACLRule', () => {

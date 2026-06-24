@@ -56,6 +56,54 @@ function normalizeStats(rule) {
   }
 }
 
+function mapCommandStatusToPolicyStatus(status) {
+  const normalized = String(status || '').trim().toLowerCase()
+  if (normalized === 'pending') return 'pending'
+  if (['sent', 'acknowledged', 'queued', 'in_progress'].includes(normalized)) return 'in_progress'
+  if (normalized === 'completed') return 'applied'
+  if (normalized === 'failed') return 'error'
+  return ''
+}
+
+function pendingCountForCommandStatus(status) {
+  return ['pending', 'sent', 'acknowledged', 'queued', 'in_progress'].includes(String(status || '').trim().toLowerCase()) ? 1 : 0
+}
+
+function normalizeDeliveryFields(rule) {
+  const dispatch = rule.dispatch || {}
+  const lastDelivery = rule.last_delivery || dispatch.last_delivery || null
+  const deliveryHistory = Array.isArray(rule.delivery_history)
+    ? rule.delivery_history
+    : (lastDelivery ? [lastDelivery] : [])
+  const deliveryStatus = lastDelivery?.command_status || dispatch.status || ''
+  const policyStatus = rule.policy_status || mapCommandStatusToPolicyStatus(deliveryStatus) || 'idle'
+  const pendingCmds = typeof rule.pending_cmds === 'number'
+    ? rule.pending_cmds
+    : (deliveryHistory.length > 0
+        ? deliveryHistory.reduce((total, delivery) => total + pendingCountForCommandStatus(delivery?.command_status), 0)
+        : pendingCountForCommandStatus(dispatch.status))
+  const lastError = rule.last_delivery_error ||
+    lastDelivery?.last_error ||
+    rule.last_command_error ||
+    ''
+
+  return {
+    dispatch,
+    policy_status: policyStatus,
+    policyStatus,
+    pending_cmds: pendingCmds,
+    desired_state_version: rule.desired_state_version || dispatch.desired_state_version || '',
+    desired_state_updated_at: rule.desired_state_updated_at || dispatch.desired_state_updated_at || '',
+    last_delivery: lastDelivery,
+    delivery_history: deliveryHistory,
+    last_delivery_command_id: rule.last_delivery_command_id || lastDelivery?.command_id || dispatch.command_id || '',
+    last_delivery_action: rule.last_delivery_action || lastDelivery?.action || '',
+    last_command_error: lastError,
+    last_delivery_error: lastError,
+    last_sync_at: rule.last_delivery_at || rule.last_sync_at || lastDelivery?.updated_at || null
+  }
+}
+
 function qosGroupForRule(rule) {
   const direction = normalizeDirection(rule)
   const src = rule.src_cidr || rule.src_net || ''
@@ -118,6 +166,51 @@ function normalizeListResponse(response) {
   return []
 }
 
+function normalizeQoSRecord(rule, nodeId) {
+  let bandwidthMbps = Number(rule.bandwidth_mbps ?? 0)
+  const rateBps = normalizeRateBps(rule, bandwidthMbps)
+  if ((!Number.isFinite(bandwidthMbps) || bandwidthMbps <= 0) && rateBps > 0) {
+    bandwidthMbps = rateBps / 1000000
+  }
+  const burstBytes = normalizeBurstBytes(rule, rateBps)
+  const deliveryFields = normalizeDeliveryFields(rule)
+  const normalized = {
+    ...rule,
+    node_id: nodeId || rule.node_id || '',
+    direction: normalizeDirection(rule),
+    mode: normalizeMode(rule),
+    group_id: rule.group_id || '',
+    group_name: rule.group_name || rule.group?.name || '',
+    rate_bps: rateBps,
+    burst_bytes: burstBytes,
+    priority: Number(rule.priority ?? 100),
+    stats: normalizeStats(rule),
+    bandwidth_mbps: bandwidthMbps,
+    bandwidth: bandwidthMbps,
+    status: rule.enabled ? 'active' : 'inactive',
+    ...deliveryFields
+  }
+  normalized.runtime_group = qosGroupForRule(normalized)
+  normalized.group_cidr = normalized.runtime_group
+  normalized.runtime_rate = normalized.rate_bps
+  normalized.runtime_burst = normalized.burst_bytes
+  return normalized
+}
+
+function normalizeQoSMutationResult(data, nodeId, includeRuleFields = true) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data
+  const hasDeliverySignal = data.dispatch || data.last_delivery || Array.isArray(data.delivery_history) || data.policy_status
+  if (!hasDeliverySignal) return data
+  if (!includeRuleFields) {
+    return {
+      ...data,
+      node_id: nodeId || data.node_id || '',
+      ...normalizeDeliveryFields(data)
+    }
+  }
+  return normalizeQoSRecord(data, nodeId)
+}
+
 /**
  * QoS 规则管理 API (v2)
  * 新运行模型：每条规则直接描述 group + direction + rate/burst + mode。
@@ -136,36 +229,7 @@ export const useQosApi = {
       const rules = normalizeListResponse(response)
 
       // 统一字段映射
-      return rules.map(rule => {
-        let bandwidthMbps = Number(rule.bandwidth_mbps ?? 0)
-        const rateBps = normalizeRateBps(rule, bandwidthMbps)
-        if ((!Number.isFinite(bandwidthMbps) || bandwidthMbps <= 0) && rateBps > 0) {
-          bandwidthMbps = rateBps / 1000000
-        }
-        const burstBytes = normalizeBurstBytes(rule, rateBps)
-        const normalized = {
-          ...rule,
-          node_id: nodeId,
-          direction: normalizeDirection(rule),
-          mode: normalizeMode(rule),
-          group_id: rule.group_id || '',
-          group_name: rule.group_name || rule.group?.name || '',
-          rate_bps: rateBps,
-          burst_bytes: burstBytes,
-          priority: Number(rule.priority ?? 100),
-          stats: normalizeStats(rule),
-          // 兼容旧 UI 字段名
-          bandwidth_mbps: bandwidthMbps,
-          bandwidth: bandwidthMbps,
-          status: rule.enabled ? 'active' : 'inactive',
-          policyStatus: rule.policy_status || 'idle'
-        }
-        normalized.runtime_group = qosGroupForRule(normalized)
-        normalized.group_cidr = normalized.runtime_group
-        normalized.runtime_rate = normalized.rate_bps
-        normalized.runtime_burst = normalized.burst_bytes
-        return normalized
-      })
+      return rules.map(rule => normalizeQoSRecord(rule, nodeId))
     } catch (error) {
       console.error('获取节点 QoS 规则失败:', error)
       throw error
@@ -184,7 +248,7 @@ export const useQosApi = {
         API_ENDPOINTS.TENANT.NODE_QOS(tenantId, nodeId),
         payload
       )
-      return response.data?.data || response.data
+      return normalizeQoSMutationResult(response.data?.data || response.data, nodeId)
     } catch (error) {
       console.error('创建 QoS 规则失败:', error)
       throw error
@@ -200,7 +264,7 @@ export const useQosApi = {
       const response = await api.delete(
         API_ENDPOINTS.TENANT.NODE_QOS_RULE(tenantId, nodeId, ruleId)
       )
-      return response.data?.data || response.data
+      return normalizeQoSMutationResult(response.data?.data || response.data, nodeId, false)
     } catch (error) {
       console.error('删除 QoS 规则失败:', error)
       throw error
@@ -216,7 +280,7 @@ export const useQosApi = {
         API_ENDPOINTS.TENANT.NODE_QOS_RULE(tenantId, nodeId, ruleId),
         payload
       )
-      return response.data?.data || response.data
+      return normalizeQoSMutationResult(response.data?.data || response.data, nodeId)
     } catch (error) {
       console.error('更新 QoS 规则失败:', error)
       throw error

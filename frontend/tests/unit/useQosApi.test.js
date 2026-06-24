@@ -149,6 +149,94 @@ describe('useQosApi', () => {
     expect(rules[0].runtime_group).toBe('未知 IP Group')
   })
 
+  it('应该保留 QoS 列表里的投递状态、命令和失败原因', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        success: true,
+        data: [{
+          id: 'qos-1',
+          group_id: 'group-1',
+          group_name: 'branch-office',
+          direction: 'egress',
+          bandwidth_mbps: 10,
+          enabled: true,
+          policy_status: 'error',
+          pending_cmds: 0,
+          last_delivery_error: 'apply failed',
+          last_delivery: {
+            id: 'delivery-1',
+            command_id: 'cmd-1',
+            command_status: 'failed',
+            last_error: 'apply failed'
+          },
+          delivery_history: [{
+            id: 'delivery-1',
+            command_id: 'cmd-1',
+            command_status: 'failed',
+            last_error: 'apply failed'
+          }]
+        }]
+      }
+    })
+
+    const rules = await useQosApi.getQoSRulesByNode('node-1')
+
+    expect(rules[0].policyStatus).toBe('error')
+    expect(rules[0].policy_status).toBe('error')
+    expect(rules[0].last_delivery_command_id).toBe('cmd-1')
+    expect(rules[0].last_command_error).toBe('apply failed')
+    expect(rules[0].delivery_history).toHaveLength(1)
+  })
+
+  it('应该把创建返回的 dispatch 归一化为待下发状态', async () => {
+    api.post.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          id: 'qos-1',
+          bandwidth_mbps: 10,
+          direction: 'egress',
+          dispatch: {
+            command_id: 'cmd-1',
+            status: 'pending',
+            desired_state_version: 'dsv-1',
+            last_delivery: {
+              id: 'delivery-1',
+              command_id: 'cmd-1',
+              command_status: 'pending',
+              action: 'create'
+            }
+          },
+          last_delivery: {
+            id: 'delivery-1',
+            command_id: 'cmd-1',
+            command_status: 'pending',
+            action: 'create'
+          },
+          delivery_history: [{
+            id: 'delivery-1',
+            command_id: 'cmd-1',
+            command_status: 'pending',
+            action: 'create'
+          }]
+        }
+      }
+    })
+
+    const result = await useQosApi.createQoSRule('node-1', {
+      group_cidr: '10.0.0.0/24',
+      direction: 'egress',
+      bandwidth_mbps: 10
+    })
+
+    expect(result.policyStatus).toBe('pending')
+    expect(result.policy_status).toBe('pending')
+    expect(result.pending_cmds).toBe(1)
+    expect(result.last_delivery_command_id).toBe('cmd-1')
+    expect(result.delivery_history).toHaveLength(1)
+    expect(result.desired_state_version).toBe('dsv-1')
+  })
+
   it('不应下发旧版 QoS protocol/port 匹配字段', async () => {
     api.post.mockResolvedValue({
       data: { success: true, data: { id: 'rule-1' } }
