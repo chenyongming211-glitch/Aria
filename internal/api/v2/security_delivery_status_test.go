@@ -484,6 +484,12 @@ func assertPolicyStatusResponse(t *testing.T, rr *httptest.ResponseRecorder, rul
 	if row["id"] != ruleID {
 		t.Fatalf("expected rule id %s, got %#v", ruleID, row["id"])
 	}
+	if row["policy_ref"] != ruleID {
+		t.Fatalf("expected policy_ref %s, got %#v", ruleID, row["policy_ref"])
+	}
+	if row["policy_id"] == "" {
+		t.Fatalf("expected non-empty policy_id in row %#v", row)
+	}
 	if row["policy_status"] != "applied" {
 		t.Fatalf("expected policy_status=applied, got %#v in row %#v", row["policy_status"], row)
 	}
