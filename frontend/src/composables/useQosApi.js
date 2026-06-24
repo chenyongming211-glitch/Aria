@@ -1,5 +1,6 @@
 import api from './useApi'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
+import { usePolicyApi } from '@/composables/usePolicyApi'
 
 function normalizeBandwidthMbps(rule) {
   const value = Number(rule.bandwidth_mbps ?? 0)
@@ -284,6 +285,41 @@ export const useQosApi = {
       return normalizeQoSMutationResult(response.data?.data || response.data, nodeId)
     } catch (error) {
       console.error('更新 QoS 规则失败:', error)
+      throw error
+    }
+  },
+
+  retryQoSPolicySync: async (nodeId, rule) => {
+    try {
+      const policyRef = rule?.policy_ref || rule?.id
+      if (!nodeId) {
+        throw new Error('nodeId is required for QoS policy retry')
+      }
+      if (!policyRef) {
+        throw new Error('policy ref is required for QoS policy retry')
+      }
+
+      const retried = await usePolicyApi.retryPolicySync({
+        nodeId,
+        kind: 'qos',
+        policyRef: String(policyRef),
+        policyName: rule?.description || rule?.name || ''
+      })
+      return normalizeQoSMutationResult({
+        ...rule,
+        ...retried,
+        id: rule?.id || retried.policyRef,
+        policy_status: retried.status,
+        pending_cmds: retried.pendingCmds,
+        last_delivery: retried.lastDelivery,
+        delivery_history: retried.deliveryHistory,
+        last_delivery_command_id: retried.lastDeliveryCommandId,
+        last_delivery_action: retried.lastDeliveryAction,
+        last_delivery_error: retried.lastDeliveryError,
+        last_command_error: retried.lastDeliveryError
+      }, nodeId)
+    } catch (error) {
+      console.error('重试 QoS 策略下发失败:', error)
       throw error
     }
   },

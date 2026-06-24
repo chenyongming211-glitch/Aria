@@ -201,8 +201,16 @@
 
         <el-table-column prop="lastDeliveryError" label="失败原因" min-width="180" show-overflow-tooltip />
 
-        <el-table-column label="操作" width="180">
+        <el-table-column label="操作" width="260">
           <template #default="{ row }">
+            <el-button
+              v-if="canRetryPolicy(row)"
+              size="small"
+              type="warning"
+              @click="retryPolicyDelivery(row)"
+            >
+              重试
+            </el-button>
             <el-button size="small" @click="showDetails(row)">
               <el-icon><View /></el-icon>
               详情
@@ -265,6 +273,7 @@
 
         <div class="drawer-actions">
           <el-button @click="openNodeDetail(selectedPolicy)">打开节点监控</el-button>
+          <el-button v-if="canRetryPolicy(selectedPolicy)" type="warning" @click="retryPolicyDelivery(selectedPolicy)">重试下发</el-button>
           <el-button type="primary" @click="goToKind(selectedPolicy.kind)">前往专页</el-button>
         </div>
       </template>
@@ -278,10 +287,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { Connection, Histogram, Lock, Refresh, View } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { usePolicyApi } from '@/composables/usePolicyApi'
+import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
 
 const router = useRouter()
 const route = useRoute()
+const { hasPermission } = usePermission()
 
 const loading = ref(false)
 const policies = ref([])
@@ -583,6 +594,46 @@ const openNodeDetail = (policy) => {
       ...(policy.kind ? { policyDomain: policy.kind } : {})
     }
   })
+}
+
+const policyWritePermission = (kind) => {
+  switch (kind) {
+    case 'acl':
+      return 'acls:write'
+    case 'qos':
+      return 'qos:write'
+    case 'route':
+      return 'routes:write'
+    default:
+      return ''
+  }
+}
+
+const canRetryPolicy = (policy) => {
+  if (!policy) return false
+  const permission = policyWritePermission(policy.kind)
+  if (!permission || !hasPermission(permission)) return false
+  return ['error', 'failed', 'stale'].includes(String(policy.status || policy.observedState || '').toLowerCase())
+}
+
+const retryPolicyDelivery = async (policy) => {
+  if (!canRetryPolicy(policy)) {
+    ElMessage.warning('当前策略状态或权限不允许重试')
+    return
+  }
+
+  try {
+    await usePolicyApi.retryPolicySync({
+      nodeId: policy.nodeId,
+      kind: policy.kind,
+      policyRef: policy.policyRef,
+      policyName: policy.name
+    })
+    ElMessage.success('重试下发已排队')
+    await fetchPolicies()
+  } catch (error) {
+    ElMessage.error(`重试失败: ${error.message || '未知错误'}`)
+  }
 }
 
 const isDeliveryMatch = (delivery) => {

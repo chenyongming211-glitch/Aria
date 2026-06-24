@@ -99,6 +99,7 @@ export const API_ENDPOINTS = {
     TOKENS: (tenantId) => buildTenantPath(tenantId, '/tokens'),
     TOKEN_DETAIL: (tenantId, tokenId) => buildTenantPath(tenantId, `/tokens/${tokenId}`),
     POLICIES: (tenantId) => buildTenantPath(tenantId, '/policies'),
+    POLICY_RETRY: (tenantId) => buildTenantPath(tenantId, '/policies/retry'),
     NODES: (tenantId) => buildTenantPath(tenantId, '/nodes'),
     NODE_DETAIL: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}`),
     NODE_ROUTES: (tenantId, nodeId) => buildTenantPath(tenantId, `/nodes/${nodeId}/routes`),

@@ -119,8 +119,16 @@
         </template>
       </el-table-column>
       <el-table-column prop="last_command_error" label="失败原因" min-width="180" show-overflow-tooltip />
-      <el-table-column label="操作" width="150" fixed="right">
+      <el-table-column label="操作" width="210" fixed="right">
         <template #default="{ row }">
+          <el-button
+            v-if="hasPermission('acls:write') && canRetryPolicy(row)"
+            link
+            type="warning"
+            @click="handleRetry(row)"
+          >
+            重试
+          </el-button>
           <el-button v-if="hasPermission('acls:write')" link type="primary" @click="handleEdit(row)">编辑</el-button>
           <el-button v-if="hasPermission('acls:write')" link type="danger" @click="handleDelete(row)">删除</el-button>
         </template>
@@ -443,6 +451,25 @@ const handleDelete = async (row) => {
     if (error !== 'cancel') {
       ElMessage.error('删除失败: ' + (error.message || '未知错误'))
     }
+  }
+}
+
+const canRetryPolicy = (row) => {
+  return ['error', 'failed', 'stale'].includes(String(row?.policy_status || row?.policyStatus || '').toLowerCase())
+}
+
+const handleRetry = async (row) => {
+  if (!hasPermission('acls:write')) {
+    ElMessage.error('缺少 ACL 管理权限')
+    return
+  }
+
+  try {
+    await useAclApi.retryACLPolicySync(row)
+    ElMessage.success('重试下发已排队')
+    loadRules()
+  } catch (error) {
+    ElMessage.error('重试失败: ' + (error.message || '未知错误'))
   }
 }
 

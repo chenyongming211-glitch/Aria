@@ -1,5 +1,6 @@
 import api from './useApi'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
+import { usePolicyApi } from '@/composables/usePolicyApi'
 
 const aclRuleNodeMap = new Map()
 
@@ -328,6 +329,42 @@ export const useAclApi = {
       return normalizeACLMutationResult(response.data?.data || response.data, resolvedNodeId, false)
     } catch (error) {
       console.error('删除 ACL 规则失败:', error)
+      throw error
+    }
+  },
+
+  retryACLPolicySync: async (rule) => {
+    try {
+      const nodeId = rule?.node_id
+      const policyRef = rule?.policy_ref || rule?.id
+      if (!nodeId) {
+        throw new Error('node_id is required for ACL policy retry')
+      }
+      if (!policyRef) {
+        throw new Error('policy ref is required for ACL policy retry')
+      }
+
+      const retried = await usePolicyApi.retryPolicySync({
+        nodeId,
+        kind: 'acl',
+        policyRef: String(policyRef),
+        policyName: rule?.name || ''
+      })
+      return normalizeACLMutationResult({
+        ...rule,
+        ...retried,
+        id: rule?.id || retried.policyRef,
+        policy_status: retried.status,
+        pending_cmds: retried.pendingCmds,
+        last_delivery: retried.lastDelivery,
+        delivery_history: retried.deliveryHistory,
+        last_delivery_command_id: retried.lastDeliveryCommandId,
+        last_delivery_action: retried.lastDeliveryAction,
+        last_delivery_error: retried.lastDeliveryError,
+        last_command_error: retried.lastDeliveryError
+      }, nodeId)
+    } catch (error) {
+      console.error('重试 ACL 策略下发失败:', error)
       throw error
     }
   }
