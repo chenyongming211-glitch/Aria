@@ -413,6 +413,33 @@ Purpose:
 | Agent artifact | Not changed; Agent remained from workflow run `27079625892`. |
 | Verification | `aria-controller` and `aria-frontend` containers healthy; Controller container image id is `sha256:12134a1682b6197`; frontend bundle includes `assets/NodeMonitorDetail-12051133.js` and `assets/Nodes-aed6c53e.js`; `sysadmin` login through `http://127.0.0.1:18080/api/v2/auth/login` succeeded; tenant node list returned `public_ip=82.156.48.111`, `assigned_ip=100.64.0.2`, `endpoint=82.156.48.111:51820`; Monitoring node detail returned matching `monitor_public_ip=82.156.48.111`, `monitor_assigned_ip=100.64.0.2`, `monitor_endpoint=82.156.48.111:51820`, `monitor_region=tencent-cloud`, `recent_commands=10`, `policy_deliveries=2`, and `active_alerts=0`. |
 
+### 2026-06-25 v0.1.0 E2E Closure Gray Deployment
+
+Status: gray deployed.
+
+Purpose:
+
+- Close the first-stage onboarding, control, and operations loops for v0.1.0.
+- Add the Nodes onboarding dialog and generated `aria-agent init` command.
+- Preserve Monitoring/Node Detail alert context into the AI assistant without
+  auto-executing write actions.
+- Verify the Controller to Agent control path for command dispatch plus
+  ACL/QoS/Route policy delivery on a real online Agent.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-25T00:44Z |
+| Git commit | `290e04b2efb6255766f27b9fee002c795ab34b13` |
+| Branch CI run | `28114344395` |
+| Version | `0.2.45` |
+| Controller image | Local runtime image `aria-controller:0.2.45`, also tagged `aria-controller:local` on `8.152.163.101`. |
+| Frontend backup | `/root/aria-controller/frontend/dist.prev-20260625-004439` |
+| Config backup | `/root/aria-controller/backups/pre-v010-closure-config-20260625-004439.tar.gz` |
+| DB backup | `/root/aria-controller/backups/pre-v010-closure-20260625-004439.sql` |
+| Agent artifact | Not changed; this deployment changed Controller/frontend/docs only. |
+| Verification | Branch Actions run `28114344395` passed Go Build, Frontend Build, and Rust Agent Build. Local `go test ./...`, frontend unit tests, `git diff --check`, and frontend build passed before deployment. Server-side `/api/version` returned `0.2.45`; `aria-controller` and `aria-frontend` were healthy; `https://aria.yun/` returned HTTP 200 from the server; deployed frontend bundles include the onboarding command inputs (`--controller-api-url`) and the AI diagnostic prompt. Online smoke with `sysadmin` verified active tenant/node discovery, Monitoring stats/health/events/alerts, node detail desired/applied/observed state, enrollment token create/delete, `health_check` command queued and completed, temporary ACL/QoS/Route create, Agent desired/applied convergence after create, temporary ACL/QoS/Route delete, and Agent desired/applied convergence after delete. |
+| Smoke detail | Temporary policy CIDRs were `acl=10.253.53.28/32`, `qos=10.252.53.28/32`, and `route=10.251.53.0/24`. Create convergence reached `desired=dsv-1782320009-6984d50f`; delete convergence reached `desired=dsv-1782320013-2ed519fc`. The temporary token and policies were deleted after validation. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
