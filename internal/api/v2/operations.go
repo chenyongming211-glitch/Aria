@@ -2,6 +2,7 @@ package v2
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -124,6 +125,11 @@ func (r *Router) handleTenantNodeAgentCommand(w http.ResponseWriter, req *http.R
 }
 
 func (r *Router) handleTenantNodeAgentStatus(w http.ResponseWriter, node *controllerstorage.Node) {
+	if err := r.failTimedOutNodeCommands(node); err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, codeCommandDispatchFailed, "Failed to refresh timed out commands: "+err.Error(), nil)
+		return
+	}
+
 	summary, err := r.buildNodeOperationsSummary(node)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, codeCommandDispatchFailed, "Failed to query agent status: "+err.Error(), nil)
@@ -136,6 +142,10 @@ func (r *Router) handleTenantNodeAgentStatus(w http.ResponseWriter, node *contro
 func (r *Router) handleTenantNodeAgentCommands(w http.ResponseWriter, req *http.Request, node *controllerstorage.Node) {
 	if req.Method != http.MethodGet {
 		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+		return
+	}
+	if err := r.failTimedOutNodeCommands(node); err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, codeCommandDispatchFailed, "Failed to refresh timed out commands: "+err.Error(), nil)
 		return
 	}
 
@@ -428,6 +438,20 @@ func (r *Router) buildNodeOperationsSummary(node *controllerstorage.Node) (map[s
 	}
 
 	return summary, nil
+}
+
+func (r *Router) failTimedOutNodeCommands(node *controllerstorage.Node) error {
+	if r == nil || r.store == nil || node == nil || strings.TrimSpace(node.PublicKey) == "" {
+		return nil
+	}
+	affected, err := r.store.FailTimedOutAgentCommandsForNode(node.PublicKey)
+	if err != nil {
+		return err
+	}
+	if affected > 0 {
+		log.Printf("[api/v2] marked %d timed out commands failed for node %s", affected, node.ID)
+	}
+	return nil
 }
 
 func agentCommandToMap(cmd *controllerstorage.AgentCommand) map[string]interface{} {

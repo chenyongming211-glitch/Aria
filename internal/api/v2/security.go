@@ -469,6 +469,10 @@ func (r *Router) handleTenantNodeACLs(w http.ResponseWriter, req *http.Request, 
 
 	switch req.Method {
 	case http.MethodGet:
+		if err := r.failTimedOutNodeCommands(node); err != nil {
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to refresh timed out commands: "+err.Error(), nil)
+			return
+		}
 		r.listTenantNodeACLs(w, tenantID, node.ID)
 	case http.MethodPost:
 		r.createTenantNodeACL(w, req, tenantID, node)
@@ -1002,6 +1006,10 @@ func (r *Router) handleTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	case http.MethodGet:
 		if ruleIDStr != "" {
 			apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+			return
+		}
+		if err := r.failTimedOutNodeCommands(node); err != nil {
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to refresh timed out commands: "+err.Error(), nil)
 			return
 		}
 		r.listTenantNodeQoS(w, tenantID, node.ID)

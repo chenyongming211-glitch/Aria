@@ -213,6 +213,64 @@ func (s *Storage) FailIncompleteAgentCommandsForNode(nodePublicKey, message stri
 	return tx.Commit()
 }
 
+func (s *Storage) FailTimedOutAgentCommandsForNode(nodePublicKey string) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	affected, err := failTimedOutAgentCommandsForNodeTx(tx, nodePublicKey)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return affected, nil
+}
+
+func failTimedOutAgentCommandsForNodeTx(tx roleExec, nodePublicKey string) (int64, error) {
+	if nodePublicKey == "" {
+		return 0, errors.New("node public key is required")
+	}
+	message := "command timed out waiting for agent result"
+
+	if _, err := tx.Exec(`
+		UPDATE policy_deliveries
+		SET command_status = $2,
+		    last_error = $3,
+		    updated_at = NOW(),
+		    completed_at = NOW()
+		WHERE command_id IN (
+			SELECT id
+			FROM agent_commands
+			WHERE node_public_key = $1
+			  AND status IN ($4, $5, $6)
+			  AND COALESCE(acknowledged_at, sent_at, created_at) + (timeout_seconds * interval '1 second') < NOW()
+		)
+	`, nodePublicKey, AgentCommandStatusFailed, message, AgentCommandStatusPending, AgentCommandStatusSent, AgentCommandStatusAcknowledged); err != nil {
+		return 0, err
+	}
+
+	result, err := tx.Exec(`
+		UPDATE agent_commands
+		SET status = $2,
+		    message = $3,
+		    updated_at = NOW(),
+		    completed_at = NOW()
+		WHERE node_public_key = $1
+		  AND status IN ($4, $5, $6)
+		  AND COALESCE(acknowledged_at, sent_at, created_at) + (timeout_seconds * interval '1 second') < NOW()
+	`, nodePublicKey, AgentCommandStatusFailed, message, AgentCommandStatusPending, AgentCommandStatusSent, AgentCommandStatusAcknowledged)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 func failIncompleteAgentCommandsForNodeTx(tx roleExec, nodePublicKey, message string) error {
 	if nodePublicKey == "" {
 		return errors.New("node public key is required")

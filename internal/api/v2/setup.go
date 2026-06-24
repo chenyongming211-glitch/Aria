@@ -180,6 +180,16 @@ func (r *Router) handleTenantRoles(w http.ResponseWriter, req *http.Request, ten
 }
 
 func (r *Router) handleTenantPolicies(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
+	parts := splitPath(req.URL.Path)
+	if len(parts) == 6 && parts[4] == "policies" && parts[5] == "retry" {
+		if req.Method != http.MethodPost {
+			apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+			return
+		}
+		r.retryTenantPolicySync(w, req, tenantID)
+		return
+	}
+
 	if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermPoliciesRead) {
 		return
 	}
@@ -189,6 +199,154 @@ func (r *Router) handleTenantPolicies(w http.ResponseWriter, req *http.Request, 
 		r.listTenantPolicies(w, req, tenantID)
 	default:
 		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+	}
+}
+
+func (r *Router) retryTenantPolicySync(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
+	var body struct {
+		NodeID       string `json:"node_id"`
+		PolicyDomain string `json:"policy_domain"`
+		Kind         string `json:"kind"`
+		PolicyRef    string `json:"policy_ref"`
+		PolicyName   string `json:"policy_name"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Invalid request body: "+err.Error(), nil)
+		return
+	}
+
+	domain := strings.ToLower(strings.TrimSpace(firstNonEmpty(body.PolicyDomain, body.Kind)))
+	policyRef := strings.TrimSpace(body.PolicyRef)
+	if body.NodeID == "" {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "node_id is required", nil)
+		return
+	}
+	if domain == "" {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "policy_domain is required", nil)
+		return
+	}
+	if policyRef == "" {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "policy_ref is required", nil)
+		return
+	}
+
+	permission, ok := policyRetryPermission(domain)
+	if !ok {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "policy_domain must be acl, qos, or route", nil)
+		return
+	}
+	if !r.authorizeTenantPermission(w, req, tenantID, permission) {
+		return
+	}
+
+	node, err := r.getTenantNodeRecord(body.NodeID, tenantID)
+	if err != nil {
+		r.writeNodeLookupError(w, err)
+		return
+	}
+	if writeInactivePolicyMutationError(w, node) {
+		return
+	}
+
+	policyName, metadata, err := r.resolveRetryPolicy(tenantID, node, domain, policyRef, body.PolicyName)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			apibase.WriteError(w, http.StatusNotFound, apibase.CodeNotFound, "Policy item not found", nil)
+			return
+		}
+		if errors.Is(err, errUnsupportedPolicyDomain) {
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "policy_domain must be acl, qos, or route", nil)
+			return
+		}
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load policy item: "+err.Error(), nil)
+		return
+	}
+
+	dispatch, delivery, err := r.queueNodePolicySync(node, domain, "retry", policyRef, policyName, metadata)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Policy retry dispatch failed", map[string]string{
+			"dispatch_error": err.Error(),
+		})
+		return
+	}
+	r.recordPolicyChangedAudit(node, domain, "retry", policyRef, policyName, dispatch)
+
+	data := map[string]interface{}{
+		"node_id":       node.ID.String(),
+		"policy_domain": domain,
+		"policy_ref":    policyRef,
+		"policy_name":   policyName,
+		"dispatch":      dispatch,
+	}
+	if delivery != nil {
+		data["last_delivery"] = policyDeliveryToMap(delivery)
+		data["delivery_history"] = []map[string]interface{}{policyDeliveryToMap(delivery)}
+	}
+	apibase.WriteSuccess(w, data, "Policy sync retry queued successfully")
+}
+
+var errUnsupportedPolicyDomain = errors.New("unsupported policy domain")
+
+func policyRetryPermission(domain string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(domain)) {
+	case "acl":
+		return middleware.PermAclsWrite, true
+	case "qos":
+		return middleware.PermQosWrite, true
+	case "route":
+		return middleware.PermRoutesWrite, true
+	default:
+		return "", false
+	}
+}
+
+func (r *Router) resolveRetryPolicy(tenantID uuid.UUID, node *controllerstorage.Node, domain, policyRef, requestedName string) (string, map[string]interface{}, error) {
+	metadata := map[string]interface{}{
+		"node_id":    node.ID.String(),
+		"policy_ref": policyRef,
+		"retry":      true,
+	}
+	requestedName = strings.TrimSpace(requestedName)
+
+	switch strings.ToLower(strings.TrimSpace(domain)) {
+	case "acl":
+		ruleID, err := uuid.Parse(policyRef)
+		if err != nil {
+			return "", nil, fmt.Errorf("invalid ACL policy_ref: %w", err)
+		}
+		rule, err := r.store.GetTenantNodeACLRule(tenantID, node.ID, ruleID)
+		if err != nil {
+			return "", nil, err
+		}
+		name := firstNonEmpty(requestedName, rule.Name, rule.Description)
+		metadata["rule_id"] = rule.ID.String()
+		metadata["policy_name"] = name
+		return name, metadata, nil
+	case "qos":
+		ruleID, err := uuid.Parse(policyRef)
+		if err != nil {
+			return "", nil, fmt.Errorf("invalid QoS policy_ref: %w", err)
+		}
+		rule, err := r.store.GetTenantNodeQoSRule(tenantID, node.ID, ruleID)
+		if err != nil {
+			return "", nil, err
+		}
+		name := firstNonEmpty(requestedName, rule.Description)
+		metadata["rule_id"] = rule.ID.String()
+		metadata["policy_name"] = name
+		return name, metadata, nil
+	case "route":
+		for _, route := range node.AdvertisedRoutes {
+			if strings.TrimSpace(route) == policyRef {
+				name := firstNonEmpty(requestedName, policyRef)
+				metadata["route"] = policyRef
+				metadata["policy_name"] = name
+				return name, metadata, nil
+			}
+		}
+		return "", nil, sql.ErrNoRows
+	default:
+		return "", nil, errUnsupportedPolicyDomain
 	}
 }
 
@@ -343,6 +501,10 @@ func (r *Router) listTenantPolicies(w http.ResponseWriter, req *http.Request, te
 	for _, node := range nodes {
 		if nodeFilter != "" && node.ID.String() != nodeFilter {
 			continue
+		}
+		if err := r.failTimedOutNodeCommands(node); err != nil {
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to refresh timed out commands", nil)
+			return
 		}
 
 		if kindFilter == "" || kindFilter == "acl" {
