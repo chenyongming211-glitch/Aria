@@ -1,0 +1,16 @@
+# Runtime-only Controller image.
+# Build Dockerfile.controller.runtime-base once on the Controller host, then use
+# this file for each release so normal deploys only copy the Controller binary.
+
+ARG ARIA_CONTROLLER_RUNTIME_BASE=aria-controller-runtime-base:alpine3.19
+FROM ${ARIA_CONTROLLER_RUNTIME_BASE}
+
+COPY bin/aria /usr/local/bin/aria
+RUN chmod +x /usr/local/bin/aria
+
+WORKDIR /opt/aria
+
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/aria"]
+CMD ["controller", "serve", "--config=/etc/aria/controller.yaml"]

@@ -17,31 +17,69 @@ ports, volumes, and network.
 | VictoriaMetrics | `aria-victoriametrics` | `victoriametrics/victoria-metrics:latest` | `127.0.0.1:18428:8428` |
 
 Public HTTPS is terminated by the host Nginx at `https://aria.yun`.
-The frontend container serves the GitHub Actions `frontend-dist` artifact.
-The Controller image is built and pushed by GitHub Actions `workflow_dispatch`.
+The frontend container serves files from `/root/aria-controller/frontend/dist`.
+For low-bandwidth deployments, build the Controller linux/amd64 binary and the
+frontend dist locally on the Mac workstation, upload only those small artifacts
+to the x86 Linux Controller host, and let the host assemble the runtime
+Controller image locally.
 The frontend Nginx config must serve `index.html` with `Cache-Control: no-store`
 so browsers do not keep an old Vite entrypoint after a deploy. Hashed assets
 under `/assets/` can use long immutable caching.
 
 ## Release Flow
 
-Do not build release binaries or Docker images locally. Use GitHub Actions.
+Default to the low-bandwidth local artifact flow for Controller and frontend
+deployments. Use GitHub Actions only when Rust Agent/eBPF/protobuf compatibility
+is affected, or as the final pre-release validation gate.
 
 1. Bump the root `VERSION` file for every shipped change.
-2. Merge the release branch into `master`.
-3. Confirm the push-triggered `Build` workflow passes Go, Rust Agent, and Frontend jobs.
-4. Trigger `workflow_dispatch` for the `Build` workflow on `master`.
-5. Confirm `Docker Build & Push` succeeds and publishes:
-   - `ghcr.io/chenyongming211-glitch/aria-controller:latest`
-   - `ghcr.io/chenyongming211-glitch/aria-controller:<VERSION>`
-6. Download the `frontend-dist` workflow artifact from the same run.
-7. Deploy the Controller image and frontend artifact to `/root/aria-controller`.
+2. Run local Go tests and frontend tests/build.
+3. Cross-compile the Controller and `ariactl` on macOS for `linux/amd64`.
+4. Build the frontend dist locally.
+5. Upload only the Controller binary, `ariactl`, frontend dist, and runtime
+   Dockerfiles to the x86 Linux host.
+6. On the host, build the Controller image from the small
+   `/root/aria-controller/runtime-build` context. The runtime base image is
+   built only when Alpine or runtime packages change; normal Controller deploys
+   do not run `apk add`.
+7. Restart `aria-controller` and `aria-frontend` through Docker Compose.
+8. Run smoke checks.
+9. If any change touches Rust Agent, eBPF, Agent protobuf, gRPC southbound
+   contracts, policy snapshot shape, ACL/QoS dataplane payloads, or Agent
+   lifecycle/runtime behavior, push the branch and run GitHub Actions for Rust
+   Agent verification before production rollout.
+10. For formal releases, keep one full GitHub Actions run as the final gate even
+    when the deployed Controller/frontend artifacts were produced locally.
 
 Useful commands:
 
 ```bash
-gh workflow run Build --repo chenyongming211-glitch/Aria --ref master
-gh run download <run-id> --repo chenyongming211-glitch/Aria -n frontend-dist -D /tmp/aria-frontend-dist
+VERSION=$(cat VERSION)
+COMMIT=$(git rev-parse --short HEAD)
+
+mkdir -p dist/controller dist/frontend
+
+go test ./...
+
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+  -ldflags="-X aria/internal/cli.Version=${VERSION} -X aria/internal/cli.commit=${COMMIT}" \
+  -o dist/controller/aria \
+  ./cmd
+
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+  -ldflags="-X main.version=${VERSION}" \
+  -o dist/controller/ariactl \
+  ./cmd/ariactl
+
+cd frontend
+npm run test:run
+npm run build -- --outDir ../dist/frontend --emptyOutDir
+```
+
+Use GitHub Actions when Rust Agent/eBPF verification is required:
+
+```bash
+gh workflow run Build --repo chenyongming211-glitch/Aria --ref <branch>
 ```
 
 ## Server Layout
@@ -50,6 +88,13 @@ gh run download <run-id> --repo chenyongming211-glitch/Aria -n frontend-dist -D 
 /root/aria-controller/
 ├── docker-compose.yml
 ├── .env
+├── bin/
+│   └── ariactl
+├── runtime-build/
+│   ├── Dockerfile.controller.runtime
+│   ├── Dockerfile.controller.runtime-base
+│   └── bin/
+│       └── aria
 ├── config/
 │   └── controller.yaml
 ├── certs/
@@ -127,12 +172,71 @@ docker exec aria-postgres pg_dump -U aria -d aria > backups/pre-controller-deplo
 tar -C /root -czf backups/pre-controller-deploy-config-$(date +%Y%m%d-%H%M%S).tar.gz aria-controller/config aria-controller/certs aria-controller/.env aria-controller/secrets
 ```
 
-Pull and apply the Controller image:
+Upload the locally built Controller artifacts:
 
 ```bash
-cd /root/aria-controller
+ssh root@<controller-host> 'mkdir -p /root/aria-controller/runtime-build/bin /root/aria-controller/bin'
+rsync -az --progress dist/controller/aria root@<controller-host>:/root/aria-controller/runtime-build/bin/aria
+rsync -az --progress dist/controller/ariactl root@<controller-host>:/root/aria-controller/bin/ariactl
+rsync -az --progress Dockerfile.controller.runtime Dockerfile.controller.runtime-base root@<controller-host>:/root/aria-controller/runtime-build/
+```
+
+The runtime base Dockerfile is tracked at `Dockerfile.controller.runtime-base`
+and copied to `/root/aria-controller/runtime-build/Dockerfile.controller.runtime-base`.
+Build it once per runtime package change. It uses the Aliyun Alpine mirror by
+default to avoid slow or unstable upstream Alpine downloads:
+
+```dockerfile
+FROM alpine:3.19
+
+ARG ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
+
+RUN if [ -n "${ALPINE_MIRROR}" ]; then \
+      sed -i "s#https://dl-cdn.alpinelinux.org/alpine#${ALPINE_MIRROR}#g" /etc/apk/repositories; \
+    fi \
+    && apk add --no-cache openssh-client ca-certificates curl \
+    && mkdir -p /var/log/aria /etc/aria
+```
+
+The per-release runtime Dockerfile is tracked at `Dockerfile.controller.runtime`
+and copied to `/root/aria-controller/runtime-build/Dockerfile.controller.runtime`.
+It must not install Alpine packages during a normal release:
+
+```dockerfile
+ARG ARIA_CONTROLLER_RUNTIME_BASE=aria-controller-runtime-base:alpine3.19
+FROM ${ARIA_CONTROLLER_RUNTIME_BASE}
+
+COPY bin/aria /usr/local/bin/aria
+RUN chmod +x /usr/local/bin/aria
+
+WORKDIR /opt/aria
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/aria"]
+CMD ["controller", "serve", "--config=/etc/aria/controller.yaml"]
+```
+
+Build the runtime image on the x86 Linux host and restart only the Controller:
+
+```bash
+cd /root/aria-controller/runtime-build
 VERSION=<VERSION>
-docker pull ghcr.io/chenyongming211-glitch/aria-controller:${VERSION}
+
+# Run this only when Alpine or runtime package dependencies change.
+docker build -f Dockerfile.controller.runtime-base \
+  --build-arg ALPINE_MIRROR=https://mirrors.aliyun.com/alpine \
+  -t aria-controller-runtime-base:alpine3.19 \
+  .
+
+# Run this for every Controller release.
+docker build -f Dockerfile.controller.runtime \
+  --build-arg ARIA_CONTROLLER_RUNTIME_BASE=aria-controller-runtime-base:alpine3.19 \
+  -t aria-controller:${VERSION} \
+  .
+docker tag aria-controller:${VERSION} aria-controller:local
+
+cd /root/aria-controller
+grep -q 'image: aria-controller:local' docker-compose.yml || sed -i.bak 's#image: .*aria-controller.*#image: aria-controller:local#' docker-compose.yml
 docker compose up -d aria-controller
 docker compose ps aria-controller
 docker logs --since 2m aria-controller
@@ -148,12 +252,12 @@ gRPC server listening on :50051 (TLS: server)
 
 ## Frontend Deploy
 
-Upload the downloaded Actions artifact and restart the frontend container:
+Upload the locally built frontend dist and restart the frontend container:
 
 ```bash
-ssh root@8.152.163.101 'rm -rf /root/aria-controller/frontend/dist.new && mkdir -p /root/aria-controller/frontend/dist.new'
-rsync -az --delete /tmp/aria-frontend-dist/ root@8.152.163.101:/root/aria-controller/frontend/dist.new/
-ssh root@8.152.163.101 '
+ssh root@<controller-host> 'rm -rf /root/aria-controller/frontend/dist.new && mkdir -p /root/aria-controller/frontend/dist.new'
+rsync -az --delete dist/frontend/ root@<controller-host>:/root/aria-controller/frontend/dist.new/
+ssh root@<controller-host> '
   set -e
   cd /root/aria-controller/frontend
   rm -rf dist.previous
@@ -313,6 +417,12 @@ Purpose:
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
   the production compose shape.
-- `deployments/ansible/playbooks/deploy-frontend.yml` expects a prebuilt
-  `frontend-dist` artifact. It must not run `npm run build` locally for release
-  deploys.
+- Do not `docker cp` a Controller binary into a running container for normal
+  deploys. It is not durable across container recreation and makes rollback
+  unclear. Always rebuild the runtime image from the uploaded binary.
+- Build Controller runtime images from `/root/aria-controller/runtime-build`,
+  not `/root/aria-controller`. The small context prevents `.env`, certs, logs,
+  backups, and other host state from entering the Docker build context.
+- `deployments/ansible/playbooks/deploy-frontend.yml` expects prebuilt frontend
+  files. Those files can come from local `npm run build` or from GitHub Actions
+  when a full CI-gated release is required.

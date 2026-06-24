@@ -1,0 +1,13 @@
+# Runtime base for local Controller deployments.
+# Rebuild this only when Alpine, CA certificates, curl, or openssh-client need
+# to change. Normal Controller releases should use Dockerfile.controller.runtime.
+
+FROM alpine:3.19
+
+ARG ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
+
+RUN if [ -n "${ALPINE_MIRROR}" ]; then \
+      sed -i "s#https://dl-cdn.alpinelinux.org/alpine#${ALPINE_MIRROR}#g" /etc/apk/repositories; \
+    fi \
+    && apk add --no-cache openssh-client ca-certificates curl \
+    && mkdir -p /var/log/aria /etc/aria
