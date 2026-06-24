@@ -7,8 +7,8 @@ use thiserror::Error;
 
 use crate::acl_qos_maps::{
     add_policy_to_maps, add_qos_rule_to_maps, cleanup_policy_generation, cleanup_root_qdisc,
-    delete_policy_from_maps, delete_port_set_from_maps, delete_qos_rule_from_maps, ensure_fq_qdisc,
-    get_qos_stats, get_rule_stats, sync_runtime_config, AclQosMapHandles, TapMapRuntime,
+    delete_port_set_from_maps, ensure_fq_qdisc, get_qos_stats, get_rule_stats,
+    sync_runtime_config, AclQosMapHandles, TapMapRuntime,
 };
 use crate::acl_qos_state::{
     requested_directions, FirewallState, GroupInfo, QosRuleInfo, DIRECTION_EGRESS,
@@ -903,51 +903,6 @@ impl AclQosManager {
             mode,
         )
         .map_err(AclQosError::Kernel)?;
-        Ok(())
-    }
-
-    fn clear_all_acl_rules(&mut self) -> Result<(), AclQosError> {
-        let rules = self.state.rules.clone();
-        for rule in rules {
-            delete_policy_from_maps(
-                &mut self.maps,
-                self.runtime,
-                rule.src_group_id,
-                rule.dst_group_id,
-                rule.proto,
-                rule.direction,
-            )
-            .map_err(AclQosError::Kernel)?;
-        }
-        let port_sets = self.state.port_sets.clone();
-        for port_set in port_sets.values() {
-            let _ = delete_port_set_from_maps(
-                &mut self.maps,
-                self.runtime,
-                port_set.bitmap_idx,
-                &port_set.ports_normalized,
-            );
-        }
-        self.state.rules.clear();
-        self.state.port_sets.clear();
-        self.state.free_bitmap_indices.clear();
-        self.state.next_bitmap_idx = 0;
-        Ok(())
-    }
-
-    fn clear_all_qos_rules(&mut self) -> Result<(), AclQosError> {
-        let rules = self.state.qos_rules.clone();
-        for rule in rules {
-            delete_qos_rule_from_maps(
-                &mut self.maps,
-                self.runtime,
-                rule.group_id,
-                rule.direction,
-                true,
-            )
-            .map_err(AclQosError::Kernel)?;
-        }
-        self.state.qos_rules.clear();
         Ok(())
     }
 

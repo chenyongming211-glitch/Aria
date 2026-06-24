@@ -18,9 +18,7 @@ use tokio_util::sync::CancellationToken;
 use tracing_subscriber::{reload, EnvFilter, Registry};
 
 use crate::acl_qos_manager::{AclQosManager, AclQosSnapshot, AclRuleSpec, IPGroupSpec, QosRuleSpec};
-use crate::acl_qos_state::{
-    requested_directions, ACTION_DROP, DIRECTION_EGRESS, DIRECTION_INGRESS,
-};
+use crate::acl_qos_state::{requested_directions, ACTION_DROP, DIRECTION_INGRESS};
 use crate::certificate_client;
 use crate::config::{AgentConfig, ConfigManager};
 use crate::grpc_client::{acl_policy_from_sync_rule, qos_policy_from_sync_rule};

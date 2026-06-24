@@ -115,11 +115,6 @@ pub fn record_sync_failure() {
     counter!("grpc_sync_failure_total").increment(1);
 }
 
-pub fn record_cleanup_failure(map_name: &str, count: u64) {
-    counter!("cleanup_failure_total", "map" => map_name.to_string())
-        .increment(count);
-}
-
 pub fn record_wireguard_peer_change(action: &str) {
     counter!("wireguard_peer_changes_total", "action" => action.to_string())
         .increment(1);

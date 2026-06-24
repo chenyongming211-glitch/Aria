@@ -117,6 +117,7 @@ fn default_true() -> bool {
     true
 }
 
+#[cfg(test)]
 pub fn direction_from_string(direction: &str) -> Result<u8, String> {
     match direction.trim().to_ascii_lowercase().as_str() {
         "ingress" | "in" => Ok(DIRECTION_INGRESS),
@@ -126,15 +127,6 @@ pub fn direction_from_string(direction: &str) -> Result<u8, String> {
             "invalid direction '{}': must be ingress, egress, or both",
             other
         )),
-    }
-}
-
-pub fn direction_to_string(direction: u8) -> String {
-    match direction {
-        DIRECTION_INGRESS => "ingress".to_string(),
-        DIRECTION_EGRESS => "egress".to_string(),
-        DIRECTION_BOTH => "both".to_string(),
-        other => other.to_string(),
     }
 }
 

@@ -255,33 +255,6 @@ pub fn add_policy_to_maps(
         .map_err(|e| format!("RULE_STATS insert: {:?}", e))
 }
 
-pub fn delete_policy_from_maps(
-    handles: &mut AclQosMapHandles,
-    runtime: TapMapRuntime,
-    src_id: u32,
-    dst_id: u32,
-    proto: u8,
-    direction: u8,
-) -> Result<(), String> {
-    let key = PolicyKey {
-        tap_id: runtime.tap_id,
-        generation: runtime.policy_generation,
-        src_id,
-        dst_id,
-        proto,
-        direction,
-        pad: [0; 2],
-    };
-    match handles.policy_table.remove(&key) {
-        Ok(()) => {
-            let _ = handles.rule_stats.remove(&key);
-            Ok(())
-        }
-        Err(e) if format!("{:?}", e).contains("KeyNotFound") => Ok(()),
-        Err(e) => Err(format!("POLICY_TABLE remove: {:?}", e)),
-    }
-}
-
 pub fn delete_port_set_from_maps(
     handles: &mut AclQosMapHandles,
     runtime: TapMapRuntime,
@@ -341,31 +314,6 @@ pub fn add_qos_rule_to_maps(
             .map_err(|e| format!("QOS_STATS insert: {:?}", e))?;
     }
     Ok(())
-}
-
-pub fn delete_qos_rule_from_maps(
-    handles: &mut AclQosMapHandles,
-    runtime: TapMapRuntime,
-    group_id: u32,
-    direction: u8,
-    user_qos_enabled: bool,
-) -> Result<(), String> {
-    let key = QosKey {
-        tap_id: runtime.tap_id,
-        generation: runtime.policy_generation,
-        group_id,
-        direction,
-        pad: [0; 3],
-    };
-    let _ = handles.qos_config.remove(&key);
-    let _ = handles.qos_token_bucket.remove(&key);
-    let _ = handles.qos_stats.remove(&key);
-    sync_runtime_config(
-        handles,
-        runtime,
-        None,
-        Some(user_qos_enabled && has_qos_rules(handles, runtime)),
-    )
 }
 
 pub fn sync_runtime_config(
@@ -506,15 +454,6 @@ fn restore_tap_config(
             Ok(())
         }
     }
-}
-
-fn has_qos_rules(handles: &AclQosMapHandles, runtime: TapMapRuntime) -> bool {
-    handles.qos_config.iter().any(|item| {
-        item.map(|(key, _)| {
-            key.tap_id == runtime.tap_id && key.generation == runtime.policy_generation
-        })
-            .unwrap_or(false)
-    })
 }
 
 pub fn cleanup_policy_generation(

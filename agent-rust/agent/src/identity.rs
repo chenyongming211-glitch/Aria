@@ -85,6 +85,7 @@ impl IdentityManager {
         })
     }
 
+    #[cfg(test)]
     pub fn assign_id(&mut self, cidr: &str) -> Result<u32, IdentityError> {
         self.assign_id_for_generation(0, cidr)
     }
@@ -128,6 +129,7 @@ impl IdentityManager {
         Ok(id)
     }
 
+    #[cfg(test)]
     pub fn replace_groups(
         &mut self,
         groups: &[RuntimeIPGroup],
@@ -292,6 +294,7 @@ impl IdentityManager {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn get_id(&self, cidr: &str) -> Option<u32> {
         let entry = parse_cidr(cidr).ok()?;
         self.cidr_to_id.get(&entry).copied()

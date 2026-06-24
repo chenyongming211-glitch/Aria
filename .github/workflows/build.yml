@@ -95,6 +95,8 @@ jobs:
   rust-agent-build:
     name: Rust Agent Build
     runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: "-Dwarnings"
     defaults:
       run:
         working-directory: agent-rust
@@ -123,7 +125,6 @@ jobs:
             --component clippy \
             --component rust-src \
             --target x86_64-unknown-linux-gnu
-          rustup default nightly
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2.9.1
@@ -131,7 +132,7 @@ jobs:
           workspaces: "agent-rust -> target"
 
       - name: Install bpf-linker
-        run: cargo install bpf-linker --locked
+        run: cargo +stable install bpf-linker --locked
 
       - name: Run Rust agent tests
         run: cargo test -p aria-agent --lib
