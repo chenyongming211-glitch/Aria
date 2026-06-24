@@ -38,6 +38,9 @@ type QoSRuleRecord struct {
 	Enabled           bool                     `json:"enabled"`
 	Description       string                   `json:"description"`
 	Stats             map[string]interface{}   `json:"stats,omitempty"`
+	PolicyID          string                   `json:"policy_id,omitempty"`
+	PolicyRef         string                   `json:"policy_ref,omitempty"`
+	PolicyDomain      string                   `json:"policy_domain,omitempty"`
 	PolicyStatus      string                   `json:"policy_status,omitempty"`
 	PendingCmds       int                      `json:"pending_cmds"`
 	LastDelivery      map[string]interface{}   `json:"last_delivery,omitempty"`
@@ -67,6 +70,9 @@ type ACLRuleRecord struct {
 	Enabled           bool                     `json:"enabled"`
 	Description       string                   `json:"description"`
 	Stats             map[string]interface{}   `json:"stats,omitempty"`
+	PolicyID          string                   `json:"policy_id,omitempty"`
+	PolicyRef         string                   `json:"policy_ref,omitempty"`
+	PolicyDomain      string                   `json:"policy_domain,omitempty"`
 	PolicyStatus      string                   `json:"policy_status,omitempty"`
 	PendingCmds       int                      `json:"pending_cmds"`
 	LastDelivery      map[string]interface{}   `json:"last_delivery,omitempty"`

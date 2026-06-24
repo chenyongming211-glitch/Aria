@@ -1106,6 +1106,9 @@ func (r *Router) attachACLRuleDeliveryStatus(tenantID, nodeID uuid.UUID, rules [
 		if rule == nil {
 			continue
 		}
+		rule.PolicyRef = rule.ID.String()
+		rule.PolicyID = "acl:" + rule.PolicyRef
+		rule.PolicyDomain = "acl"
 		fields := statusByRef[rule.ID.String()]
 		applyPolicyDeliveryFields(&rule.PolicyStatus, &rule.PendingCmds, &rule.LastDelivery, &rule.DeliveryHistory, &rule.LastDeliveryError, fields)
 	}
@@ -1121,6 +1124,9 @@ func (r *Router) attachQoSRuleDeliveryStatus(tenantID, nodeID uuid.UUID, rules [
 		if rule == nil {
 			continue
 		}
+		rule.PolicyRef = rule.ID.String()
+		rule.PolicyID = "qos:" + rule.PolicyRef
+		rule.PolicyDomain = "qos"
 		fields := statusByRef[rule.ID.String()]
 		applyPolicyDeliveryFields(&rule.PolicyStatus, &rule.PendingCmds, &rule.LastDelivery, &rule.DeliveryHistory, &rule.LastDeliveryError, fields)
 	}
