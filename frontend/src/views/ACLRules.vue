@@ -527,6 +527,7 @@ const formatPolicyStatus = (status) => {
     queued: '排队中',
     sent: '已发送',
     in_progress: '下发中',
+    stale: '已过期',
     failed: '失败',
     error: '失败',
     idle: '空闲'
@@ -541,6 +542,7 @@ const getPolicyTagType = (status) => {
     queued: 'warning',
     sent: 'warning',
     in_progress: 'warning',
+    stale: 'info',
     failed: 'danger',
     error: 'danger',
     idle: 'info'

@@ -237,6 +237,41 @@ describe('useQosApi', () => {
     expect(result.desired_state_version).toBe('dsv-1')
   })
 
+  it('应该把 stale QoS 投递归一化为已过期且不计入待执行', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        success: true,
+        data: [{
+          id: 'qos-1',
+          group_id: 'group-1',
+          group_name: 'branch-office',
+          direction: 'egress',
+          bandwidth_mbps: 10,
+          enabled: true,
+          last_delivery: {
+            id: 'delivery-old',
+            command_id: 'cmd-old',
+            command_status: 'stale',
+            last_error: 'superseded by desired state dsv-new'
+          },
+          delivery_history: [{
+            id: 'delivery-old',
+            command_id: 'cmd-old',
+            command_status: 'stale',
+            last_error: 'superseded by desired state dsv-new'
+          }]
+        }]
+      }
+    })
+
+    const rules = await useQosApi.getQoSRulesByNode('node-1')
+
+    expect(rules[0].policy_status).toBe('stale')
+    expect(rules[0].policyStatus).toBe('stale')
+    expect(rules[0].pending_cmds).toBe(0)
+    expect(rules[0].last_command_error).toContain('superseded')
+  })
+
   it('不应下发旧版 QoS protocol/port 匹配字段', async () => {
     api.post.mockResolvedValue({
       data: { success: true, data: { id: 'rule-1' } }

@@ -95,6 +95,12 @@ func TestWritePolicyMutationSuccessWritesPolicyChangedAudit(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO node_control_states")).
 		WithArgs(tenantID, nodeID, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(nodeControlStateRowsFor(tenantID, nodeID, "dsv-test", now))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE agent_commands ac")).
+		WithArgs(node.PublicKey, controllerstorage.AgentCommandStatusStale, sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged, tenantID, nodeID).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE policy_deliveries")).
+		WithArgs(tenantID, nodeID, controllerstorage.AgentCommandStatusStale, sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO agent_commands")).
 		WithArgs(node.PublicKey, "sync", sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, 1, 60).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow(commandID, now, now))

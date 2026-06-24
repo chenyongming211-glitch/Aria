@@ -422,9 +422,9 @@ const statusCount = (items, statuses, field = 'status') => (
 
 const workbenchSummary = computed(() => {
   const failedCommands = statusCount(recentCommands.value, ['failed'])
-  const pendingCommands = statusCount(recentCommands.value, ['pending', 'queued', 'running', 'acknowledged'])
+  const pendingCommands = statusCount(recentCommands.value, ['pending', 'queued', 'sent', 'acknowledged', 'in_progress', 'running'])
   const failedDeliveries = statusCount(recentPolicyDeliveries.value, ['failed'], 'command_status')
-  const pendingDeliveries = statusCount(recentPolicyDeliveries.value, ['pending', 'queued', 'running', 'acknowledged'], 'command_status')
+  const pendingDeliveries = statusCount(recentPolicyDeliveries.value, ['pending', 'queued', 'sent', 'acknowledged', 'in_progress', 'running'], 'command_status')
   const certificateStatus = certificateStatusLabel.value
 
   return [
@@ -510,6 +510,8 @@ const cmdStatusType = (status) => {
     case 'in_progress':
     case 'running':
       return 'warning'
+    case 'stale':
+      return 'info'
     default: return 'info'
   }
 }

@@ -329,6 +329,7 @@ const formatPolicyStatus = (status) => {
     applied: '已应用',
     pending: '待下发',
     in_progress: '下发中',
+    stale: '已过期',
     error: '失败',
     idle: '空闲'
   }
@@ -340,6 +341,7 @@ const getPolicyTagType = (status) => {
     case 'applied': return 'success'
     case 'pending':
     case 'in_progress': return 'warning'
+    case 'stale': return 'info'
     case 'error': return 'danger'
     default: return 'info'
   }

@@ -62,6 +62,7 @@ function mapCommandStatusToPolicyStatus(status) {
   if (['sent', 'acknowledged', 'queued', 'in_progress'].includes(normalized)) return 'in_progress'
   if (normalized === 'completed') return 'applied'
   if (normalized === 'failed') return 'error'
+  if (normalized === 'stale') return 'stale'
   return ''
 }
 

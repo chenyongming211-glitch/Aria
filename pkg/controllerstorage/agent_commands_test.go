@@ -128,11 +128,44 @@ func TestUpdateAgentCommandStatusForNodeRejectsMismatchedNode(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE agent_commands")).
 		WithArgs(commandID, AgentCommandStatusCompleted, "done", []byte(`{"ok":"true"}`), nodePublicKey).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT status FROM agent_commands")).
+		WithArgs(commandID, nodePublicKey).
+		WillReturnError(errors.New("not found"))
 	mock.ExpectRollback()
 
 	err = store.UpdateAgentCommandStatusForNode(commandID, nodePublicKey, AgentCommandStatusCompleted, "done", map[string]string{"ok": "true"})
 	if err == nil {
 		t.Fatalf("expected command status update to reject mismatched node")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestUpdateAgentCommandStatusForNodeIgnoresStaleCommand(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	store := NewStorageWithDB(db)
+	commandID := "a74e0068-4fd9-4d85-bb56-4d37400eb8cc"
+	nodePublicKey := "stream-node-key"
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE agent_commands")).
+		WithArgs(commandID, AgentCommandStatusCompleted, "done", []byte(`{"desired_state_version":"dsv-old"}`), nodePublicKey).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT status FROM agent_commands")).
+		WithArgs(commandID, nodePublicKey).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow(AgentCommandStatusStale))
+	mock.ExpectRollback()
+
+	err = store.UpdateAgentCommandStatusForNode(commandID, nodePublicKey, AgentCommandStatusCompleted, "done", map[string]string{"desired_state_version": "dsv-old"})
+	if err != nil {
+		t.Fatalf("expected stale command result to be ignored, got %v", err)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

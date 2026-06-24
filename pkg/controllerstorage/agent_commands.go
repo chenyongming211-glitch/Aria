@@ -18,6 +18,7 @@ const (
 	AgentCommandStatusAcknowledged = "acknowledged"
 	AgentCommandStatusCompleted    = "completed"
 	AgentCommandStatusFailed       = "failed"
+	AgentCommandStatusStale        = "stale"
 )
 
 var allowedAgentCommands = map[string]struct{}{
@@ -288,7 +289,7 @@ func (s *Storage) updateAgentCommandStatus(commandID, nodePublicKey, status, mes
 		        WHEN $2::varchar IN ('completed', 'failed') THEN NOW()
 		        ELSE completed_at
 		    END
-		WHERE id = $1
+		WHERE id = $1 AND status <> 'stale'
 	`
 	args := []interface{}{commandID, status, message, resultJSON}
 	if nodePublicKey != "" {
@@ -306,7 +307,7 @@ func (s *Storage) updateAgentCommandStatus(commandID, nodePublicKey, status, mes
 			        WHEN $2::varchar IN ('completed', 'failed') THEN NOW()
 			        ELSE completed_at
 			    END
-			WHERE id = $1 AND node_public_key = $5
+				WHERE id = $1 AND node_public_key = $5 AND status <> 'stale'
 		`
 		args = append(args, nodePublicKey)
 	}
@@ -321,14 +322,22 @@ func (s *Storage) updateAgentCommandStatus(commandID, nodePublicKey, status, mes
 	if err != nil {
 		return err
 	}
-	if nodePublicKey != "" {
-		affected, err := commandResult.RowsAffected()
+	affected, err := commandResult.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		currentStatus, err := currentAgentCommandStatusTx(tx, commandID, nodePublicKey)
+		if err == nil && currentStatus == AgentCommandStatusStale {
+			return nil
+		}
+		if nodePublicKey != "" {
+			return fmt.Errorf("agent command %s does not belong to node %s", commandID, nodePublicKey)
+		}
 		if err != nil {
 			return err
 		}
-		if affected == 0 {
-			return fmt.Errorf("agent command %s does not belong to node %s", commandID, nodePublicKey)
-		}
+		return fmt.Errorf("agent command %s was not updated", commandID)
 	}
 
 	if _, err := tx.Exec(`
@@ -363,6 +372,21 @@ func (s *Storage) updateAgentCommandStatus(commandID, nodePublicKey, status, mes
 	}
 
 	return nil
+}
+
+func currentAgentCommandStatusTx(tx *sql.Tx, commandID, nodePublicKey string) (string, error) {
+	query := `SELECT status FROM agent_commands WHERE id = $1`
+	args := []interface{}{commandID}
+	if nodePublicKey != "" {
+		query += ` AND node_public_key = $2`
+		args = append(args, nodePublicKey)
+	}
+
+	var status string
+	if err := tx.QueryRow(query, args...).Scan(&status); err != nil {
+		return "", err
+	}
+	return status, nil
 }
 
 // emitCommandAlertAndAudit generates alerts and audit events after a command reaches a terminal status.

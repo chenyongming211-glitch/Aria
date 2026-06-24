@@ -528,6 +528,8 @@ func deriveConfigurationStatus(
 			return "applied"
 		case controllerstorage.AgentCommandStatusFailed:
 			return "error"
+		case controllerstorage.AgentCommandStatusStale:
+			return "stale"
 		case controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged:
 			return "in_progress"
 		}

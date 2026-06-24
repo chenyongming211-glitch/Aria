@@ -119,6 +119,7 @@
           <el-option label="已应用" value="applied" />
           <el-option label="待下发" value="pending" />
           <el-option label="下发中" value="in_progress" />
+          <el-option label="已过期" value="stale" />
           <el-option label="失败" value="error" />
           <el-option label="空闲" value="idle" />
         </el-select>
@@ -323,6 +324,7 @@ const statusLabel = (status) => {
     sent: '已发送',
     acknowledged: '已确认',
     completed: '已完成',
+    stale: '已过期',
     failed: '失败'
   }
   return labels[status] || status || '未知'
@@ -338,6 +340,8 @@ const statusTagType = (status) => {
     case 'acknowledged':
     case 'in_progress':
       return 'warning'
+    case 'stale':
+      return 'info'
     case 'error':
     case 'failed':
       return 'danger'

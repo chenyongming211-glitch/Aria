@@ -532,6 +532,13 @@ func expectPolicyDispatchSuccessInOpenTx(mock sqlmock.Sqlmock, tenantID, nodeID 
 			tenantID, nodeID, "desired-v1", desiredMetadata, now, "", nil, "", "", nil, nil, "", now, now,
 		))
 
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE agent_commands ac")).
+		WithArgs("pub-key-1", controllerstorage.AgentCommandStatusStale, sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged, tenantID, nodeID).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE policy_deliveries")).
+		WithArgs(tenantID, nodeID, controllerstorage.AgentCommandStatusStale, sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO agent_commands (node_public_key, command, params, status, priority, timeout_seconds)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, created_at, updated_at`)).

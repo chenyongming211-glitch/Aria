@@ -285,6 +285,10 @@ func (s *Storage) queuePolicySyncTx(tx *sql.Tx, req PolicySyncRequest) (*PolicyS
 		return nil, err
 	}
 
+	if err := markSupersededPolicySyncsTx(tx, req); err != nil {
+		return nil, err
+	}
+
 	cmd, err := queueAgentCommand(tx, req.NodePublicKey, "sync", req.CommandParams, req.Priority, req.TimeoutSeconds)
 	if err != nil {
 		return nil, err
@@ -314,6 +318,59 @@ func (s *Storage) queuePolicySyncTx(tx *sql.Tx, req PolicySyncRequest) (*PolicyS
 		Command:             cmd,
 		Delivery:            delivery,
 	}, nil
+}
+
+func markSupersededPolicySyncsTx(tx roleExec, req PolicySyncRequest) error {
+	message := fmt.Sprintf("superseded by desired state %s", req.DesiredStateVersion)
+
+	if _, err := tx.Exec(`
+		UPDATE agent_commands ac
+		SET status = $2,
+		    message = $3,
+		    updated_at = NOW(),
+		    completed_at = NOW()
+		WHERE ac.node_public_key = $1
+		  AND ac.status IN ($4, $5, $6)
+		  AND EXISTS (
+		      SELECT 1
+		      FROM policy_deliveries pd
+		      WHERE pd.command_id = ac.id
+		        AND pd.tenant_id = $7
+		        AND pd.node_id = $8
+		        AND pd.command_status IN ($4, $5, $6)
+		  )
+	`,
+		req.NodePublicKey,
+		AgentCommandStatusStale,
+		message,
+		AgentCommandStatusPending,
+		AgentCommandStatusSent,
+		AgentCommandStatusAcknowledged,
+		req.TenantID,
+		req.NodeID,
+	); err != nil {
+		return err
+	}
+
+	_, err := tx.Exec(`
+		UPDATE policy_deliveries
+		SET command_status = $3,
+		    last_error = $4,
+		    updated_at = NOW(),
+		    completed_at = NOW()
+		WHERE tenant_id = $1
+		  AND node_id = $2
+		  AND command_status IN ($5, $6, $7)
+	`,
+		req.TenantID,
+		req.NodeID,
+		AgentCommandStatusStale,
+		message,
+		AgentCommandStatusPending,
+		AgentCommandStatusSent,
+		AgentCommandStatusAcknowledged,
+	)
+	return err
 }
 
 func (s *Storage) recordCommandQueuedAudit(req PolicySyncRequest, cmd *AgentCommand) {

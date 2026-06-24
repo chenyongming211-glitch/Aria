@@ -1509,6 +1509,8 @@ func mapCommandStatusToPolicyStatus(status string) string {
 		return "applied"
 	case controllerstorage.AgentCommandStatusFailed:
 		return "error"
+	case controllerstorage.AgentCommandStatusStale:
+		return "stale"
 	default:
 		return "idle"
 	}

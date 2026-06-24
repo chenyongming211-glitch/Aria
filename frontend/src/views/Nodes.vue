@@ -1088,6 +1088,8 @@ const getDeliveryStatusTagType = (status) => {
     case 'acknowledged':
     case 'in_progress':
       return 'warning'
+    case 'stale':
+      return 'info'
     case 'failed':
     case 'error':
       return 'danger'

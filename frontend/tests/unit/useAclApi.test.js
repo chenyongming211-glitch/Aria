@@ -213,6 +213,43 @@ describe('useAclApi', () => {
       expect(result.delivery_history).toHaveLength(1)
       expect(result.desired_state_version).toBe('dsv-1')
     })
+
+    it('应该把 stale 投递归一化为已过期且不计入待执行', async () => {
+      api.post.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            id: 'acl-1',
+            name: 'allow-icmp',
+            action: 'allow',
+            last_delivery: {
+              id: 'delivery-old',
+              command_id: 'cmd-old',
+              command_status: 'stale',
+              last_error: 'superseded by desired state dsv-new'
+            },
+            delivery_history: [{
+              id: 'delivery-old',
+              command_id: 'cmd-old',
+              command_status: 'stale',
+              last_error: 'superseded by desired state dsv-new'
+            }]
+          }
+        }
+      })
+
+      const result = await useAclApi.createACLRule({
+        node_id: 'node-1',
+        name: 'allow-icmp',
+        action: 'allow',
+        protocol: 1,
+        direction: 'egress'
+      })
+
+      expect(result.policy_status).toBe('stale')
+      expect(result.pending_cmds).toBe(0)
+      expect(result.last_command_error).toContain('superseded')
+    })
   })
 
   describe('updateACLRule', () => {
