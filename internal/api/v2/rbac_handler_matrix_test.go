@@ -394,6 +394,22 @@ func expectACLCreateSuccessWithEnabled(mock sqlmock.Sqlmock, tenantID, nodeID uu
 		}).AddRow(uuid.New(), tenantID, nodeID, "allow-web", "allow", srcGroupID, nil, "0.0.0.0/0", "0.0.0.0/0", 443, 6, "ingress", "443", 100, enabled, "allow web", now, now))
 }
 
+func expectACLCreateSuccessWithAnyCIDRs(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
+	now := time.Now()
+	expectACLConflictCheckEmpty(mock, tenantID, nodeID)
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO acl_rules (tenant_id, node_id, name, action, src_group_id, dst_group_id, src_cidr, dst_cidr, dst_port, protocol, direction, ports, priority, enabled, description, src_net, dst_net, min_port, max_port)
+			 VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, '')::cidr, NULLIF($8, '')::cidr, $9, $10, $11, $12, $13, $14, $15, $16::cidr, $17::cidr, $18, $19)
+			 RETURNING id, tenant_id, node_id, COALESCE(name, ''), action, src_group_id, dst_group_id, COALESCE(src_cidr::text, src_net::text, ''), COALESCE(dst_cidr::text, dst_net::text, ''),
+			           COALESCE(dst_port, CASE WHEN min_port = max_port THEN max_port ELSE 0 END, 0), COALESCE(protocol, 0),
+			           COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
+			           priority, enabled, COALESCE(description, ''),
+			           created_at, updated_at`)).
+		WithArgs(tenantID, nodeID, "allow-any", "allow", nil, nil, "", "", nil, 1, "egress", "", 100, true, "allow any", "0.0.0.0/0", "0.0.0.0/0", 0, 65535).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "name", "action", "src_group_id", "dst_group_id", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(uuid.New(), tenantID, nodeID, "allow-any", "allow", nil, nil, "0.0.0.0/0", "0.0.0.0/0", 0, 1, "egress", "", 100, true, "allow any", now, now))
+}
+
 func expectQoSCreateSuccess(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
 	expectQoSCreateSuccessWithEnabled(mock, tenantID, nodeID, true)
 }
@@ -419,6 +435,24 @@ func expectQoSCreateSuccessWithModeAndEnabled(mock sqlmock.Sqlmock, tenantID, no
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "group_id", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at",
 		}).AddRow(uuid.New(), tenantID, nodeID, groupID, "", "", 0, 0, 0, 200, "egress", uint64(200000000), uint64(2500000), 100, mode, enabled, "qos web", now, now))
+}
+
+func expectQoSCreateSuccessWithAnyCIDR(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) {
+	now := time.Now()
+	expectQoSConflictCheckEmpty(mock, tenantID, nodeID)
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO qos_rules (tenant_id, node_id, group_id, src_cidr, dst_cidr, src_port, dst_port, protocol, bandwidth_mbps, direction, rate_bps, burst_bytes, priority, mode, enabled, description)
+		 VALUES ($1, $2, $3, NULLIF($4, '')::cidr, NULLIF($5, '')::cidr, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		 RETURNING id, tenant_id, node_id, group_id, COALESCE(src_cidr::text, ''), COALESCE(dst_cidr::text, ''),
+		           COALESCE(src_port, 0), COALESCE(dst_port, 0), COALESCE(protocol, 0),
+		           bandwidth_mbps, COALESCE(direction, 'egress'),
+		           COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000),
+		           COALESCE(burst_bytes, GREATEST((COALESCE(rate_bps, bandwidth_mbps::bigint * 1000000) / 8 / 10), 1500)),
+		           COALESCE(priority, 0), COALESCE(mode, 'auto'),
+		           enabled, COALESCE(description, ''), created_at, updated_at`)).
+		WithArgs(tenantID, nodeID, nil, "", "", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), 200, "egress", uint64(200000000), uint64(2500000), 100, "auto", true, "qos any").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "group_id", "src_cidr", "dst_cidr", "src_port", "dst_port", "protocol", "bandwidth_mbps", "direction", "rate_bps", "burst_bytes", "priority", "mode", "enabled", "description", "created_at", "updated_at",
+		}).AddRow(uuid.New(), tenantID, nodeID, nil, "", "", 0, 0, 0, 200, "egress", uint64(200000000), uint64(2500000), 100, "auto", true, "qos any", now, now))
 }
 
 func expectInlineGroupResolve(mock sqlmock.Sqlmock, tenantID uuid.UUID, cidr string) uuid.UUID {
@@ -1276,6 +1310,45 @@ func TestACLCreateHonorsDisabledPayload(t *testing.T) {
 	}
 }
 
+func TestACLCreateTreatsAnyCIDRAsEmptyMatch(t *testing.T) {
+	t.Setenv("RBAC_ENFORCEMENT", "enforce")
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/security/acls"
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	expectTenantStatusActive(mock, tenantID)
+	expectPermissionLookup(mock, tenantID, "admin", []string{"acls:write"})
+	mock.ExpectBegin()
+	expectACLCreateSuccessWithAnyCIDRs(mock, tenantID, nodeID)
+	expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
+	mock.ExpectCommit()
+	expectPolicyDispatchPostCommitSummary(mock, tenantID, nodeID)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withAuthContext(httptest.NewRequest(
+		http.MethodPost,
+		path,
+		strings.NewReader(`{"name":"allow-any","action":"allow","src_cidr":"any","dst_cidr":"any","protocol":1,"direction":"egress","priority":100,"description":"allow any"}`),
+	), "admin", tenantID)
+	rr := httptest.NewRecorder()
+	router.HandleTenantScoped(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestACLUpdatePreservesOmittedFields(t *testing.T) {
 	t.Setenv("RBAC_ENFORCEMENT", "enforce")
 
@@ -1454,6 +1527,45 @@ func TestQoSCreateHonorsDisabledPayload(t *testing.T) {
 		http.MethodPost,
 		path,
 		strings.NewReader(`{"dst_cidr":"10.0.0.0/24","bandwidth_mbps":200,"priority":100,"enabled":false,"description":"qos web"}`),
+	), "admin", tenantID)
+	rr := httptest.NewRecorder()
+	router.HandleTenantScoped(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestQoSCreateTreatsAnyCIDRAsEmptyMatch(t *testing.T) {
+	t.Setenv("RBAC_ENFORCEMENT", "enforce")
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	path := "/api/v2/tenants/" + tenantID.String() + "/nodes/" + nodeID.String() + "/qos"
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookup(mock, tenantID, nodeID, "{}")
+	expectTenantStatusActive(mock, tenantID)
+	expectPermissionLookup(mock, tenantID, "admin", []string{"qos:write"})
+	mock.ExpectBegin()
+	expectQoSCreateSuccessWithAnyCIDR(mock, tenantID, nodeID)
+	expectPolicyDispatchSuccessInOpenTx(mock, tenantID, nodeID)
+	mock.ExpectCommit()
+	expectPolicyDispatchPostCommitSummary(mock, tenantID, nodeID)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withAuthContext(httptest.NewRequest(
+		http.MethodPost,
+		path,
+		strings.NewReader(`{"dst_cidr":"any","bandwidth_mbps":200,"priority":100,"description":"qos any"}`),
 	), "admin", tenantID)
 	rr := httptest.NewRecorder()
 	router.HandleTenantScoped(rr, req)
