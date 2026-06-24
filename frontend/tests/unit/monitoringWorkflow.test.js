@@ -503,7 +503,8 @@ describe('policy center context handling', () => {
       nodeId: 'node-1',
       policyRef: 'acl-1',
       kind: 'acl',
-      name: 'ACL 1'
+      name: 'ACL 1',
+      status: 'error'
     })
 
     expect(policyApiMock.retryPolicySync).toHaveBeenCalledWith({
