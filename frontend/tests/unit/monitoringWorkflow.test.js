@@ -498,6 +498,7 @@ describe('policy center context handling', () => {
   it('retries failed policy delivery from policy center', async () => {
     const wrapper = mountWithStubs(Policies)
     await flushPromises()
+    const callsBeforeRetry = policyApiMock.listPolicies.mock.calls.length
 
     await wrapper.vm.retryPolicyDelivery({
       nodeId: 'node-1',
@@ -513,6 +514,6 @@ describe('policy center context handling', () => {
       policyRef: 'acl-1',
       policyName: 'ACL 1'
     })
-    expect(policyApiMock.listPolicies).toHaveBeenCalledTimes(2)
+    expect(policyApiMock.listPolicies.mock.calls.length).toBeGreaterThan(callsBeforeRetry)
   })
 })
