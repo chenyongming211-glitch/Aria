@@ -388,7 +388,7 @@ func expectACLCreateSuccessWithEnabled(mock sqlmock.Sqlmock, tenantID, nodeID uu
 			           COALESCE(direction, 'ingress'), COALESCE(ports, CASE WHEN min_port > 0 AND max_port > 0 AND min_port <> max_port THEN min_port::text || '-' || max_port::text WHEN min_port > 0 THEN min_port::text ELSE '' END),
 			           priority, enabled, COALESCE(description, ''),
 			           created_at, updated_at`)).
-		WithArgs(tenantID, nodeID, "allow-web", "allow", srcGroupID, nil, "", "0.0.0.0/0", 443, 6, "ingress", "443", 100, enabled, "allow web", "0.0.0.0/0", "0.0.0.0/0", 443, 443).
+		WithArgs(tenantID, nodeID, "allow-web", "allow", srcGroupID, nil, "", "", 443, 6, "ingress", "443", 100, enabled, "allow web", "0.0.0.0/0", "0.0.0.0/0", 443, 443).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "name", "action", "src_group_id", "dst_group_id", "src_cidr", "dst_cidr", "dst_port", "protocol", "direction", "ports", "priority", "enabled", "description", "created_at", "updated_at",
 		}).AddRow(uuid.New(), tenantID, nodeID, "allow-web", "allow", srcGroupID, nil, "0.0.0.0/0", "0.0.0.0/0", 443, 6, "ingress", "443", 100, enabled, "allow web", now, now))

@@ -244,6 +244,9 @@ func nullableUUIDString(value uuid.NullUUID) interface{} {
 }
 
 func qosDirectGroupCIDR(group string, srcCIDR string, dstCIDR string, direction string) string {
+	group = normalizePolicyCIDRInput(group)
+	srcCIDR = normalizePolicyCIDRInput(srcCIDR)
+	dstCIDR = normalizePolicyCIDRInput(dstCIDR)
 	if strings.TrimSpace(group) != "" {
 		return group
 	}
@@ -254,6 +257,23 @@ func qosDirectGroupCIDR(group string, srcCIDR string, dstCIDR string, direction 
 		return dstCIDR
 	}
 	return srcCIDR
+}
+
+func normalizePolicyCIDRInput(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if policyInputCIDRIsAny(trimmed) {
+		return ""
+	}
+	return trimmed
+}
+
+func policyInputCIDRIsAny(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "any", "0", "0.0.0.0/0", "::/0":
+		return true
+	default:
+		return false
+	}
 }
 
 func hydrateACLRuleGroups(tx *controllerstorage.PolicyMutationTx, tenantID uuid.UUID, rules []*controllerstorage.ACLRuleRecord) error {
@@ -519,10 +539,12 @@ func (r *Router) createTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 	if src == "" {
 		src = body.SrcNet
 	}
+	src = normalizePolicyCIDRInput(src)
 	dst := body.DstCIDR
 	if dst == "" {
 		dst = body.DstNet
 	}
+	dst = normalizePolicyCIDRInput(dst)
 	port := body.DstPort
 	if port == 0 {
 		port = body.MaxPort
@@ -674,20 +696,20 @@ func (r *Router) updateTenantNodeACL(w http.ResponseWriter, req *http.Request, t
 		rule.Action = *body.Action
 	}
 	if body.SrcCIDR != nil {
-		rule.SrcCIDR = *body.SrcCIDR
+		rule.SrcCIDR = normalizePolicyCIDRInput(*body.SrcCIDR)
 		rule.SrcGroupID = uuid.NullUUID{}
 	} else if body.SrcNet != nil {
-		rule.SrcCIDR = *body.SrcNet
+		rule.SrcCIDR = normalizePolicyCIDRInput(*body.SrcNet)
 		rule.SrcGroupID = uuid.NullUUID{}
 	} else if body.SrcGroupID != nil {
 		rule.SrcCIDR = ""
 		rule.SrcGroupID = nullUUIDFromPtr(body.SrcGroupID)
 	}
 	if body.DstCIDR != nil {
-		rule.DstCIDR = *body.DstCIDR
+		rule.DstCIDR = normalizePolicyCIDRInput(*body.DstCIDR)
 		rule.DstGroupID = uuid.NullUUID{}
 	} else if body.DstNet != nil {
-		rule.DstCIDR = *body.DstNet
+		rule.DstCIDR = normalizePolicyCIDRInput(*body.DstNet)
 		rule.DstGroupID = uuid.NullUUID{}
 	} else if body.DstGroupID != nil {
 		rule.DstCIDR = ""
@@ -1460,8 +1482,8 @@ func (r *Router) createTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	rule := &controllerstorage.QoSRuleRecord{
 		TenantID:      tenantID,
 		NodeID:        node.ID,
-		SrcCIDR:       body.SrcCIDR,
-		DstCIDR:       body.DstCIDR,
+		SrcCIDR:       normalizePolicyCIDRInput(body.SrcCIDR),
+		DstCIDR:       normalizePolicyCIDRInput(body.DstCIDR),
 		BandwidthMbps: body.BandwidthMbps,
 		Direction:     body.Direction,
 		RateBps:       body.RateBps,
@@ -1572,21 +1594,21 @@ func (r *Router) updateTenantNodeQoS(w http.ResponseWriter, req *http.Request, t
 	explicitGroup := rule.GroupID
 	groupChanged := false
 	if body.SrcCIDR != nil {
-		rule.SrcCIDR = *body.SrcCIDR
+		rule.SrcCIDR = normalizePolicyCIDRInput(*body.SrcCIDR)
 		rule.GroupID = uuid.NullUUID{}
 		explicitGroup = uuid.NullUUID{}
-		directGroup = *body.SrcCIDR
+		directGroup = rule.SrcCIDR
 		groupChanged = true
 	}
 	if body.DstCIDR != nil {
-		rule.DstCIDR = *body.DstCIDR
+		rule.DstCIDR = normalizePolicyCIDRInput(*body.DstCIDR)
 		rule.GroupID = uuid.NullUUID{}
 		explicitGroup = uuid.NullUUID{}
-		directGroup = *body.DstCIDR
+		directGroup = rule.DstCIDR
 		groupChanged = true
 	}
 	if body.Group != nil {
-		directGroup = *body.Group
+		directGroup = normalizePolicyCIDRInput(*body.Group)
 		rule.SrcCIDR = ""
 		rule.DstCIDR = ""
 		rule.GroupID = uuid.NullUUID{}
