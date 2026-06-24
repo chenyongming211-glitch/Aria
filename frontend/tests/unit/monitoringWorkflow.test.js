@@ -6,6 +6,7 @@ const {
   routerPush,
   routeState,
   monitorApiMock,
+  agentApiMock,
   policyApiMock,
   localStorageMock
 } = vi.hoisted(() => ({
@@ -102,6 +103,15 @@ const {
       ]
     }))
   },
+  agentApiMock: {
+    sendAgentCommand: vi.fn(async () => ({
+      command_id: 'cmd-new',
+      command: 'sync',
+      status: 'pending',
+      message: 'Command queued for delivery',
+      created_at: '2026-04-21T10:01:00Z'
+    }))
+  },
   policyApiMock: {
     listPolicies: vi.fn(async () => ([
       {
@@ -172,6 +182,10 @@ vi.mock('@/composables/usePolicyApi', () => ({
   usePolicyApi: policyApiMock
 }))
 
+vi.mock('@/composables/useAgentProxyApi', () => ({
+  useAgentProxyApi: agentApiMock
+}))
+
 vi.mock('@/composables/usePermission', () => ({
   usePermission: () => ({
     hasPermission: () => true,
@@ -204,6 +218,9 @@ vi.mock('element-plus', () => ({
     success: vi.fn(),
     error: vi.fn(),
     warning: vi.fn()
+  },
+  ElMessageBox: {
+    confirm: vi.fn(async () => true)
   }
 }))
 
@@ -269,6 +286,9 @@ describe('monitoring workflow routing', () => {
     routerPush.mockReset()
     monitorApiMock.getEvents.mockClear()
     monitorApiMock.getAlerts.mockClear()
+    monitorApiMock.getStats.mockClear()
+    monitorApiMock.resolveAlert.mockClear()
+    agentApiMock.sendAgentCommand.mockClear()
     policyApiMock.listPolicies.mockClear()
     policyApiMock.retryPolicySync.mockClear()
     routeState.params = { nodeId: 'node-1' }
@@ -389,12 +409,46 @@ describe('monitoring workflow routing', () => {
       }
     })
   })
+
+  it('queues a sync command from a sync_failed alert with alert context', async () => {
+    const wrapper = mountWithStubs(Monitoring)
+    await flushPromises()
+
+    await wrapper.vm.handleAlertCommand({
+      id: 'alert-sync-1',
+      node_id: 'node-1',
+      alert_type: 'sync_failed',
+      context: {
+        command_id: 'cmd-old',
+        policy_ref: 'acl-1',
+        policy_domain: 'acl'
+      }
+    }, 'sync')
+
+    expect(agentApiMock.sendAgentCommand).toHaveBeenCalledWith('node-1', {
+      command: 'sync',
+      params: {
+        source: 'monitoring',
+        alert_id: 'alert-sync-1',
+        event_type: 'sync_failed',
+        command_id: 'cmd-old',
+        policy_ref: 'acl-1',
+        policy_domain: 'acl'
+      },
+      timeout: 30
+    })
+    expect(monitorApiMock.getStats).toHaveBeenCalled()
+    expect(monitorApiMock.getEvents).toHaveBeenCalled()
+    expect(monitorApiMock.getAlerts).toHaveBeenCalled()
+  })
 })
 
 describe('node monitor detail context handling', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     routerPush.mockReset()
+    monitorApiMock.resolveAlert.mockClear()
+    agentApiMock.sendAgentCommand.mockClear()
     routeState.params = { nodeId: 'node-1' }
     routeState.query = {
       focus: 'certificate',
@@ -443,6 +497,38 @@ describe('node monitor detail context handling', () => {
         kind: 'acl'
       }
     })
+  })
+
+  it('queues a context sync command and preserves alert context from node detail', async () => {
+    const wrapper = mountWithStubs(NodeMonitorDetail)
+    await flushPromises()
+
+    await wrapper.vm.runContextCommand('sync')
+
+    expect(agentApiMock.sendAgentCommand).toHaveBeenCalledWith('node-1', {
+      command: 'sync',
+      params: {
+        source: 'node_monitor_detail',
+        alert_id: 'alert-1',
+        event_type: 'policy_failed',
+        command_id: 'cmd-1',
+        policy_ref: 'acl-1',
+        policy_domain: 'acl'
+      },
+      timeout: 30
+    })
+    expect(wrapper.vm.node.recent_commands[0].id).toBe('cmd-new')
+  })
+
+  it('resolves the focused alert from node detail and reloads node state', async () => {
+    const wrapper = mountWithStubs(NodeMonitorDetail)
+    await flushPromises()
+    const callsBeforeResolve = monitorApiMock.getNodeDetail.mock.calls.length
+
+    await wrapper.vm.resolveContextAlert()
+
+    expect(monitorApiMock.resolveAlert).toHaveBeenCalledWith('alert-1')
+    expect(monitorApiMock.getNodeDetail.mock.calls.length).toBeGreaterThan(callsBeforeResolve)
   })
 })
 

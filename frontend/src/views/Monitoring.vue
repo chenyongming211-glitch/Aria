@@ -130,7 +130,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="Actions" width="260">
+        <el-table-column label="Actions" width="360">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button v-if="row.node_id" size="small" @click="goToNodeFromAlert(row)">
@@ -138,6 +138,25 @@
               </el-button>
               <el-button v-if="row.context?.policy_ref" size="small" @click="goToPolicyFromContext(row.node_id, row.context)">
                 View Policy
+              </el-button>
+              <el-button
+                v-if="isActionableAlert(row) && hasPermission('commands:write')"
+                size="small"
+                type="primary"
+                plain
+                :loading="commandActionKey === alertCommandKey(row, 'sync')"
+                @click="handleAlertCommand(row, 'sync')"
+              >
+                Run Sync
+              </el-button>
+              <el-button
+                v-if="isActionableAlert(row) && hasPermission('commands:write')"
+                size="small"
+                plain
+                :loading="commandActionKey === alertCommandKey(row, 'health_check')"
+                @click="handleAlertCommand(row, 'health_check')"
+              >
+                Health Check
               </el-button>
               <el-button
                 v-if="hasPermission('commands:write')"
@@ -289,6 +308,7 @@ import {
   Bell
 } from '@element-plus/icons-vue'
 import { useMonitorApi } from '@/composables/useMonitorApi'
+import { useAgentProxyApi } from '@/composables/useAgentProxyApi'
 import { usePermission } from '../composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
 import { ElMessage } from 'element-plus'
@@ -302,6 +322,7 @@ const eventsLoading = ref(false)
 const alertsLoading = ref(false)
 const refreshing = ref(false)
 const resolvingId = ref(null)
+const commandActionKey = ref('')
 const alertsSectionRef = ref(null)
 const eventsSectionRef = ref(null)
 
@@ -327,6 +348,7 @@ const alertsFilterMode = ref('all')
 const filterEventType = ref('')
 const filterSeverity = ref('')
 const certificateAlertTypes = ['certificate_expiring', 'certificate_expired', 'certificate_renew_failed']
+const actionableAlertTypes = ['sync_failed', 'policy_failed', 'command_failed', 'node_offline']
 
 // --- Computed ---
 const statCards = computed(() => [
@@ -490,6 +512,54 @@ const handleResolve = async (alertId) => {
 }
 
 const isCertificateAlert = (alertType = '') => certificateAlertTypes.includes(alertType)
+
+const isActionableAlert = (alert = {}) => (
+  Boolean(alert?.node_id) && actionableAlertTypes.includes(alert?.alert_type)
+)
+
+const alertCommandKey = (alert = {}, command = '') => `${alert?.id || alert?.node_id || 'alert'}:${command}`
+
+const buildAlertCommandParams = (alert = {}) => {
+  const context = alert.context || {}
+  return {
+    source: 'monitoring',
+    alert_id: alert.id || '',
+    event_type: alert.alert_type || '',
+    ...(context.command_id ? { command_id: context.command_id } : {}),
+    ...(context.policy_ref ? { policy_ref: context.policy_ref } : {}),
+    ...(context.policy_domain ? { policy_domain: context.policy_domain } : {})
+  }
+}
+
+const handleAlertCommand = async (alert, command) => {
+  if (!hasPermission('commands:write')) {
+    ElMessage.error('Missing command permission')
+    return
+  }
+  if (!alert?.node_id) {
+    ElMessage.error('Alert does not reference a node')
+    return
+  }
+
+  const actionKey = alertCommandKey(alert, command)
+  commandActionKey.value = actionKey
+  try {
+    await useAgentProxyApi.sendAgentCommand(alert.node_id, {
+      command,
+      params: buildAlertCommandParams(alert),
+      timeout: 30
+    })
+    ElMessage.success(`${command} queued`)
+    await Promise.all([loadStats(), loadEvents(), loadAlerts()])
+  } catch (e) {
+    console.error(`Failed to queue ${command} from alert:`, e)
+    ElMessage.error(`Failed to queue ${command}`)
+  } finally {
+    if (commandActionKey.value === actionKey) {
+      commandActionKey.value = ''
+    }
+  }
+}
 
 const setAlertsFilterMode = async (mode) => {
   alertsFilterMode.value = mode

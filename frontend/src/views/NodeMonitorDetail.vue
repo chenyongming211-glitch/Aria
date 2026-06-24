@@ -19,6 +19,33 @@
             <el-button v-if="contextQuery.policyRef" size="small" @click="openPolicyCenter">
               Open Policy
             </el-button>
+            <el-button
+              v-if="hasPermission('commands:write')"
+              size="small"
+              type="primary"
+              :loading="contextCommandLoading === 'sync'"
+              @click="runContextCommand('sync')"
+            >
+              Run Sync
+            </el-button>
+            <el-button
+              v-if="hasPermission('commands:write')"
+              size="small"
+              :loading="contextCommandLoading === 'health_check'"
+              @click="runContextCommand('health_check')"
+            >
+              Health Check
+            </el-button>
+            <el-button
+              v-if="contextQuery.alertId && hasPermission('commands:write')"
+              size="small"
+              type="warning"
+              plain
+              :loading="resolvingContextAlert"
+              @click="resolveContextAlert"
+            >
+              Resolve Alert
+            </el-button>
             <el-button v-if="contextQuery.focus === 'certificate'" size="small" @click="scrollToFocusSection">
               Focus Certificate
             </el-button>
@@ -342,7 +369,10 @@
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { useMonitorApi } from '@/composables/useMonitorApi'
+import { useAgentProxyApi } from '@/composables/useAgentProxyApi'
+import { usePermission } from '@/composables/usePermission'
 import {
   commandStatusLabel,
   commandStatusTagType,
@@ -351,8 +381,11 @@ import {
 
 const route = useRoute()
 const router = useRouter()
+const { hasPermission } = usePermission()
 
 const loading = ref(false)
+const contextCommandLoading = ref('')
+const resolvingContextAlert = ref(false)
 const node = ref(null)
 const certificateSectionRef = ref(null)
 const commandsSectionRef = ref(null)
@@ -477,6 +510,89 @@ const loadNode = async () => {
     node.value = null
   } finally {
     loading.value = false
+  }
+}
+
+const buildContextCommandParams = () => ({
+  source: 'node_monitor_detail',
+  ...(contextQuery.value.alertId ? { alert_id: contextQuery.value.alertId } : {}),
+  ...(contextQuery.value.eventType ? { event_type: contextQuery.value.eventType } : {}),
+  ...(contextQuery.value.commandId ? { command_id: contextQuery.value.commandId } : {}),
+  ...(contextQuery.value.policyRef ? { policy_ref: contextQuery.value.policyRef } : {}),
+  ...(contextQuery.value.policyDomain ? { policy_domain: contextQuery.value.policyDomain } : {})
+})
+
+const normalizeQueuedCommand = (command, response = {}) => ({
+  id: response.command_id || response.id || '',
+  command: response.command || command,
+  status: response.status || 'pending',
+  message: response.message || 'Command queued for delivery',
+  created_at: response.created_at || new Date().toISOString(),
+  updated_at: response.updated_at || response.created_at || new Date().toISOString(),
+  timeout_seconds: response.timeout_seconds,
+  priority: response.priority
+})
+
+const prependQueuedCommand = (command) => {
+  if (!node.value || !command?.id) return
+  const existing = Array.isArray(node.value.recent_commands) ? node.value.recent_commands : []
+  if (existing.some((item) => item.id === command.id)) {
+    node.value.recent_commands = existing
+    return
+  }
+  node.value.recent_commands = [command, ...existing]
+}
+
+const runContextCommand = async (command) => {
+  if (!hasPermission('commands:write')) {
+    ElMessage.error('Missing command permission')
+    return
+  }
+  if (!nodeId.value) {
+    ElMessage.error('Node context is missing')
+    return
+  }
+
+  contextCommandLoading.value = command
+  try {
+    const response = await useAgentProxyApi.sendAgentCommand(nodeId.value, {
+      command,
+      params: buildContextCommandParams(),
+      timeout: 30
+    })
+    const queuedCommand = normalizeQueuedCommand(command, response)
+    prependQueuedCommand(queuedCommand)
+    ElMessage.success(`${command} queued`)
+    await loadNode()
+    prependQueuedCommand(queuedCommand)
+  } catch (e) {
+    console.error(`Failed to queue ${command}:`, e)
+    ElMessage.error(`Failed to queue ${command}`)
+  } finally {
+    contextCommandLoading.value = ''
+  }
+}
+
+const resolveContextAlert = async () => {
+  if (!hasPermission('commands:write')) {
+    ElMessage.error('Missing command permission')
+    return
+  }
+  if (!contextQuery.value.alertId) {
+    ElMessage.error('Alert context is missing')
+    return
+  }
+
+  resolvingContextAlert.value = true
+  try {
+    await useMonitorApi.resolveAlert(contextQuery.value.alertId)
+    ElMessage.success('Alert resolved')
+    await loadNode()
+  } catch (e) {
+    console.error('Failed to resolve context alert:', e)
+    ElMessage.error('Failed to resolve alert')
+  } finally {
+    resolvingContextAlert.value = false
   }
 }
 
