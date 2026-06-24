@@ -68,4 +68,57 @@ describe('usePolicyApi', () => {
     expect(result.lastDeliveryAction).toBe('retry')
     expect(result.deliveryHistory).toHaveLength(1)
   })
+
+  it('应该从最近投递状态推导统一策略状态和待执行数量', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        success: true,
+        data: [
+          {
+            policy_id: 'route:route-1',
+            policy_ref: 'route-1',
+            kind: 'route',
+            node_id: 'node-1',
+            node_name: 'node-1',
+            status: 'pending',
+            last_delivery: {
+              id: 'delivery-1',
+              command_id: 'cmd-1',
+              command_status: 'completed',
+              action: 'update'
+            },
+            delivery_history: [{
+              id: 'delivery-1',
+              command_id: 'cmd-1',
+              command_status: 'completed',
+              action: 'update'
+            }]
+          },
+          {
+            policy_id: 'acl:acl-1',
+            policy_ref: 'acl-1',
+            kind: 'acl',
+            node_id: 'node-1',
+            node_name: 'node-1',
+            status: 'idle',
+            last_delivery: {
+              id: 'delivery-2',
+              command_id: 'cmd-2',
+              command_status: 'acknowledged',
+              action: 'create'
+            }
+          }
+        ]
+      }
+    })
+
+    const result = await usePolicyApi.listPolicies()
+
+    expect(result[0].status).toBe('applied')
+    expect(result[0].policy_status).toBe('applied')
+    expect(result[0].pendingCmds).toBe(0)
+    expect(result[0].observedState).toBe('applied')
+    expect(result[1].status).toBe('in_progress')
+    expect(result[1].pendingCmds).toBe(1)
+  })
 })

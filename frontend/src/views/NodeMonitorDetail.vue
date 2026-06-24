@@ -256,7 +256,7 @@
           </el-table-column>
           <el-table-column prop="status" label="Status" width="120">
             <template #default="{ row }">
-              <el-tag :type="cmdStatusType(row.status)" size="small">{{ row.status }}</el-tag>
+              <el-tag :type="commandStatusTagType(row.status)" size="small">{{ commandStatusLabel(row.status) }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="created_at" label="Created" width="180">
@@ -291,7 +291,7 @@
           <el-table-column prop="policy_ref" label="Policy Ref" width="160" />
           <el-table-column prop="command_status" label="Status" width="120">
             <template #default="{ row }">
-              <el-tag :type="cmdStatusType(row.command_status)" size="small">{{ row.command_status }}</el-tag>
+              <el-tag :type="commandStatusTagType(row.command_status)" size="small">{{ commandStatusLabel(row.command_status) }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="created_at" label="Created" width="180">
@@ -343,6 +343,11 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { useMonitorApi } from '@/composables/useMonitorApi'
+import {
+  commandStatusLabel,
+  commandStatusTagType,
+  isPendingCommandStatus
+} from '@/utils/controlLoopStatus'
 
 const route = useRoute()
 const router = useRouter()
@@ -422,9 +427,9 @@ const statusCount = (items, statuses, field = 'status') => (
 
 const workbenchSummary = computed(() => {
   const failedCommands = statusCount(recentCommands.value, ['failed'])
-  const pendingCommands = statusCount(recentCommands.value, ['pending', 'queued', 'sent', 'acknowledged', 'in_progress', 'running'])
+  const pendingCommands = recentCommands.value.filter((item) => isPendingCommandStatus(item?.status)).length
   const failedDeliveries = statusCount(recentPolicyDeliveries.value, ['failed'], 'command_status')
-  const pendingDeliveries = statusCount(recentPolicyDeliveries.value, ['pending', 'queued', 'sent', 'acknowledged', 'in_progress', 'running'], 'command_status')
+  const pendingDeliveries = recentPolicyDeliveries.value.filter((item) => isPendingCommandStatus(item?.command_status)).length
   const certificateStatus = certificateStatusLabel.value
 
   return [
@@ -499,22 +504,7 @@ const formatTime = (iso) => {
   return new Date(iso).toLocaleString()
 }
 
-const cmdStatusType = (status) => {
-  switch (status) {
-    case 'completed': return 'success'
-    case 'failed': return 'danger'
-    case 'pending':
-    case 'queued':
-    case 'sent':
-    case 'acknowledged':
-    case 'in_progress':
-    case 'running':
-      return 'warning'
-    case 'stale':
-      return 'info'
-    default: return 'info'
-  }
-}
+const cmdStatusType = commandStatusTagType
 
 const alertSeverityType = (severity) => {
   switch (severity) {

@@ -272,6 +272,11 @@ import { useIpGroupApi } from '@/composables/useIpGroupApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
+import {
+  isRetryablePolicyStatus,
+  policyStatusLabel as formatPolicyStatus,
+  policyStatusTagType as getPolicyTagType
+} from '@/utils/controlLoopStatus'
 
 const { hasPermission } = usePermission()
 
@@ -455,7 +460,7 @@ const handleDelete = async (row) => {
 }
 
 const canRetryPolicy = (row) => {
-  return ['error', 'failed', 'stale'].includes(String(row?.policy_status || row?.policyStatus || '').toLowerCase())
+  return isRetryablePolicyStatus(row?.policy_status || row?.policyStatus)
 }
 
 const handleRetry = async (row) => {
@@ -545,36 +550,6 @@ const getActionType = (action) => {
 const formatDirection = (direction) => {
   const map = { ingress: '入站', egress: '出站', both: '双向' }
   return map[direction] || direction || '入站'
-}
-
-const formatPolicyStatus = (status) => {
-  const map = {
-    applied: '已应用',
-    pending: '待下发',
-    queued: '排队中',
-    sent: '已发送',
-    in_progress: '下发中',
-    stale: '已过期',
-    failed: '失败',
-    error: '失败',
-    idle: '空闲'
-  }
-  return map[status] || status || '未知'
-}
-
-const getPolicyTagType = (status) => {
-  const map = {
-    applied: 'success',
-    pending: 'warning',
-    queued: 'warning',
-    sent: 'warning',
-    in_progress: 'warning',
-    stale: 'info',
-    failed: 'danger',
-    error: 'danger',
-    idle: 'info'
-  }
-  return map[status] || 'info'
 }
 
 const formatGroupOption = (group) => {

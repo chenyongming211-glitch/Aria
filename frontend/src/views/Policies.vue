@@ -258,8 +258,8 @@
             :class="{ 'delivery-item-match': isDeliveryMatch(item) }"
           >
             <div class="delivery-main">
-              <el-tag size="small" :type="statusTagType(item.command_status)">
-                {{ statusLabel(item.command_status) }}
+              <el-tag size="small" :type="commandStatusTagType(item.command_status)">
+                {{ commandStatusLabel(item.command_status) }}
               </el-tag>
               <span class="delivery-command">{{ item.command_id }}</span>
             </div>
@@ -289,6 +289,13 @@ import { ElMessage } from 'element-plus'
 import { usePolicyApi } from '@/composables/usePolicyApi'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
+import {
+  commandStatusLabel,
+  commandStatusTagType,
+  isRetryablePolicyStatus,
+  policyStatusLabel as statusLabel,
+  policyStatusTagType as statusTagType
+} from '@/utils/controlLoopStatus'
 
 const router = useRouter()
 const route = useRoute()
@@ -321,43 +328,6 @@ const kindTagType = (kind) => {
     case 'qos': return 'warning'
     case 'route': return 'success'
     default: return 'info'
-  }
-}
-
-const statusLabel = (status) => {
-  const labels = {
-    applied: '已应用',
-    healthy: 'Healthy',
-    pending: '待下发',
-    in_progress: '下发中',
-    error: '失败',
-    idle: '空闲',
-    sent: '已发送',
-    acknowledged: '已确认',
-    completed: '已完成',
-    stale: '已过期',
-    failed: '失败'
-  }
-  return labels[status] || status || '未知'
-}
-
-const statusTagType = (status) => {
-  switch (status) {
-    case 'applied':
-    case 'completed':
-      return 'success'
-    case 'pending':
-    case 'sent':
-    case 'acknowledged':
-    case 'in_progress':
-      return 'warning'
-    case 'stale':
-      return 'info'
-    case 'error':
-    case 'failed':
-      return 'danger'
-    default:
-      return 'info'
   }
 }
 
@@ -613,7 +583,7 @@ const canRetryPolicy = (policy) => {
   if (!policy) return false
   const permission = policyWritePermission(policy.kind)
   if (!permission || !hasPermission(permission)) return false
-  return ['error', 'failed', 'stale'].includes(String(policy.status || policy.observedState || '').toLowerCase())
+  return isRetryablePolicyStatus(policy.status || policy.observedState)
 }
 
 const retryPolicyDelivery = async (policy) => {

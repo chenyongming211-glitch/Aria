@@ -1,7 +1,25 @@
 import api from './useApi'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
+import {
+  mapCommandStatusToPolicyStatus,
+  pendingCountForCommandStatus
+} from '@/utils/controlLoopStatus'
 
 function normalizePolicy(policy) {
+  const lastDelivery = policy.last_delivery || null
+  const deliveryHistory = Array.isArray(policy.delivery_history)
+    ? policy.delivery_history
+    : (lastDelivery ? [lastDelivery] : [])
+  const deliveryStatus = lastDelivery?.command_status || policy.dispatch?.status || ''
+  const mappedDeliveryStatus = mapCommandStatusToPolicyStatus(deliveryStatus)
+  const status = policy.policy_status || mappedDeliveryStatus || policy.status || 'idle'
+  const pendingCmds = typeof policy.pending_cmds === 'number'
+    ? policy.pending_cmds
+    : (deliveryHistory.length > 0
+        ? deliveryHistory.reduce((total, delivery) => total + pendingCountForCommandStatus(delivery?.command_status), 0)
+        : pendingCountForCommandStatus(deliveryStatus))
+  const lastDeliveryError = policy.last_delivery_error || lastDelivery?.last_error || ''
+
   const normalized = {
     id: policy.policy_id,
     policyId: policy.policy_id,
@@ -16,22 +34,22 @@ function normalizePolicy(policy) {
     enabled: policy.enabled !== false,
     priority: Number(policy.priority || 100),
     version: policy.version || '',
-    status: policy.status || policy.policy_status || 'idle',
+    status,
     desiredStateVersion: policy.desired_state_version || '',
     desiredStateUpdatedAt: policy.desired_state_updated_at || null,
     appliedStateVersion: policy.applied_state_version || '',
     appliedStateUpdatedAt: policy.applied_state_updated_at || null,
-    observedState: policy.observed_state || policy.status || policy.policy_status || 'idle',
+    observedState: policy.observed_state || status,
     observedMessage: policy.observed_message || policy.last_sync_error || '',
     observedAt: policy.observed_at || null,
     stateConvergence: policy.state_convergence || '',
     spec: policy.spec || {},
-    pendingCmds: Number(policy.pending_cmds || 0),
-    lastDelivery: policy.last_delivery || null,
-    deliveryHistory: Array.isArray(policy.delivery_history) ? policy.delivery_history : [],
-    lastDeliveryCommandId: policy.last_delivery_command_id || policy.last_delivery?.command_id || '',
-    lastDeliveryAction: policy.last_delivery_action || policy.last_delivery?.action || '',
-    lastDeliveryError: policy.last_delivery_error || '',
+    pendingCmds,
+    lastDelivery,
+    deliveryHistory,
+    lastDeliveryCommandId: policy.last_delivery_command_id || lastDelivery?.command_id || '',
+    lastDeliveryAction: policy.last_delivery_action || lastDelivery?.action || '',
+    lastDeliveryError,
     updatedAt: policy.updated_at || null,
     createdAt: policy.created_at || null
   }

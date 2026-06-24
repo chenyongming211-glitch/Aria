@@ -1,7 +1,28 @@
 import api from './useApi'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
+import {
+  mapCommandStatusToPolicyStatus,
+  pendingCountForCommandStatus
+} from '@/utils/controlLoopStatus'
 
 function normalizeRoute(node, route) {
+  const lastDelivery = route.last_delivery || null
+  const deliveryHistory = Array.isArray(route.delivery_history)
+    ? route.delivery_history
+    : (lastDelivery ? [lastDelivery] : [])
+  const deliveryStatus = lastDelivery?.command_status || route.dispatch?.status || ''
+  const mappedDeliveryStatus = mapCommandStatusToPolicyStatus(deliveryStatus)
+  const pendingCmds = typeof route.pending_cmds === 'number'
+    ? route.pending_cmds
+    : (deliveryHistory.length > 0
+        ? deliveryHistory.reduce((total, delivery) => total + pendingCountForCommandStatus(delivery?.command_status), 0)
+        : (mappedDeliveryStatus ? pendingCountForCommandStatus(deliveryStatus) : (node.pending_cmds || 0)))
+  const lastCommandError = route.last_delivery_error ||
+    lastDelivery?.last_error ||
+    route.last_command_error ||
+    node.last_command_error ||
+    ''
+
   return {
     id: route.id || route.cidr,
     cidr: route.cidr || route.id,
@@ -10,14 +31,14 @@ function normalizeRoute(node, route) {
     hostname: node.hostname || 'unknown',
     publicIp: node.public_ip || 'N/A',
     region: node.region || 'unknown',
-    policyStatus: route.policy_status || node.configuration_status || 'idle',
-    pendingCmds: typeof route.pending_cmds === 'number' ? route.pending_cmds : (node.pending_cmds || 0),
-    lastCommandError: route.last_delivery_error || node.last_command_error || '',
+    policyStatus: route.policy_status || mappedDeliveryStatus || node.configuration_status || 'idle',
+    pendingCmds,
+    lastCommandError,
     lastSyncAt: route.last_delivery_at || node.last_sync_at || null,
-    lastDelivery: route.last_delivery || null,
-    deliveryHistory: Array.isArray(route.delivery_history) ? route.delivery_history : [],
-    lastDeliveryCommandId: route.last_delivery_command_id || route.last_delivery?.command_id || '',
-    lastDeliveryAction: route.last_delivery_action || route.last_delivery?.action || ''
+    lastDelivery,
+    deliveryHistory,
+    lastDeliveryCommandId: route.last_delivery_command_id || lastDelivery?.command_id || '',
+    lastDeliveryAction: route.last_delivery_action || lastDelivery?.action || ''
   }
 }
 

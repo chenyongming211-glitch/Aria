@@ -139,6 +139,10 @@ import { useRouteApi } from '@/composables/useRouteApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
+import {
+  policyStatusLabel as formatPolicyStatus,
+  policyStatusTagType as getPolicyTagType
+} from '@/utils/controlLoopStatus'
 
 const { hasPermission } = usePermission()
 
@@ -322,29 +326,6 @@ const shortCommandId = (commandId) => {
     return '-'
   }
   return commandId.slice(0, 8)
-}
-
-const formatPolicyStatus = (status) => {
-  const map = {
-    applied: '已应用',
-    pending: '待下发',
-    in_progress: '下发中',
-    stale: '已过期',
-    error: '失败',
-    idle: '空闲'
-  }
-  return map[status] || status || '未知'
-}
-
-const getPolicyTagType = (status) => {
-  switch (status) {
-    case 'applied': return 'success'
-    case 'pending':
-    case 'in_progress': return 'warning'
-    case 'stale': return 'info'
-    case 'error': return 'danger'
-    default: return 'info'
-  }
 }
 
 onMounted(() => {

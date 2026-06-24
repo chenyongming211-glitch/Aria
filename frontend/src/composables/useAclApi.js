@@ -1,6 +1,10 @@
 import api from './useApi'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 import { usePolicyApi } from '@/composables/usePolicyApi'
+import {
+  mapCommandStatusToPolicyStatus,
+  pendingCountForCommandStatus
+} from '@/utils/controlLoopStatus'
 
 const aclRuleNodeMap = new Map()
 
@@ -148,20 +152,6 @@ function normalizeStats(rule) {
     dropped_packets: Number(stats.dropped_packets ?? 0),
     dropped_bytes: Number(stats.dropped_bytes ?? 0)
   }
-}
-
-function mapCommandStatusToPolicyStatus(status) {
-  const normalized = String(status || '').trim().toLowerCase()
-  if (normalized === 'pending') return 'pending'
-  if (['sent', 'acknowledged', 'queued', 'in_progress'].includes(normalized)) return 'in_progress'
-  if (normalized === 'completed') return 'applied'
-  if (normalized === 'failed') return 'error'
-  if (normalized === 'stale') return 'stale'
-  return ''
-}
-
-function pendingCountForCommandStatus(status) {
-  return ['pending', 'sent', 'acknowledged', 'queued', 'in_progress'].includes(String(status || '').trim().toLowerCase()) ? 1 : 0
 }
 
 function normalizeDeliveryFields(rule, nodeState = {}) {
