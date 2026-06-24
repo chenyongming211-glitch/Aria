@@ -446,7 +446,8 @@ func (r *Router) failTimedOutNodeCommands(node *controllerstorage.Node) error {
 	}
 	affected, err := r.store.FailTimedOutAgentCommandsForNode(node.PublicKey)
 	if err != nil {
-		return err
+		log.Printf("[api/v2] failed to refresh timed out commands for node %s: %v", node.ID, err)
+		return nil
 	}
 	if affected > 0 {
 		log.Printf("[api/v2] marked %d timed out commands failed for node %s", affected, node.ID)
