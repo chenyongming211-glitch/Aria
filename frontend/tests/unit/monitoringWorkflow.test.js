@@ -138,7 +138,16 @@ const {
         observedState: 'healthy',
         deliveryHistory: []
       }
-    ]))
+    ])),
+    retryPolicySync: vi.fn(async () => ({
+      policyId: 'policy-1',
+      policyRef: 'acl-1',
+      nodeId: 'node-1',
+      kind: 'acl',
+      name: 'ACL 1',
+      status: 'pending',
+      lastDeliveryCommandId: 'cmd-retry'
+    }))
   },
   localStorageMock: {
     getItem: vi.fn(() => null),
@@ -261,6 +270,7 @@ describe('monitoring workflow routing', () => {
     monitorApiMock.getEvents.mockClear()
     monitorApiMock.getAlerts.mockClear()
     policyApiMock.listPolicies.mockClear()
+    policyApiMock.retryPolicySync.mockClear()
     routeState.params = { nodeId: 'node-1' }
     routeState.query = {}
     routeState.fullPath = '/monitoring/nodes/node-1'
@@ -483,5 +493,25 @@ describe('policy center context handling', () => {
         policyDomain: 'acl'
       }
     })
+  })
+
+  it('retries failed policy delivery from policy center', async () => {
+    const wrapper = mountWithStubs(Policies)
+    await flushPromises()
+
+    await wrapper.vm.retryPolicyDelivery({
+      nodeId: 'node-1',
+      policyRef: 'acl-1',
+      kind: 'acl',
+      name: 'ACL 1'
+    })
+
+    expect(policyApiMock.retryPolicySync).toHaveBeenCalledWith({
+      nodeId: 'node-1',
+      kind: 'acl',
+      policyRef: 'acl-1',
+      policyName: 'ACL 1'
+    })
+    expect(policyApiMock.listPolicies).toHaveBeenCalledTimes(2)
   })
 })

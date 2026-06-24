@@ -121,6 +121,7 @@ vi.mock('@/composables/useQosApi', () => ({
     createQoSRule: vi.fn(async () => ({})),
     updateQoSRule: vi.fn(async () => ({})),
     deleteQoSRule: vi.fn(async () => ({})),
+    retryQoSPolicySync: vi.fn(async () => ({})),
     getProtocolName: vi.fn((protocol) => String(protocol))
   }
 }))
@@ -130,7 +131,8 @@ vi.mock('@/composables/useAclApi', () => ({
     getACLRulesByNode: vi.fn(async () => []),
     createACLRule: vi.fn(async () => ({})),
     updateACLRule: vi.fn(async () => ({})),
-    deleteACLRule: vi.fn(async () => ({}))
+    deleteACLRule: vi.fn(async () => ({})),
+    retryACLPolicySync: vi.fn(async () => ({}))
   }
 }))
 
@@ -298,10 +300,11 @@ const elementStubs = {
           max_port: 65535,
           protocol: 6,
           action: 'allow',
-          policy_status: 'idle',
+          policy_status: 'error',
+          policyStatus: 'error',
           pending_cmds: 0,
           last_delivery_command_id: '',
-          last_command_error: '',
+          last_command_error: 'apply failed',
           used_count: 0
         }
       }
@@ -357,6 +360,7 @@ describe('page-level RBAC button visibility', () => {
     expect(allowed.text()).toContain('新建规则')
     expect(allowed.text()).toContain('编辑')
     expect(allowed.text()).toContain('删除')
+    expect(allowed.text()).toContain('重试')
 
     permissionSet.clear()
     const denied = mountWithStubs(ACLRules)
@@ -364,6 +368,7 @@ describe('page-level RBAC button visibility', () => {
     expect(denied.text()).not.toContain('新建规则')
     expect(denied.text()).not.toContain('编辑')
     expect(denied.text()).not.toContain('删除')
+    expect(denied.text()).not.toContain('重试')
   })
 
   it('shows/hides Tokens create and revoke actions based on tokens:write', async () => {
@@ -516,6 +521,7 @@ describe('page-level RBAC button visibility', () => {
     expect(allowedButtons).toContain('添加规则')
     expect(allowedButtons).toContain('编辑')
     expect(allowedButtons).toContain('删除')
+    expect(allowedButtons).toContain('重试')
     expect(allowedButtons).toContain('保存并应用')
 
     permissionSet.clear()
@@ -525,6 +531,7 @@ describe('page-level RBAC button visibility', () => {
     expect(deniedButtons).not.toContain('添加规则')
     expect(deniedButtons).not.toContain('编辑')
     expect(deniedButtons).not.toContain('删除')
+    expect(deniedButtons).not.toContain('重试')
     expect(deniedButtons).not.toContain('保存并应用')
   })
 

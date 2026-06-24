@@ -250,6 +250,35 @@ describe('useAclApi', () => {
       expect(result.pending_cmds).toBe(0)
       expect(result.last_command_error).toContain('superseded')
     })
+
+    it('应该按 ACL 规则生成策略重试请求', async () => {
+      api.post.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            policy_ref: 'acl-1',
+            kind: 'acl',
+            status: 'pending',
+            last_delivery_command_id: 'cmd-retry'
+          }
+        }
+      })
+
+      const result = await useAclApi.retryACLPolicySync({
+        id: 'acl-1',
+        node_id: 'node-1',
+        name: 'deny bad peer'
+      })
+
+      expect(api.post).toHaveBeenCalledWith('/v2/tenants/tenant-1/policies/retry', {
+        node_id: 'node-1',
+        kind: 'acl',
+        policy_ref: 'acl-1',
+        policy_name: 'deny bad peer'
+      })
+      expect(result.policy_status).toBe('pending')
+      expect(result.last_delivery_command_id).toBe('cmd-retry')
+    })
   })
 
   describe('updateACLRule', () => {

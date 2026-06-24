@@ -272,6 +272,34 @@ describe('useQosApi', () => {
     expect(rules[0].last_command_error).toContain('superseded')
   })
 
+  it('应该按 QoS 规则生成策略重试请求', async () => {
+    api.post.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          policy_ref: 'qos-1',
+          kind: 'qos',
+          status: 'pending',
+          last_delivery_command_id: 'cmd-retry'
+        }
+      }
+    })
+
+    const result = await useQosApi.retryQoSPolicySync('node-1', {
+      id: 'qos-1',
+      description: 'limit peer'
+    })
+
+    expect(api.post).toHaveBeenCalledWith('/v2/tenants/tenant-1/policies/retry', {
+      node_id: 'node-1',
+      kind: 'qos',
+      policy_ref: 'qos-1',
+      policy_name: 'limit peer'
+    })
+    expect(result.policyStatus).toBe('pending')
+    expect(result.last_delivery_command_id).toBe('cmd-retry')
+  })
+
   it('不应下发旧版 QoS protocol/port 匹配字段', async () => {
     api.post.mockResolvedValue({
       data: { success: true, data: { id: 'rule-1' } }
