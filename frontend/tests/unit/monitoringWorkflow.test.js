@@ -227,12 +227,14 @@ vi.mock('element-plus', () => ({
 import Monitoring from '@/views/Monitoring.vue'
 import NodeMonitorDetail from '@/views/NodeMonitorDetail.vue'
 import Policies from '@/views/Policies.vue'
+import AIAssistant from '@/views/AIAssistant.vue'
 
 const elementStubs = {
   'el-row': { template: '<div><slot /></div>' },
   'el-col': { template: '<div><slot /></div>' },
   'el-card': { template: '<div><slot name="header" /><slot /></div>' },
   'el-input': { template: '<div><slot name="prefix" /><slot name="append" /></div>' },
+  'el-avatar': { template: '<div><slot /></div>' },
   'el-select': { template: '<div><slot /></div>' },
   'el-option': { template: '<div></div>' },
   'el-button': { template: '<button @click="$emit(\'click\')"><slot /></button>' },
@@ -243,6 +245,7 @@ const elementStubs = {
   'el-pagination': { template: '<div></div>' },
   'el-tooltip': { template: '<div><slot /></div>' },
   'el-drawer': { template: '<div><slot /></div>' },
+  'el-dialog': { template: '<div><slot /><slot name="footer" /></div>' },
   'el-descriptions': { template: '<div><slot /></div>' },
   'el-descriptions-item': { template: '<div><slot /></div>' },
   'el-table': { template: '<div><slot /></div>' },
@@ -441,6 +444,35 @@ describe('monitoring workflow routing', () => {
     expect(monitorApiMock.getEvents).toHaveBeenCalled()
     expect(monitorApiMock.getAlerts).toHaveBeenCalled()
   })
+
+  it('routes actionable alerts to AI with full diagnostic context', async () => {
+    const wrapper = mountWithStubs(Monitoring)
+    await flushPromises()
+
+    wrapper.vm.askAIForAlert({
+      id: 'alert-1',
+      node_id: 'node-1',
+      alert_type: 'policy_failed',
+      context: {
+        command_id: 'cmd-1',
+        policy_ref: 'acl-1',
+        policy_domain: 'acl'
+      }
+    })
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'AiAssistant',
+      query: {
+        source: 'monitoring',
+        nodeId: 'node-1',
+        alertId: 'alert-1',
+        eventType: 'policy_failed',
+        commandId: 'cmd-1',
+        policyRef: 'acl-1',
+        policyDomain: 'acl'
+      }
+    })
+  })
 })
 
 describe('node monitor detail context handling', () => {
@@ -530,6 +562,26 @@ describe('node monitor detail context handling', () => {
     expect(monitorApiMock.resolveAlert).toHaveBeenCalledWith('alert-1')
     expect(monitorApiMock.getNodeDetail.mock.calls.length).toBeGreaterThan(callsBeforeResolve)
   })
+
+  it('routes focused node context to AI diagnostics', async () => {
+    const wrapper = mountWithStubs(NodeMonitorDetail)
+    await flushPromises()
+
+    wrapper.vm.askAIForContext()
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'AiAssistant',
+      query: {
+        source: 'node_monitor_detail',
+        nodeId: 'node-1',
+        alertId: 'alert-1',
+        eventType: 'policy_failed',
+        commandId: 'cmd-1',
+        policyRef: 'acl-1',
+        policyDomain: 'acl'
+      }
+    })
+  })
 })
 
 describe('policy center context handling', () => {
@@ -601,5 +653,33 @@ describe('policy center context handling', () => {
       policyName: 'ACL 1'
     })
     expect(policyApiMock.listPolicies.mock.calls.length).toBeGreaterThan(callsBeforeRetry)
+  })
+})
+
+describe('AI assistant monitoring context', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    routeState.params = {}
+    routeState.query = {
+      source: 'monitoring',
+      nodeId: 'node-1',
+      alertId: 'alert-1',
+      eventType: 'sync_failed',
+      commandId: 'cmd-1',
+      policyRef: 'acl-1',
+      policyDomain: 'acl'
+    }
+    routeState.fullPath = '/ai-copilot?source=monitoring&nodeId=node-1&alertId=alert-1'
+  })
+
+  it('prefills a diagnostic prompt from monitoring query context', () => {
+    const wrapper = mountWithStubs(AIAssistant)
+
+    expect(wrapper.vm.inputMessage).toContain('Diagnose Aria operations alert')
+    expect(wrapper.vm.inputMessage).toContain('node_id: node-1')
+    expect(wrapper.vm.inputMessage).toContain('alert_id: alert-1')
+    expect(wrapper.vm.inputMessage).toContain('event_type: sync_failed')
+    expect(wrapper.vm.inputMessage).toContain('policy_ref: acl-1')
+    expect(wrapper.vm.inputMessage).toContain('command_id: cmd-1')
   })
 })

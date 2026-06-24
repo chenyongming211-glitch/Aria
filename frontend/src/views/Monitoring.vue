@@ -130,7 +130,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="Actions" width="360">
+        <el-table-column label="Actions" width="430">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button v-if="row.node_id" size="small" @click="goToNodeFromAlert(row)">
@@ -157,6 +157,15 @@
                 @click="handleAlertCommand(row, 'health_check')"
               >
                 Health Check
+              </el-button>
+              <el-button
+                v-if="isActionableAlert(row) && hasPermission('ai:use')"
+                size="small"
+                type="success"
+                plain
+                @click="askAIForAlert(row)"
+              >
+                Ask AI
               </el-button>
               <el-button
                 v-if="hasPermission('commands:write')"
@@ -529,6 +538,30 @@ const buildAlertCommandParams = (alert = {}) => {
     ...(context.policy_ref ? { policy_ref: context.policy_ref } : {}),
     ...(context.policy_domain ? { policy_domain: context.policy_domain } : {})
   }
+}
+
+const buildAlertAIQuery = (alert = {}) => {
+  const context = alert.context || {}
+  return {
+    source: 'monitoring',
+    ...(alert.node_id ? { nodeId: alert.node_id } : {}),
+    ...(alert.id ? { alertId: alert.id } : {}),
+    ...(alert.alert_type ? { eventType: alert.alert_type } : {}),
+    ...(context.command_id ? { commandId: context.command_id } : {}),
+    ...(context.policy_ref ? { policyRef: context.policy_ref } : {}),
+    ...(context.policy_domain ? { policyDomain: context.policy_domain } : {})
+  }
+}
+
+const askAIForAlert = (alert = {}) => {
+  if (!hasPermission('ai:use')) {
+    ElMessage.error('Missing AI permission')
+    return
+  }
+  router.push({
+    name: 'AiAssistant',
+    query: buildAlertAIQuery(alert)
+  })
 }
 
 const handleAlertCommand = async (alert, command) => {

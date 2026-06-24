@@ -248,6 +248,12 @@ Monitoring 的事件应能反向跳转到策略、节点和命令详情。
 
 控制闭环完成后，至少应能通过以下验收：
 
+### 2026-06-25 当前收口状态
+
+- ACL、QoS、Route、Blacklist 写操作已经走 `desired_state_version -> agent_commands -> policy_deliveries` 的控制链路。
+- Policy Center、Nodes、Monitoring 已统一展示 `pending / sent / acknowledged / applied / failed / stale` 的状态语义和失败原因。
+- 本阶段剩余工作是线上真实 Agent 冒烟：创建/更新/删除 ACL、QoS、Route 后，确认 `desired_state_version` 变化、Agent applied 回写、失败原因一致展示。
+
 1. 创建 ACL 规则后，Controller 返回 `desired_state_version`、`command_id` 和 `policy_delivery`。
 2. 创建 QoS 规则后，`node_control_states.desired_state_version` 发生变化。
 3. 删除 Route 后，前端不立即假定删除完成，而是展示投递状态。

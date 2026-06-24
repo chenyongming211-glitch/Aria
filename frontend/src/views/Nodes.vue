@@ -602,6 +602,98 @@
       </div>
     </el-dialog>
 
+    <!-- 节点接入向导 -->
+    <el-dialog
+      v-model="onboardingDialogVisible"
+      title="Onboard New Node"
+      width="760px"
+      custom-class="node-onboarding-dialog"
+    >
+      <div class="onboarding-flow">
+        <el-alert
+          title="Create an enrollment token, copy the init command, run it on the target machine, then start aria-agent."
+          type="info"
+          show-icon
+          :closable="false"
+        />
+
+        <div class="onboarding-section">
+          <h4>1. Enrollment Token</h4>
+          <el-form :model="onboardingForm" label-width="150px">
+            <el-form-item label="Token Tag">
+              <el-input v-model="onboardingForm.tokenTag" placeholder="node-onboarding" />
+            </el-form-item>
+            <el-form-item label="Max Uses">
+              <el-input-number v-model="onboardingForm.maxUses" :min="1" :max="1000" />
+            </el-form-item>
+            <el-form-item label="TTL Hours">
+              <el-input-number v-model="onboardingForm.ttlHours" :min="1" :max="8760" />
+            </el-form-item>
+            <el-form-item>
+              <el-button
+                v-if="hasPermission('tokens:write')"
+                type="primary"
+                :loading="onboardingCreating"
+                @click="createOnboardingToken"
+              >
+                Create Token
+              </el-button>
+            </el-form-item>
+            <el-form-item v-if="onboardingTokenValue" label="Token">
+              <el-input :value="onboardingTokenValue" readonly>
+                <template #append>
+                  <el-button @click="copyOnboardingToken">Copy</el-button>
+                </template>
+              </el-input>
+            </el-form-item>
+          </el-form>
+        </div>
+
+        <div class="onboarding-section">
+          <h4>2. Init Command</h4>
+          <el-form :model="onboardingForm" label-width="150px">
+            <el-form-item label="gRPC Server">
+              <el-input v-model="onboardingForm.server" placeholder="https://aria.yun:50051" />
+            </el-form-item>
+            <el-form-item label="Controller API">
+              <el-input v-model="onboardingForm.controllerApiUrl" placeholder="https://aria.yun" />
+            </el-form-item>
+            <el-form-item label="Region">
+              <el-input v-model="onboardingForm.region" placeholder="default" />
+            </el-form-item>
+            <el-form-item label="Interface">
+              <el-input v-model="onboardingForm.interface" placeholder="aria0" />
+            </el-form-item>
+            <el-form-item label="Hostname">
+              <el-input v-model="onboardingForm.hostname" placeholder="optional" />
+            </el-form-item>
+            <el-form-item label="Advertise Routes">
+              <el-input v-model="onboardingForm.advertiseRoutes" placeholder="optional, comma separated CIDRs" />
+            </el-form-item>
+          </el-form>
+          <pre class="init-command">{{ onboardingInitCommand }}</pre>
+          <div class="onboarding-actions">
+            <el-button :disabled="!onboardingInitCommand" @click="copyOnboardingCommand">
+              Copy Init Command
+            </el-button>
+          </div>
+        </div>
+
+        <div class="onboarding-section">
+          <h4>3. Verify</h4>
+          <ul class="onboarding-checklist">
+            <li>Run the init command on the target machine.</li>
+            <li>Start the agent service and wait for the first sync.</li>
+            <li>Refresh this page and confirm the node is online or degraded with a visible reason.</li>
+            <li>Open node detail to check last sync, desired/applied versions, commands, alerts, and certificate status.</li>
+          </ul>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="onboardingDialogVisible = false">Close</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 节点编辑对话框 -->
     <el-dialog
       v-model="editDialogVisible"
@@ -684,6 +776,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import useNodeStore from '../stores/node'
 import { useAgentProxyApi } from '../composables/useAgentProxyApi'
 import { useMonitorApi } from '../composables/useMonitorApi'
+import { useTokenApi } from '../composables/useTokenApi'
 import { usePermission } from '../composables/usePermission'
 import { useTenantChangeReload } from '../composables/useTenantChangeReload'
 
@@ -703,6 +796,37 @@ const detailDialogVisible = ref(false)
 const selectedNode = ref(null)
 const commandLoading = ref(false)
 const commandPollTimer = ref(null)
+const onboardingDialogVisible = ref(false)
+const onboardingCreating = ref(false)
+const onboardingToken = ref(null)
+
+const currentOrigin = () => {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin
+  }
+  return 'https://aria.yun'
+}
+
+const defaultGrpcServer = () => {
+  try {
+    const origin = new URL(currentOrigin())
+    return `${origin.protocol}//${origin.hostname}:50051`
+  } catch {
+    return 'https://aria.yun:50051'
+  }
+}
+
+const onboardingForm = reactive({
+  tokenTag: 'node-onboarding',
+  maxUses: 1,
+  ttlHours: 24,
+  server: defaultGrpcServer(),
+  controllerApiUrl: currentOrigin(),
+  region: 'default',
+  interface: 'aria0',
+  hostname: '',
+  advertiseRoutes: ''
+})
 
 // 编辑相关状态
 const editDialogVisible = ref(false)
@@ -742,6 +866,8 @@ const policyDatapathStats = computed(() => {
     qosShapedBytes: Number(raw.qos_shaped_bytes ?? qos.shaped_bytes ?? 0)
   }
 })
+const onboardingTokenValue = computed(() => onboardingToken.value?.token || '')
+const onboardingInitCommand = computed(() => buildOnboardingInitCommand())
 const isStateDiverged = computed(() => {
   if (!selectedNode.value) return false
   const desired = selectedNode.value.desiredStateVersion
@@ -812,10 +938,87 @@ const refreshNodes = async () => {
 }
 
 const addNode = () => {
-  ElMessageBox.alert('To add a node, please generate an Enrollment Token and run aria-agent init on your node.', 'Registration Guide', {
-    confirmButtonText: 'Got it',
-  })
+  onboardingDialogVisible.value = true
 }
+
+const createOnboardingToken = async () => {
+  if (!hasPermission('tokens:write')) {
+    ElMessage.error('Missing permission to create enrollment tokens')
+    return
+  }
+  const tag = String(onboardingForm.tokenTag || '').trim()
+  if (!tag) {
+    ElMessage.error('Token tag is required')
+    return
+  }
+
+  onboardingCreating.value = true
+  try {
+    onboardingToken.value = await useTokenApi.createToken({
+      tag,
+      max_uses: Number(onboardingForm.maxUses || 1),
+      ttl: `${Number(onboardingForm.ttlHours || 24)}h`
+    })
+    ElMessage.success('Enrollment token created')
+  } catch (error) {
+    console.error('Failed to create enrollment token:', error)
+    ElMessage.error(`Failed to create token: ${error.message || error}`)
+  } finally {
+    onboardingCreating.value = false
+  }
+}
+
+const shellArg = (value) => {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (/^[A-Za-z0-9_./:@,+-]+$/.test(raw)) return raw
+  return `'${raw.replace(/'/g, `'\\''`)}'`
+}
+
+const buildOnboardingInitCommand = () => {
+  const token = onboardingTokenValue.value || '<enrollment-token>'
+  const parts = [
+    'sudo',
+    'aria-agent',
+    'init',
+    '--server',
+    shellArg(onboardingForm.server || defaultGrpcServer()),
+    '--token',
+    shellArg(token),
+    '--controller-api-url',
+    shellArg(onboardingForm.controllerApiUrl || currentOrigin())
+  ]
+  const optionalArgs = [
+    ['--region', onboardingForm.region],
+    ['--interface', onboardingForm.interface],
+    ['--hostname', onboardingForm.hostname],
+    ['--advertise-routes', onboardingForm.advertiseRoutes]
+  ]
+  optionalArgs.forEach(([flag, value]) => {
+    const arg = shellArg(value)
+    if (arg) {
+      parts.push(flag, arg)
+    }
+  })
+  return parts.join(' ')
+}
+
+const copyText = async (value, successMessage) => {
+  if (!value) {
+    ElMessage.warning('Nothing to copy')
+    return
+  }
+  if (!navigator?.clipboard?.writeText) {
+    ElMessage.error('Clipboard API is unavailable')
+    return
+  }
+  await navigator.clipboard.writeText(value)
+  ElMessage.success(successMessage)
+}
+
+const copyOnboardingToken = () => copyText(onboardingTokenValue.value, 'Token copied')
+
+const copyOnboardingCommand = () => copyText(onboardingInitCommand.value, 'Init command copied')
 
 const viewNodeDetails = async (node) => {
   try {

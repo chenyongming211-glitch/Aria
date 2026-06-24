@@ -5,7 +5,8 @@ const {
   routerPush,
   mockNodeStore,
   sendAgentCommandMock,
-  getNodeMetricsMock
+  getNodeMetricsMock,
+  tokenApiMock
 } = vi.hoisted(() => ({
   routerPush: vi.fn(),
   mockNodeStore: {
@@ -91,7 +92,17 @@ const {
     message: 'Command queued for delivery',
     created_at: '2026-05-30T10:05:00Z'
   })),
-  getNodeMetricsMock: vi.fn(async () => ({ upload_mbps: 1.234, download_mbps: 2.345, latency_ms: 12.3 }))
+  getNodeMetricsMock: vi.fn(async () => ({ upload_mbps: 1.234, download_mbps: 2.345, latency_ms: 12.3 })),
+  tokenApiMock: {
+    createToken: vi.fn(async () => ({
+      id: 'token-1',
+      token: 'enroll-secret-123456',
+      token_preview: 'enroll-secret...',
+      tag: 'node-onboarding',
+      max_uses: 1,
+      expires_at: '2026-06-26T00:00:00Z'
+    }))
+  }
 }))
 
 vi.mock('/src/stores/node', () => ({
@@ -116,6 +127,10 @@ vi.mock('/src/composables/useMonitorApi', () => ({
   }
 }))
 
+vi.mock('/src/composables/useTokenApi', () => ({
+  useTokenApi: tokenApiMock
+}))
+
 vi.mock('vue-router', () => ({
   useRouter: () => ({
     push: routerPush
@@ -138,6 +153,7 @@ import Nodes from '@/views/Nodes.vue'
 const elementStubs = {
   'el-card': { template: '<div><slot name="header" /><slot /></div>' },
   'el-input': { template: '<div><slot name="prefix" /><slot name="append" /></div>' },
+  'el-input-number': { template: '<input />' },
   'el-button': { template: '<button @click="$emit(\'click\')"><slot /></button>' },
   'el-icon': { template: '<i><slot /></i>' },
   'el-tag': { template: '<span><slot /></span>' },
@@ -195,6 +211,7 @@ describe('Nodes workbench detail', () => {
     routerPush.mockReset()
     sendAgentCommandMock.mockClear()
     getNodeMetricsMock.mockClear()
+    tokenApiMock.createToken.mockClear()
     mockNodeStore.loadNodes.mockClear()
     mockNodeStore.loadNodeDetail.mockClear()
   })
@@ -301,5 +318,42 @@ describe('Nodes workbench detail', () => {
         commandId: 'cmd-policy-1'
       }
     })
+  })
+
+  it('opens onboarding wizard, creates an enrollment token, and builds an init command', async () => {
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true
+    })
+
+    const wrapper = mountNodes()
+    wrapper.vm.addNode()
+    expect(wrapper.vm.onboardingDialogVisible).toBe(true)
+
+    wrapper.vm.onboardingForm.server = 'https://aria.yun:50051'
+    wrapper.vm.onboardingForm.controllerApiUrl = 'https://aria.yun'
+    wrapper.vm.onboardingForm.region = 'tencent-cloud'
+    wrapper.vm.onboardingForm.interface = 'aria0'
+    wrapper.vm.onboardingForm.hostname = 'edge-new'
+    wrapper.vm.onboardingForm.advertiseRoutes = '10.10.0.0/16,10.20.0.0/16'
+
+    await wrapper.vm.createOnboardingToken()
+    await flushPromises()
+
+    expect(tokenApiMock.createToken).toHaveBeenCalledWith({
+      tag: 'node-onboarding',
+      max_uses: 1,
+      ttl: '24h'
+    })
+    expect(wrapper.vm.onboardingToken.token).toBe('enroll-secret-123456')
+    expect(wrapper.vm.onboardingInitCommand).toContain('sudo aria-agent init')
+    expect(wrapper.vm.onboardingInitCommand).toContain('--server https://aria.yun:50051')
+    expect(wrapper.vm.onboardingInitCommand).toContain('--token enroll-secret-123456')
+    expect(wrapper.vm.onboardingInitCommand).toContain('--controller-api-url https://aria.yun')
+    expect(wrapper.vm.onboardingInitCommand).toContain('--advertise-routes 10.10.0.0/16,10.20.0.0/16')
+
+    await wrapper.vm.copyOnboardingCommand()
+    expect(writeText).toHaveBeenCalledWith(wrapper.vm.onboardingInitCommand)
   })
 })

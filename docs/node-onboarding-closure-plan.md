@@ -219,6 +219,12 @@ Enrollment Token preview 或来源标签
 
 ## 9. 验收标准
 
+### 2026-06-25 当前收口状态
+
+- Controller / Agent 注册、runtime token、首次 Sync、节点状态和证书基础链路已经具备。
+- Nodes 页面已经从静态提示升级为接入向导：可创建 Enrollment Token、生成真实 `aria-agent init --server ... --token ... --controller-api-url ...` 命令，并提供复制与验证清单。
+- 本阶段剩余工作不再扩展安装器，而是在线上用一台新机器从 0 执行 init、启动 Agent，并按下列验收项记录证据。
+
 接入闭环完成后，应能通过以下验收：
 
 1. 新租户创建 Enrollment Token。

@@ -206,6 +206,7 @@
 
 <script setup>
 import { ref, computed, nextTick, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   ChatLineRound,
   Delete,
@@ -224,6 +225,7 @@ import { useUserStore } from '@/stores'
 
 const userStore = useUserStore()
 const currentUser = computed(() => userStore.currentUser)
+const route = useRoute()
 
 // 聊天状态
 const messages = ref([
@@ -242,6 +244,42 @@ const messagesContainer = ref(null)
 // 工具确认状态
 const showConfirmDialog = ref(false)
 const pendingTool = ref(null)
+
+const readQueryString = (key) => {
+  const value = route.query?.[key]
+  return typeof value === 'string' ? value : ''
+}
+
+const buildDiagnosticPromptFromQuery = () => {
+  const source = readQueryString('source')
+  const nodeId = readQueryString('nodeId')
+  const alertId = readQueryString('alertId')
+  const eventType = readQueryString('eventType')
+  const commandId = readQueryString('commandId')
+  const policyRef = readQueryString('policyRef')
+  const policyDomain = readQueryString('policyDomain')
+
+  if (!source && !nodeId && !alertId && !eventType && !commandId && !policyRef && !policyDomain) {
+    return ''
+  }
+
+  const lines = [
+    'Diagnose Aria operations alert and suggest the safest next action.',
+    '',
+    'Context:',
+    source ? `- source: ${source}` : '',
+    nodeId ? `- node_id: ${nodeId}` : '',
+    alertId ? `- alert_id: ${alertId}` : '',
+    eventType ? `- event_type: ${eventType}` : '',
+    commandId ? `- command_id: ${commandId}` : '',
+    policyRef ? `- policy_ref: ${policyRef}` : '',
+    policyDomain ? `- policy_domain: ${policyDomain}` : '',
+    '',
+    'Please inspect node status, control state, recent commands, policy deliveries, and audit evidence before recommending sync or health_check. Do not execute write actions unless I explicitly confirm.'
+  ]
+
+  return lines.filter((line) => line !== '').join('\n')
+}
 
 // 功能能力
 const capabilities = [
@@ -453,6 +491,10 @@ const formatMessage = (content) => {
 }
 
 onMounted(() => {
+  const prompt = buildDiagnosticPromptFromQuery()
+  if (prompt && !inputMessage.value.trim()) {
+    inputMessage.value = prompt
+  }
   scrollToBottom()
 })
 </script>

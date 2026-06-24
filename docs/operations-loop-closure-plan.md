@@ -306,6 +306,13 @@ IM 联动作为第二阶段：
 
 运维闭环完成后，至少应能通过以下验收：
 
+### 2026-06-25 当前收口状态
+
+- Monitoring 已能从 active alert 跳 Node Detail / Policy Center，并能直接下发 `sync` 或 `health_check`。
+- Node Detail 已能携带 alert、policy、command 上下文执行 `sync` / `health_check`，并能人工 resolve 当前 alert。
+- Monitoring 和 Node Detail 已新增 Ask AI 入口；AI 页面会用告警上下文预填诊断提示，但不会自动执行写操作。
+- 本阶段剩余工作是线上制造或复用 `sync_failed / policy_failed / node_offline`，验证“告警 -> Ask AI -> 人工确认命令 -> Agent 回写 -> resolve/失败留痕”。
+
 1. 人为制造 `sync_failed` 后，Monitoring 出现 active alert。
 2. 该 alert 的 `context` 包含 `node_id`、`desired_state_version`、`applied_state_version` 和错误原因。
 3. 从 Monitoring 点击 Ask AI，AI 能读取节点、控制状态、最近命令和策略投递。
