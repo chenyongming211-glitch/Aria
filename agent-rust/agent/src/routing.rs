@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use std::collections::HashSet;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 const VPN_TABLE: u32 = 100;
 const DIRECT_TABLE: u32 = 200;
@@ -415,17 +416,27 @@ fn parse_route_table_routes(routes_str: &str, stderr: &str, success: bool) -> Re
 
         // 提取目标网段（第一个字段）
         if let Some(dest) = line.split_whitespace().next() {
-            // 只收集有效的 CIDR 格式路由
-            // 过滤掉 "default"、"local" 等特殊路由
-            if is_valid_cidr(dest) {
-                routes.insert(dest.to_string());
+            if let Some(route) = normalize_route_destination(dest) {
+                routes.insert(route);
             } else {
-                tracing::debug!("Skipping non-CIDR route: {}", dest);
+                tracing::debug!("Skipping non-VPN route: {}", dest);
             }
         }
     }
 
     Ok(routes)
+}
+
+fn normalize_route_destination(s: &str) -> Option<String> {
+    if is_valid_cidr(s) {
+        return Some(s.to_string());
+    }
+
+    match s.parse::<IpAddr>() {
+        Ok(IpAddr::V4(addr)) if addr != Ipv4Addr::UNSPECIFIED => Some(format!("{}/32", addr)),
+        Ok(IpAddr::V6(addr)) if addr != Ipv6Addr::UNSPECIFIED => Some(format!("{}/128", addr)),
+        _ => None,
+    }
 }
 
 /// 检查是否是有效的 CIDR 格式
@@ -480,5 +491,18 @@ mod tests {
         ).expect("missing FIB table should be treated as an empty table");
 
         assert!(routes.is_empty());
+    }
+
+    #[test]
+    fn host_routes_are_normalized_to_cidr_for_cleanup() {
+        let routes = parse_route_table_routes(
+            "100.64.0.28 \n100.64.0.29 nhid 12 proto static\n172.16.0.0/24 \n",
+            "",
+            true,
+        ).expect("route table should parse");
+
+        assert!(routes.contains("100.64.0.28/32"));
+        assert!(routes.contains("100.64.0.29/32"));
+        assert!(routes.contains("172.16.0.0/24"));
     }
 }
