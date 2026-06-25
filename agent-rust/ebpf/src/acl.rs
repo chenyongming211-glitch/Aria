@@ -54,63 +54,6 @@ macro_rules! policy_key_ref {
     }};
 }
 
-macro_rules! write_best_policy {
-    ($best_key:expr, $best_value:expr, $candidate_key:expr, $policy:expr) => {{
-        let key_ptr = $best_key.as_mut_ptr();
-        let value_ptr = $best_value.as_mut_ptr();
-        unsafe {
-            core::ptr::write_volatile(
-                core::ptr::addr_of_mut!((*key_ptr).tap_id),
-                (*$candidate_key).tap_id,
-            );
-            core::ptr::write_volatile(
-                core::ptr::addr_of_mut!((*key_ptr).generation),
-                (*$candidate_key).generation,
-            );
-            core::ptr::write_volatile(
-                core::ptr::addr_of_mut!((*key_ptr).src_id),
-                (*$candidate_key).src_id,
-            );
-            core::ptr::write_volatile(
-                core::ptr::addr_of_mut!((*key_ptr).dst_id),
-                (*$candidate_key).dst_id,
-            );
-            core::ptr::write_volatile(
-                core::ptr::addr_of_mut!((*key_ptr).proto),
-                (*$candidate_key).proto,
-            );
-            core::ptr::write_volatile(
-                core::ptr::addr_of_mut!((*key_ptr).direction),
-                (*$candidate_key).direction,
-            );
-            core::ptr::write_volatile(
-                core::ptr::addr_of_mut!((*key_ptr).pad[0]),
-                (*$candidate_key).pad[0],
-            );
-            core::ptr::write_volatile(
-                core::ptr::addr_of_mut!((*key_ptr).pad[1]),
-                (*$candidate_key).pad[1],
-            );
-            core::ptr::write_volatile(
-                core::ptr::addr_of_mut!((*value_ptr).action),
-                (*$policy).action,
-            );
-            core::ptr::write_volatile(
-                core::ptr::addr_of_mut!((*value_ptr).has_port_filter),
-                (*$policy).has_port_filter,
-            );
-            core::ptr::write_volatile(
-                core::ptr::addr_of_mut!((*value_ptr).priority),
-                (*$policy).priority,
-            );
-            core::ptr::write_volatile(
-                core::ptr::addr_of_mut!((*value_ptr).bitmap_idx),
-                (*$policy).bitmap_idx,
-            );
-        }
-    }};
-}
-
 type Ipv4IdentityKey = [u8; 8];
 type Ipv6IdentityKey = [u8; 20];
 
@@ -407,24 +350,101 @@ fn acl_policy_action(
     pkt_len: u64,
     direction: u8,
 ) -> u8 {
-    let mut best_key = MaybeUninit::<PolicyKey>::uninit();
-    let mut best_value = MaybeUninit::<PolicyValue>::uninit();
-    let mut found = 0;
+    let mut found: u8 = 0;
+    let mut best_priority: u16 = u16::MAX;
+    let mut best_action: u8 = ACTION_ALLOW;
+    let mut best_has_port_filter: u8 = 0;
+    let mut best_bitmap_idx: u32 = 0;
+    let mut best_generation: u32 = generation;
+    let mut best_src_id: u32 = ID_WILDCARD;
+    let mut best_dst_id: u32 = ID_WILDCARD;
+    let mut best_proto: u8 = PROTO_WILDCARD;
+    let mut best_direction: u8 = direction;
 
-    if lookup_policy(
-        &mut best_key,
-        &mut best_value,
-        &mut found,
-        generation,
-        direction,
-        src_id,
-        dst_id,
-        proto,
-    ) {
-        let best_value_ref = unsafe { &*best_value.as_ptr() };
-        let action = policy_action(generation, *best_value_ref, dst_port);
-        let best_key_ref = unsafe { &*best_key.as_ptr() };
-        update_rule_stats(best_key_ref, pkt_len, action == ACTION_DROP);
+    macro_rules! consider_candidate {
+        ($candidate_key:expr) => {{
+            if let Some(policy) = unsafe { POLICY_TABLE.get($candidate_key) } {
+                if found == 0 || policy.priority < best_priority {
+                    found = 1;
+                    best_priority = policy.priority;
+                    best_action = policy.action;
+                    best_has_port_filter = policy.has_port_filter;
+                    best_bitmap_idx = policy.bitmap_idx;
+                    best_generation = (*$candidate_key).generation;
+                    best_src_id = (*$candidate_key).src_id;
+                    best_dst_id = (*$candidate_key).dst_id;
+                    best_proto = (*$candidate_key).proto;
+                    best_direction = (*$candidate_key).direction;
+                }
+            }
+        }};
+    }
+
+    macro_rules! lookup_candidates_for_proto {
+        ($candidate_proto:expr) => {{
+            let mut exact_key = MaybeUninit::<PolicyKey>::uninit();
+            let exact_key_ref =
+                policy_key_ref!(exact_key, generation, src_id, dst_id, $candidate_proto, direction);
+            consider_candidate!(exact_key_ref);
+
+            let mut wildcard_src_key = MaybeUninit::<PolicyKey>::uninit();
+            let wildcard_src_key_ref = policy_key_ref!(
+                wildcard_src_key,
+                generation,
+                ID_WILDCARD,
+                dst_id,
+                $candidate_proto,
+                direction
+            );
+            consider_candidate!(wildcard_src_key_ref);
+
+            let mut wildcard_dst_key = MaybeUninit::<PolicyKey>::uninit();
+            let wildcard_dst_key_ref = policy_key_ref!(
+                wildcard_dst_key,
+                generation,
+                src_id,
+                ID_WILDCARD,
+                $candidate_proto,
+                direction
+            );
+            consider_candidate!(wildcard_dst_key_ref);
+
+            let mut full_wildcard_key = MaybeUninit::<PolicyKey>::uninit();
+            let full_wildcard_key_ref = policy_key_ref!(
+                full_wildcard_key,
+                generation,
+                ID_WILDCARD,
+                ID_WILDCARD,
+                $candidate_proto,
+                direction
+            );
+            consider_candidate!(full_wildcard_key_ref);
+        }};
+    }
+
+    lookup_candidates_for_proto!(proto);
+    if proto != PROTO_WILDCARD {
+        lookup_candidates_for_proto!(PROTO_WILDCARD);
+    }
+
+    if found != 0 {
+        let action = policy_action(
+            generation,
+            best_action,
+            best_has_port_filter,
+            best_bitmap_idx,
+            dst_port,
+        );
+        let mut stats_key = MaybeUninit::<PolicyKey>::uninit();
+        let stats_key_ref = policy_key_ref!(
+            stats_key,
+            best_generation,
+            best_src_id,
+            best_dst_id,
+            best_proto,
+            best_direction
+        );
+        update_rule_stats(stats_key_ref, pkt_len, action == ACTION_DROP);
         return action;
     }
 
@@ -458,120 +478,25 @@ fn active_policy_generation(tap_id: u32) -> u32 {
 }
 
 #[inline(always)]
-fn lookup_policy(
-    best_key: &mut MaybeUninit<PolicyKey>,
-    best_value: &mut MaybeUninit<PolicyValue>,
-    found: &mut u8,
+fn policy_action(
     generation: u32,
-    direction: u8,
-    src_id: u32,
-    dst_id: u32,
-    proto: u8,
-) -> bool {
-    lookup_policy_for_proto(
-        best_key, best_value, found, generation, direction, src_id, dst_id, proto,
-    );
-
-    if proto != PROTO_WILDCARD {
-        lookup_policy_for_proto(
-            best_key,
-            best_value,
-            found,
-            generation,
-            direction,
-            src_id,
-            dst_id,
-            PROTO_WILDCARD,
-        );
-    }
-
-    *found != 0
-}
-
-#[inline(always)]
-fn lookup_policy_for_proto(
-    best_key: &mut MaybeUninit<PolicyKey>,
-    best_value: &mut MaybeUninit<PolicyValue>,
-    found: &mut u8,
-    generation: u32,
-    direction: u8,
-    src_id: u32,
-    dst_id: u32,
-    proto: u8,
-) {
-    let mut exact_key = MaybeUninit::<PolicyKey>::uninit();
-    let exact_key_ref = policy_key_ref!(exact_key, generation, src_id, dst_id, proto, direction);
-    consider_policy(best_key, best_value, found, exact_key_ref);
-
-    let mut wildcard_src_key = MaybeUninit::<PolicyKey>::uninit();
-    let wildcard_src_key_ref = policy_key_ref!(
-        wildcard_src_key,
-        generation,
-        ID_WILDCARD,
-        dst_id,
-        proto,
-        direction
-    );
-    consider_policy(best_key, best_value, found, wildcard_src_key_ref);
-
-    let mut wildcard_dst_key = MaybeUninit::<PolicyKey>::uninit();
-    let wildcard_dst_key_ref = policy_key_ref!(
-        wildcard_dst_key,
-        generation,
-        src_id,
-        ID_WILDCARD,
-        proto,
-        direction
-    );
-    consider_policy(best_key, best_value, found, wildcard_dst_key_ref);
-
-    let mut full_wildcard_key = MaybeUninit::<PolicyKey>::uninit();
-    let full_wildcard_key_ref = policy_key_ref!(
-        full_wildcard_key,
-        generation,
-        ID_WILDCARD,
-        ID_WILDCARD,
-        proto,
-        direction
-    );
-    consider_policy(best_key, best_value, found, full_wildcard_key_ref);
-}
-
-#[inline(always)]
-fn consider_policy(
-    best_key: &mut MaybeUninit<PolicyKey>,
-    best_value: &mut MaybeUninit<PolicyValue>,
-    found: &mut u8,
-    candidate_key: &PolicyKey,
-) {
-    if let Some(policy) = unsafe { POLICY_TABLE.get(candidate_key) } {
-        if *found == 0 {
-            write_best_policy!(best_key, best_value, candidate_key, policy);
-            *found = 1;
-            return;
-        }
-
-        let current_priority = unsafe { (*best_value.as_ptr()).priority };
-        if policy.priority < current_priority {
-            write_best_policy!(best_key, best_value, candidate_key, policy);
-        }
-    }
-}
-
-#[inline(always)]
-fn policy_action(generation: u32, policy: PolicyValue, dst_port: u16) -> u8 {
-    if policy.has_port_filter == 0 {
-        return policy.action;
+    action: u8,
+    has_port_filter: u8,
+    bitmap_idx: u32,
+    dst_port: u16,
+) -> u8 {
+    if has_port_filter == 0 {
+        return action;
     }
 
     if dst_port == 0 {
-        return policy.action;
+        return action;
     }
 
     let port_key = PortKey {
         tap_id: TAP_ID_UNASSIGNED,
         generation,
-        idx: policy.bitmap_idx,
+        idx: bitmap_idx,
         port: dst_port,
         pad: 0,
     };
@@ -585,7 +510,7 @@ fn policy_action(generation: u32, policy: PolicyValue, dst_port: u16) -> u8 {
         }
     }
 
-    policy.action
+    action
 }
 
 #[inline(always)]
