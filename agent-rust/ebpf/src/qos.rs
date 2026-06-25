@@ -149,49 +149,43 @@ static TAP_CONFIG_MAP: HashMap<u32, TapConfig> = HashMap::with_max_entries(1024,
 
 #[classifier]
 pub fn tc_ingress_qos(ctx: TcContext) -> i32 {
-    match try_tc_qos(ctx, DIRECTION_INGRESS) {
-        Ok(ret) => ret,
-        Err(_) => TC_ACT_OK,
-    }
+    try_tc_qos(&ctx, DIRECTION_INGRESS)
 }
 
 #[classifier]
 pub fn tc_egress_qos(ctx: TcContext) -> i32 {
-    match try_tc_qos(ctx, DIRECTION_EGRESS) {
-        Ok(ret) => ret,
-        Err(_) => TC_ACT_OK,
-    }
+    try_tc_qos(&ctx, DIRECTION_EGRESS)
 }
 
-fn try_tc_qos(ctx: TcContext, direction: u8) -> Result<i32, u64> {
+fn try_tc_qos(ctx: &TcContext, direction: u8) -> i32 {
     let tap_id = TAP_ID_UNASSIGNED;
     if !qos_enabled(tap_id) {
-        return Ok(TC_ACT_OK);
+        return TC_ACT_OK;
     }
 
     let pkt_len = ctx.skb.len() as u64;
 
-    if let Ok(eth) = ptr_at::<EthHdr>(&ctx, 0) {
+    if let Ok(eth) = ptr_at::<EthHdr>(ctx, 0) {
         match u16::from_be(eth.ether_type) {
-            ETH_P_IP => return try_tc_qos_ipv4(&ctx, direction, pkt_len, EthHdr::LEN),
-            ETH_P_IPV6 => return try_tc_qos_ipv6(&ctx, direction, pkt_len, EthHdr::LEN),
+            ETH_P_IP => return try_tc_qos_ipv4(ctx, direction, pkt_len, EthHdr::LEN),
+            ETH_P_IPV6 => return try_tc_qos_ipv6(ctx, direction, pkt_len, EthHdr::LEN),
             _ => {}
         }
     }
 
-    if let Ok(ip) = ptr_at::<Ipv4Hdr>(&ctx, 0) {
+    if let Ok(ip) = ptr_at::<Ipv4Hdr>(ctx, 0) {
         if ip.version() == IP_VERSION_4 {
-            return try_tc_qos_ipv4(&ctx, direction, pkt_len, 0);
+            return try_tc_qos_ipv4(ctx, direction, pkt_len, 0);
         }
     }
 
-    if let Ok(ip) = ptr_at::<Ipv6Hdr>(&ctx, 0) {
+    if let Ok(ip) = ptr_at::<Ipv6Hdr>(ctx, 0) {
         if ip.version() == IP_VERSION_6 {
-            return try_tc_qos_ipv6(&ctx, direction, pkt_len, 0);
+            return try_tc_qos_ipv6(ctx, direction, pkt_len, 0);
         }
     }
 
-    Ok(TC_ACT_OK)
+    TC_ACT_OK
 }
 
 #[inline(always)]
@@ -200,8 +194,11 @@ fn try_tc_qos_ipv4(
     direction: u8,
     pkt_len: u64,
     ip_offset: usize,
-) -> Result<i32, u64> {
-    let ip = ptr_at::<Ipv4Hdr>(ctx, ip_offset)?;
+) -> i32 {
+    let ip = match ptr_at::<Ipv4Hdr>(ctx, ip_offset) {
+        Ok(ip) => ip,
+        Err(_) => return TC_ACT_OK,
+    };
     let generation = active_policy_generation(TAP_ID_UNASSIGNED);
     let src_id = lookup_ipv4_id(
         &SRC_IPV4_ID_MAP,
@@ -222,8 +219,11 @@ fn try_tc_qos_ipv6(
     direction: u8,
     pkt_len: u64,
     ip_offset: usize,
-) -> Result<i32, u64> {
-    let ip = ptr_at::<Ipv6Hdr>(ctx, ip_offset)?;
+) -> i32 {
+    let ip = match ptr_at::<Ipv6Hdr>(ctx, ip_offset) {
+        Ok(ip) => ip,
+        Err(_) => return TC_ACT_OK,
+    };
     let generation = active_policy_generation(TAP_ID_UNASSIGNED);
     let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, generation, ip.src_addr);
     let dst_id = lookup_ipv6_id(&DST_IPV6_ID_MAP, generation, ip.dst_addr);
@@ -238,7 +238,7 @@ fn apply_qos_for_ids(
     dst_id: u32,
     direction: u8,
     pkt_len: u64,
-) -> Result<i32, u64> {
+) -> i32 {
     let group_id = if direction == DIRECTION_EGRESS {
         dst_id
     } else {
@@ -308,10 +308,10 @@ fn apply_qos_for_ids(
         if action == TC_ACT_OK && edt != 0 {
             apply_edt_prio(ctx, edt, priority);
         }
-        return Ok(action);
+        return action;
     }
 
-    Ok(TC_ACT_OK)
+    TC_ACT_OK
 }
 
 fn qos_enabled(tap_id: u32) -> bool {
