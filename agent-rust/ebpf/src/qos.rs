@@ -297,14 +297,13 @@ fn apply_qos_for_ids(
             best_group_id,
             direction
         );
+        let priority_mode = ((best_mode as u16) << 8) | best_priority as u16;
         let (action, edt, priority) = apply_qos_bucket(
             best_key,
             best_rate_bps,
             best_burst_bytes,
-            best_priority,
-            best_mode,
+            priority_mode,
             pkt_len,
-            direction,
         );
         if action == TC_ACT_OK && edt != 0 {
             apply_edt_prio(ctx, edt, priority);
@@ -341,14 +340,13 @@ fn active_policy_generation(tap_id: u32) -> u32 {
     0
 }
 
+#[inline(always)]
 fn apply_qos_bucket(
     key: &QosKey,
     rate_bps: u64,
     burst_bytes: u64,
-    priority: u8,
-    mode: u8,
+    priority_mode: u16,
     pkt_len: u64,
-    direction: u8,
 ) -> (i32, u64, u8) {
     let now = unsafe { bpf_ktime_get_ns() };
     let rate_bytes_per_sec = if rate_bps >= 8 {
@@ -356,6 +354,9 @@ fn apply_qos_bucket(
     } else {
         1
     };
+    let priority = (priority_mode & 0xff) as u8;
+    let mode = (priority_mode >> 8) as u8;
+    let direction = key.direction;
 
     if let Some(bucket_ptr) = QOS_TOKEN_BUCKET.get_ptr_mut(key) {
         let bucket = unsafe { &mut *bucket_ptr };
@@ -399,6 +400,7 @@ fn apply_qos_bucket(
     }
 }
 
+#[inline(always)]
 fn decide_qos_bucket(
     bucket: &mut TokenBucket,
     burst_bytes: u64,
