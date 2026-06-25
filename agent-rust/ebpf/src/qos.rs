@@ -33,6 +33,22 @@ const QOS_EDT_MAX_DELAY_NS: u64 = 9_000_000_000;
 const IPV4_IDENTITY_LOOKUP_BITS: u32 = 64;
 const IPV6_IDENTITY_LOOKUP_BITS: u32 = 160;
 
+macro_rules! qos_key_ref {
+    ($slot:expr, $tap_id:expr, $generation:expr, $group_id:expr, $direction:expr) => {{
+        let ptr = $slot.as_mut_ptr();
+        unsafe {
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*ptr).tap_id), $tap_id);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*ptr).generation), $generation);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*ptr).group_id), $group_id);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*ptr).direction), $direction);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*ptr).pad[0]), 0);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*ptr).pad[1]), 0);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*ptr).pad[2]), 0);
+            &*ptr
+        }
+    }};
+}
+
 type Ipv4IdentityKey = [u8; 8];
 type Ipv6IdentityKey = [u8; 20];
 
@@ -229,10 +245,67 @@ fn apply_qos_for_ids(
         src_id
     };
 
-    if let Some((key, config)) =
-        lookup_qos_config(TAP_ID_UNASSIGNED, generation, group_id, direction)
-    {
-        let (action, edt, priority) = apply_qos_bucket(&key, config, pkt_len, direction);
+    let mut found = false;
+    let mut best_group_id = ID_WILDCARD;
+    let mut best_rate_bps = 0;
+    let mut best_burst_bytes = 0;
+    let mut best_priority = 0;
+    let mut best_mode = 0;
+
+    let mut exact_key_slot = MaybeUninit::<QosKey>::uninit();
+    let exact_key = qos_key_ref!(
+        exact_key_slot,
+        TAP_ID_UNASSIGNED,
+        generation,
+        group_id,
+        direction
+    );
+    if let Some(config) = unsafe { QOS_CONFIG.get(exact_key) } {
+        found = true;
+        best_group_id = group_id;
+        best_rate_bps = config.rate_bps;
+        best_burst_bytes = config.burst_bytes;
+        best_priority = config.priority;
+        best_mode = config.mode;
+    }
+
+    let mut fallback_key_slot = MaybeUninit::<QosKey>::uninit();
+    let fallback_key = qos_key_ref!(
+        fallback_key_slot,
+        TAP_ID_UNASSIGNED,
+        generation,
+        ID_WILDCARD,
+        direction
+    );
+    if let Some(config) = unsafe { QOS_CONFIG.get(fallback_key) } {
+        if !found || config.priority < best_priority {
+            found = true;
+            best_group_id = ID_WILDCARD;
+            best_rate_bps = config.rate_bps;
+            best_burst_bytes = config.burst_bytes;
+            best_priority = config.priority;
+            best_mode = config.mode;
+        }
+    }
+
+    if found {
+        let mut best_key_slot = MaybeUninit::<QosKey>::uninit();
+        let best_key = qos_key_ref!(
+            best_key_slot,
+            TAP_ID_UNASSIGNED,
+            generation,
+            best_group_id,
+            direction
+        );
+        let (action, edt, priority) = apply_qos_bucket(
+            best_key,
+            best_rate_bps,
+            best_burst_bytes,
+            best_priority,
+            best_mode,
+            pkt_len,
+            direction,
+        );
         if action == TC_ACT_OK && edt != 0 {
             apply_edt_prio(ctx, edt, priority);
         }
@@ -268,92 +341,68 @@ fn active_policy_generation(tap_id: u32) -> u32 {
     0
 }
 
-fn lookup_qos_config(
-    tap_id: u32,
-    generation: u32,
-    group_id: u32,
-    direction: u8,
-) -> Option<(QosKey, QosConfig)> {
-    let mut best: Option<(QosKey, QosConfig)> = None;
-    let exact_key = QosKey {
-        tap_id,
-        generation,
-        group_id,
-        direction,
-        pad: [0; 3],
-    };
-    if let Some(config) = unsafe { QOS_CONFIG.get(&exact_key) } {
-        best = choose_qos_config(best, (exact_key, *config));
-    }
-
-    let fallback_key = QosKey {
-        tap_id,
-        generation,
-        group_id: ID_WILDCARD,
-        direction,
-        pad: [0; 3],
-    };
-    if let Some(config) = unsafe { QOS_CONFIG.get(&fallback_key) } {
-        best = choose_qos_config(best, (fallback_key, *config));
-    }
-
-    best
-}
-
-fn choose_qos_config(
-    current: Option<(QosKey, QosConfig)>,
-    candidate: (QosKey, QosConfig),
-) -> Option<(QosKey, QosConfig)> {
-    match current {
-        Some(existing) if existing.1.priority <= candidate.1.priority => Some(existing),
-        _ => Some(candidate),
-    }
-}
-
 fn apply_qos_bucket(
     key: &QosKey,
-    config: QosConfig,
+    rate_bps: u64,
+    burst_bytes: u64,
+    priority: u8,
+    mode: u8,
     pkt_len: u64,
     direction: u8,
 ) -> (i32, u64, u8) {
     let now = unsafe { bpf_ktime_get_ns() };
-    let rate_bytes_per_sec = if config.rate_bps >= 8 {
-        config.rate_bps / 8
+    let rate_bytes_per_sec = if rate_bps >= 8 {
+        rate_bps / 8
     } else {
         1
     };
 
     if let Some(bucket_ptr) = QOS_TOKEN_BUCKET.get_ptr_mut(key) {
         let bucket = unsafe { &mut *bucket_ptr };
-        let (passed, dropped, shaped, edt) =
-            decide_qos_bucket(bucket, config, pkt_len, direction, now, rate_bytes_per_sec);
+        let (passed, dropped, shaped, edt) = decide_qos_bucket(
+            bucket,
+            burst_bytes,
+            mode,
+            pkt_len,
+            direction,
+            now,
+            rate_bytes_per_sec,
+        );
         update_qos_stats(key, pkt_len, dropped, shaped);
         return if passed {
-            (TC_ACT_OK, edt, config.priority)
+            (TC_ACT_OK, edt, priority)
         } else {
-            (TC_ACT_SHOT, 0, config.priority)
+            (TC_ACT_SHOT, 0, priority)
         };
     }
 
     let mut bucket = TokenBucket {
-        tokens: config.burst_bytes,
+        tokens: burst_bytes,
         last_refill_ns: now,
         last_edt: 0,
     };
-    let (passed, dropped, shaped, edt) =
-        decide_qos_bucket(&mut bucket, config, pkt_len, direction, now, rate_bytes_per_sec);
+    let (passed, dropped, shaped, edt) = decide_qos_bucket(
+        &mut bucket,
+        burst_bytes,
+        mode,
+        pkt_len,
+        direction,
+        now,
+        rate_bytes_per_sec,
+    );
     let _ = QOS_TOKEN_BUCKET.insert(key, &bucket, 0);
     update_qos_stats(key, pkt_len, dropped, shaped);
     if passed {
-        (TC_ACT_OK, edt, config.priority)
+        (TC_ACT_OK, edt, priority)
     } else {
-        (TC_ACT_SHOT, 0, config.priority)
+        (TC_ACT_SHOT, 0, priority)
     }
 }
 
 fn decide_qos_bucket(
     bucket: &mut TokenBucket,
-    config: QosConfig,
+    burst_bytes: u64,
+    mode: u8,
     pkt_len: u64,
     direction: u8,
     now: u64,
@@ -371,14 +420,14 @@ fn decide_qos_bucket(
     };
     let refill = mul_div(elapsed, rate_bytes_per_sec, NS_PER_SEC);
     let tokens = bucket.tokens.saturating_add(refill);
-    bucket.tokens = if tokens > config.burst_bytes {
-        config.burst_bytes
+    bucket.tokens = if tokens > burst_bytes {
+        burst_bytes
     } else {
         tokens
     };
     bucket.last_refill_ns = now;
 
-    if direction == DIRECTION_EGRESS && config.mode == QOS_MODE_SHAPING {
+    if direction == DIRECTION_EGRESS && mode == QOS_MODE_SHAPING {
         let edt = next_edt(bucket.last_edt, now, pkt_len, rate_bytes_per_sec);
         if edt == 0 {
             bucket.tokens = 0;
