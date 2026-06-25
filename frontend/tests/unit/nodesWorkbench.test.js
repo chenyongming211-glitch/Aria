@@ -24,6 +24,13 @@ const {
         desiredStateVersion: 'desired-1',
         appliedStateVersion: 'applied-1',
         stateConvergence: 'converged',
+        onboarding: {
+          phase: 'online',
+          tokenPreview: 'enroll...3456',
+          firstSeenAt: '2026-05-30 17:59:00',
+          lastSyncAt: '2026-05-30 18:00:00',
+          nextAction: 'Open node detail'
+        },
         routes: ['10.10.0.0/16']
       }
     ],
@@ -44,6 +51,13 @@ const {
       observedMessage: 'sync applied successfully',
       stateConvergence: 'converged',
       lastSyncAt: '2026-05-30 18:00:00',
+      onboarding: {
+        phase: 'online',
+        tokenPreview: 'enroll...3456',
+        firstSeenAt: '2026-05-30 17:59:00',
+        lastSyncAt: '2026-05-30 18:00:00',
+        nextAction: 'Open node detail'
+      },
       pendingCmds: 0,
       routes: ['10.10.0.0/16'],
       learnedRoutes: [],
@@ -181,7 +195,7 @@ const elementStubs = {
   'el-icon': { template: '<i><slot /></i>' },
   'el-tag': { template: '<span><slot /></span>' },
   'el-tooltip': { template: '<div><slot /></div>' },
-  'el-alert': { template: '<div><slot />{{ title }}</div>', props: ['title'] },
+  'el-alert': { template: '<div><slot />{{ title }}{{ description }}</div>', props: ['title', 'description'] },
   'el-empty': { template: '<div></div>' },
   'el-pagination': { template: '<div></div>' },
   'el-popconfirm': { template: '<div><slot name="reference" /></div>' },
@@ -213,7 +227,12 @@ const elementStubs = {
           created_at: '2026-05-30T10:00:00Z',
           updated_at: '2026-05-30T10:00:00Z',
           region: 'sh',
-          status: 'online'
+          status: 'online',
+          onboarding: {
+            phase: 'online',
+            tokenPreview: 'enroll...3456',
+            lastSyncAt: '2026-05-30 18:00:00'
+          }
         }
       }
     }
@@ -250,6 +269,9 @@ describe('Nodes workbench detail', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Operations Summary')
+    expect(wrapper.text()).toContain('Onboarding Evidence')
+    expect(wrapper.text()).toContain('enroll...3456')
+    expect(wrapper.text()).toContain('aria-agent doctor')
     expect(wrapper.text()).toContain('203.0.113.10:51820')
     expect(wrapper.text()).toContain('Certificate Status')
     expect(wrapper.text()).toContain('serial-1')
@@ -373,6 +395,8 @@ describe('Nodes workbench detail', () => {
       ttl: '24h'
     })
     expect(wrapper.vm.onboardingToken.token).toBe('enroll-secret-123456')
+    expect(wrapper.vm.onboardingTokenPreview).toBe('enroll...3456')
+    expect(wrapper.vm.recentOnboardingNodes[0].id).toBe('node-1')
     expect(wrapper.vm.onboardingInstallCommand).toContain('curl -fsSL https://aria.yun/api/v2/install/agent.sh')
     expect(wrapper.vm.onboardingInstallCommand).toContain('| sudo bash -s --')
     expect(wrapper.vm.onboardingInstallCommand).toContain('--controller-api-url https://aria.yun')

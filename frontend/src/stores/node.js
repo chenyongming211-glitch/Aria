@@ -25,6 +25,23 @@ export default defineStore('node', () => {
     }
   }
 
+  function normalizeOnboarding(onboarding = {}, fallback = {}) {
+    const phase = onboarding.phase || fallback.phase || 'registered'
+    const firstSeenRaw = onboarding.first_seen_at ?? fallback.firstSeenRaw
+    const lastSyncRaw = onboarding.last_sync_at ?? fallback.lastSyncRaw
+
+    return {
+      phase,
+      tokenPreview: onboarding.token_preview || fallback.tokenPreview || '',
+      firstSeenAt: firstSeenRaw ? formatTimestamp(firstSeenRaw) : (fallback.firstSeenAt || 'N/A'),
+      firstSeenRaw,
+      lastSyncAt: lastSyncRaw ? formatTimestamp(lastSyncRaw) : (fallback.lastSyncAt || 'N/A'),
+      lastSyncRaw,
+      lastError: onboarding.last_error || fallback.lastError || '',
+      nextAction: onboarding.next_action || fallback.nextAction || ''
+    }
+  }
+
   function normalizeNodeRecord(node = {}, fallback = {}) {
     const lastSeen = node.last_seen
     const lastSyncAt = node.last_sync_at
@@ -54,6 +71,7 @@ export default defineStore('node', () => {
       observedMessage: node.observed_message || node.last_sync_error || fallback.observedMessage || '',
       observedAt: node.observed_at ? formatDateTime(node.observed_at) : (fallback.observedAt || 'N/A'),
       stateConvergence: node.convergence_status || node.state_convergence || fallback.stateConvergence || 'idle',
+      onboarding: normalizeOnboarding(node.onboarding, fallback.onboarding),
       lastCommand: node.last_command || fallback.lastCommand || null,
       lastCommandStatus: node.last_command_status || fallback.lastCommandStatus || '',
       lastCommandError: node.last_command_error || fallback.lastCommandError || '',
@@ -159,6 +177,7 @@ export default defineStore('node', () => {
       observedMessage: status.observed_message || monitorDetail?.observed_message || detail.observed_message || status.last_sync_error || monitorDetail?.last_sync_error || detail.last_sync_error || '',
       observedAt: formatDateTime(status.observed_at || detail.observed_at),
       stateConvergence: status.convergence_status || monitorDetail?.state_convergence || detail.convergence_status || status.state_convergence || detail.state_convergence || 'idle',
+      onboarding: normalizeOnboarding(detail.onboarding),
       learnedRoutes: Array.isArray(monitorDetail?.learned_routes) ? monitorDetail.learned_routes : [],
       lastCommand: status.last_command || detail.last_command || null,
       lastCommandStatus: status.last_command_status || detail.last_command_status || '',

@@ -111,6 +111,22 @@
             </span>
           </template>
         </el-table-column>
+        <el-table-column label="Onboarding" width="130">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.onboarding?.lastError || row.onboarding?.nextAction"
+              :content="row.onboarding.lastError || row.onboarding.nextAction"
+              placement="top"
+            >
+              <el-tag size="small" :type="getOnboardingPhaseTagType(row.onboarding?.phase)">
+                {{ formatOnboardingPhase(row.onboarding?.phase) }}
+              </el-tag>
+            </el-tooltip>
+            <el-tag v-else size="small" :type="getOnboardingPhaseTagType(row.onboarding?.phase)">
+              {{ formatOnboardingPhase(row.onboarding?.phase) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="Sync" width="120">
           <template #default="{ row }">
             <el-tooltip
@@ -229,6 +245,39 @@
               <el-tag size="small" :type="item.type">{{ item.status }}</el-tag>
             </button>
           </div>
+        </div>
+
+        <div class="detail-section">
+          <h4 class="section-title">
+            <el-icon><Connection /></el-icon>
+            Onboarding Evidence
+          </h4>
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="Phase">
+              <el-tag size="small" :type="getOnboardingPhaseTagType(selectedNode.onboarding?.phase)">
+                {{ formatOnboardingPhase(selectedNode.onboarding?.phase) }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="Token">
+              {{ selectedNode.onboarding?.tokenPreview || 'N/A' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="First Seen">
+              {{ selectedNode.onboarding?.firstSeenAt || 'N/A' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Last Sync">
+              {{ selectedNode.onboarding?.lastSyncAt || selectedNode.lastSyncAt || 'N/A' }}
+            </el-descriptions-item>
+          </el-descriptions>
+          <el-alert
+            v-if="selectedNode.onboarding?.lastError || selectedNode.onboarding?.nextAction"
+            class="state-alert"
+            :title="selectedNode.onboarding?.lastError || selectedNode.onboarding?.nextAction"
+            :description="selectedNode.onboarding?.nextAction"
+            :type="selectedNode.onboarding?.phase === 'degraded' ? 'error' : 'info'"
+            show-icon
+            :closable="false"
+          />
+          <pre class="diagnostic-command">{{ onboardingTroubleshootingCommand(selectedNode) }}</pre>
         </div>
 
         <!-- 基础信息 -->
@@ -700,7 +749,39 @@
         </div>
 
         <div class="onboarding-section">
-          <h4>4. Verify</h4>
+          <div class="onboarding-section-header">
+            <h4>4. Progress</h4>
+            <el-button size="small" :icon="Refresh" :loading="loading" @click="refreshOnboardingProgress">
+              Refresh
+            </el-button>
+          </div>
+          <el-table :data="recentOnboardingNodes" size="small" empty-text="No registered nodes yet">
+            <el-table-column prop="hostname" label="Hostname" min-width="150" />
+            <el-table-column label="Phase" width="120">
+              <template #default="{ row }">
+                <el-tag size="small" :type="getOnboardingPhaseTagType(row.onboarding?.phase)">
+                  {{ formatOnboardingPhase(row.onboarding?.phase) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="Token" width="130">
+              <template #default="{ row }">{{ row.onboarding?.tokenPreview || 'N/A' }}</template>
+            </el-table-column>
+            <el-table-column label="Last Sync" min-width="160">
+              <template #default="{ row }">{{ row.onboarding?.lastSyncAt || row.lastSyncAt || 'N/A' }}</template>
+            </el-table-column>
+            <el-table-column label="Action" width="100">
+              <template #default="{ row }">
+                <el-button size="small" link type="primary" @click="openNodeDetailFromOnboarding(row)">
+                  Detail
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+
+        <div class="onboarding-section">
+          <h4>5. Verify</h4>
           <ul class="onboarding-checklist">
             <li>Run the install command on the target machine.</li>
             <li>Confirm <code>systemctl status aria-agent --no-pager</code> is active.</li>
@@ -904,8 +985,17 @@ const policyDatapathStats = computed(() => {
   }
 })
 const onboardingTokenValue = computed(() => onboardingToken.value?.token || '')
+const onboardingTokenPreview = computed(() => tokenPreview(onboardingTokenValue.value))
 const onboardingInstallCommand = computed(() => buildOnboardingInstallCommand())
 const onboardingInitCommand = computed(() => buildOnboardingInitCommand())
+const recentOnboardingNodes = computed(() => {
+  const token = onboardingTokenPreview.value
+  const items = nodes.value.filter(node => node.onboarding)
+  const matched = token
+    ? items.filter(node => node.onboarding?.tokenPreview === token)
+    : items
+  return matched.slice(0, 6)
+})
 const isStateDiverged = computed(() => {
   if (!selectedNode.value) return false
   const desired = selectedNode.value.desiredStateVersion
@@ -973,6 +1063,10 @@ const paginatedNodes = computed(() => {
 // 方法
 const refreshNodes = async () => {
   await nodeStore.loadNodes()
+}
+
+const refreshOnboardingProgress = async () => {
+  await refreshNodes()
 }
 
 const addNode = async () => {
@@ -1124,6 +1218,59 @@ const copyOnboardingToken = () => copyText(onboardingTokenValue.value, 'Token co
 const copyOnboardingCommand = () => copyText(onboardingInstallCommand.value, 'Install command copied')
 
 const copyOnboardingInitCommand = () => copyText(onboardingInitCommand.value, 'Init command copied')
+
+const tokenPreview = (value) => {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (raw.length <= 10) return 'redacted'
+  return `${raw.slice(0, 6)}...${raw.slice(-4)}`
+}
+
+const getOnboardingPhaseTagType = (phase) => {
+  switch (phase) {
+    case 'online':
+      return 'success'
+    case 'syncing':
+      return 'warning'
+    case 'degraded':
+      return 'danger'
+    case 'registered':
+    default:
+      return 'info'
+  }
+}
+
+const formatOnboardingPhase = (phase) => {
+  switch (phase) {
+    case 'online':
+      return 'Online'
+    case 'syncing':
+      return 'Syncing'
+    case 'degraded':
+      return 'Degraded'
+    case 'registered':
+    default:
+      return 'Registered'
+  }
+}
+
+const onboardingTroubleshootingCommand = (node) => {
+  const configPath = onboardingControllerInfo.value?.agent?.config_path || '/etc/aria/agent.yaml'
+  const lines = [
+    `sudo aria-agent doctor --config ${configPath}`,
+    'sudo systemctl status aria-agent --no-pager',
+    'sudo journalctl -u aria-agent -n 120 --no-pager'
+  ]
+  if (node?.hostname) {
+    lines.unshift(`# ${node.hostname}`)
+  }
+  return lines.join('\n')
+}
+
+const openNodeDetailFromOnboarding = async (node) => {
+  onboardingDialogVisible.value = false
+  await viewNodeDetails(node)
+}
 
 const viewNodeDetails = async (node) => {
   try {
@@ -1542,6 +1689,17 @@ useTenantChangeReload(reloadTenantScopedData)
 .control-state-value.danger { color: #EF4444; }
 .control-state-time { margin-top: 8px; font-size: 12px; color: var(--aria-text-secondary); word-break: break-word; }
 .state-alert { margin-top: 12px; }
+.diagnostic-command {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--aria-bg-tertiary);
+  border: 1px solid var(--aria-border-primary);
+  border-radius: var(--aria-radius-md);
+  color: var(--aria-text-primary);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
 .certificate-note { margin-top: 10px; color: var(--aria-text-secondary); font-size: 12px; }
 .mono-text { font-family: Menlo, Monaco, Consolas, "Courier New", monospace; font-size: 12px; }
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
@@ -1557,6 +1715,8 @@ useTenantChangeReload(reloadTenantScopedData)
 .routes-list { display: flex; flex-wrap: wrap; gap: 10px; }
 .route-tag { font-family: monospace; }
 .route-code { color: #cf9236; }
+.onboarding-section-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.onboarding-section-header h4 { margin: 0; }
 
 @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 @media (max-width: 960px) { .workbench-summary-grid, .control-state-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

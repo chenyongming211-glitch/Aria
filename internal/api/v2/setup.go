@@ -757,7 +757,9 @@ func (r *Router) buildTenantNodeResponse(node *controllerstorage.Node) map[strin
 		"updated_at":          node.UpdatedAt,
 	}
 
+	var operationsSummary map[string]interface{}
 	if summary, err := r.buildNodeOperationsSummary(node); err == nil {
+		operationsSummary = summary
 		response["operations"] = summary
 		response["pending_cmds"] = summary["pending_cmds"]
 		response["last_command"] = summary["last_command"]
@@ -773,8 +775,77 @@ func (r *Router) buildTenantNodeResponse(node *controllerstorage.Node) map[strin
 			response["convergence_status"] = string(controllerstorage.StatusConverged)
 		}
 	}
+	response["onboarding"] = buildNodeOnboardingStatus(node, operationsSummary)
 
 	return response
+}
+
+func buildNodeOnboardingStatus(node *controllerstorage.Node, summary map[string]interface{}) map[string]interface{} {
+	if summary == nil {
+		summary = map[string]interface{}{}
+	}
+
+	lastError := firstNonEmptyString(
+		onboardingString(summary["last_sync_error"]),
+		onboardingString(summary["last_command_error"]),
+		onboardingString(summary["observed_message"]),
+	)
+	desiredVersion := onboardingString(summary["desired_state_version"])
+	appliedVersion := onboardingString(summary["applied_state_version"])
+	observedState := strings.ToLower(onboardingString(summary["observed_state"]))
+	configurationStatus := strings.ToLower(onboardingString(summary["configuration_status"]))
+
+	phase := "registered"
+	nextAction := "Run the install command on the target machine, then wait for the agent to register and complete first sync."
+	availability := nodeAvailabilityStatus(node)
+
+	switch {
+	case strings.TrimSpace(lastError) != "":
+		phase = "degraded"
+		nextAction = "Open node detail, run aria-agent doctor, and check journalctl -u aria-agent -n 120 --no-pager on the host."
+	case desiredVersion != "" && appliedVersion != "" && desiredVersion != appliedVersion:
+		phase = "syncing"
+		nextAction = "Wait for desired/applied versions to converge, or run a sync command from node detail."
+	case availability == "online" && (appliedVersion != "" || observedState == "healthy" || observedState == "applied" || configurationStatus == "applied"):
+		phase = "online"
+		nextAction = "Open node detail to verify commands, policy delivery, certificate status, and alerts."
+	case availability == "online":
+		phase = "syncing"
+		nextAction = "Agent is online; wait for first sync to report desired/applied state."
+	default:
+		phase = "registered"
+		nextAction = "Confirm aria-agent.service is running and use aria-agent doctor if the node does not come online."
+	}
+
+	onboarding := map[string]interface{}{
+		"phase":       phase,
+		"last_error":  lastError,
+		"next_action": nextAction,
+	}
+	if tokenPreview := tokenSecretPreview(node.EnrolledWithToken); tokenPreview != "" {
+		onboarding["token_preview"] = tokenPreview
+	}
+	if node.RegisteredAt > 0 {
+		onboarding["first_seen_at"] = node.RegisteredAt
+	} else if !node.CreatedAt.IsZero() {
+		onboarding["first_seen_at"] = node.CreatedAt
+	}
+	if value, ok := summary["last_sync_at"]; ok {
+		onboarding["last_sync_at"] = value
+	}
+
+	return onboarding
+}
+
+func onboardingString(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case fmt.Stringer:
+		return strings.TrimSpace(v.String())
+	default:
+		return ""
+	}
 }
 
 func (r *Router) deleteTenantNode(w http.ResponseWriter, tenantID uuid.UUID, nodeID string) {

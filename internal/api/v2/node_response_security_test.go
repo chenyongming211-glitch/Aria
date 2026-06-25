@@ -3,6 +3,7 @@ package v2
 import (
 	"database/sql"
 	"testing"
+	"time"
 
 	"aria/pkg/controllerstorage"
 
@@ -51,5 +52,89 @@ func TestBuildTenantNodeResponseDoesNotExposeEnrollmentToken(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestNodeOnboardingStatusPhases(t *testing.T) {
+	now := time.Now().UTC()
+	node := &controllerstorage.Node{
+		ID:                uuid.New(),
+		TenantID:          uuid.New(),
+		PublicKey:         "node-public-key",
+		Hostname:          "node-1",
+		Status:            "online",
+		LastSeen:          now.Unix(),
+		RegisteredAt:      now.Unix(),
+		EnrolledWithToken: "tk_sensitive_enrollment_token",
+	}
+
+	tests := []struct {
+		name    string
+		node    *controllerstorage.Node
+		summary map[string]interface{}
+		phase   string
+	}{
+		{
+			name:    "registered online but no sync evidence",
+			node:    node,
+			summary: map[string]interface{}{},
+			phase:   "syncing",
+		},
+		{
+			name: "desired applied mismatch",
+			node: node,
+			summary: map[string]interface{}{
+				"desired_state_version": "dsv-new",
+				"applied_state_version": "dsv-old",
+			},
+			phase: "syncing",
+		},
+		{
+			name: "online and applied",
+			node: node,
+			summary: map[string]interface{}{
+				"desired_state_version": "dsv-new",
+				"applied_state_version": "dsv-new",
+				"last_sync_at":          now,
+			},
+			phase: "online",
+		},
+		{
+			name: "sync error",
+			node: node,
+			summary: map[string]interface{}{
+				"last_sync_error": "sync apply failed",
+			},
+			phase: "degraded",
+		},
+		{
+			name: "offline no sync",
+			node: &controllerstorage.Node{
+				ID:                node.ID,
+				TenantID:          node.TenantID,
+				PublicKey:         node.PublicKey,
+				Hostname:          node.Hostname,
+				Status:            "offline",
+				RegisteredAt:      node.RegisteredAt,
+				EnrolledWithToken: node.EnrolledWithToken,
+			},
+			summary: map[string]interface{}{},
+			phase:   "registered",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			onboarding := buildNodeOnboardingStatus(tt.node, tt.summary)
+			if onboarding["phase"] != tt.phase {
+				t.Fatalf("expected phase %q, got %#v", tt.phase, onboarding["phase"])
+			}
+			if onboarding["token_preview"] != "tk_sen...oken" {
+				t.Fatalf("expected redacted token preview, got %#v", onboarding["token_preview"])
+			}
+			if _, leaked := onboarding["enrolled_with_token"]; leaked {
+				t.Fatal("onboarding status must not expose raw enrollment token")
+			}
+		})
 	}
 }
