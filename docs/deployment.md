@@ -91,6 +91,11 @@ rsync -az --progress aria-agent root@8.152.163.101:/root/aria-controller/artifac
 ssh root@8.152.163.101 'cd /root/aria-controller/artifacts && sha256sum aria-agent-linux-amd64 > aria-agent-linux-amd64.sha256'
 ```
 
+Build the published Agent artifact on the pinned Ubuntu 22.04 GitHub runner, not
+on `ubuntu-latest`. The installer is intended to work on Ubuntu 22.04 or newer;
+using a newer runner can produce a binary that requires a newer glibc than common
+LTS nodes provide.
+
 The Controller serves this artifact from
 `/api/v2/downloads/aria-agent/linux/amd64` for the Nodes onboarding installer.
 If the artifact is missing, the download endpoint returns `404` and the

@@ -94,7 +94,7 @@ jobs:
 
   rust-agent-build:
     name: Rust Agent Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     env:
       RUSTFLAGS: "-Dwarnings"
     defaults:
