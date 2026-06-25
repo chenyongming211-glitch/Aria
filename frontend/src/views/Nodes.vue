@@ -658,6 +658,12 @@
             <el-form-item label="Controller API">
               <el-input v-model="onboardingForm.controllerApiUrl" placeholder="https://aria.yun" />
             </el-form-item>
+            <el-form-item label="Controller CA Path">
+              <el-input v-model="onboardingForm.caCertPath" placeholder="/etc/aria/certs/ca.crt" />
+            </el-form-item>
+            <el-form-item label="TLS Server Name">
+              <el-input v-model="onboardingForm.tlsServerName" placeholder="aria.yun" />
+            </el-form-item>
             <el-form-item label="Region">
               <el-input v-model="onboardingForm.region" placeholder="default" />
             </el-form-item>
@@ -682,6 +688,7 @@
         <div class="onboarding-section">
           <h4>3. Verify</h4>
           <ul class="onboarding-checklist">
+            <li>Install the Controller CA certificate at the configured CA path before starting the agent service.</li>
             <li>Run the init command on the target machine.</li>
             <li>Start the agent service and wait for the first sync.</li>
             <li>Refresh this page and confirm the node is online or degraded with a visible reason.</li>
@@ -816,12 +823,22 @@ const defaultGrpcServer = () => {
   }
 }
 
+const inferTLSServerName = (server) => {
+  try {
+    return new URL(server || defaultGrpcServer()).hostname || 'aria.yun'
+  } catch {
+    return 'aria.yun'
+  }
+}
+
 const onboardingForm = reactive({
   tokenTag: 'node-onboarding',
   maxUses: 1,
   ttlHours: 24,
   server: defaultGrpcServer(),
   controllerApiUrl: currentOrigin(),
+  caCertPath: '/etc/aria/certs/ca.crt',
+  tlsServerName: '',
   region: 'default',
   interface: 'aria0',
   hostname: '',
@@ -989,6 +1006,8 @@ const buildOnboardingInitCommand = () => {
     shellArg(onboardingForm.controllerApiUrl || currentOrigin())
   ]
   const optionalArgs = [
+    ['--ca-cert', onboardingForm.caCertPath],
+    ['--tls-server-name', onboardingForm.tlsServerName || inferTLSServerName(onboardingForm.server)],
     ['--region', onboardingForm.region],
     ['--interface', onboardingForm.interface],
     ['--hostname', onboardingForm.hostname],

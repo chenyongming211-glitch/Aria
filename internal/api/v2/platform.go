@@ -41,6 +41,12 @@ func (r *Router) HandleControllerInfo(w http.ResponseWriter, req *http.Request) 
 			"runtime_token_ttl_sec": 86400,
 			"challenge_auth":        false,
 		},
+		"grpc_tls": map[string]interface{}{
+			"mode":         currentGRPCTLSMode(),
+			"ca_required":  currentGRPCTLSMode() != "disabled",
+			"ca_cert_path": currentGRPCCACertPath(),
+			"server_name":  currentGRPCTLSServerName(),
+		},
 	}, "Controller capabilities retrieved")
 }
 
@@ -52,6 +58,35 @@ func currentControllerVersion() string {
 		return version
 	}
 	return "0.2.x"
+}
+
+func currentGRPCTLSMode() string {
+	mode := strings.TrimSpace(os.Getenv("ARIA_GRPC_TLS_MODE"))
+	if mode == "" {
+		return "server"
+	}
+	return mode
+}
+
+func currentGRPCCACertPath() string {
+	path := strings.TrimSpace(os.Getenv("ARIA_GRPC_CA_CERT"))
+	if path == "" {
+		return "/etc/aria/certs/ca.crt"
+	}
+	return path
+}
+
+func currentGRPCTLSServerName() string {
+	if name := strings.TrimSpace(os.Getenv("ARIA_GRPC_TLS_SERVER_NAME")); name != "" {
+		return name
+	}
+	if name := strings.TrimSpace(os.Getenv("ARIA_GRPC_SERVER_NAME")); name != "" {
+		return name
+	}
+	if name := strings.TrimSpace(os.Getenv("ARIA_PUBLIC_HOST")); name != "" {
+		return name
+	}
+	return "aria.yun"
 }
 
 // handleTenantTokens 处理租户级别的注册令牌

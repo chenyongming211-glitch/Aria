@@ -78,9 +78,15 @@ v0.1.0 的验收标准是“自助接入可演示、可回放、可排障”。�
 示例命令：
 
 ```bash
+sudo install -d -m 0755 /etc/aria/certs
+sudo install -m 0600 ca.crt /etc/aria/certs/ca.crt
+
 aria-agent init \
-  --controller https://controller.example.com \
+  --server https://controller.example.com:50051 \
+  --controller-api-url https://controller.example.com \
   --token tk_xxx \
+  --ca-cert /etc/aria/certs/ca.crt \
+  --tls-server-name controller.example.com \
   --hostname edge-sh-01 \
   --region sh \
   --interface eth0
@@ -102,6 +108,23 @@ aria-agent init \
 4. 调用 Controller 注册接口。
 5. 保存 Controller 返回的 runtime state。
 6. 立刻触发首次 Sync。
+
+生产环境 gRPC 使用单向 TLS 时，新机器必须先安装 Controller CA。控制台生成的接入命令必须包含 `--ca-cert` 和 `--tls-server-name`，否则 `aria-agent up` 会在 bootstrap 阶段因为 `UnknownIssuer` 退出。当前线上标准路径是：
+
+```bash
+sudo install -d -m 0755 /etc/aria/certs
+sudo install -m 0600 ca.crt /etc/aria/certs/ca.crt
+sudo aria-agent init \
+  --server https://aria.yun:50051 \
+  --controller-api-url https://aria.yun \
+  --token tk_xxx \
+  --ca-cert /etc/aria/certs/ca.crt \
+  --tls-server-name aria.yun \
+  --hostname edge-node \
+  --region tencent-cloud \
+  --interface aria0
+sudo systemctl enable --now aria-agent
+```
 
 推荐拆分静态配置与运行状态：
 

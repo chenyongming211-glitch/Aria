@@ -129,10 +129,28 @@ ARIA_GRPC_TLS_MODE=server
 ARIA_GRPC_SERVER_CERT=/etc/aria/certs/grpc-server.crt
 ARIA_GRPC_SERVER_KEY=/etc/aria/certs/grpc-server.key
 ARIA_GRPC_CA_CERT=/etc/aria/certs/ca.crt
+ARIA_GRPC_TLS_SERVER_NAME=aria.yun
 ```
 
 `disabled` is only for local or one-off plaintext testing. Do not use it on the
 production Controller while Agents are configured with `https://`.
+
+New Agent nodes must install the same Controller CA before `aria-agent up`:
+
+```bash
+sudo install -d -m 0755 /etc/aria/certs
+sudo install -m 0600 ca.crt /etc/aria/certs/ca.crt
+sudo aria-agent init \
+  --server https://aria.yun:50051 \
+  --controller-api-url https://aria.yun \
+  --token tk_xxx \
+  --ca-cert /etc/aria/certs/ca.crt \
+  --tls-server-name aria.yun \
+  --interface aria0
+```
+
+If `aria-agent up` logs `invalid peer certificate: UnknownIssuer`, the CA file is
+missing or `--ca-cert` points to the wrong path.
 
 ## Super Admin Bootstrap
 

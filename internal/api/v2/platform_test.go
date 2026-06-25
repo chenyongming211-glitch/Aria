@@ -137,6 +137,16 @@ func TestControllerInfoIsPublicAndStable(t *testing.T) {
 	if auth["enrollment"] != true || auth["challenge_auth"] != false {
 		t.Fatalf("unexpected auth contract: %#v", auth)
 	}
+	grpcTLS := data["grpc_tls"].(map[string]interface{})
+	if grpcTLS["mode"] != "server" {
+		t.Fatalf("expected default server TLS mode, got %#v", grpcTLS)
+	}
+	if grpcTLS["ca_cert_path"] != "/etc/aria/certs/ca.crt" {
+		t.Fatalf("expected default CA cert path, got %#v", grpcTLS)
+	}
+	if grpcTLS["server_name"] != "aria.yun" {
+		t.Fatalf("expected default TLS server name, got %#v", grpcTLS)
+	}
 }
 
 func containsStringValue(values []interface{}, expected string) bool {

@@ -351,6 +351,8 @@ describe('Nodes workbench detail', () => {
     expect(wrapper.vm.onboardingInitCommand).toContain('--server https://aria.yun:50051')
     expect(wrapper.vm.onboardingInitCommand).toContain('--token enroll-secret-123456')
     expect(wrapper.vm.onboardingInitCommand).toContain('--controller-api-url https://aria.yun')
+    expect(wrapper.vm.onboardingInitCommand).toContain('--ca-cert /etc/aria/certs/ca.crt')
+    expect(wrapper.vm.onboardingInitCommand).toContain('--tls-server-name aria.yun')
     expect(wrapper.vm.onboardingInitCommand).toContain('--advertise-routes 10.10.0.0/16,10.20.0.0/16')
 
     await wrapper.vm.copyOnboardingCommand()
