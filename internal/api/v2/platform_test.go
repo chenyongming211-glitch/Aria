@@ -288,6 +288,99 @@ func TestControllerGRPCCARejectsPrivateKeyMaterial(t *testing.T) {
 	}
 }
 
+func TestAgentInstallerScriptIncludesInstallInitAndSystemd(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mux := http.NewServeMux()
+	SetupRoutes(mux, controllerstorage.NewStorageWithDB(db), nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/install/agent.sh", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected installer script 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, expected := range []string{
+		"aria-agent init",
+		"systemctl enable --now aria-agent",
+		"/etc/aria/certs/ca.crt",
+		"ExecStart=/usr/local/bin/aria-agent up --interface",
+		"--controller-api-url",
+		"--tls-server-name",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected installer script to contain %q\nscript:\n%s", expected, body)
+		}
+	}
+	if contentType := rr.Header().Get("Content-Type"); !strings.Contains(contentType, "text/x-shellscript") {
+		t.Fatalf("expected shellscript content type, got %q", contentType)
+	}
+}
+
+func TestAgentBinaryDownloadReturns404WhenMissing(t *testing.T) {
+	t.Setenv("ARIA_AGENT_ARTIFACT_PATH", filepath.Join(t.TempDir(), "missing-agent"))
+
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mux := http.NewServeMux()
+	SetupRoutes(mux, controllerstorage.NewStorageWithDB(db), nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/downloads/aria-agent/linux/amd64", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected missing artifact 404, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestAgentBinaryDownloadReturnsArtifactAndChecksum(t *testing.T) {
+	artifact := []byte("fake-agent-binary")
+	artifactPath := filepath.Join(t.TempDir(), "aria-agent-linux-amd64")
+	if err := os.WriteFile(artifactPath, artifact, 0o755); err != nil {
+		t.Fatalf("write artifact fixture failed: %v", err)
+	}
+	sum := sha256.Sum256(artifact)
+	expectedChecksum := hex.EncodeToString(sum[:])
+	t.Setenv("ARIA_AGENT_ARTIFACT_PATH", artifactPath)
+
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mux := http.NewServeMux()
+	SetupRoutes(mux, controllerstorage.NewStorageWithDB(db), nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/downloads/aria-agent/linux/amd64", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected artifact 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Body.Bytes(); string(got) != string(artifact) {
+		t.Fatalf("unexpected artifact body: %q", string(got))
+	}
+	if rr.Header().Get("X-Aria-Artifact-SHA256") != expectedChecksum {
+		t.Fatalf("unexpected checksum header: %q", rr.Header().Get("X-Aria-Artifact-SHA256"))
+	}
+	if contentType := rr.Header().Get("Content-Type"); !strings.Contains(contentType, "application/octet-stream") {
+		t.Fatalf("expected octet-stream content type, got %q", contentType)
+	}
+}
+
 func TestListTenantTokensReturnsScanError(t *testing.T) {
 	tenantID := uuid.New()
 	now := time.Now().UTC()

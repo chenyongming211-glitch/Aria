@@ -95,6 +95,39 @@ func (r *Router) HandleControllerGRPCCA(w http.ResponseWriter, req *http.Request
 	_, _ = w.Write(content)
 }
 
+func (r *Router) HandleAgentInstallerScript(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+		return
+	}
+	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(agentInstallerScript()))
+}
+
+func (r *Router) HandleAgentBinaryDownload(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+		return
+	}
+	path := currentAgentArtifactPath()
+	if path == "" {
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Agent artifact is not configured", nil)
+		return
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Agent artifact not found", nil)
+		return
+	}
+	checksum := sha256Hex(content)
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", `attachment; filename="aria-agent-linux-amd64"`)
+	w.Header().Set("X-Aria-Artifact-SHA256", checksum)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(content)
+}
+
 func currentControllerVersion() string {
 	if version := strings.TrimSpace(os.Getenv("ARIA_CONTROLLER_VERSION")); version != "" {
 		return version
@@ -151,7 +184,7 @@ func currentAgentArtifactSHA256() string {
 	if checksum := strings.TrimSpace(os.Getenv("ARIA_AGENT_ARTIFACT_SHA256")); checksum != "" {
 		return checksum
 	}
-	path := strings.TrimSpace(os.Getenv("ARIA_AGENT_ARTIFACT_PATH"))
+	path := currentAgentArtifactPath()
 	if path == "" {
 		return ""
 	}
@@ -160,6 +193,13 @@ func currentAgentArtifactSHA256() string {
 		return ""
 	}
 	return sha256Hex(content)
+}
+
+func currentAgentArtifactPath() string {
+	if path := strings.TrimSpace(os.Getenv("ARIA_AGENT_ARTIFACT_PATH")); path != "" {
+		return path
+	}
+	return "/root/aria-controller/artifacts/aria-agent-linux-amd64"
 }
 
 func publicControllerAPIURL(req *http.Request) string {
@@ -232,6 +272,169 @@ func containsPrivateKeyMaterial(content []byte) bool {
 func sha256Hex(content []byte) string {
 	sum := sha256.Sum256(content)
 	return hex.EncodeToString(sum[:])
+}
+
+func agentInstallerScript() string {
+	return `#!/usr/bin/env bash
+set -euo pipefail
+
+CONTROLLER_API_URL=""
+SERVER=""
+TOKEN=""
+CA_URL=""
+CA_SHA256=""
+TLS_SERVER_NAME=""
+REGION="default"
+INTERFACE="aria0"
+HOSTNAME_VALUE="$(hostname)"
+PUBLIC_IP=""
+PUBLIC_ENDPOINT=""
+AGENT_URL=""
+AGENT_SHA256=""
+CONFIG_PATH="/etc/aria/agent.yaml"
+CA_PATH="/etc/aria/certs/ca.crt"
+
+usage() {
+  cat <<'USAGE'
+Usage: install-agent.sh --controller-api-url URL --server URL --token TOKEN [options]
+
+Options:
+  --ca-url URL
+  --ca-sha256 SHA256
+  --tls-server-name NAME
+  --region REGION
+  --interface IFACE
+  --hostname HOSTNAME
+  --public-ip IP|auto
+  --public-endpoint HOSTPORT|auto
+  --agent-url URL
+  --agent-sha256 SHA256
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --controller-api-url) CONTROLLER_API_URL="${2:-}"; shift 2 ;;
+    --server) SERVER="${2:-}"; shift 2 ;;
+    --token) TOKEN="${2:-}"; shift 2 ;;
+    --ca-url) CA_URL="${2:-}"; shift 2 ;;
+    --ca-sha256) CA_SHA256="${2:-}"; shift 2 ;;
+    --tls-server-name) TLS_SERVER_NAME="${2:-}"; shift 2 ;;
+    --region) REGION="${2:-}"; shift 2 ;;
+    --interface) INTERFACE="${2:-}"; shift 2 ;;
+    --hostname) HOSTNAME_VALUE="${2:-}"; shift 2 ;;
+    --public-ip) PUBLIC_IP="${2:-}"; shift 2 ;;
+    --public-endpoint) PUBLIC_ENDPOINT="${2:-}"; shift 2 ;;
+    --agent-url) AGENT_URL="${2:-}"; shift 2 ;;
+    --agent-sha256) AGENT_SHA256="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+fail() {
+  echo "aria-agent installer failed: $*" >&2
+  exit 1
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
+}
+
+[ "$(id -u)" = "0" ] || fail "run as root, for example: curl ... | sudo bash -s -- ..."
+[ -n "$CONTROLLER_API_URL" ] || fail "--controller-api-url is required"
+[ -n "$SERVER" ] || fail "--server is required"
+[ -n "$TOKEN" ] || fail "--token is required"
+[ -n "$INTERFACE" ] || fail "--interface is required"
+
+need curl
+need install
+need systemctl
+need sha256sum
+
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64|Linux-amd64) ;;
+  *) fail "only linux/amd64 is supported by this installer" ;;
+esac
+
+if [ -z "$AGENT_URL" ]; then
+  AGENT_URL="${CONTROLLER_API_URL%/}/api/v2/downloads/aria-agent/linux/amd64"
+fi
+if [ -z "$CA_URL" ]; then
+  CA_URL="${CONTROLLER_API_URL%/}/api/v2/controller-info/grpc-ca.crt"
+fi
+
+if [ -e "$CONFIG_PATH" ] || [ -e "/var/lib/aria/agent-state.yaml" ]; then
+  fail "existing Aria config or state found; inspect /etc/aria and /var/lib/aria before reinstalling"
+fi
+
+install -d -m 0755 /etc/aria /etc/aria/certs /var/lib/aria /var/log/aria /usr/local/bin
+
+tmp_agent="$(mktemp)"
+tmp_ca="$(mktemp)"
+trap 'rm -f "$tmp_agent" "$tmp_ca"' EXIT
+
+echo "Downloading aria-agent from $AGENT_URL"
+curl -fsSL "$AGENT_URL" -o "$tmp_agent" || fail "failed to download aria-agent from $AGENT_URL"
+if [ -n "$AGENT_SHA256" ]; then
+  echo "$AGENT_SHA256  $tmp_agent" | sha256sum -c - || fail "aria-agent checksum mismatch"
+fi
+install -m 0755 "$tmp_agent" /usr/local/bin/aria-agent
+
+echo "Downloading Controller CA from $CA_URL"
+curl -fsSL "$CA_URL" -o "$tmp_ca" || fail "failed to download Controller CA from $CA_URL"
+if [ -n "$CA_SHA256" ]; then
+  echo "$CA_SHA256  $tmp_ca" | sha256sum -c - || fail "Controller CA checksum mismatch"
+fi
+install -m 0600 "$tmp_ca" "$CA_PATH"
+
+init_args=(
+  init
+  --server "$SERVER"
+  --controller-api-url "$CONTROLLER_API_URL"
+  --token "$TOKEN"
+  --ca-cert "$CA_PATH"
+  --region "$REGION"
+  --interface "$INTERFACE"
+)
+
+[ -n "$TLS_SERVER_NAME" ] && init_args+=(--tls-server-name "$TLS_SERVER_NAME")
+[ -n "$HOSTNAME_VALUE" ] && init_args+=(--hostname "$HOSTNAME_VALUE")
+[ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" != "auto" ] && init_args+=(--public-ip "$PUBLIC_IP")
+[ -n "$PUBLIC_ENDPOINT" ] && [ "$PUBLIC_ENDPOINT" != "auto" ] && init_args+=(--public-endpoint "$PUBLIC_ENDPOINT")
+
+echo "Initializing aria-agent"
+/usr/local/bin/aria-agent "${init_args[@]}" || fail "aria-agent init failed"
+
+cat >/etc/systemd/system/aria-agent.service <<UNIT
+[Unit]
+Description=Aria SD-WAN Agent
+Documentation=https://github.com/chenyongming211-glitch/Aria
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/aria-agent up --interface ${INTERFACE} --config ${CONFIG_PATH}
+Restart=always
+RestartSec=5
+LimitMEMLOCK=infinity
+AmbientCapabilities=CAP_NET_ADMIN CAP_BPF CAP_SYS_RESOURCE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_BPF CAP_SYS_RESOURCE
+NoNewPrivileges=false
+ExecStopPost=/bin/bash -c 'for i in {0..3}; do ip link del aria$i 2>/dev/null || true; done'
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now aria-agent || fail "failed to start aria-agent.service"
+
+echo "aria-agent installed and started"
+systemctl status aria-agent --no-pager || true
+journalctl -u aria-agent -n 80 --no-pager || true
+`
 }
 
 // handleTenantTokens 处理租户级别的注册令牌

@@ -52,6 +52,8 @@ func SetupRoutes(mux *http.ServeMux, store *controllerstorage.Storage, vmClient 
 	withJWT := middleware.JWTAuthMiddleware
 	mux.HandleFunc("/api/v2/controller-info", router.HandleControllerInfo)
 	mux.HandleFunc("/api/v2/controller-info/grpc-ca.crt", router.HandleControllerGRPCCA)
+	mux.HandleFunc("/api/v2/install/agent.sh", router.HandleAgentInstallerScript)
+	mux.HandleFunc("/api/v2/downloads/aria-agent/linux/amd64", router.HandleAgentBinaryDownload)
 	mux.HandleFunc("/api/v2/auth/login", router.authAPI.HandleLogin)
 	mux.HandleFunc("/api/v2/auth/refresh", router.authAPI.HandleRefresh)
 	mux.HandleFunc("/api/v2/auth/logout", router.authAPI.HandleLogout)

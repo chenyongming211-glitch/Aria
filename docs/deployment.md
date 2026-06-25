@@ -82,6 +82,20 @@ Use GitHub Actions when Rust Agent/eBPF verification is required:
 gh workflow run Build --repo chenyongming211-glitch/Aria --ref <branch>
 ```
 
+When a release includes Agent onboarding support, upload the Linux amd64 Agent
+artifact produced by GitHub Actions or a Linux builder to the Controller host:
+
+```bash
+ssh root@8.152.163.101 'mkdir -p /root/aria-controller/artifacts'
+rsync -az --progress aria-agent root@8.152.163.101:/root/aria-controller/artifacts/aria-agent-linux-amd64
+ssh root@8.152.163.101 'cd /root/aria-controller/artifacts && sha256sum aria-agent-linux-amd64 > aria-agent-linux-amd64.sha256'
+```
+
+The Controller serves this artifact from
+`/api/v2/downloads/aria-agent/linux/amd64` for the Nodes onboarding installer.
+If the artifact is missing, the download endpoint returns `404` and the
+installer exits before consuming the enrollment token.
+
 ## Server Layout
 
 ```text
@@ -90,6 +104,9 @@ gh workflow run Build --repo chenyongming211-glitch/Aria --ref <branch>
 ├── .env
 ├── bin/
 │   └── ariactl
+├── artifacts/
+│   ├── aria-agent-linux-amd64
+│   └── aria-agent-linux-amd64.sha256
 ├── runtime-build/
 │   ├── Dockerfile.controller.runtime
 │   ├── Dockerfile.controller.runtime-base
