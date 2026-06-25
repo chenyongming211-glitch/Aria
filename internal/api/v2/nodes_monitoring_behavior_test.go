@@ -1962,6 +1962,9 @@ func TestMonitoringAPI_TopologyOneNodeReturnsNodeWithoutLinks(t *testing.T) {
 	if firstNode["id"] != nodeID.String() || firstNode["status"] != "online" {
 		t.Fatalf("unexpected topology node payload: %#v", firstNode)
 	}
+	if firstNode["assigned_ip"] != "10.0.0.10" || firstNode["vpn_ip"] != "10.0.0.10" {
+		t.Fatalf("expected topology node to expose assigned_ip and vpn_ip, got %#v", firstNode)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}

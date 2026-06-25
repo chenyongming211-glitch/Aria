@@ -779,6 +779,7 @@ func (r *Router) handleMonitoringTopology(w http.ResponseWriter, req *http.Reque
 			"region":      n.Region,
 			"status":      nodeAvailabilityStatus(n),
 			"assigned_ip": n.AssignedIP,
+			"vpn_ip":      n.AssignedIP,
 		})
 	}
 
