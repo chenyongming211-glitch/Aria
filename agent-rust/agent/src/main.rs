@@ -39,6 +39,7 @@ type LogLevelHandle = Arc<Mutex<Option<reload::Handle<EnvFilter, Registry>>>>;
 
 #[derive(Parser)]
 #[command(name = "aria-agent")]
+#[command(version)]
 #[command(about = "Aria Agent - eBPF-based QoS and ACL", long_about = None)]
 struct Cli {
     #[command(subcommand)]
