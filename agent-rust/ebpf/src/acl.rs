@@ -41,15 +41,72 @@ macro_rules! policy_key_ref {
     ($slot:expr, $generation:expr, $src_id:expr, $dst_id:expr, $proto:expr, $direction:expr) => {{
         let ptr = $slot.as_mut_ptr();
         unsafe {
-            (*ptr).tap_id = TAP_ID_UNASSIGNED;
-            (*ptr).generation = $generation;
-            (*ptr).src_id = $src_id;
-            (*ptr).dst_id = $dst_id;
-            (*ptr).proto = $proto;
-            (*ptr).direction = $direction;
-            (*ptr).pad[0] = 0;
-            (*ptr).pad[1] = 0;
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*ptr).tap_id), TAP_ID_UNASSIGNED);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*ptr).generation), $generation);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*ptr).src_id), $src_id);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*ptr).dst_id), $dst_id);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*ptr).proto), $proto);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*ptr).direction), $direction);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*ptr).pad[0]), 0);
+            core::ptr::write_volatile(core::ptr::addr_of_mut!((*ptr).pad[1]), 0);
             &*ptr
+        }
+    }};
+}
+
+macro_rules! write_best_policy {
+    ($best_key:expr, $best_value:expr, $candidate_key:expr, $policy:expr) => {{
+        let key_ptr = $best_key.as_mut_ptr();
+        let value_ptr = $best_value.as_mut_ptr();
+        unsafe {
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!((*key_ptr).tap_id),
+                (*$candidate_key).tap_id,
+            );
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!((*key_ptr).generation),
+                (*$candidate_key).generation,
+            );
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!((*key_ptr).src_id),
+                (*$candidate_key).src_id,
+            );
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!((*key_ptr).dst_id),
+                (*$candidate_key).dst_id,
+            );
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!((*key_ptr).proto),
+                (*$candidate_key).proto,
+            );
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!((*key_ptr).direction),
+                (*$candidate_key).direction,
+            );
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!((*key_ptr).pad[0]),
+                (*$candidate_key).pad[0],
+            );
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!((*key_ptr).pad[1]),
+                (*$candidate_key).pad[1],
+            );
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!((*value_ptr).action),
+                (*$policy).action,
+            );
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!((*value_ptr).has_port_filter),
+                (*$policy).has_port_filter,
+            );
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!((*value_ptr).priority),
+                (*$policy).priority,
+            );
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!((*value_ptr).bitmap_idx),
+                (*$policy).bitmap_idx,
+            );
         }
     }};
 }
@@ -489,16 +546,14 @@ fn consider_policy(
 ) {
     if let Some(policy) = unsafe { POLICY_TABLE.get(candidate_key) } {
         if *found == 0 {
-            best_key.write(*candidate_key);
-            best_value.write(*policy);
+            write_best_policy!(best_key, best_value, candidate_key, policy);
             *found = 1;
             return;
         }
 
         let current_priority = unsafe { (*best_value.as_ptr()).priority };
         if policy.priority < current_priority {
-            best_key.write(*candidate_key);
-            best_value.write(*policy);
+            write_best_policy!(best_key, best_value, candidate_key, policy);
         }
     }
 }
