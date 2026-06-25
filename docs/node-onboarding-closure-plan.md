@@ -8,7 +8,9 @@
 
 ```text
 管理员生成 Enrollment Token
--> 节点执行 aria-agent init
+-> 控制台生成完整 installer 命令
+-> 节点执行 installer，安装 aria-agent、Controller CA 和 systemd unit
+-> installer 调用 aria-agent init
 -> Agent 生成本机身份
 -> Controller 校验 token
 -> Controller 创建或绑定 node_id、tenant_id、assigned_ip
@@ -27,7 +29,8 @@ v0.1.0 的验收标准是“自助接入可演示、可回放、可排障”。�
 
 ```text
 管理员生成 Enrollment Token
--> 复制 init 命令
+-> 复制完整 installer 命令
+-> installer 安装 aria-agent + Controller CA + systemd unit
 -> Agent 注册
 -> Controller 创建 node + assigned_ip + runtime token
 -> Agent 完成首次 Sync
@@ -78,18 +81,18 @@ v0.1.0 的验收标准是“自助接入可演示、可回放、可排障”。�
 示例命令：
 
 ```bash
-sudo install -d -m 0755 /etc/aria/certs
-sudo install -m 0600 ca.crt /etc/aria/certs/ca.crt
-
-aria-agent init \
-  --server https://controller.example.com:50051 \
-  --controller-api-url https://controller.example.com \
+curl -fsSL https://aria.yun/api/v2/install/agent.sh | sudo bash -s -- \
+  --controller-api-url https://aria.yun \
+  --server https://aria.yun:50051 \
   --token tk_xxx \
-  --ca-cert /etc/aria/certs/ca.crt \
-  --tls-server-name controller.example.com \
+  --ca-url https://aria.yun/api/v2/controller-info/grpc-ca.crt \
+  --ca-sha256 <sha256> \
+  --tls-server-name aria.yun \
   --hostname edge-sh-01 \
-  --region sh \
-  --interface eth0
+  --region tencent-cloud \
+  --interface aria0 \
+  --public-ip auto \
+  --public-endpoint auto
 ```
 
 边界要求：
@@ -109,21 +112,27 @@ aria-agent init \
 5. 保存 Controller 返回的 runtime state。
 6. 立刻触发首次 Sync。
 
-生产环境 gRPC 使用单向 TLS 时，新机器必须先安装 Controller CA。控制台生成的接入命令必须包含 `--ca-cert` 和 `--tls-server-name`，否则 `aria-agent up` 会在 bootstrap 阶段因为 `UnknownIssuer` 退出。当前线上标准路径是：
+生产环境 gRPC 使用单向 TLS 时，新机器必须安装 Controller CA。控制台生成的接入命令现在使用 Controller 托管的 installer 脚本自动下载 CA，并传入 `--tls-server-name`。当前线上标准路径是：
 
 ```bash
-sudo install -d -m 0755 /etc/aria/certs
-sudo install -m 0600 ca.crt /etc/aria/certs/ca.crt
-sudo aria-agent init \
-  --server https://aria.yun:50051 \
+curl -fsSL https://aria.yun/api/v2/install/agent.sh | sudo bash -s -- \
   --controller-api-url https://aria.yun \
+  --server https://aria.yun:50051 \
   --token tk_xxx \
-  --ca-cert /etc/aria/certs/ca.crt \
+  --ca-url https://aria.yun/api/v2/controller-info/grpc-ca.crt \
+  --ca-sha256 <sha256> \
   --tls-server-name aria.yun \
   --hostname edge-node \
   --region tencent-cloud \
   --interface aria0
-sudo systemctl enable --now aria-agent
+```
+
+如果需要手工排障，Agent 侧标准命令是：
+
+```bash
+sudo aria-agent doctor --config /etc/aria/agent.yaml
+sudo systemctl status aria-agent --no-pager
+sudo journalctl -u aria-agent -n 120 --no-pager
 ```
 
 推荐拆分静态配置与运行状态：
@@ -245,13 +254,14 @@ Enrollment Token preview 或来源标签
 ### 2026-06-25 当前收口状态
 
 - Controller / Agent 注册、runtime token、首次 Sync、节点状态和证书基础链路已经具备。
-- Nodes 页面已经从静态提示升级为接入向导：可创建 Enrollment Token、生成真实 `aria-agent init --server ... --token ... --controller-api-url ...` 命令，并提供复制与验证清单。
-- 本阶段剩余工作不再扩展安装器，而是在线上用一台新机器从 0 执行 init、启动 Agent，并按下列验收项记录证据。
+- Nodes 页面已经从静态提示升级为接入向导：可创建 Enrollment Token、读取 Controller bootstrap contract、生成完整 installer 命令，自动安装 `aria-agent`、Controller CA、systemd unit，并保留 init-only 高级命令。
+- 节点列表和节点详情已经返回并展示 `onboarding.phase`、token preview、first seen、last sync、last error 和 next action。
+- 本阶段剩余工作是在线上用一台新机器从 0 执行 installer、启动 Agent，并按下列验收项记录证据。
 
 接入闭环完成后，应能通过以下验收：
 
 1. 新租户创建 Enrollment Token。
-2. 新机器执行一条 `aria-agent init ...`。
+2. 新机器执行一条 installer 命令。
 3. Controller 创建节点并分配 `node_id + assigned_ip`。
 4. Agent 保存 runtime state。
 5. Agent 立刻完成第一次 Sync。
@@ -262,6 +272,16 @@ Enrollment Token preview 或来源标签
 10. 删除或禁用节点后，Agent 不能继续 command stream 或 Sync。
 11. 全流程有审计事件：token created、node registered、sync applied、node offline/deleted。
 12. 注册、重启、token 过期、节点删除至少有自动化回归测试。
+
+### 失败场景与预期提示
+
+| 场景 | 预期结果 |
+| --- | --- |
+| 缺少 Controller CA | installer 在 CA 下载或校验阶段失败；`aria-agent doctor` 明确提示 CA 文件不存在或不是 PEM 证书 |
+| token 过期 | 注册失败，节点不应显示为 online；页面保持 registered/degraded 并显示错误 |
+| token 使用次数耗尽 | 注册失败，不创建新的有效节点身份 |
+| Controller 未放置 Agent artifact | `/api/v2/downloads/aria-agent/linux/amd64` 返回 404，installer 在安装 binary 前退出 |
+| systemd service 启动失败 | installer 打印 `systemctl status` 和 `journalctl`，节点详情 next action 指向 `aria-agent doctor` |
 
 ## 10. 实施顺序
 

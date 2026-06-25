@@ -96,6 +96,30 @@ The Controller serves this artifact from
 If the artifact is missing, the download endpoint returns `404` and the
 installer exits before consuming the enrollment token.
 
+The Nodes onboarding command should use the Controller-served installer:
+
+```bash
+curl -fsSL https://aria.yun/api/v2/install/agent.sh | sudo bash -s -- \
+  --controller-api-url https://aria.yun \
+  --server https://aria.yun:50051 \
+  --token tk_xxx \
+  --ca-url https://aria.yun/api/v2/controller-info/grpc-ca.crt \
+  --ca-sha256 <sha256> \
+  --tls-server-name aria.yun \
+  --region tencent-cloud \
+  --interface aria0 \
+  --public-ip auto \
+  --public-endpoint auto
+```
+
+After installation, the expected local checks on the Agent host are:
+
+```bash
+sudo aria-agent doctor --config /etc/aria/agent.yaml
+sudo systemctl status aria-agent --no-pager
+sudo journalctl -u aria-agent -n 120 --no-pager
+```
+
 ## Server Layout
 
 ```text
@@ -152,7 +176,9 @@ ARIA_GRPC_TLS_SERVER_NAME=aria.yun
 `disabled` is only for local or one-off plaintext testing. Do not use it on the
 production Controller while Agents are configured with `https://`.
 
-New Agent nodes must install the same Controller CA before `aria-agent up`:
+New Agent nodes must install the same Controller CA before `aria-agent up`.
+The preferred path is the Nodes onboarding installer above. Manual init remains
+only a fallback for diagnostics:
 
 ```bash
 sudo install -d -m 0755 /etc/aria/certs
@@ -168,6 +194,17 @@ sudo aria-agent init \
 
 If `aria-agent up` logs `invalid peer certificate: UnknownIssuer`, the CA file is
 missing or `--ca-cert` points to the wrong path.
+
+Known onboarding failure modes:
+
+| Failure | Expected operator signal |
+| --- | --- |
+| Missing Agent artifact | `/api/v2/downloads/aria-agent/linux/amd64` returns `404`; installer exits before init |
+| Bad CA URL | installer exits during CA download |
+| Wrong CA checksum | installer exits during SHA256 verification |
+| Missing CA file in manual mode | `aria-agent init` or `aria-agent doctor` reports `CA certificate file not found` |
+| Missing TLS server name with CA | `aria-agent init` or `aria-agent doctor` reports `--tls-server-name is required when --ca-cert is set` |
+| systemd start failed | installer prints `systemctl status aria-agent --no-pager` and recent journal lines |
 
 ## Super Admin Bootstrap
 
