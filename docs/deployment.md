@@ -157,6 +157,7 @@ Controller volumes:
 - ./certs:/etc/aria/certs:ro
 - ./logs:/var/log/aria
 - ./data/backups:/opt/aria/data/backups
+- ./artifacts:/root/aria-controller/artifacts:ro
 ```
 
 ## gRPC TLS
