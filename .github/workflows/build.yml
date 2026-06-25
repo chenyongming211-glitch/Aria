@@ -138,7 +138,11 @@ jobs:
         run: cargo test -p aria-agent --lib
 
       - name: Build Rust agent
-        run: cargo build --release -p aria-agent
+        run: |
+          rm -rf target/release
+          cargo build --release -p aria-agent
+          ldd target/release/aria-agent
+          target/release/aria-agent --version
 
       - name: Upload Rust artifact
         uses: actions/upload-artifact@v7.0.1
