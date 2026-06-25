@@ -1,10 +1,11 @@
-use std::os::unix::net::UnixStream;
-use std::io::{BufReader, BufWriter, BufRead, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::net::{IpAddr, Ipv4Addr, UdpSocket};
+use std::os::unix::net::UnixStream;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -48,7 +49,7 @@ struct Cli {
 enum Commands {
     Up {
         #[arg(short, long)]
-        interface: String,
+        interface: Option<String>,
         #[arg(short = 'l', long, default_value = "info")]
         log_level: String,
         #[arg(long, default_value = "0.0.0.0:9090")]
@@ -86,6 +87,10 @@ enum Commands {
         #[arg(long)]
         advertise_routes: Option<String>,
     },
+    Doctor {
+        #[arg(long)]
+        config: Option<String>,
+    },
     Status,
     Peers,
     Route,
@@ -118,10 +123,20 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Up { interface, log_level, metrics_addr, config } => {
-            let rt = tokio::runtime::Runtime::new()
-                .context("Failed to create tokio runtime")?;
-            rt.block_on(run_agent_runtime(&interface, &log_level, &metrics_addr, config.as_deref()))?;
+        Commands::Up {
+            interface,
+            log_level,
+            metrics_addr,
+            config,
+        } => {
+            let rt =
+                tokio::runtime::Runtime::new().context("Failed to create tokio runtime")?;
+            rt.block_on(run_agent_runtime(
+                interface.as_deref(),
+                &log_level,
+                &metrics_addr,
+                config.as_deref(),
+            ))?;
         }
         Commands::Init {
             server,
@@ -156,6 +171,7 @@ fn main() -> Result<()> {
                 advertise_routes.as_deref(),
             )?
         }
+        Commands::Doctor { config } => run_doctor(config.as_deref())?,
         Commands::Status => send_status_command()?,
         Commands::Peers => send_peers_command()?,
         Commands::Route => send_route_command()?,
@@ -238,6 +254,7 @@ fn run_init(
     println!("  Token: {}...", &token[..16.min(token.len())]);
     
     let iface = interface.unwrap_or("aria0");
+    validate_init_inputs(server, token, iface, ca_cert, tls_server_name)?;
     let hostname = hostname
         .map(|value| value.to_string())
         .or_else(detect_hostname)
@@ -285,6 +302,242 @@ fn run_init(
     println!("Run 'aria-agent up' to start the agent.");
     
     Ok(())
+}
+
+fn validate_init_inputs(
+    server: &str,
+    token: &str,
+    interface: &str,
+    ca_cert: Option<&str>,
+    tls_server_name: Option<&str>,
+) -> Result<()> {
+    let server = server.trim();
+    if server.is_empty() {
+        bail!("--server is required");
+    }
+    url::Url::parse(server)
+        .with_context(|| format!("invalid --server URL: {}", server))?;
+
+    if token.trim().is_empty() {
+        bail!("--token is required");
+    }
+
+    validate_interface_name(interface)?;
+    validate_ca_and_tls(ca_cert, tls_server_name)?;
+
+    Ok(())
+}
+
+fn validate_interface_name(interface: &str) -> Result<()> {
+    let interface = interface.trim();
+    if interface.is_empty() {
+        bail!("--interface must not be empty");
+    }
+    if interface.len() > 15 {
+        bail!("--interface must be 15 characters or fewer for Linux netdev names");
+    }
+    if !interface
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.')
+    {
+        bail!("--interface contains unsupported characters: {}", interface);
+    }
+    Ok(())
+}
+
+fn validate_ca_and_tls(ca_cert: Option<&str>, tls_server_name: Option<&str>) -> Result<()> {
+    let ca_cert = ca_cert.map(str::trim).filter(|value| !value.is_empty());
+    if let Some(ca_path) = ca_cert {
+        let path = Path::new(ca_path);
+        if !path.exists() {
+            bail!(
+                "CA certificate file not found: {}. Download the Controller CA or pass --ca-cert /etc/aria/certs/ca.crt",
+                ca_path
+            );
+        }
+        if !path.is_file() {
+            bail!("CA certificate path is not a file: {}", ca_path);
+        }
+
+        let pem = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read CA certificate file: {}", ca_path))?;
+        if pem.contains("PRIVATE KEY") {
+            bail!("CA certificate file must not contain private key material: {}", ca_path);
+        }
+        if !pem.contains("BEGIN CERTIFICATE") {
+            bail!("CA certificate file is not a PEM certificate: {}", ca_path);
+        }
+
+        let tls_server_name = tls_server_name
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if tls_server_name.is_none() {
+            bail!("--tls-server-name is required when --ca-cert is set");
+        }
+    }
+
+    Ok(())
+}
+
+fn run_doctor(config_path: Option<&str>) -> Result<()> {
+    println!("Aria Agent doctor");
+    println!("  Version: {}", env!("CARGO_PKG_VERSION"));
+
+    let config_path = config_path.unwrap_or(DEFAULT_CONFIG_PATH);
+    let config_manager = config::ConfigManager::new(config_path);
+    println!("  Config: {}", config_manager.bootstrap_path());
+    println!("  State: {}", config_manager.state_path());
+
+    let mut failed = false;
+
+    let bootstrap = match config_manager.load_bootstrap() {
+        Ok(bootstrap) => {
+            print_doctor_check("OK", "bootstrap", config_manager.bootstrap_path());
+            Some(bootstrap)
+        }
+        Err(err) => {
+            print_doctor_check(
+                "FAIL",
+                "bootstrap",
+                &format!("cannot read {}: {}", config_manager.bootstrap_path(), err),
+            );
+            failed = true;
+            None
+        }
+    };
+
+    let state = match config_manager.load_state_opt() {
+        Ok(Some(state)) => {
+            print_doctor_check("OK", "state", config_manager.state_path());
+            Some(state)
+        }
+        Ok(None) => {
+            print_doctor_check(
+                "WARN",
+                "state",
+                &format!("{} does not exist yet", config_manager.state_path()),
+            );
+            None
+        }
+        Err(err) => {
+            print_doctor_check(
+                "FAIL",
+                "state",
+                &format!("cannot read {}: {}", config_manager.state_path(), err),
+            );
+            failed = true;
+            None
+        }
+    };
+
+    if let Some(bootstrap) = bootstrap.as_ref() {
+        if bootstrap.controller_url.trim().is_empty() {
+            print_doctor_check("FAIL", "controller", "controller_url is empty");
+            failed = true;
+        } else if let Err(err) = url::Url::parse(bootstrap.controller_url.trim()) {
+            print_doctor_check(
+                "FAIL",
+                "controller",
+                &format!("invalid controller_url {}: {}", bootstrap.controller_url, err),
+            );
+            failed = true;
+        } else {
+            print_doctor_check("OK", "controller", &bootstrap.controller_url);
+        }
+
+        if let Err(err) = validate_interface_name(&bootstrap.interface_name) {
+            print_doctor_check("FAIL", "interface", &err.to_string());
+            failed = true;
+        } else {
+            print_doctor_check("OK", "interface", &bootstrap.interface_name);
+        }
+
+        if let Err(err) = validate_ca_and_tls(
+            Some(bootstrap.ca_cert.as_str()).filter(|value| !value.trim().is_empty()),
+            bootstrap.tls_server_name.as_deref(),
+        ) {
+            print_doctor_check("FAIL", "grpc tls", &err.to_string());
+            failed = true;
+        } else if bootstrap.ca_cert.trim().is_empty() {
+            print_doctor_check(
+                "WARN",
+                "grpc tls",
+                "no ca_cert configured; TLS may rely on system roots or fail",
+            );
+        } else {
+            let server_name = bootstrap
+                .tls_server_name
+                .as_deref()
+                .unwrap_or("<missing>");
+            print_doctor_check(
+                "OK",
+                "grpc tls",
+                &format!("ca={}, server_name={}", bootstrap.ca_cert, server_name),
+            );
+        }
+
+        let has_runtime = state
+            .as_ref()
+            .map(|state| {
+                state.node_id.is_some()
+                    || state.current_credential.is_some()
+                    || !state.public_key.trim().is_empty()
+            })
+            .unwrap_or(false);
+        if bootstrap.enrollment_token.is_none() && !has_runtime {
+            print_doctor_check(
+                "FAIL",
+                "identity",
+                "no enrollment token and no runtime identity in state",
+            );
+            failed = true;
+        } else {
+            print_doctor_check("OK", "identity", "bootstrap or runtime identity is present");
+        }
+    }
+
+    for command in ["ip", "wg"] {
+        if command_exists(command) {
+            print_doctor_check("OK", "command", command);
+        } else {
+            print_doctor_check("FAIL", "command", &format!("{} not found in PATH", command));
+            failed = true;
+        }
+    }
+
+    if command_exists("systemctl") {
+        let unit_path = Path::new("/etc/systemd/system/aria-agent.service");
+        if unit_path.exists() {
+            print_doctor_check("OK", "systemd", "/etc/systemd/system/aria-agent.service");
+        } else {
+            print_doctor_check(
+                "WARN",
+                "systemd",
+                "aria-agent.service is not installed under /etc/systemd/system",
+            );
+        }
+    } else {
+        print_doctor_check("WARN", "systemd", "systemctl not found");
+    }
+
+    if failed {
+        bail!("aria-agent doctor found blocking issues");
+    }
+
+    println!("Doctor finished without blocking issues.");
+    Ok(())
+}
+
+fn print_doctor_check(status: &str, label: &str, detail: &str) {
+    println!("  [{:<4}] {:<12} {}", status, label, detail);
+}
+
+fn command_exists(command: &str) -> bool {
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return false;
+    };
+
+    std::env::split_paths(&path_var).any(|dir| dir.join(command).is_file())
 }
 
 fn parse_advertised_routes(advertise_routes: Option<&str>) -> Option<Vec<String>> {
@@ -850,7 +1103,7 @@ fn send_down_command() -> Result<()> {
 // ==================== AgentRuntime 启动函数 ====================
 
 async fn run_agent_runtime(
-    interface: &str,
+    interface: Option<&str>,
     log_level: &str,
     metrics_addr: &str,
     config_path: Option<&str>,
@@ -869,6 +1122,13 @@ async fn run_agent_runtime(
         .context("Agent is not initialized. Run 'aria-agent init' first.")?;
 
     let (mut bootstrap_changed, mut state_changed) = ensure_local_identity(&mut bootstrap, &mut state)?;
+    if let Some(interface) = interface.map(str::trim).filter(|value| !value.is_empty()) {
+        validate_interface_name(interface)?;
+        if bootstrap.interface_name != interface {
+            bootstrap.interface_name = interface.to_string();
+            bootstrap_changed = true;
+        }
+    }
     if ensure_public_network_identity(&mut bootstrap).await {
         bootstrap_changed = true;
     }
@@ -891,10 +1151,11 @@ async fn run_agent_runtime(
     }
 
     let config = config::AgentConfig::from_parts(bootstrap, state);
+    let runtime_interface = config.interface_name.clone();
     let mut agent = agent_runtime::AgentRuntime::new(
         config,
         config_path.to_string(),
-        interface,
+        &runtime_interface,
         log_handle,
     ).await?;
     agent.start().await
@@ -909,10 +1170,12 @@ async fn run_agent_runtime(
 mod tests {
     use super::{
         is_public_ipv4, needs_bootstrap_registration, normalize_public_endpoint,
-        normalize_public_ipv4,
+        normalize_public_ipv4, validate_init_inputs, validate_interface_name,
     };
     use crate::config::AgentState;
     use std::net::Ipv4Addr;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn bootstrap_needed_when_assigned_ip_exists_but_runtime_credential_missing() {
@@ -974,5 +1237,74 @@ mod tests {
             normalize_public_endpoint(None, Some("82.156.48.111"), 51820),
             Some("82.156.48.111:51820".to_string())
         );
+    }
+
+    #[test]
+    fn init_validation_rejects_missing_ca_file() {
+        let err = validate_init_inputs(
+            "https://aria.yun:50051",
+            "tk_test",
+            "aria0",
+            Some("/tmp/aria-agent-missing-ca-for-test.pem"),
+            Some("aria.yun"),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("CA certificate file not found"));
+    }
+
+    #[test]
+    fn init_validation_requires_tls_server_name_when_ca_is_set() {
+        let ca_path = write_temp_ca("init_validation_requires_tls_server_name_when_ca_is_set");
+        let err = validate_init_inputs(
+            "https://aria.yun:50051",
+            "tk_test",
+            "aria0",
+            Some(ca_path.to_str().unwrap()),
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+        std::fs::remove_file(&ca_path).ok();
+
+        assert!(err.contains("--tls-server-name is required"));
+    }
+
+    #[test]
+    fn init_validation_accepts_ca_and_tls_server_name() {
+        let ca_path = write_temp_ca("init_validation_accepts_ca_and_tls_server_name");
+        validate_init_inputs(
+            "https://aria.yun:50051",
+            "tk_test",
+            "aria0",
+            Some(ca_path.to_str().unwrap()),
+            Some("aria.yun"),
+        )
+        .unwrap();
+        std::fs::remove_file(&ca_path).ok();
+    }
+
+    #[test]
+    fn interface_validation_rejects_linux_netdev_too_long() {
+        let err = validate_interface_name("aria-interface-name-too-long")
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("15 characters"));
+    }
+
+    fn write_temp_ca(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("aria-agent-{}-{}.pem", label, nanos));
+        std::fs::write(
+            &path,
+            "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+        )
+        .unwrap();
+        path
     }
 }
