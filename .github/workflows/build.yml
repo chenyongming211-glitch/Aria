@@ -130,16 +130,18 @@ jobs:
         uses: Swatinem/rust-cache@v2.9.1
         with:
           workspaces: "agent-rust -> target"
+          cache-targets: false
 
       - name: Install bpf-linker
         run: cargo +stable install bpf-linker --locked
 
       - name: Run Rust agent tests
-        run: cargo test -p aria-agent --lib
+        run: |
+          rm -rf target
+          cargo test -p aria-agent --lib
 
       - name: Build Rust agent
         run: |
-          rm -rf target/release
           cargo build --release -p aria-agent
           ldd target/release/aria-agent
           target/release/aria-agent --version

@@ -67,8 +67,7 @@ ipnetwork = "0.20"
 pnet = "0.35"
 
 # gRPC 客户端
-tonic = { version = "0.13", features = ["tls-ring"] }
-rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
+tonic = { version = "0.13", features = ["tls-aws-lc"] }
 prost = "0.13"
 tokio-stream = "0.1"
 

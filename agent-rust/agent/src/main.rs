@@ -116,11 +116,6 @@ struct Response {
 }
 
 fn main() -> Result<()> {
-    // Install rustls CryptoProvider before any TLS operation.
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .expect("Failed to install rustls ring provider");
-
     let cli = Cli::parse();
 
     match cli.command {
