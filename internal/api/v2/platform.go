@@ -453,8 +453,8 @@ ExecStart=/usr/local/bin/aria-agent up --interface ${INTERFACE} --config ${CONFI
 Restart=always
 RestartSec=5
 LimitMEMLOCK=infinity
-AmbientCapabilities=CAP_NET_ADMIN CAP_BPF CAP_SYS_RESOURCE
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_BPF CAP_SYS_RESOURCE
+AmbientCapabilities=CAP_NET_ADMIN CAP_BPF CAP_PERFMON CAP_SYS_RESOURCE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_BPF CAP_PERFMON CAP_SYS_RESOURCE
 NoNewPrivileges=false
 ExecStopPost=/bin/bash -c 'for i in {0..3}; do ip link del aria\$i 2>/dev/null || true; done'
 

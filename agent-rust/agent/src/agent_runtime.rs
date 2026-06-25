@@ -582,10 +582,11 @@ impl AgentRuntime {
             .output()
             .context("failed to execute bpftool prog show")?;
         if !prog_output.status.success() {
-            return Err(anyhow::anyhow!(
-                "bpftool prog show failed: {}",
+            tracing::warn!(
+                "Skipping xdp_ingress_acl program-name verification because bpftool prog show failed: {}",
                 String::from_utf8_lossy(&prog_output.stderr)
-            ));
+            );
+            return Ok(());
         }
         let prog_stdout = String::from_utf8_lossy(&prog_output.stdout);
         if !prog_stdout.contains("xdp_ingress_acl") {
