@@ -1,9 +1,13 @@
 package v2
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -144,8 +148,25 @@ func TestControllerInfoIsPublicAndStable(t *testing.T) {
 	if grpcTLS["ca_cert_path"] != "/etc/aria/certs/ca.crt" {
 		t.Fatalf("expected default CA cert path, got %#v", grpcTLS)
 	}
-	if grpcTLS["server_name"] != "aria.yun" {
+	if grpcTLS["server_name"] != "example.com" {
 		t.Fatalf("expected default TLS server name, got %#v", grpcTLS)
+	}
+	if data["controller_api_url"] == "" {
+		t.Fatalf("expected controller_api_url in controller-info: %#v", data)
+	}
+	grpc := data["grpc"].(map[string]interface{})
+	if grpc["server"] == "" {
+		t.Fatalf("expected grpc.server in controller-info: %#v", grpc)
+	}
+	agent := data["agent"].(map[string]interface{})
+	if agent["default_interface"] != "aria0" {
+		t.Fatalf("expected default agent interface aria0, got %#v", agent)
+	}
+	if grpcTLS["ca_cert_url"] == "" {
+		t.Fatalf("expected grpc_tls.ca_cert_url in controller-info: %#v", grpcTLS)
+	}
+	if _, ok := grpcTLS["ca_cert_sha256"].(string); !ok {
+		t.Fatalf("expected grpc_tls.ca_cert_sha256 string in controller-info: %#v", grpcTLS)
 	}
 }
 
@@ -156,6 +177,115 @@ func containsStringValue(values []interface{}, expected string) bool {
 		}
 	}
 	return false
+}
+
+func TestControllerInfoIncludesBootstrapURLsAndCAChecksum(t *testing.T) {
+	caPEM := []byte("-----BEGIN CERTIFICATE-----\nMIIBtest\n-----END CERTIFICATE-----\n")
+	caPath := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(caPath, caPEM, 0o600); err != nil {
+		t.Fatalf("write ca fixture failed: %v", err)
+	}
+	sum := sha256.Sum256(caPEM)
+	expectedChecksum := hex.EncodeToString(sum[:])
+	t.Setenv("ARIA_GRPC_CA_CERT", caPath)
+	t.Setenv("ARIA_GRPC_TLS_SERVER_NAME", "controller.example.com")
+
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mux := http.NewServeMux()
+	SetupRoutes(mux, controllerstorage.NewStorageWithDB(db), nil)
+
+	req := httptest.NewRequest(http.MethodGet, "https://controller.example.com/api/v2/controller-info", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected controller-info 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp apibase.APIResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	data := resp.Data.(map[string]interface{})
+	if data["controller_api_url"] != "https://controller.example.com" {
+		t.Fatalf("unexpected controller api url: %#v", data["controller_api_url"])
+	}
+	grpc := data["grpc"].(map[string]interface{})
+	if grpc["server"] != "https://controller.example.com:50051" {
+		t.Fatalf("unexpected grpc server: %#v", grpc)
+	}
+	grpcTLS := data["grpc_tls"].(map[string]interface{})
+	if grpcTLS["ca_cert_url"] != "https://controller.example.com/api/v2/controller-info/grpc-ca.crt" {
+		t.Fatalf("unexpected ca url: %#v", grpcTLS["ca_cert_url"])
+	}
+	if grpcTLS["ca_cert_sha256"] != expectedChecksum {
+		t.Fatalf("unexpected ca checksum: got %#v want %s", grpcTLS["ca_cert_sha256"], expectedChecksum)
+	}
+	agent := data["agent"].(map[string]interface{})
+	if agent["download_url"] != "https://controller.example.com/api/v2/downloads/aria-agent/linux/amd64" {
+		t.Fatalf("unexpected agent download url: %#v", agent["download_url"])
+	}
+}
+
+func TestControllerGRPCCAReturnsPEM(t *testing.T) {
+	caPEM := []byte("-----BEGIN CERTIFICATE-----\nMIIBtest\n-----END CERTIFICATE-----\n")
+	caPath := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(caPath, caPEM, 0o600); err != nil {
+		t.Fatalf("write ca fixture failed: %v", err)
+	}
+	t.Setenv("ARIA_GRPC_CA_CERT", caPath)
+
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mux := http.NewServeMux()
+	SetupRoutes(mux, controllerstorage.NewStorageWithDB(db), nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/controller-info/grpc-ca.crt", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected ca endpoint 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := strings.TrimSpace(rr.Body.String()); got != strings.TrimSpace(string(caPEM)) {
+		t.Fatalf("unexpected ca response: %q", got)
+	}
+	if contentType := rr.Header().Get("Content-Type"); !strings.Contains(contentType, "application/x-pem-file") {
+		t.Fatalf("expected pem content type, got %q", contentType)
+	}
+}
+
+func TestControllerGRPCCARejectsPrivateKeyMaterial(t *testing.T) {
+	caPath := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(caPath, []byte("-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----\n"), 0o600); err != nil {
+		t.Fatalf("write private key fixture failed: %v", err)
+	}
+	t.Setenv("ARIA_GRPC_CA_CERT", caPath)
+
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mux := http.NewServeMux()
+	SetupRoutes(mux, controllerstorage.NewStorageWithDB(db), nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/controller-info/grpc-ca.crt", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected private key material to be rejected, got %d body=%s", rr.Code, rr.Body.String())
+	}
 }
 
 func TestListTenantTokensReturnsScanError(t *testing.T) {

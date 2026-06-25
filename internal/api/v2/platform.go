@@ -1,7 +1,9 @@
 package v2
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -41,13 +43,56 @@ func (r *Router) HandleControllerInfo(w http.ResponseWriter, req *http.Request) 
 			"runtime_token_ttl_sec": 86400,
 			"challenge_auth":        false,
 		},
+		"controller_api_url": publicControllerAPIURL(req),
+		"grpc": map[string]interface{}{
+			"server": publicGRPCServerURL(req),
+		},
 		"grpc_tls": map[string]interface{}{
-			"mode":         currentGRPCTLSMode(),
-			"ca_required":  currentGRPCTLSMode() != "disabled",
-			"ca_cert_path": currentGRPCCACertPath(),
-			"server_name":  currentGRPCTLSServerName(),
+			"mode":            currentGRPCTLSMode(),
+			"ca_required":     currentGRPCTLSMode() != "disabled",
+			"ca_cert_path":    currentGRPCCACertPath(),
+			"ca_cert_url":     absoluteURL(req, "/api/v2/controller-info/grpc-ca.crt"),
+			"ca_cert_sha256":  currentGRPCCACertSHA256(),
+			"server_name":     currentGRPCTLSServerName(req),
+			"download_method": "https",
+		},
+		"agent": map[string]interface{}{
+			"supported_os":      []string{"linux"},
+			"supported_arch":    []string{"amd64"},
+			"default_interface": "aria0",
+			"default_region":    "default",
+			"install_dir":       "/usr/local/bin",
+			"config_path":       "/etc/aria/agent.yaml",
+			"state_path":        "/var/lib/aria/agent-state.yaml",
+			"systemd_unit":      "aria-agent.service",
+			"download_url":      absoluteURL(req, "/api/v2/downloads/aria-agent/linux/amd64"),
+			"sha256":            currentAgentArtifactSHA256(),
 		},
 	}, "Controller capabilities retrieved")
+}
+
+func (r *Router) HandleControllerGRPCCA(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+		return
+	}
+	if currentGRPCTLSMode() == "disabled" {
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "gRPC TLS is disabled", nil)
+		return
+	}
+	content, err := os.ReadFile(currentGRPCCACertPath())
+	if err != nil {
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "gRPC CA certificate not found", nil)
+		return
+	}
+	if containsPrivateKeyMaterial(content) {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Configured gRPC CA file contains private key material", nil)
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-pem-file")
+	w.Header().Set("X-Aria-CA-SHA256", sha256Hex(content))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(content)
 }
 
 func currentControllerVersion() string {
@@ -76,7 +121,7 @@ func currentGRPCCACertPath() string {
 	return path
 }
 
-func currentGRPCTLSServerName() string {
+func currentGRPCTLSServerName(req ...*http.Request) string {
 	if name := strings.TrimSpace(os.Getenv("ARIA_GRPC_TLS_SERVER_NAME")); name != "" {
 		return name
 	}
@@ -86,7 +131,107 @@ func currentGRPCTLSServerName() string {
 	if name := strings.TrimSpace(os.Getenv("ARIA_PUBLIC_HOST")); name != "" {
 		return name
 	}
+	if len(req) > 0 && req[0] != nil {
+		if host := requestHostWithoutPort(req[0]); host != "" {
+			return host
+		}
+	}
 	return "aria.yun"
+}
+
+func currentGRPCCACertSHA256() string {
+	content, err := os.ReadFile(currentGRPCCACertPath())
+	if err != nil || containsPrivateKeyMaterial(content) {
+		return ""
+	}
+	return sha256Hex(content)
+}
+
+func currentAgentArtifactSHA256() string {
+	if checksum := strings.TrimSpace(os.Getenv("ARIA_AGENT_ARTIFACT_SHA256")); checksum != "" {
+		return checksum
+	}
+	path := strings.TrimSpace(os.Getenv("ARIA_AGENT_ARTIFACT_PATH"))
+	if path == "" {
+		return ""
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return sha256Hex(content)
+}
+
+func publicControllerAPIURL(req *http.Request) string {
+	if value := strings.TrimSpace(os.Getenv("ARIA_CONTROLLER_PUBLIC_URL")); value != "" {
+		return strings.TrimRight(value, "/")
+	}
+	if value := strings.TrimSpace(os.Getenv("ARIA_PUBLIC_URL")); value != "" {
+		return strings.TrimRight(value, "/")
+	}
+	return fmt.Sprintf("%s://%s", requestScheme(req), req.Host)
+}
+
+func publicGRPCServerURL(req *http.Request) string {
+	if value := strings.TrimSpace(os.Getenv("ARIA_GRPC_PUBLIC_SERVER")); value != "" {
+		return value
+	}
+	host := currentGRPCTLSServerName(req)
+	if host == "" {
+		host = requestHostWithoutPort(req)
+	}
+	if strings.Contains(host, ":") {
+		host = strings.Split(host, ":")[0]
+	}
+	return fmt.Sprintf("https://%s:50051", host)
+}
+
+func absoluteURL(req *http.Request, path string) string {
+	return publicControllerAPIURL(req) + path
+}
+
+func requestScheme(req *http.Request) string {
+	if req == nil {
+		return "https"
+	}
+	if proto := strings.TrimSpace(req.Header.Get("X-Forwarded-Proto")); proto != "" {
+		return strings.Split(proto, ",")[0]
+	}
+	if req.TLS != nil {
+		return "https"
+	}
+	if req.URL != nil && req.URL.Scheme != "" {
+		return req.URL.Scheme
+	}
+	return "https"
+}
+
+func requestHostWithoutPort(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+	host := strings.TrimSpace(req.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = req.Host
+	}
+	if host == "" && req.URL != nil {
+		host = req.URL.Host
+	}
+	host = strings.Split(host, ",")[0]
+	if idx := strings.LastIndex(host, ":"); idx > -1 && !strings.Contains(host[idx+1:], "]") {
+		return strings.Trim(host[:idx], "[]")
+	}
+	return strings.Trim(host, "[]")
+}
+
+func containsPrivateKeyMaterial(content []byte) bool {
+	text := strings.ToUpper(string(content))
+	return strings.Contains(text, "PRIVATE KEY")
+}
+
+func sha256Hex(content []byte) string {
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])
 }
 
 // handleTenantTokens 处理租户级别的注册令牌
