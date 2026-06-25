@@ -611,7 +611,7 @@
     >
       <div class="onboarding-flow">
         <el-alert
-          title="Create an enrollment token, copy the init command, run it on the target machine, then start aria-agent."
+          title="Create an enrollment token, copy the install command, run it on the target machine, then watch the node come online."
           type="info"
           show-icon
           :closable="false"
@@ -650,7 +650,7 @@
         </div>
 
         <div class="onboarding-section">
-          <h4>2. Init Command</h4>
+          <h4>2. Target Settings</h4>
           <el-form :model="onboardingForm" label-width="150px">
             <el-form-item label="gRPC Server">
               <el-input v-model="onboardingForm.server" placeholder="https://aria.yun:50051" />
@@ -660,6 +660,9 @@
             </el-form-item>
             <el-form-item label="Controller CA Path">
               <el-input v-model="onboardingForm.caCertPath" placeholder="/etc/aria/certs/ca.crt" />
+            </el-form-item>
+            <el-form-item label="Controller CA URL">
+              <el-input v-model="onboardingForm.caUrl" placeholder="https://aria.yun/api/v2/controller-info/grpc-ca.crt" />
             </el-form-item>
             <el-form-item label="TLS Server Name">
               <el-input v-model="onboardingForm.tlsServerName" placeholder="aria.yun" />
@@ -677,20 +680,31 @@
               <el-input v-model="onboardingForm.advertiseRoutes" placeholder="optional, comma separated CIDRs" />
             </el-form-item>
           </el-form>
+        </div>
+
+        <div class="onboarding-section">
+          <h4>3. Install Command</h4>
+          <pre class="init-command">{{ onboardingInstallCommand }}</pre>
+          <div class="onboarding-actions">
+            <el-button :disabled="!onboardingInstallCommand" @click="copyOnboardingCommand">
+              Copy Install Command
+            </el-button>
+          </div>
+          <h5>Advanced: init-only command</h5>
           <pre class="init-command">{{ onboardingInitCommand }}</pre>
           <div class="onboarding-actions">
-            <el-button :disabled="!onboardingInitCommand" @click="copyOnboardingCommand">
-              Copy Init Command
+            <el-button :disabled="!onboardingInitCommand" @click="copyOnboardingInitCommand">
+              Copy Init-Only Command
             </el-button>
           </div>
         </div>
 
         <div class="onboarding-section">
-          <h4>3. Verify</h4>
+          <h4>4. Verify</h4>
           <ul class="onboarding-checklist">
-            <li>Install the Controller CA certificate at the configured CA path before starting the agent service.</li>
-            <li>Run the init command on the target machine.</li>
-            <li>Start the agent service and wait for the first sync.</li>
+            <li>Run the install command on the target machine.</li>
+            <li>Confirm <code>systemctl status aria-agent --no-pager</code> is active.</li>
+            <li>Check <code>journalctl -u aria-agent -n 120 --no-pager</code> if the service does not become healthy.</li>
             <li>Refresh this page and confirm the node is online or degraded with a visible reason.</li>
             <li>Open node detail to check last sync, desired/applied versions, commands, alerts, and certificate status.</li>
           </ul>
@@ -784,6 +798,7 @@ import useNodeStore from '../stores/node'
 import { useAgentProxyApi } from '../composables/useAgentProxyApi'
 import { useMonitorApi } from '../composables/useMonitorApi'
 import { useTokenApi } from '../composables/useTokenApi'
+import { fetchControllerInfo } from '../composables/useControllerInfo'
 import { usePermission } from '../composables/usePermission'
 import { useTenantChangeReload } from '../composables/useTenantChangeReload'
 
@@ -806,6 +821,7 @@ const commandPollTimer = ref(null)
 const onboardingDialogVisible = ref(false)
 const onboardingCreating = ref(false)
 const onboardingToken = ref(null)
+const onboardingControllerInfo = ref({})
 
 const currentOrigin = () => {
   if (typeof window !== 'undefined' && window.location?.origin) {
@@ -838,6 +854,10 @@ const onboardingForm = reactive({
   server: defaultGrpcServer(),
   controllerApiUrl: currentOrigin(),
   caCertPath: '/etc/aria/certs/ca.crt',
+  caUrl: '',
+  caSha256: '',
+  agentUrl: '',
+  agentSha256: '',
   tlsServerName: '',
   region: 'default',
   interface: 'aria0',
@@ -884,6 +904,7 @@ const policyDatapathStats = computed(() => {
   }
 })
 const onboardingTokenValue = computed(() => onboardingToken.value?.token || '')
+const onboardingInstallCommand = computed(() => buildOnboardingInstallCommand())
 const onboardingInitCommand = computed(() => buildOnboardingInitCommand())
 const isStateDiverged = computed(() => {
   if (!selectedNode.value) return false
@@ -954,8 +975,30 @@ const refreshNodes = async () => {
   await nodeStore.loadNodes()
 }
 
-const addNode = () => {
+const addNode = async () => {
   onboardingDialogVisible.value = true
+  await loadOnboardingControllerInfo()
+}
+
+const loadOnboardingControllerInfo = async () => {
+  try {
+    const info = await fetchControllerInfo()
+    onboardingControllerInfo.value = info
+    const grpcTLS = info.grpc_tls || {}
+    const agent = info.agent || {}
+    if (info.controller_api_url) onboardingForm.controllerApiUrl = info.controller_api_url
+    if (info.grpc?.server) onboardingForm.server = info.grpc.server
+    if (grpcTLS.ca_cert_path) onboardingForm.caCertPath = grpcTLS.ca_cert_path
+    if (grpcTLS.ca_cert_url) onboardingForm.caUrl = grpcTLS.ca_cert_url
+    if (grpcTLS.ca_cert_sha256) onboardingForm.caSha256 = grpcTLS.ca_cert_sha256
+    if (grpcTLS.server_name) onboardingForm.tlsServerName = grpcTLS.server_name
+    if (agent.default_interface) onboardingForm.interface = agent.default_interface
+    if (agent.default_region) onboardingForm.region = agent.default_region
+    if (agent.download_url) onboardingForm.agentUrl = agent.download_url
+    if (agent.sha256) onboardingForm.agentSha256 = agent.sha256
+  } catch (error) {
+    console.warn('Failed to load controller onboarding info:', error)
+  }
 }
 
 const createOnboardingToken = async () => {
@@ -1022,6 +1065,47 @@ const buildOnboardingInitCommand = () => {
   return parts.join(' ')
 }
 
+const buildOnboardingInstallCommand = () => {
+  const token = onboardingTokenValue.value || '<enrollment-token>'
+  const controllerApiUrl = onboardingForm.controllerApiUrl || currentOrigin()
+  const installScriptUrl = `${String(controllerApiUrl).replace(/\/+$/, '')}/api/v2/install/agent.sh`
+  const parts = [
+    'curl',
+    '-fsSL',
+    shellArg(installScriptUrl),
+    '|',
+    'sudo',
+    'bash',
+    '-s',
+    '--',
+    '--controller-api-url',
+    shellArg(controllerApiUrl),
+    '--server',
+    shellArg(onboardingForm.server || defaultGrpcServer()),
+    '--token',
+    shellArg(token)
+  ]
+  const optionalArgs = [
+    ['--ca-url', onboardingForm.caUrl],
+    ['--ca-sha256', onboardingForm.caSha256],
+    ['--tls-server-name', onboardingForm.tlsServerName || inferTLSServerName(onboardingForm.server)],
+    ['--region', onboardingForm.region],
+    ['--interface', onboardingForm.interface],
+    ['--hostname', onboardingForm.hostname],
+    ['--agent-url', onboardingForm.agentUrl],
+    ['--agent-sha256', onboardingForm.agentSha256],
+    ['--public-ip', 'auto'],
+    ['--public-endpoint', 'auto']
+  ]
+  optionalArgs.forEach(([flag, value]) => {
+    const arg = shellArg(value)
+    if (arg) {
+      parts.push(flag, arg)
+    }
+  })
+  return parts.join(' ')
+}
+
 const copyText = async (value, successMessage) => {
   if (!value) {
     ElMessage.warning('Nothing to copy')
@@ -1037,7 +1121,9 @@ const copyText = async (value, successMessage) => {
 
 const copyOnboardingToken = () => copyText(onboardingTokenValue.value, 'Token copied')
 
-const copyOnboardingCommand = () => copyText(onboardingInitCommand.value, 'Init command copied')
+const copyOnboardingCommand = () => copyText(onboardingInstallCommand.value, 'Install command copied')
+
+const copyOnboardingInitCommand = () => copyText(onboardingInitCommand.value, 'Init command copied')
 
 const viewNodeDetails = async (node) => {
   try {

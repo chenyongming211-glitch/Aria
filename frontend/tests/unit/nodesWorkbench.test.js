@@ -6,7 +6,8 @@ const {
   mockNodeStore,
   sendAgentCommandMock,
   getNodeMetricsMock,
-  tokenApiMock
+  tokenApiMock,
+  fetchControllerInfoMock
 } = vi.hoisted(() => ({
   routerPush: vi.fn(),
   mockNodeStore: {
@@ -102,7 +103,25 @@ const {
       max_uses: 1,
       expires_at: '2026-06-26T00:00:00Z'
     }))
-  }
+  },
+  fetchControllerInfoMock: vi.fn(async () => ({
+    controller_api_url: 'https://aria.yun',
+    grpc: {
+      server: 'https://aria.yun:50051'
+    },
+    grpc_tls: {
+      ca_cert_path: '/etc/aria/certs/ca.crt',
+      ca_cert_url: 'https://aria.yun/api/v2/controller-info/grpc-ca.crt',
+      ca_cert_sha256: 'ca-sha256',
+      server_name: 'aria.yun'
+    },
+    agent: {
+      default_interface: 'aria0',
+      default_region: 'default',
+      download_url: 'https://aria.yun/api/v2/downloads/aria-agent/linux/amd64',
+      sha256: 'agent-sha256'
+    }
+  }))
 }))
 
 vi.mock('/src/stores/node', () => ({
@@ -129,6 +148,10 @@ vi.mock('/src/composables/useMonitorApi', () => ({
 
 vi.mock('/src/composables/useTokenApi', () => ({
   useTokenApi: tokenApiMock
+}))
+
+vi.mock('/src/composables/useControllerInfo', () => ({
+  fetchControllerInfo: fetchControllerInfoMock
 }))
 
 vi.mock('vue-router', () => ({
@@ -212,6 +235,7 @@ describe('Nodes workbench detail', () => {
     sendAgentCommandMock.mockClear()
     getNodeMetricsMock.mockClear()
     tokenApiMock.createToken.mockClear()
+    fetchControllerInfoMock.mockClear()
     mockNodeStore.loadNodes.mockClear()
     mockNodeStore.loadNodeDetail.mockClear()
   })
@@ -320,7 +344,7 @@ describe('Nodes workbench detail', () => {
     })
   })
 
-  it('opens onboarding wizard, creates an enrollment token, and builds an init command', async () => {
+  it('opens onboarding wizard, creates an enrollment token, and builds install and init commands', async () => {
     const writeText = vi.fn(async () => {})
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText },
@@ -328,8 +352,10 @@ describe('Nodes workbench detail', () => {
     })
 
     const wrapper = mountNodes()
-    wrapper.vm.addNode()
+    await wrapper.vm.addNode()
+    await flushPromises()
     expect(wrapper.vm.onboardingDialogVisible).toBe(true)
+    expect(fetchControllerInfoMock).toHaveBeenCalled()
 
     wrapper.vm.onboardingForm.server = 'https://aria.yun:50051'
     wrapper.vm.onboardingForm.controllerApiUrl = 'https://aria.yun'
@@ -347,6 +373,17 @@ describe('Nodes workbench detail', () => {
       ttl: '24h'
     })
     expect(wrapper.vm.onboardingToken.token).toBe('enroll-secret-123456')
+    expect(wrapper.vm.onboardingInstallCommand).toContain('curl -fsSL https://aria.yun/api/v2/install/agent.sh')
+    expect(wrapper.vm.onboardingInstallCommand).toContain('| sudo bash -s --')
+    expect(wrapper.vm.onboardingInstallCommand).toContain('--controller-api-url https://aria.yun')
+    expect(wrapper.vm.onboardingInstallCommand).toContain('--server https://aria.yun:50051')
+    expect(wrapper.vm.onboardingInstallCommand).toContain('--token enroll-secret-123456')
+    expect(wrapper.vm.onboardingInstallCommand).toContain('--ca-url https://aria.yun/api/v2/controller-info/grpc-ca.crt')
+    expect(wrapper.vm.onboardingInstallCommand).toContain('--ca-sha256 ca-sha256')
+    expect(wrapper.vm.onboardingInstallCommand).toContain('--tls-server-name aria.yun')
+    expect(wrapper.vm.onboardingInstallCommand).toContain('--interface aria0')
+    expect(wrapper.vm.onboardingInstallCommand).toContain('--agent-url https://aria.yun/api/v2/downloads/aria-agent/linux/amd64')
+    expect(wrapper.vm.onboardingInstallCommand).toContain('--agent-sha256 agent-sha256')
     expect(wrapper.vm.onboardingInitCommand).toContain('sudo aria-agent init')
     expect(wrapper.vm.onboardingInitCommand).toContain('--server https://aria.yun:50051')
     expect(wrapper.vm.onboardingInitCommand).toContain('--token enroll-secret-123456')
@@ -356,6 +393,9 @@ describe('Nodes workbench detail', () => {
     expect(wrapper.vm.onboardingInitCommand).toContain('--advertise-routes 10.10.0.0/16,10.20.0.0/16')
 
     await wrapper.vm.copyOnboardingCommand()
+    expect(writeText).toHaveBeenCalledWith(wrapper.vm.onboardingInstallCommand)
+
+    await wrapper.vm.copyOnboardingInitCommand()
     expect(writeText).toHaveBeenCalledWith(wrapper.vm.onboardingInitCommand)
   })
 })
