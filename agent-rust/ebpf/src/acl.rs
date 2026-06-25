@@ -66,7 +66,6 @@ struct PolicyLookup {
     key: PolicyKey,
     value: PolicyValue,
     found: u8,
-    pad: [u8; 3],
 }
 
 #[repr(C)]
@@ -351,9 +350,13 @@ fn acl_policy_action(
             direction,
             pad: [0; 2],
         },
-        value: PolicyValue::default(),
+        value: PolicyValue {
+            action: ACTION_ALLOW,
+            has_port_filter: 0,
+            priority: 0,
+            bitmap_idx: 0,
+        },
         found: 0,
-        pad: [0; 3],
     };
 
     if lookup_policy(&mut lookup, src_id, dst_id, proto) {
