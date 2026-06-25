@@ -330,7 +330,11 @@ gRPC server listening on :50051 (TLS: server)
 
 ## Frontend Deploy
 
-Upload the locally built frontend dist and restart the frontend container:
+Upload the locally built frontend dist and restart the frontend container. The
+frontend is a Docker bind mount (`./frontend/dist:/usr/share/nginx/html:ro`), so
+after replacing the `dist` directory do not run only `docker compose up -d`
+against an already-running `aria-frontend` container. Restart or force-recreate
+the frontend container so Docker remounts the new directory.
 
 ```bash
 ssh root@<controller-host> 'rm -rf /root/aria-controller/frontend/dist.new && mkdir -p /root/aria-controller/frontend/dist.new'
@@ -342,6 +346,8 @@ ssh root@<controller-host> '
   [ -d dist ] && mv dist dist.previous
   mv dist.new dist
   docker restart aria-frontend
+  # If the container was not restarted after the dist swap, use:
+  # cd /root/aria-controller && docker compose up -d --force-recreate aria-frontend
 '
 ```
 
