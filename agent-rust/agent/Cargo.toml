@@ -68,6 +68,7 @@ pnet = "0.35"
 
 # gRPC 客户端
 tonic = { version = "0.13", features = ["tls-aws-lc"] }
+rustls = "0.23"
 prost = "0.13"
 tokio-stream = "0.1"
 
