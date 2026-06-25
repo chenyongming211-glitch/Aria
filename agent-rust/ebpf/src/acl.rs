@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
 
+use core::mem::MaybeUninit;
+
 use aya_ebpf::{
     macros::{classifier, map, xdp},
     maps::{lpm_trie::Key, HashMap, LpmTrie, PerCpuHashMap},
@@ -34,6 +36,23 @@ const PORT_ACTION_DROP: u8 = 1;
 const PORT_ACTION_PASS: u8 = 2;
 const IPV4_IDENTITY_LOOKUP_BITS: u32 = 64;
 const IPV6_IDENTITY_LOOKUP_BITS: u32 = 160;
+
+macro_rules! policy_key_ref {
+    ($slot:expr, $generation:expr, $src_id:expr, $dst_id:expr, $proto:expr, $direction:expr) => {{
+        let ptr = $slot.as_mut_ptr();
+        unsafe {
+            (*ptr).tap_id = TAP_ID_UNASSIGNED;
+            (*ptr).generation = $generation;
+            (*ptr).src_id = $src_id;
+            (*ptr).dst_id = $dst_id;
+            (*ptr).proto = $proto;
+            (*ptr).direction = $direction;
+            (*ptr).pad[0] = 0;
+            (*ptr).pad[1] = 0;
+            &*ptr
+        }
+    }};
+}
 
 type Ipv4IdentityKey = [u8; 8];
 type Ipv6IdentityKey = [u8; 20];
@@ -331,21 +350,8 @@ fn acl_policy_action(
     pkt_len: u64,
     direction: u8,
 ) -> u8 {
-    let mut best_key = PolicyKey {
-        tap_id: TAP_ID_UNASSIGNED,
-        generation,
-        src_id: ID_WILDCARD,
-        dst_id: ID_WILDCARD,
-        proto: PROTO_WILDCARD,
-        direction,
-        pad: [0; 2],
-    };
-    let mut best_value = PolicyValue {
-        action: ACTION_ALLOW,
-        has_port_filter: 0,
-        priority: 0xffff,
-        bitmap_idx: 0,
-    };
+    let mut best_key = MaybeUninit::<PolicyKey>::uninit();
+    let mut best_value = MaybeUninit::<PolicyValue>::uninit();
     let mut found = 0;
 
     if lookup_policy(
@@ -358,8 +364,10 @@ fn acl_policy_action(
         dst_id,
         proto,
     ) {
-        let action = policy_action(generation, best_value, dst_port);
-        update_rule_stats(&best_key, pkt_len, action == ACTION_DROP);
+        let best_value_ref = unsafe { &*best_value.as_ptr() };
+        let action = policy_action(generation, *best_value_ref, dst_port);
+        let best_key_ref = unsafe { &*best_key.as_ptr() };
+        update_rule_stats(best_key_ref, pkt_len, action == ACTION_DROP);
         return action;
     }
 
@@ -394,8 +402,8 @@ fn active_policy_generation(tap_id: u32) -> u32 {
 
 #[inline(always)]
 fn lookup_policy(
-    best_key: &mut PolicyKey,
-    best_value: &mut PolicyValue,
+    best_key: &mut MaybeUninit<PolicyKey>,
+    best_value: &mut MaybeUninit<PolicyValue>,
     found: &mut u8,
     generation: u32,
     direction: u8,
@@ -425,8 +433,8 @@ fn lookup_policy(
 
 #[inline(always)]
 fn lookup_policy_for_proto(
-    best_key: &mut PolicyKey,
-    best_value: &mut PolicyValue,
+    best_key: &mut MaybeUninit<PolicyKey>,
+    best_value: &mut MaybeUninit<PolicyValue>,
     found: &mut u8,
     generation: u32,
     direction: u8,
@@ -434,63 +442,63 @@ fn lookup_policy_for_proto(
     dst_id: u32,
     proto: u8,
 ) {
-    let exact_key = PolicyKey {
-        tap_id: TAP_ID_UNASSIGNED,
+    let mut exact_key = MaybeUninit::<PolicyKey>::uninit();
+    let exact_key_ref = policy_key_ref!(exact_key, generation, src_id, dst_id, proto, direction);
+    consider_policy(best_key, best_value, found, exact_key_ref);
+
+    let mut wildcard_src_key = MaybeUninit::<PolicyKey>::uninit();
+    let wildcard_src_key_ref = policy_key_ref!(
+        wildcard_src_key,
         generation,
-        src_id,
+        ID_WILDCARD,
         dst_id,
         proto,
-        direction,
-        pad: [0; 2],
-    };
-    consider_policy(best_key, best_value, found, &exact_key);
+        direction
+    );
+    consider_policy(best_key, best_value, found, wildcard_src_key_ref);
 
-    let wildcard_src_key = PolicyKey {
-        tap_id: TAP_ID_UNASSIGNED,
-        generation,
-        src_id: ID_WILDCARD,
-        dst_id,
-        proto,
-        direction,
-        pad: [0; 2],
-    };
-    consider_policy(best_key, best_value, found, &wildcard_src_key);
-
-    let wildcard_dst_key = PolicyKey {
-        tap_id: TAP_ID_UNASSIGNED,
+    let mut wildcard_dst_key = MaybeUninit::<PolicyKey>::uninit();
+    let wildcard_dst_key_ref = policy_key_ref!(
+        wildcard_dst_key,
         generation,
         src_id,
-        dst_id: ID_WILDCARD,
+        ID_WILDCARD,
         proto,
-        direction,
-        pad: [0; 2],
-    };
-    consider_policy(best_key, best_value, found, &wildcard_dst_key);
+        direction
+    );
+    consider_policy(best_key, best_value, found, wildcard_dst_key_ref);
 
-    let full_wildcard_key = PolicyKey {
-        tap_id: TAP_ID_UNASSIGNED,
+    let mut full_wildcard_key = MaybeUninit::<PolicyKey>::uninit();
+    let full_wildcard_key_ref = policy_key_ref!(
+        full_wildcard_key,
         generation,
-        src_id: ID_WILDCARD,
-        dst_id: ID_WILDCARD,
+        ID_WILDCARD,
+        ID_WILDCARD,
         proto,
-        direction,
-        pad: [0; 2],
-    };
-    consider_policy(best_key, best_value, found, &full_wildcard_key);
+        direction
+    );
+    consider_policy(best_key, best_value, found, full_wildcard_key_ref);
 }
 
 #[inline(always)]
 fn consider_policy(
-    best_key: &mut PolicyKey,
-    best_value: &mut PolicyValue,
+    best_key: &mut MaybeUninit<PolicyKey>,
+    best_value: &mut MaybeUninit<PolicyValue>,
     found: &mut u8,
     candidate_key: &PolicyKey,
 ) {
     if let Some(policy) = unsafe { POLICY_TABLE.get(candidate_key) } {
-        if *found == 0 || policy.priority < best_value.priority {
-            *best_key = *candidate_key;
-            *best_value = *policy;
+        if *found == 0 {
+            best_key.write(*candidate_key);
+            best_value.write(*policy);
             *found = 1;
+            return;
+        }
+
+        let current_priority = unsafe { (*best_value.as_ptr()).priority };
+        if policy.priority < current_priority {
+            best_key.write(*candidate_key);
+            best_value.write(*policy);
         }
     }
 }
