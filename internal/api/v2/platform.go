@@ -341,6 +341,38 @@ need() {
   command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
 }
 
+install_runtime_packages() {
+  echo "Installing Aria Agent runtime dependencies"
+  if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update || fail "apt-get update failed while installing runtime dependencies"
+    apt-get install -y iproute2 wireguard-tools || fail "apt-get install iproute2 wireguard-tools failed"
+    return
+  fi
+  if command -v dnf >/dev/null 2>&1; then
+    dnf install -y iproute wireguard-tools || fail "dnf install iproute wireguard-tools failed"
+    return
+  fi
+  if command -v yum >/dev/null 2>&1; then
+    yum install -y iproute wireguard-tools || fail "yum install iproute wireguard-tools failed"
+    return
+  fi
+  if command -v apk >/dev/null 2>&1; then
+    apk add --no-cache iproute2 wireguard-tools || fail "apk add iproute2 wireguard-tools failed"
+    return
+  fi
+  fail "missing ip or wg; install iproute2 and wireguard-tools before running this installer"
+}
+
+ensure_runtime_commands() {
+  if command -v ip >/dev/null 2>&1 && command -v wg >/dev/null 2>&1; then
+    return
+  fi
+  install_runtime_packages
+  need ip
+  need wg
+}
+
 [ "$(id -u)" = "0" ] || fail "run as root, for example: curl ... | sudo bash -s -- ..."
 [ -n "$CONTROLLER_API_URL" ] || fail "--controller-api-url is required"
 [ -n "$SERVER" ] || fail "--server is required"
@@ -367,6 +399,8 @@ fi
 if [ -e "$CONFIG_PATH" ] || [ -e "/var/lib/aria/agent-state.yaml" ]; then
   fail "existing Aria config or state found; inspect /etc/aria and /var/lib/aria before reinstalling"
 fi
+
+ensure_runtime_commands
 
 install -d -m 0755 /etc/aria /etc/aria/certs /var/lib/aria /var/log/aria /usr/local/bin
 

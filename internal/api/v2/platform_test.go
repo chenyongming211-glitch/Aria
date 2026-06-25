@@ -312,6 +312,10 @@ func TestAgentInstallerScriptIncludesInstallInitAndSystemd(t *testing.T) {
 		"/etc/aria/certs/ca.crt",
 		"ExecStart=/usr/local/bin/aria-agent up --interface",
 		"ip link del aria\\$i",
+		"ensure_runtime_commands",
+		"wireguard-tools",
+		"need ip",
+		"need wg",
 		"--controller-api-url",
 		"--tls-server-name",
 	} {

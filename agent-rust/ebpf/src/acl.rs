@@ -167,25 +167,23 @@ fn try_xdp_ingress_acl(ctx: XdpContext) -> Result<u32, u64> {
         return Ok(XDP_PASS);
     }
 
-    let pkt_len = (ctx.data_end() - ctx.data()) as u64;
-
     if let Ok(eth) = ptr_at::<EthHdr>(&ctx, 0) {
         match u16::from_be(eth.ether_type) {
-            ETH_P_IP => return try_xdp_ingress_acl_ipv4(&ctx, pkt_len, EthHdr::LEN),
-            ETH_P_IPV6 => return try_xdp_ingress_acl_ipv6(&ctx, pkt_len, EthHdr::LEN),
+            ETH_P_IP => return try_xdp_ingress_acl_ipv4(&ctx, EthHdr::LEN),
+            ETH_P_IPV6 => return try_xdp_ingress_acl_ipv6(&ctx, EthHdr::LEN),
             _ => {}
         }
     }
 
     if let Ok(ip) = ptr_at::<Ipv4Hdr>(&ctx, 0) {
         if ip.version() == IP_VERSION_4 {
-            return try_xdp_ingress_acl_ipv4(&ctx, pkt_len, 0);
+            return try_xdp_ingress_acl_ipv4(&ctx, 0);
         }
     }
 
     if let Ok(ip) = ptr_at::<Ipv6Hdr>(&ctx, 0) {
         if ip.version() == IP_VERSION_6 {
-            return try_xdp_ingress_acl_ipv6(&ctx, pkt_len, 0);
+            return try_xdp_ingress_acl_ipv6(&ctx, 0);
         }
     }
 
@@ -224,8 +222,9 @@ fn try_tc_egress_acl(ctx: TcContext) -> Result<i32, u64> {
 }
 
 #[inline(always)]
-fn try_xdp_ingress_acl_ipv4(ctx: &XdpContext, pkt_len: u64, ip_offset: usize) -> Result<u32, u64> {
+fn try_xdp_ingress_acl_ipv4(ctx: &XdpContext, ip_offset: usize) -> Result<u32, u64> {
     let ip = ptr_at::<Ipv4Hdr>(ctx, ip_offset)?;
+    let pkt_len = ipv4_packet_len(ip, ip_offset);
     let (_, dst_port) = parse_ports_ipv4(ctx, ip_offset, ip)?;
     let generation = active_policy_generation(TAP_ID_UNASSIGNED);
     let src_id = lookup_ipv4_id(
@@ -255,8 +254,9 @@ fn try_xdp_ingress_acl_ipv4(ctx: &XdpContext, pkt_len: u64, ip_offset: usize) ->
 }
 
 #[inline(always)]
-fn try_xdp_ingress_acl_ipv6(ctx: &XdpContext, pkt_len: u64, ip_offset: usize) -> Result<u32, u64> {
+fn try_xdp_ingress_acl_ipv6(ctx: &XdpContext, ip_offset: usize) -> Result<u32, u64> {
     let ip = ptr_at::<Ipv6Hdr>(ctx, ip_offset)?;
+    let pkt_len = ipv6_packet_len(ip, ip_offset);
     let (_, dst_port) = parse_ports_ipv6(ctx, ip_offset, ip)?;
     let generation = active_policy_generation(TAP_ID_UNASSIGNED);
     let src_id = lookup_ipv6_id(&SRC_IPV6_ID_MAP, generation, ip.src_addr);
@@ -609,6 +609,16 @@ fn parse_ports_ipv6_tc(ctx: &TcContext, ip_offset: usize, ip: &Ipv6Hdr) -> Resul
         }
         _ => Ok((0, 0)),
     }
+}
+
+#[inline(always)]
+fn ipv4_packet_len(ip: &Ipv4Hdr, ip_offset: usize) -> u64 {
+    ip_offset as u64 + u16::from_be_bytes(ip.tot_len) as u64
+}
+
+#[inline(always)]
+fn ipv6_packet_len(ip: &Ipv6Hdr, ip_offset: usize) -> u64 {
+    ip_offset as u64 + Ipv6Hdr::LEN as u64 + u16::from_be_bytes(ip.payload_len) as u64
 }
 
 #[inline(always)]
