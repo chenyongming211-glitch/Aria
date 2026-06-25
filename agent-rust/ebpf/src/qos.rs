@@ -1,11 +1,13 @@
 #![no_std]
 #![no_main]
 
+use core::mem::MaybeUninit;
+
 use aya_ebpf::{
     bindings::__sk_buff,
     helpers::bpf_ktime_get_ns,
     macros::{classifier, map},
-    maps::{lpm_trie::Key, HashMap, LpmTrie, PerCpuArray, PerCpuHashMap},
+    maps::{lpm_trie::Key, HashMap, LpmTrie, PerCpuHashMap},
     programs::TcContext,
     EbpfContext,
 };
@@ -122,9 +124,6 @@ static QOS_TOKEN_BUCKET: HashMap<QosKey, TokenBucket> = HashMap::with_max_entrie
 
 #[map(name = "QOS_STATS", pin)]
 static QOS_STATS: PerCpuHashMap<QosKey, QosStatsValue> = PerCpuHashMap::with_max_entries(65536, 0);
-
-#[map(name = "QOS_STATS_BUF")]
-static QOS_STATS_BUF: PerCpuArray<QosStatsValue> = PerCpuArray::with_max_entries(1, 0);
 
 #[map(name = "FIREWALL_CONFIG", pin)]
 static FIREWALL_CONFIG: HashMap<u32, FirewallConfig> = HashMap::with_max_entries(1, 0);
@@ -420,26 +419,33 @@ fn update_qos_stats(key: &QosKey, pkt_len: u64, dropped: bool, shaped: bool) {
         return;
     }
 
-    if let Some(stats_ptr) = QOS_STATS_BUF.get_ptr_mut(0) {
-        let stats = unsafe { &mut *stats_ptr };
-        stats.passed_packets = 0;
-        stats.passed_bytes = 0;
-        stats.dropped_packets = 0;
-        stats.dropped_bytes = 0;
-        stats.shaped_packets = 0;
-        stats.shaped_bytes = 0;
-
-        if dropped {
-            stats.dropped_packets = 1;
-            stats.dropped_bytes = pkt_len;
-        } else {
-            stats.passed_packets = 1;
-            stats.passed_bytes = pkt_len;
-            if shaped {
-                stats.shaped_packets = 1;
-                stats.shaped_bytes = pkt_len;
-            }
-        }
+    let mut stats_value = MaybeUninit::<QosStatsValue>::uninit();
+    let stats = stats_value.as_mut_ptr();
+    unsafe {
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!((*stats).passed_packets),
+            if dropped { 0 } else { 1 },
+        );
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!((*stats).passed_bytes),
+            if dropped { 0 } else { pkt_len },
+        );
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!((*stats).dropped_packets),
+            if dropped { 1 } else { 0 },
+        );
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!((*stats).dropped_bytes),
+            if dropped { pkt_len } else { 0 },
+        );
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!((*stats).shaped_packets),
+            if !dropped && shaped { 1 } else { 0 },
+        );
+        core::ptr::write_volatile(
+            core::ptr::addr_of_mut!((*stats).shaped_bytes),
+            if !dropped && shaped { pkt_len } else { 0 },
+        );
         let _ = QOS_STATS.insert(key, &*stats, 0);
     }
 }
