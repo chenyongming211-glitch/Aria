@@ -16,7 +16,6 @@ use network_types::{
 const XDP_PASS: u32 = 2;
 const XDP_DROP: u32 = 1;
 const TC_ACT_UNSPEC: i32 = -1;
-const TC_ACT_OK: i32 = 0;
 const TC_ACT_SHOT: i32 = 2;
 const ETH_P_IP: u16 = 0x0800;
 const ETH_P_IPV6: u16 = 0x86DD;
@@ -393,6 +392,7 @@ fn active_policy_generation(tap_id: u32) -> u32 {
     0
 }
 
+#[inline(always)]
 fn lookup_policy(
     best_key: &mut PolicyKey,
     best_value: &mut PolicyValue,
@@ -423,6 +423,7 @@ fn lookup_policy(
     *found != 0
 }
 
+#[inline(always)]
 fn lookup_policy_for_proto(
     best_key: &mut PolicyKey,
     best_value: &mut PolicyValue,
@@ -478,6 +479,7 @@ fn lookup_policy_for_proto(
     consider_policy(best_key, best_value, found, &full_wildcard_key);
 }
 
+#[inline(always)]
 fn consider_policy(
     best_key: &mut PolicyKey,
     best_value: &mut PolicyValue,
@@ -493,6 +495,7 @@ fn consider_policy(
     }
 }
 
+#[inline(always)]
 fn policy_action(generation: u32, policy: PolicyValue, dst_port: u16) -> u8 {
     if policy.has_port_filter == 0 {
         return policy.action;
@@ -522,6 +525,7 @@ fn policy_action(generation: u32, policy: PolicyValue, dst_port: u16) -> u8 {
     policy.action
 }
 
+#[inline(always)]
 fn update_rule_stats(key: &PolicyKey, pkt_len: u64, dropped: bool) {
     if let Some(stats_ptr) = RULE_STATS.get_ptr_mut(key) {
         let stats = unsafe { &mut *stats_ptr };
