@@ -248,11 +248,16 @@ Monitoring 的事件应能反向跳转到策略、节点和命令详情。
 
 控制闭环完成后，至少应能通过以下验收：
 
-### 2026-06-25 当前收口状态
+### 2026-06-26 当前收口状态
 
 - ACL、QoS、Route、Blacklist 写操作已经走 `desired_state_version -> agent_commands -> policy_deliveries` 的控制链路。
 - Policy Center、Nodes、Monitoring 已统一展示 `pending / sent / acknowledged / applied / failed / stale` 的状态语义和失败原因。
-- 本阶段剩余工作是线上真实 Agent 冒烟：创建/更新/删除 ACL、QoS、Route 后，确认 `desired_state_version` 变化、Agent applied 回写、失败原因一致展示。
+- 线上真实 Agent 验收已完成，目标节点为 `node-82-156-137-42`（node id `d5c7723c-3d86-48ce-a9fc-4695cd170b1c`，VPN IP `100.64.0.40`）。
+- ACL 验收：创建 egress ICMP allow 规则后 `policy_status=applied` 且 `100.64.0.40 -> 100.64.0.2` ping 成功；更新为 deny 后 ping 被阻断，ACL stats 增长到 `dropped_packets=4`、`dropped_bytes=336`；删除后规则列表清空且 ping 恢复。
+- QoS 验收：创建 egress QoS `1 Mbps` 后 `policy_status=applied`，真实 ping 流量命中并上报 `passed_bytes=20560`；更新为 `2 Mbps` 后再次 `applied` 并上报 `passed_bytes=19532`；删除后 QoS 规则列表清空。
+- Route 验收：创建 `10.255.240.40/32` 后 `policy_status=applied`，对端 WireGuard allowed ips 出现 `100.64.0.40/32, 10.255.240.40/32`；更新为 `10.255.240.41/32` 后对端 allowed ips 同步更新；删除后 route 列表清空且对端 allowed ips 移除。
+- 命令成功路径验收：下发 `health_check` 后命令进入 completed，返回 `agent healthy`，并记录 `sent_at / acknowledged_at / completed_at`。
+- 命令失败路径验收：临时停止 Agent 后下发短超时 `health_check`，命令进入 `failed`，错误为 `command timed out waiting for agent result`；重启 Agent 后节点恢复 `online/applied/converged`，再次 `health_check` completed。
 
 1. 创建 ACL 规则后，Controller 返回 `desired_state_version`、`command_id` 和 `policy_delivery`。
 2. 创建 QoS 规则后，`node_control_states.desired_state_version` 发生变化。

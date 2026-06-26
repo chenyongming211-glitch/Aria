@@ -100,10 +100,32 @@ func TestNodeOnboardingStatusPhases(t *testing.T) {
 			phase: "online",
 		},
 		{
+			name: "applied observed message is not an error",
+			node: node,
+			summary: map[string]interface{}{
+				"desired_state_version": "dsv-new",
+				"applied_state_version": "dsv-new",
+				"observed_state":        "applied",
+				"observed_message":      "sync applied successfully",
+				"configuration_status":  "applied",
+				"last_sync_at":          now,
+			},
+			phase: "online",
+		},
+		{
 			name: "sync error",
 			node: node,
 			summary: map[string]interface{}{
 				"last_sync_error": "sync apply failed",
+			},
+			phase: "degraded",
+		},
+		{
+			name: "failed observed message is an error",
+			node: node,
+			summary: map[string]interface{}{
+				"observed_state":   "failed",
+				"observed_message": "sync apply failed",
 			},
 			phase: "degraded",
 		},
@@ -134,6 +156,12 @@ func TestNodeOnboardingStatusPhases(t *testing.T) {
 			}
 			if _, leaked := onboarding["enrolled_with_token"]; leaked {
 				t.Fatal("onboarding status must not expose raw enrollment token")
+			}
+			if tt.name == "applied observed message is not an error" && onboarding["last_error"] != "" {
+				t.Fatalf("expected no last_error for successful observed message, got %#v", onboarding["last_error"])
+			}
+			if tt.name == "failed observed message is an error" && onboarding["last_error"] != "sync apply failed" {
+				t.Fatalf("expected failed observed message as last_error, got %#v", onboarding["last_error"])
 			}
 		})
 	}

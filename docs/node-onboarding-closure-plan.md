@@ -256,7 +256,9 @@ Enrollment Token preview 或来源标签
 - Controller / Agent 注册、runtime token、首次 Sync、节点状态和证书基础链路已经具备。
 - Nodes 页面已经从静态提示升级为接入向导：可创建 Enrollment Token、读取 Controller bootstrap contract、生成完整 installer 命令，自动安装 `aria-agent`、Controller CA、systemd unit，并保留 init-only 高级命令。
 - 节点列表和节点详情已经返回并展示 `onboarding.phase`、token preview、first seen、last sync、last error 和 next action。
-- 本阶段剩余工作是在线上用一台新机器从 0 执行 installer、启动 Agent，并按下列验收项记录证据。
+- 2026-06-26 线上验收已完成：`0.2.62` / commit `8939283` / Actions run `28210865082` 部署后，干净 VM `82.156.137.42` 从 0 执行 installer 接入，生成节点 `node-82-156-137-42`（node id `d5c7723c-3d86-48ce-a9fc-4695cd170b1c`，VPN IP `100.64.0.40`，endpoint `82.156.137.42:51820`）。
+- 验收证据：`aria-agent.service` active，`aria0` 到 `aria3` 均存在并有 3 个 peer，`100.64.0.40 -> 100.64.0.2` VPN ping 成功，节点详情返回 `configuration_status=applied`、`convergence_status=converged`、`observed_state=applied`、`pending_cmds=0`，`health_check` command stream 完成并返回 `agent healthy`。
+- 本次收口同时发现并修复一个状态展示 bug：成功的 `observed_message=sync applied successfully` 不应被当成 onboarding `last_error`，否则已 applied 的节点会被误判为 `degraded`。
 
 接入闭环完成后，应能通过以下验收：
 

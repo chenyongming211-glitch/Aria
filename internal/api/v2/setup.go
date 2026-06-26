@@ -785,15 +785,20 @@ func buildNodeOnboardingStatus(node *controllerstorage.Node, summary map[string]
 		summary = map[string]interface{}{}
 	}
 
+	observedState := strings.ToLower(onboardingString(summary["observed_state"]))
+	configurationStatus := strings.ToLower(onboardingString(summary["configuration_status"]))
+	observedMessage := onboardingString(summary["observed_message"])
+	observedError := ""
+	if onboardingObservedMessageIsError(observedState, configurationStatus, observedMessage) {
+		observedError = observedMessage
+	}
 	lastError := firstNonEmptyString(
 		onboardingString(summary["last_sync_error"]),
 		onboardingString(summary["last_command_error"]),
-		onboardingString(summary["observed_message"]),
+		observedError,
 	)
 	desiredVersion := onboardingString(summary["desired_state_version"])
 	appliedVersion := onboardingString(summary["applied_state_version"])
-	observedState := strings.ToLower(onboardingString(summary["observed_state"]))
-	configurationStatus := strings.ToLower(onboardingString(summary["configuration_status"]))
 
 	phase := "registered"
 	nextAction := "Run the install command on the target machine, then wait for the agent to register and complete first sync."
@@ -835,6 +840,25 @@ func buildNodeOnboardingStatus(node *controllerstorage.Node, summary map[string]
 	}
 
 	return onboarding
+}
+
+func onboardingObservedMessageIsError(observedState, configurationStatus, observedMessage string) bool {
+	if strings.TrimSpace(observedMessage) == "" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(observedState)) {
+	case "failed", "error", "degraded":
+		return true
+	case "applied", "healthy", "ok":
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(configurationStatus)) {
+	case "failed", "degraded":
+		return true
+	case "applied":
+		return false
+	}
+	return false
 }
 
 func onboardingString(value interface{}) string {

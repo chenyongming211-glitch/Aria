@@ -524,6 +524,34 @@ Purpose:
 | Verification | Branch Actions run `28114344395` passed Go Build, Frontend Build, and Rust Agent Build. Local `go test ./...`, frontend unit tests, `git diff --check`, and frontend build passed before deployment. Server-side `/api/version` returned `0.2.45`; `aria-controller` and `aria-frontend` were healthy; `https://aria.yun/` returned HTTP 200 from the server; deployed frontend bundles include the onboarding command inputs (`--controller-api-url`) and the AI diagnostic prompt. Online smoke with `sysadmin` verified active tenant/node discovery, Monitoring stats/health/events/alerts, node detail desired/applied/observed state, enrollment token create/delete, `health_check` command queued and completed, temporary ACL/QoS/Route create, Agent desired/applied convergence after create, temporary ACL/QoS/Route delete, and Agent desired/applied convergence after delete. |
 | Smoke detail | Temporary policy CIDRs were `acl=10.253.53.28/32`, `qos=10.252.53.28/32`, and `route=10.251.53.0/24`. Create convergence reached `desired=dsv-1782320009-6984d50f`; delete convergence reached `desired=dsv-1782320013-2ed519fc`. The temporary token and policies were deleted after validation. |
 
+### 2026-06-26 v0.1.0 Closure Master Deployment and Final Validation
+
+Status: deployed and validated.
+
+Purpose:
+
+- Record the master deployment used for the final onboarding and control-loop
+  closure validation.
+- Verify one clean VM can self-onboard through the installer flow and that a
+  real Agent applies ACL, QoS, Route, and command-loop changes end to end.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-26T09:24+08:00 deployment; 2026-06-26T09:40+08:00 to 2026-06-26T09:48+08:00 final validation |
+| Git commit | `8939283ffe49eba0290bdd9b88096ef9334f33e3` |
+| Push CI run | `28210865082` |
+| Publish run | Not used; deployed low-bandwidth local payload from master run `28210865082`. |
+| Version | `0.2.62` |
+| Controller image | Local runtime image `aria-controller:local@sha256:136206400398fe52fa3f43ac7391ca6ed2bf475d6a2af2c1ba4dbc791d74267a`. |
+| Frontend backup | `/root/aria-controller/deploy-backups/20260626092400-0.2.62-28210865082-master/frontend-dist` |
+| Config backup | `/root/aria-controller/deploy-backups/20260626092400-0.2.62-28210865082-master/config` |
+| DB backup | `/root/aria-controller/deploy-backups/20260626092400-0.2.62-28210865082-master/postgres.sql` |
+| Release payload | `/root/aria-controller/aria-0.2.62-28210865082-master-payload.tgz`; unpacked release path `/root/aria-controller/releases/0.2.62-28210865082-master` |
+| Agent artifact | Existing Agent on `82.156.137.42`, `82.156.48.111`, `43.143.245.123`, and `43.140.246.115`; no Rust/eBPF rebuild in this validation. |
+| Verification | Server-side `/api/version` returned `0.2.62`; Controller and frontend containers were healthy. New VM `82.156.137.42` joined as `node-82-156-137-42` with node id `d5c7723c-3d86-48ce-a9fc-4695cd170b1c`, VPN IP `100.64.0.40`, endpoint `82.156.137.42:51820`, and `aria0` through `aria3` all active with three peers. `100.64.0.40 -> 100.64.0.2` VPN ping succeeded. Node detail returned `configuration_status=applied`, `convergence_status=converged`, `observed_state=applied`, and `pending_cmds=0`. |
+| Control-loop validation | ACL egress ICMP allow on `100.64.0.2/32` applied and ping succeeded; updating the same ACL to deny applied, ping was blocked, and stats reported `dropped_packets=4`, `dropped_bytes=336`; deleting the ACL restored ping. QoS egress `100.64.0.27/32` create at `1 Mbps` applied and stats reported `passed_bytes=20560`; update to `2 Mbps` applied and stats reported `passed_bytes=19532`; delete removed the rule. Route create `10.255.240.40/32` applied and appeared in the peer WireGuard allowed ips for `100.64.0.40`; update to `10.255.240.41/32` updated the peer allowed ips; delete removed it. |
+| Command-loop validation | `health_check` completed with `agent healthy`. A controlled failure test stopped `aria-agent`, queued short-timeout `health_check`, and confirmed command status `failed` with message `command timed out waiting for agent result`; restarting Agent restored `online/applied/converged`, and a follow-up `health_check` completed. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
