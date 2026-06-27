@@ -79,7 +79,7 @@ Run: `git diff --check`
 
 Expected: no output, exit 0.
 
-- [ ] **Step 3: Commit and push**
+- [x] **Step 3: Commit and push**
 
 Commit message: `frontend: close non-ai operations loop`
 
@@ -90,24 +90,33 @@ Push branch: `codex/operations-loop-closure`
 **Files:**
 - No code files.
 
-- [ ] **Step 1: Wait for branch GitHub Actions**
+- [x] **Step 1: Wait for branch GitHub Actions**
 
 Run: `gh run watch <branch-run-id> --exit-status`
 
 Expected: branch Actions success.
 
-- [ ] **Step 2: Fast-forward merge to master**
+- [x] **Step 2: Fast-forward merge to master**
 
 Run: `git switch master && git merge --ff-only origin/master && git merge --ff-only codex/operations-loop-closure && git push origin master`
 
 Expected: master push succeeds.
 
-- [ ] **Step 3: Wait for master GitHub Actions**
+- [x] **Step 3: Wait for master GitHub Actions**
 
 Run: `gh run watch <master-run-id> --exit-status`
 
 Expected: master Actions success.
 
-- [ ] **Step 4: Clean branch**
+- [x] **Step 4: Clean branch**
 
 Delete local and remote `codex/operations-loop-closure`.
+
+### 2026-06-28 Follow-Up Verification
+
+- `0.2.82` master deployment kept active alerts at `0`.
+- A live `health_check` from the tenant-scoped node command API queued command
+  `a71d279a-a7fb-4457-8c8b-f45f10161e8d` for
+  `node-82-156-48-111` and converged from `pending` to `completed` with
+  message `agent healthy`.
+- Monitoring event feed still exposes historical `alert_resolved` events.
