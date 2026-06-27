@@ -43,7 +43,7 @@
           <el-option label="QoS" value="qos" />
           <el-option label="Route" value="route" />
         </el-select>
-        <el-select v-model="filters.status" clearable placeholder="交付状态" class="filter-item">
+        <el-select v-model="filters.status" clearable placeholder="交付状态" class="filter-item" @change="filters.statusGroup = ''">
           <el-option label="已应用" value="applied" />
           <el-option label="待下发" value="pending" />
           <el-option label="下发中" value="in_progress" />
@@ -281,6 +281,7 @@ interface PolicyFilters {
   keyword: string
   kind: string
   status: string
+  statusGroup: string
   nodeId: string
 }
 
@@ -294,6 +295,7 @@ interface RouteContext {
 interface MetricFilter {
   kind?: string
   status?: string
+  statusGroup?: string
 }
 
 interface PolicyMetric {
@@ -320,8 +322,11 @@ const filters = ref<PolicyFilters>({
   keyword: '',
   kind: '',
   status: '',
+  statusGroup: '',
   nodeId: ''
 })
+
+const activePolicyStatuses = new Set(['pending', 'in_progress', 'sent', 'acknowledged'])
 
 const stringValue = (value: unknown): string => typeof value === 'string' ? value : ''
 
@@ -450,6 +455,9 @@ const filteredPolicies = computed<NormalizedPolicy[]>(() => {
     if (filters.value.status && policy.status !== filters.value.status) {
       return false
     }
+    if (!filters.value.status && filters.value.statusGroup === 'active' && !activePolicyStatuses.has(policy.status || '')) {
+      return false
+    }
     if (filters.value.nodeId && policy.nodeId !== filters.value.nodeId) {
       return false
     }
@@ -558,7 +566,7 @@ const policyMetricItems = computed<PolicyMetric[]>(() => [
     meta: 'awaiting agent',
     status: 'warning',
     clickable: true,
-    filter: { status: 'pending' }
+    filter: { status: '', statusGroup: 'active' }
   },
   {
     key: 'failed',
@@ -578,6 +586,11 @@ const handleMetricSelect = (metric?: PolicyMetric) => {
   }
   if (Object.prototype.hasOwnProperty.call(filter, 'status')) {
     filters.value.status = filter.status || ''
+  }
+  if (Object.prototype.hasOwnProperty.call(filter, 'statusGroup')) {
+    filters.value.statusGroup = filter.statusGroup || ''
+  } else if (Object.prototype.hasOwnProperty.call(filter, 'status')) {
+    filters.value.statusGroup = ''
   }
 }
 
@@ -606,6 +619,7 @@ const syncFiltersFromRoute = () => {
   filters.value.nodeId = routeContext.value.nodeId
   filters.value.keyword = routeContext.value.policyRef
   filters.value.kind = routeContext.value.kind
+  filters.value.statusGroup = ''
 }
 
 const syncSelectedPolicy = () => {

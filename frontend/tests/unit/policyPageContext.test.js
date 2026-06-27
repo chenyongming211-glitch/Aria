@@ -174,6 +174,16 @@ const {
         name: 'Route special',
         status: 'applied',
         deliveryHistory: []
+      },
+      {
+        policyId: 'policy-route-pending',
+        policyRef: '10.4.0.0/24',
+        nodeId: 'node-1',
+        nodeName: 'node-1',
+        kind: 'route',
+        name: 'Route in progress',
+        status: 'in_progress',
+        deliveryHistory: []
       }
     ]),
     retryPolicySync: vi.fn(async () => ({}))
@@ -378,9 +388,11 @@ describe('policy page context handoff', () => {
 
     await pendingMetric.trigger('click')
 
-    expect(wrapper.vm.filters.status).toBe('pending')
-    expect(wrapper.vm.filteredPolicies).toHaveLength(1)
+    expect(wrapper.vm.filters.status).toBe('')
+    expect(wrapper.vm.filters.statusGroup).toBe('active')
+    expect(wrapper.vm.filteredPolicies).toHaveLength(2)
     expect(wrapper.vm.filteredPolicies[0].policyRef).toBe('qos-special')
+    expect(wrapper.vm.filteredPolicies[1].policyRef).toBe('10.4.0.0/24')
   })
 
   it('preserves policy context when opening the QoS page from Policy Center', async () => {
