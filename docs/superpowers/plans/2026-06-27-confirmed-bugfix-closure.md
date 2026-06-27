@@ -10,7 +10,12 @@
 
 ---
 
-## Current Open Bug Inventory
+## Closed Bug Inventory
+
+**2026-06-28 status:** BUG-25 through BUG-37 are recorded as fixed in
+`docs/confirmed-bugs.md`. The related master deployments are documented in
+`docs/deployment.md`: frontend workflow / TypeScript closure shipped as `0.2.81`,
+and node response `region` / `vpc_id` fixes shipped as `0.2.82`.
 
 | Batch | Bugs | Theme | Stop rule |
 | --- | --- | --- | --- |
@@ -32,9 +37,9 @@
 - `pkg/controllerstorage/postgres.go`: schema, node save/reuse helpers, tenant/node/token persistence.
 - `pkg/controllerstorage/agent_commands.go`, `pkg/controllerstorage/policy_deliveries.go`, `pkg/controllerstorage/node_control_states.go`, `pkg/controllerstorage/policy_sync.go`: command status, delivery status, desired/applied state, and policy dispatch.
 - `pkg/controllerstorage/monitoring_queries.go`: monitoring aggregates and topology source data.
-- `frontend/src/stores/user.js`, `frontend/src/router/index.js`: frontend permission refresh and fail-closed routing behavior.
-- `frontend/src/views/Nodes.vue`, `frontend/src/stores/node.js`, `frontend/src/composables/useRouteApi.js`: node edit form and route mutation path.
-- `frontend/src/utils/controlLoopStatus.js`: frontend command/policy status normalization.
+- `frontend/src/stores/user.ts`, `frontend/src/router/index.ts`: frontend permission refresh and fail-closed routing behavior.
+- `frontend/src/views/Nodes.vue`, `frontend/src/stores/node.ts`, `frontend/src/composables/useRouteApi.ts`: node edit form and route mutation path.
+- `frontend/src/utils/controlLoopStatus.ts`: frontend command/policy status normalization.
 - `internal/service/ai_service.go`: legacy AI tool exposure and confirmed tool execution guard.
 - `internal/service/ai_service_test.go`: legacy AI write tool fail-closed regression tests.
 
@@ -54,8 +59,8 @@ Hermes design input files, not extended by this plan:
 - Modify: `internal/api/v2/setup.go`
 - Modify: `internal/api/v2/platform.go`
 - Modify: `pkg/controllerstorage/postgres.go`
-- Modify: `frontend/src/stores/user.js`
-- Modify: `frontend/src/router/index.js`
+- Modify: `frontend/src/stores/user.ts`
+- Modify: `frontend/src/router/index.ts`
 - Test: `internal/cli/controller_registration_test.go`
 - Test: `internal/cli/controller_southbound_auth_test.go`
 - Test: `internal/api/handlers/auth_refresh_test.go`
@@ -64,7 +69,7 @@ Hermes design input files, not extended by this plan:
 - Test: `frontend/tests/unit/routerPermissions.test.js`
 - Test: `frontend/tests/unit/usePermission.test.js`
 
-- [ ] **Step 1: Add failing tenant lifecycle tests**
+- [x] **Step 1: Add failing tenant lifecycle tests**
 
   Add tests that prove these requests are rejected:
   - registration with an active enrollment token whose tenant is `suspended` or `deleted`;
@@ -78,7 +83,7 @@ Hermes design input files, not extended by this plan:
   ```
   Expected before implementation: at least one new test fails because inactive tenant paths still pass.
 
-- [ ] **Step 2: Enforce tenant active checks at token and runtime boundaries**
+- [x] **Step 2: Enforce tenant active checks at token and runtime boundaries**
 
   Implement a storage/helper path that verifies `tenants.status = 'active'` for enrollment token tenant lookup and runtime node tenant lookup. Apply it in:
   - `validateEnrollmentTokenTenant`;
@@ -92,7 +97,7 @@ Hermes design input files, not extended by this plan:
   ```
   Expected: inactive tenant tests pass, active tenant happy paths remain green.
 
-- [ ] **Step 3: Close auth and frontend permission fallback**
+- [x] **Step 3: Close auth and frontend permission fallback**
 
   Backend behavior:
   - login rejects inactive tenant users except super-admin platform access;
@@ -111,7 +116,7 @@ Hermes design input files, not extended by this plan:
   ```
   Expected: backend rejects inactive tenant sessions; frontend tests show fail-closed UI permissions.
 
-- [ ] **Step 4: Fix hostname reuse and unregister inactive-node bypass**
+- [x] **Step 4: Fix hostname reuse and unregister inactive-node bypass**
 
   Implement:
   - `ReuseHostnameIP` must not soft-delete `suspended` or `banned` hostname matches;
@@ -124,7 +129,7 @@ Hermes design input files, not extended by this plan:
   ```
   Expected: suspended/banned nodes keep their lifecycle state and cannot self-delete.
 
-- [ ] **Step 5: Commit B1**
+- [x] **Step 5: Commit B1**
 
   ```bash
   git add internal/cli internal/controller/grpc internal/api pkg/controllerstorage frontend/src docs/confirmed-bugs.md
@@ -140,14 +145,14 @@ Hermes design input files, not extended by this plan:
 - Modify: `internal/cli/controller_serve.go`
 - Modify: `pkg/controllerstorage/policy_sync.go`
 - Modify: `frontend/src/views/Nodes.vue`
-- Modify: `frontend/src/stores/node.js`
-- Modify: `frontend/src/composables/useRouteApi.js`
+- Modify: `frontend/src/stores/node.ts`
+- Modify: `frontend/src/composables/useRouteApi.ts`
 - Test: `internal/api/v2/tenant_routes_real_path_test.go`
 - Test: `internal/cli/controller_southbound_auth_test.go`
 - Test: `frontend/tests/unit/nodesWorkbench.test.js`
 - Test: `frontend/tests/unit/useRouteApi.test.js`
 
-- [ ] **Step 1: Add failing route-write consistency tests**
+- [x] **Step 1: Add failing route-write consistency tests**
 
   Cover three write sources:
   - legacy `/api/v2/agents/network`;
@@ -161,7 +166,7 @@ Hermes design input files, not extended by this plan:
   ```
   Expected before implementation: legacy/generic paths fail because they update `nodes.advertised_routes` directly or use the wrong permission.
 
-- [ ] **Step 2: Remove direct route mutation from generic node edit**
+- [x] **Step 2: Remove direct route mutation from generic node edit**
 
   Implement:
   - generic node update ignores/rejects `advertised_routes` unless it delegates to the standard route mutation service;
@@ -175,7 +180,7 @@ Hermes design input files, not extended by this plan:
   ```
   Expected: generic node edits cannot mutate route policy without the route path.
 
-- [ ] **Step 3: Convert legacy southbound network route to the standard route mutation path**
+- [x] **Step 3: Convert legacy southbound network route to the standard route mutation path**
 
   Keep `/api/v2/agents/network` as a compatibility endpoint, but remove its direct `UpdateTenantNodeAdvertisedRoutes(...)` write. Map it into the standard route mutation flow with tenant, node, permission, desired-state, command, and delivery records.
 
@@ -185,7 +190,7 @@ Hermes design input files, not extended by this plan:
   ```
   Expected: no route write can bypass policy delivery.
 
-- [ ] **Step 4: Commit B2**
+- [x] **Step 4: Commit B2**
 
   ```bash
   git add internal/api internal/cli pkg/controllerstorage frontend/src docs/confirmed-bugs.md
@@ -201,12 +206,12 @@ Hermes design input files, not extended by this plan:
 - Modify: `pkg/controllerstorage/agent_commands.go`
 - Modify: `pkg/controllerstorage/policy_deliveries.go`
 - Modify: `pkg/controllerstorage/node_control_states.go`
-- Modify: `frontend/src/utils/controlLoopStatus.js`
+- Modify: `frontend/src/utils/controlLoopStatus.ts`
 - Test: `pkg/controllerstorage/agent_commands_test.go`
 - Test: `internal/controller/grpc/command_stream_test.go`
 - Test: `internal/controller/grpc/server_command_stream_test.go`
 
-- [ ] **Step 1: Add failing command status tests**
+- [x] **Step 1: Add failing command status tests**
 
   Add tests for:
   - unknown status such as `ready` is rejected and not persisted;
@@ -220,7 +225,7 @@ Hermes design input files, not extended by this plan:
   ```
   Expected before implementation: unknown status or terminal downgrade test fails.
 
-- [ ] **Step 2: Add storage-level enum and transition validation**
+- [x] **Step 2: Add storage-level enum and transition validation**
 
   Implement a single validation function in `pkg/controllerstorage/agent_commands.go` and call it before any update. Supported persisted statuses should stay aligned with constants:
   - `pending`
@@ -242,7 +247,7 @@ Hermes design input files, not extended by this plan:
   ```
   Expected: invalid transitions return explicit errors and do not update command or delivery rows.
 
-- [ ] **Step 3: Make gRPC CommandStream reject invalid responses safely**
+- [x] **Step 3: Make gRPC CommandStream reject invalid responses safely**
 
   `CommandStream` should reject invalid Agent command responses with `codes.InvalidArgument`, keep the command row unchanged, and avoid advancing the stream to the next command. It should log enough context for audit/debugging but not persist unknown status.
 
@@ -252,10 +257,10 @@ Hermes design input files, not extended by this plan:
   ```
   Expected: invalid status does not poison command state.
 
-- [ ] **Step 4: Commit B3**
+- [x] **Step 4: Commit B3**
 
   ```bash
-  git add internal/controller/grpc pkg/controllerstorage frontend/src/utils/controlLoopStatus.js docs/confirmed-bugs.md
+  git add internal/controller/grpc pkg/controllerstorage frontend/src/utils/controlLoopStatus.ts docs/confirmed-bugs.md
   git commit -m "fix: validate agent command status transitions"
   ```
 
@@ -270,7 +275,7 @@ Hermes design input files, not extended by this plan:
 - Modify: `pkg/controllerstorage/postgres.go`
 - Test: `internal/api/v2/nodes_monitoring_behavior_test.go`
 
-- [ ] **Step 1: Add failing monitoring tests**
+- [x] **Step 1: Add failing monitoring tests**
 
   Cover:
   - suspended/banned node with fresh `last_seen` is not `online`;
@@ -283,7 +288,7 @@ Hermes design input files, not extended by this plan:
   ```
   Expected before implementation: recent inactive node still appears online.
 
-- [ ] **Step 2: Normalize inactive availability semantics**
+- [x] **Step 2: Normalize inactive availability semantics**
 
   Implement a single helper used by node detail, monitoring stats, topology, and traffic filters:
   - `deleted` = deleted/hidden;
@@ -297,7 +302,7 @@ Hermes design input files, not extended by this plan:
   ```
   Expected: all monitoring surfaces agree on inactive node status.
 
-- [ ] **Step 3: Commit B4**
+- [x] **Step 3: Commit B4**
 
   ```bash
   git add internal/api/v2 pkg/controllerstorage docs/confirmed-bugs.md
@@ -346,13 +351,13 @@ Hermes implementation requirements remain:
 
 ## Final Verification
 
-- [ ] **Step 1: Run backend focused tests**
+- [x] **Step 1: Run backend focused tests**
 
   ```bash
   go test ./internal/cli ./internal/controller/grpc ./internal/api/handlers ./internal/api/v2 ./internal/agent/... ./internal/service/... ./pkg/controllerstorage -count=1
   ```
 
-- [ ] **Step 2: Run frontend tests and build**
+- [x] **Step 2: Run frontend tests and build**
 
   ```bash
   cd frontend
@@ -360,14 +365,14 @@ Hermes implementation requirements remain:
   npm run build
   ```
 
-- [ ] **Step 3: Update bug statuses**
+- [x] **Step 3: Update bug statuses**
 
   For each closed bug in `docs/confirmed-bugs.md`:
   - record it under `BUG-25 到 BUG-35 闭合总览` and `BUG-25 到 BUG-35 本轮修复详情`;
   - include the exact verification command that passed;
   - keep any not-yet-fixed bug OPEN.
 
-- [ ] **Step 4: Deployment decision**
+- [x] **Step 4: Deployment decision**
 
   If the final patch only changes Controller/frontend and not Rust Agent runtime, use the low-bandwidth local artifact deployment path. If Rust Agent runtime behavior changes, use branch CI for the Agent artifact.
 
@@ -377,7 +382,7 @@ Hermes implementation requirements remain:
   cd frontend && npm run build
   ```
 
-- [ ] **Step 5: Smoke test closure loops**
+- [x] **Step 5: Smoke test closure loops**
 
   Validate:
   - inactive tenant cannot register/login/refresh;
@@ -385,3 +390,7 @@ Hermes implementation requirements remain:
   - route update creates policy delivery and command;
   - Agent command completion updates delivery;
   - monitoring does not show suspended/banned as online.
+
+  2026-06-28 status: the closed bug inventory is synced in
+  `docs/confirmed-bugs.md`; the deployed closure evidence is recorded in
+  `docs/deployment.md` under the `0.2.81` and `0.2.82` records.
