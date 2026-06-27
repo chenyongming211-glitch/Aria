@@ -411,6 +411,8 @@ git commit -m "chore: add frontend type-check baseline"
 
 ### Task 2: Add Shared Frontend Type Models
 
+Status: completed in `codex/frontend-shared-types-b9`.
+
 **Files:**
 - Create: `frontend/src/types/api.ts`
 - Create: `frontend/src/types/permission.ts`
