@@ -544,8 +544,8 @@
             <el-table-column prop="command" label="Command" min-width="120" />
             <el-table-column prop="status" label="Status" width="120">
               <template #default="{ row }">
-                <el-tag :type="getCommandStatusTagType(row.status)" size="small">
-                  {{ row.status }}
+                <el-tag :type="commandStatusTagType(row.status)" size="small">
+                  {{ commandStatusLabel(row.status) }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -628,8 +628,8 @@
             </el-table-column>
             <el-table-column prop="command_status" label="Status" width="120">
               <template #default="{ row }">
-                <el-tag size="small" :type="getDeliveryStatusTagType(row.command_status)">
-                  {{ row.command_status || 'unknown' }}
+                <el-tag size="small" :type="commandStatusTagType(row.command_status)">
+                  {{ commandStatusLabel(row.command_status) }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -882,6 +882,13 @@ import { useTokenApi } from '../composables/useTokenApi'
 import { fetchControllerInfo } from '../composables/useControllerInfo'
 import { usePermission } from '../composables/usePermission'
 import { useTenantChangeReload } from '../composables/useTenantChangeReload'
+import {
+  commandStatusLabel,
+  commandStatusTagType,
+  isFailedCommandStatus,
+  isPendingCommandStatus,
+  isTerminalCommandStatus
+} from '../utils/controlLoopStatus'
 
 // 使用节点 store
 const nodeStore = useNodeStore()
@@ -968,9 +975,9 @@ const maintenanceCount = computed(() => nodes.value.filter(n => n.status === 'ma
 const recentCommandCount = computed(() => selectedNode.value?.recentCommands?.length || 0)
 const recentDeliveryCount = computed(() => selectedNode.value?.recentPolicyDeliveries?.length || 0)
 const activeAlertCount = computed(() => selectedNode.value?.activeAlerts?.length || 0)
-const failedCommandCount = computed(() => (selectedNode.value?.recentCommands || []).filter(item => item.status === 'failed').length)
+const failedCommandCount = computed(() => (selectedNode.value?.recentCommands || []).filter(item => isFailedCommandStatus(item.status)).length)
 const pendingCommandCount = computed(() => (selectedNode.value?.recentCommands || []).filter(item => isPendingCommandStatus(item.status)).length)
-const failedDeliveryCount = computed(() => (selectedNode.value?.recentPolicyDeliveries || []).filter(item => item.command_status === 'failed').length)
+const failedDeliveryCount = computed(() => (selectedNode.value?.recentPolicyDeliveries || []).filter(item => isFailedCommandStatus(item.command_status)).length)
 const pendingDeliveryCount = computed(() => (selectedNode.value?.recentPolicyDeliveries || []).filter(item => isPendingCommandStatus(item.command_status)).length)
 const policyDatapathStats = computed(() => {
   const raw = selectedNode.value?.policyStats || selectedNode.value?.policy_stats || {}
@@ -1412,8 +1419,6 @@ const reloadSelectedNode = async (preserveCommand = null) => {
   }
 }
 
-const isTerminalCommandStatus = (status) => ['completed', 'failed'].includes(status)
-
 const findRecentCommand = (commandId) => {
   if (!commandId || !selectedNode.value?.recentCommands) return null
   return selectedNode.value.recentCommands.find(item => item.id === commandId) || null
@@ -1531,29 +1536,6 @@ const getAlertSeverityTagType = (severity) => {
   }
 }
 
-const getDeliveryStatusTagType = (status) => {
-  switch (status) {
-    case 'completed':
-    case 'applied':
-      return 'success'
-    case 'pending':
-    case 'queued':
-    case 'sent':
-    case 'acknowledged':
-    case 'in_progress':
-      return 'warning'
-    case 'stale':
-      return 'info'
-    case 'failed':
-    case 'error':
-      return 'danger'
-    default:
-      return 'info'
-  }
-}
-
-const getCommandStatusTagType = (status) => getDeliveryStatusTagType(status)
-
 const getCertificateStatusTagType = (status) => {
   switch (status) {
     case 'issued':
@@ -1567,8 +1549,6 @@ const getCertificateStatusTagType = (status) => {
       return 'info'
   }
 }
-
-const isPendingCommandStatus = (status) => ['pending', 'queued', 'sent', 'acknowledged', 'in_progress', 'running'].includes(status)
 
 const shortStateVersion = (value) => {
   if (!value) return 'N/A'

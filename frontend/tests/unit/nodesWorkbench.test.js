@@ -213,7 +213,7 @@ const elementStubs = {
         row: {
           id: 'row-1',
           command: 'sync',
-          status: 'failed',
+          status: 'timeout',
           message: 'sync failed',
           command_id: 'cmd-policy-1',
           command_status: 'failed',
@@ -227,7 +227,6 @@ const elementStubs = {
           created_at: '2026-05-30T10:00:00Z',
           updated_at: '2026-05-30T10:00:00Z',
           region: 'sh',
-          status: 'online',
           onboarding: {
             phase: 'online',
             tokenPreview: 'enroll...3456',
@@ -277,6 +276,8 @@ describe('Nodes workbench detail', () => {
     expect(wrapper.text()).toContain('serial-1')
     expect(wrapper.text()).toContain('certificate_expiring')
     expect(wrapper.text()).toContain('allow-office')
+    expect(wrapper.text()).toContain('超时')
+    expect(wrapper.text()).toContain('失败')
   })
 
   it('prepends queued quick commands before the next backend refresh catches up', async () => {

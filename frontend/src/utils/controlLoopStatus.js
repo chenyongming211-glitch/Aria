@@ -7,6 +7,18 @@ const pendingCommandStatuses = new Set([
   'running'
 ])
 
+const failedCommandStatuses = new Set(['failed', 'error', 'timeout', 'timed_out'])
+
+const terminalCommandStatuses = new Set([
+  'completed',
+  'applied',
+  'stale',
+  'cancelled',
+  'canceled',
+  'idle',
+  ...failedCommandStatuses
+])
+
 const retryablePolicyStatuses = new Set(['error', 'failed', 'stale', 'timeout', 'timed_out'])
 
 const normalizeStatus = (status) => String(status || '').trim().toLowerCase()
@@ -27,6 +39,14 @@ export function isPendingCommandStatus(status) {
   return pendingCommandStatuses.has(normalizeStatus(status))
 }
 
+export function isFailedCommandStatus(status) {
+  return failedCommandStatuses.has(normalizeStatus(status))
+}
+
+export function isTerminalCommandStatus(status) {
+  return terminalCommandStatuses.has(normalizeStatus(status))
+}
+
 export function pendingCountForCommandStatus(status) {
   return isPendingCommandStatus(status) ? 1 : 0
 }
@@ -39,6 +59,7 @@ export function policyStatusLabel(status) {
   const labels = {
     accepted: '已接受',
     applied: '已应用',
+    canceled: '已取消',
     cancelled: '已取消',
     error: '失败',
     failed: '失败',
@@ -77,6 +98,7 @@ export function commandStatusLabel(status) {
   const labels = {
     acknowledged: '执行中',
     applied: '已应用',
+    canceled: '已取消',
     cancelled: '已取消',
     completed: '已完成',
     error: '失败',

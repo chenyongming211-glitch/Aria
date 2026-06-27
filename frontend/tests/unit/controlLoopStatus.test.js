@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   commandStatusLabel,
   commandStatusTagType,
+  isFailedCommandStatus,
   isPendingCommandStatus,
   isRetryablePolicyStatus,
+  isTerminalCommandStatus,
   mapCommandStatusToPolicyStatus,
   pendingCountForCommandStatus,
   policyStatusLabel,
@@ -36,6 +38,22 @@ describe('controlLoopStatus', () => {
     }
   })
 
+  it('统一识别失败和终态命令状态', () => {
+    for (const status of ['failed', 'error', 'timeout', 'timed_out']) {
+      expect(isFailedCommandStatus(status)).toBe(true)
+      expect(isTerminalCommandStatus(status)).toBe(true)
+    }
+
+    for (const status of ['completed', 'applied', 'stale', 'cancelled', 'canceled', 'idle']) {
+      expect(isFailedCommandStatus(status)).toBe(false)
+      expect(isTerminalCommandStatus(status)).toBe(true)
+    }
+
+    for (const status of ['queued', 'pending', 'sent', 'acknowledged', 'in_progress', 'running', '']) {
+      expect(isTerminalCommandStatus(status)).toBe(false)
+    }
+  })
+
   it('统一返回策略状态和命令状态的中文展示', () => {
     expect(policyStatusLabel('pending')).toBe('待下发')
     expect(policyStatusLabel('in_progress')).toBe('下发中')
@@ -46,7 +64,9 @@ describe('controlLoopStatus', () => {
 
     expect(commandStatusLabel('acknowledged')).toBe('执行中')
     expect(commandStatusLabel('completed')).toBe('已完成')
+    expect(commandStatusLabel('timeout')).toBe('超时')
     expect(commandStatusTagType('completed')).toBe('success')
+    expect(commandStatusTagType('timeout')).toBe('danger')
   })
 
   it('只允许失败或过期的策略投递重试', () => {
