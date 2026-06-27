@@ -73,7 +73,7 @@
         </el-menu-item>
         <el-menu-item v-if="canAccess('ai:use')" index="/ai-copilot">
           <el-icon><ChatLineRound /></el-icon>
-          <template #title>{{ t('nav.aiCopilot') }}</template>
+          <template #title>{{ t('nav.aiAssistant') }}</template>
         </el-menu-item>
         <el-sub-menu v-if="isSuperAdmin || canAnyAccess(['tokens:read', 'roles:read'])" index="platform">
           <template #title>
@@ -103,7 +103,7 @@
       <div class="sidebar-footer">
         <div class="status-indicator">
           <div class="status-dot online"></div>
-          <span v-if="!isCollapsed" class="status-text">System Online</span>
+          <span v-if="!isCollapsed" class="status-text">{{ t('header.controllerOnline') }}</span>
         </div>
       </div>
     </el-aside>
@@ -253,24 +253,7 @@ const activeMenu = computed(() => {
 })
 
 const getPageTitle = computed(() => {
-  const routeMap = {
-    Dashboard: t('nav.dashboard'),
-    Nodes: t('nav.nodes'),
-    Routing: t('nav.routingManagement'),
-    VpnTopology: t('nav.vpnTopology'),
-    Policies: t('nav.policyCenter'),
-    ACLRules: t('nav.aclManagement'),
-    IPGroups: t('nav.ipGroupManagement'),
-    BandwidthControl: t('nav.bandwidthControl'),
-    Tokens: t('nav.tokenManagement'),
-    TenantManagement: t('nav.tenantManagement'),
-    Roles: t('nav.roleManagement'),
-    Monitoring: t('nav.monitoringCenter'),
-    NodeMonitorDetail: t('nav.monitoringCenter'),
-    AiAssistant: t('nav.aiCopilot'),
-    Settings: t('nav.settings')
-  }
-  return routeMap[route.name] || t('common.dashboard')
+  return route.meta?.titleKey ? t(route.meta.titleKey) : t('common.dashboard')
 })
 
 const toggleSidebar = () => {

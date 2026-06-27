@@ -545,7 +545,7 @@
             <el-table-column prop="status" label="Status" width="120">
               <template #default="{ row }">
                 <el-tag :type="commandStatusTagType(row.status)" size="small">
-                  {{ commandStatusLabel(row.status) }}
+                  {{ commandStatusLabel(row.status, t) }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -629,7 +629,7 @@
             <el-table-column prop="command_status" label="Status" width="120">
               <template #default="{ row }">
                 <el-tag size="small" :type="commandStatusTagType(row.command_status)">
-                  {{ commandStatusLabel(row.command_status) }}
+                  {{ commandStatusLabel(row.command_status, t) }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -882,6 +882,7 @@ import { useTokenApi } from '../composables/useTokenApi'
 import { fetchControllerInfo } from '../composables/useControllerInfo'
 import { usePermission } from '../composables/usePermission'
 import { useTenantChangeReload } from '../composables/useTenantChangeReload'
+import { t } from '../i18n'
 import {
   commandStatusLabel,
   commandStatusTagType,

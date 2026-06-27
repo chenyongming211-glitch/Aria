@@ -171,7 +171,7 @@
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
             <el-tag size="small" :type="statusTagType(row.status)">
-              {{ statusLabel(row.status) }}
+              {{ statusLabel(row.status, t) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -232,12 +232,12 @@
           <el-descriptions-item label="策略 ID">{{ selectedPolicy.policyId }}</el-descriptions-item>
           <el-descriptions-item label="策略类型">{{ kindLabel(selectedPolicy.kind) }}</el-descriptions-item>
           <el-descriptions-item label="目标节点">{{ selectedPolicy.nodeName }}</el-descriptions-item>
-          <el-descriptions-item label="交付状态">{{ statusLabel(selectedPolicy.status) }}</el-descriptions-item>
+          <el-descriptions-item label="交付状态">{{ statusLabel(selectedPolicy.status, t) }}</el-descriptions-item>
           <el-descriptions-item label="最近命令 ID">{{ selectedPolicy.lastDeliveryCommandId || '-' }}</el-descriptions-item>
           <el-descriptions-item label="版本">{{ selectedPolicy.version || '-' }}</el-descriptions-item>
           <el-descriptions-item label="Desired Version">{{ selectedPolicy.desiredStateVersion || '-' }}</el-descriptions-item>
           <el-descriptions-item label="Applied Version">{{ selectedPolicy.appliedStateVersion || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="Observed State">{{ statusLabel(selectedPolicy.observedState) }}</el-descriptions-item>
+          <el-descriptions-item label="Observed State">{{ statusLabel(selectedPolicy.observedState, t) }}</el-descriptions-item>
           <el-descriptions-item label="Convergence">{{ convergenceLabel(selectedPolicy.stateConvergence) }}</el-descriptions-item>
           <el-descriptions-item label="Observed Message" :span="1">{{ selectedPolicy.observedMessage || '-' }}</el-descriptions-item>
           <el-descriptions-item label="Observed At">{{ formatTimestamp(selectedPolicy.observedAt) }}</el-descriptions-item>
@@ -259,7 +259,7 @@
           >
             <div class="delivery-main">
               <el-tag size="small" :type="commandStatusTagType(item.command_status)">
-                {{ commandStatusLabel(item.command_status) }}
+                {{ commandStatusLabel(item.command_status, t) }}
               </el-tag>
               <span class="delivery-command">{{ item.command_id }}</span>
             </div>
@@ -289,6 +289,7 @@ import { ElMessage } from 'element-plus'
 import { usePolicyApi } from '@/composables/usePolicyApi'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
+import { t } from '@/i18n'
 import {
   commandStatusLabel,
   commandStatusTagType,

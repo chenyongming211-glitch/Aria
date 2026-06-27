@@ -38,6 +38,15 @@ describe('router RBAC metadata', () => {
     }
   })
 
+  it('uses translated title keys instead of fixed route titles', () => {
+    const namedRoutes = router.getRoutes().filter((route) => route.name)
+
+    for (const route of namedRoutes) {
+      expect(route.meta.title, `${String(route.name)} should not use fixed title`).toBeUndefined()
+      expect(route.meta.titleKey, `${String(route.name)} missing titleKey`).toMatch(/^[a-z]+[a-zA-Z0-9]*(\.[a-z]+[a-zA-Z0-9]*)+$/)
+    }
+  })
+
   it('restricts Settings to super_admin role metadata', () => {
     const route = router.getRoutes().find((r) => r.name === 'Settings')
     expect(route, 'missing route Settings').toBeTruthy()

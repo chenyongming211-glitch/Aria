@@ -90,7 +90,7 @@
         </el-table-column>
         <el-table-column label="同步状态" width="120">
           <template #default="{ row }">
-            <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">{{ formatPolicyStatus(row.policyStatus) }}</el-tag>
+            <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">{{ formatPolicyStatus(row.policyStatus, t) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="最近命令" width="150">
@@ -213,6 +213,7 @@ import { useIpGroupApi } from '@/composables/useIpGroupApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
+import { t } from '@/i18n'
 import {
   isRetryablePolicyStatus,
   policyStatusLabel as formatPolicyStatus,

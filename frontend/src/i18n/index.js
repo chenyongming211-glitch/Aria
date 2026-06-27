@@ -1,5 +1,4 @@
 // src/i18n/index.js
-import { computed } from 'vue'
 import { useAppStore } from '@/stores'
 
 // 翻译资源
@@ -69,8 +68,7 @@ const messages = {
       accessControl: 'Access Control',
       bandwidthControl: 'Bandwidth Control',
       routingManagement: 'Routing Management',
-      aiAssistant: 'AI Assistant',
-      aiCopilot: 'AI Copilot',
+      aiAssistant: 'Assistant',
       vpnManagement: 'VPN Management',
       vpnTopology: 'VPN Topology',
       tenantManagement: 'Tenant Management',
@@ -83,7 +81,46 @@ const messages = {
     header: {
       help: 'Help',
       profile: 'Profile',
-      logout: 'Logout'
+      logout: 'Logout',
+      controllerOnline: 'Controller online'
+    },
+    auth: {
+      login: 'Login',
+      changePassword: 'Change Password'
+    },
+    status: {
+      unknown: 'Unknown',
+      policy: {
+        accepted: 'Accepted',
+        applied: 'Applied',
+        canceled: 'Cancelled',
+        cancelled: 'Cancelled',
+        error: 'Failed',
+        failed: 'Failed',
+        healthy: 'Healthy',
+        idle: 'Idle',
+        in_progress: 'Delivering',
+        pending: 'Pending delivery',
+        stale: 'Stale'
+      },
+      command: {
+        acknowledged: 'Running',
+        applied: 'Applied',
+        canceled: 'Cancelled',
+        cancelled: 'Cancelled',
+        completed: 'Completed',
+        error: 'Failed',
+        failed: 'Failed',
+        idle: 'Idle',
+        in_progress: 'Running',
+        pending: 'Pending',
+        queued: 'Queued',
+        running: 'Running',
+        sent: 'Sent',
+        stale: 'Stale',
+        timeout: 'Timed out',
+        timed_out: 'Timed out'
+      }
     },
     tenantManagement: {
       title: 'Tenant Management',
@@ -254,7 +291,6 @@ const messages = {
       bandwidthControl: '带宽控制',
       routingManagement: '路由管理',
       aiAssistant: '智能助手',
-      aiCopilot: '智能副驾',
       vpnManagement: 'VPN管理',
       vpnTopology: 'VPN拓扑',
       tenantManagement: '租户管理',
@@ -267,7 +303,46 @@ const messages = {
     header: {
       help: '帮助',
       profile: '个人资料',
-      logout: '退出登录'
+      logout: '退出登录',
+      controllerOnline: 'Controller 在线'
+    },
+    auth: {
+      login: '登录',
+      changePassword: '修改密码'
+    },
+    status: {
+      unknown: '未知',
+      policy: {
+        accepted: '已接受',
+        applied: '已应用',
+        canceled: '已取消',
+        cancelled: '已取消',
+        error: '失败',
+        failed: '失败',
+        healthy: '健康',
+        idle: '空闲',
+        in_progress: '下发中',
+        pending: '待下发',
+        stale: '已过期'
+      },
+      command: {
+        acknowledged: '执行中',
+        applied: '已应用',
+        canceled: '已取消',
+        cancelled: '已取消',
+        completed: '已完成',
+        error: '失败',
+        failed: '失败',
+        idle: '空闲',
+        in_progress: '执行中',
+        pending: '待下发',
+        queued: '排队中',
+        running: '执行中',
+        sent: '已发送',
+        stale: '已过期',
+        timeout: '超时',
+        timed_out: '超时'
+      }
     },
     tenantManagement: {
       title: '租户管理',
@@ -374,10 +449,18 @@ const messages = {
   }
 }
 
+const readLang = () => {
+  try {
+    const appStore = useAppStore()
+    return appStore.lang || 'zh'
+  } catch {
+    return globalThis.localStorage?.getItem('aria-lang') || 'zh'
+  }
+}
+
 // 翻译函数
 export function t(key) {
-  const appStore = useAppStore()
-  const lang = appStore.lang || 'zh'
+  const lang = readLang()
 
   // 尝試直接翻譯
   if (messages[lang] && messages[lang][key]) {

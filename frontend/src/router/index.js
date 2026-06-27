@@ -15,13 +15,13 @@ const routes = [
         path: 'dashboard',
         name: 'Dashboard',
         component: () => import('@/views/Dashboard.vue'),
-        meta: { title: 'Dashboard', requiresAuth: true, permission: 'monitoring:read' }
+        meta: { titleKey: 'nav.dashboard', requiresAuth: true, permission: 'monitoring:read' }
       },
       {
         path: 'nodes',
         name: 'Nodes',
         component: () => import('@/views/Nodes.vue'),
-        meta: { title: 'Nodes', requiresAuth: true, permission: 'nodes:read' }
+        meta: { titleKey: 'nav.nodes', requiresAuth: true, permission: 'nodes:read' }
       },
       {
         path: 'connectivity',
@@ -31,37 +31,37 @@ const routes = [
         path: 'connectivity/routing',
         name: 'Routing',
         component: () => import('@/views/Routing.vue'),
-        meta: { title: 'Routing Management', requiresAuth: true, section: 'connectivity', permission: 'routes:read' }
+        meta: { titleKey: 'nav.routingManagement', requiresAuth: true, section: 'connectivity', permission: 'routes:read' }
       },
       {
         path: 'connectivity/topology',
         name: 'VpnTopology',
         component: () => import('@/views/VpnTopology.vue'),
-        meta: { title: 'VPN Topology', requiresAuth: true, section: 'connectivity', permission: 'monitoring:read' }
+        meta: { titleKey: 'nav.vpnTopology', requiresAuth: true, section: 'connectivity', permission: 'monitoring:read' }
       },
       {
         path: 'policy-center',
         name: 'Policies',
         component: () => import('@/views/Policies.vue'),
-        meta: { title: 'Policy Center', requiresAuth: true, section: 'policy-center', permission: 'policies:read' }
+        meta: { titleKey: 'nav.policyCenter', requiresAuth: true, section: 'policy-center', permission: 'policies:read' }
       },
       {
         path: 'policy-center/bandwidth-control',
         name: 'BandwidthControl',
         component: () => import('@/views/BandwidthControl.vue'),
-        meta: { title: 'Bandwidth Control', requiresAuth: true, section: 'policy-center', permission: 'qos:read' }
+        meta: { titleKey: 'nav.bandwidthControl', requiresAuth: true, section: 'policy-center', permission: 'qos:read' }
       },
       {
         path: 'policy-center/acl-rules',
         name: 'ACLRules',
         component: () => import('@/views/ACLRules.vue'),
-        meta: { title: 'ACL Rules Management', requiresAuth: true, section: 'policy-center', permission: 'acls:read' }
+        meta: { titleKey: 'nav.aclManagement', requiresAuth: true, section: 'policy-center', permission: 'acls:read' }
       },
       {
         path: 'policy-center/ip-groups',
         name: 'IPGroups',
         component: () => import('@/views/IPGroups.vue'),
-        meta: { title: 'IP Group Management', requiresAuth: true, section: 'policy-center', permission: 'ip-groups:read' }
+        meta: { titleKey: 'nav.ipGroupManagement', requiresAuth: true, section: 'policy-center', permission: 'ip-groups:read' }
       },
       {
         path: 'platform',
@@ -71,43 +71,43 @@ const routes = [
         path: 'platform/tokens',
         name: 'Tokens',
         component: () => import('@/views/Tokens.vue'),
-        meta: { title: 'Tokens', requiresAuth: true, section: 'platform', permission: 'tokens:read' }
+        meta: { titleKey: 'nav.tokenManagement', requiresAuth: true, section: 'platform', permission: 'tokens:read' }
       },
       {
         path: 'platform/tenants',
         name: 'TenantManagement',
         component: () => import('@/views/TenantManagement.vue'),
-        meta: { title: 'Tenant Management', requiresAuth: true, section: 'platform', role: 'super_admin' }
+        meta: { titleKey: 'nav.tenantManagement', requiresAuth: true, section: 'platform', role: 'super_admin' }
       },
       {
         path: 'platform/roles',
         name: 'Roles',
         component: () => import('@/views/Roles.vue'),
-        meta: { title: 'Role Management', requiresAuth: true, section: 'platform', permission: 'roles:read' }
+        meta: { titleKey: 'nav.roleManagement', requiresAuth: true, section: 'platform', permission: 'roles:read' }
       },
       {
         path: 'monitoring',
         name: 'Monitoring',
         component: () => import('@/views/Monitoring.vue'),
-        meta: { title: 'Monitoring Center', requiresAuth: true, permission: 'monitoring:read' }
+        meta: { titleKey: 'nav.monitoringCenter', requiresAuth: true, permission: 'monitoring:read' }
       },
       {
         path: 'monitoring/nodes/:nodeId',
         name: 'NodeMonitorDetail',
         component: () => import('@/views/NodeMonitorDetail.vue'),
-        meta: { title: 'Node Monitor Detail', requiresAuth: true, permission: 'monitoring:read' }
+        meta: { titleKey: 'nav.monitoringCenter', requiresAuth: true, permission: 'monitoring:read' }
       },
       {
         path: 'ai-copilot',
         name: 'AiAssistant',
         component: () => import('@/views/AIAssistant.vue'),
-        meta: { title: 'AI Assistant', requiresAuth: true, permission: 'ai:use' }
+        meta: { titleKey: 'nav.aiAssistant', requiresAuth: true, permission: 'ai:use' }
       },
       {
         path: 'platform/settings',
         name: 'Settings',
         component: () => import('@/views/Settings.vue'),
-        meta: { title: 'Settings', requiresAuth: true, section: 'platform', role: 'super_admin' }
+        meta: { titleKey: 'nav.settings', requiresAuth: true, section: 'platform', role: 'super_admin' }
       },
       {
         path: 'routing',
@@ -151,13 +151,13 @@ const routes = [
     path: '/login',
     name: 'Login',
     component: () => import('@/views/Login.vue'),
-    meta: { title: 'Login', requiresAuth: false }
+    meta: { titleKey: 'auth.login', requiresAuth: false }
   },
   {
     path: '/change-password',
     name: 'ChangePassword',
     component: () => import('@/views/ChangePassword.vue'),
-    meta: { title: 'Change Password', requiresAuth: true, allowPasswordChange: true }
+    meta: { titleKey: 'auth.changePassword', requiresAuth: true, allowPasswordChange: true }
   }
 ]
 

@@ -292,7 +292,7 @@
           </el-table-column>
           <el-table-column prop="status" label="Status" width="120">
             <template #default="{ row }">
-              <el-tag :type="commandStatusTagType(row.status)" size="small">{{ commandStatusLabel(row.status) }}</el-tag>
+              <el-tag :type="commandStatusTagType(row.status)" size="small">{{ commandStatusLabel(row.status, t) }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="created_at" label="Created" width="180">
@@ -327,7 +327,7 @@
           <el-table-column prop="policy_ref" label="Policy Ref" width="160" />
           <el-table-column prop="command_status" label="Status" width="120">
             <template #default="{ row }">
-              <el-tag :type="commandStatusTagType(row.command_status)" size="small">{{ commandStatusLabel(row.command_status) }}</el-tag>
+              <el-tag :type="commandStatusTagType(row.command_status)" size="small">{{ commandStatusLabel(row.command_status, t) }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="created_at" label="Created" width="180">
@@ -382,6 +382,7 @@ import { ElMessage } from 'element-plus'
 import { useMonitorApi } from '@/composables/useMonitorApi'
 import { useAgentProxyApi } from '@/composables/useAgentProxyApi'
 import { usePermission } from '@/composables/usePermission'
+import { t } from '@/i18n'
 import {
   commandStatusLabel,
   commandStatusTagType,

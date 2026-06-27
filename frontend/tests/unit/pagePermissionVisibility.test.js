@@ -24,7 +24,8 @@ const {
   },
   mockRoute: {
     name: 'Dashboard',
-    path: '/dashboard'
+    path: '/dashboard',
+    meta: { titleKey: 'nav.dashboard' }
   }
 }))
 
@@ -343,6 +344,7 @@ describe('page-level RBAC button visibility', () => {
     mockUserStore.permissions = []
     mockRoute.name = 'Dashboard'
     mockRoute.path = '/dashboard'
+    mockRoute.meta = { titleKey: 'nav.dashboard' }
 
     const storage = new Map()
     globalThis.localStorage = {
@@ -465,11 +467,24 @@ describe('page-level RBAC button visibility', () => {
     permissionSet.add('*')
     mockRoute.name = 'NodeMonitorDetail'
     mockRoute.path = '/monitoring/nodes/node-1'
+    mockRoute.meta = { titleKey: 'nav.monitoringCenter' }
 
     const wrapper = mountWithStubs(Layout)
 
     expect(wrapper.find('.page-title').text()).toBe('nav.monitoringCenter')
     expect(wrapper.find('.sidebar-menu').attributes('data-active')).toBe('/monitoring')
+  })
+
+  it('uses the active route titleKey for the top header title', () => {
+    mockUserStore.user = { role: 'super_admin' }
+    permissionSet.add('*')
+    mockRoute.name = 'BandwidthControl'
+    mockRoute.path = '/policy-center/bandwidth-control'
+    mockRoute.meta = { titleKey: 'nav.bandwidthControl' }
+
+    const wrapper = mountWithStubs(Layout)
+
+    expect(wrapper.find('.page-title').text()).toBe('nav.bandwidthControl')
   })
 
   it('hides tenant management menu from non-super_admin users', () => {

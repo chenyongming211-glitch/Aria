@@ -69,6 +69,23 @@ describe('controlLoopStatus', () => {
     expect(commandStatusTagType('timeout')).toBe('danger')
   })
 
+  it('支持通过翻译函数返回策略和命令状态文案', () => {
+    const labels = {
+      'status.policy.pending': 'Pending delivery',
+      'status.policy.applied': 'Applied',
+      'status.command.completed': 'Completed',
+      'status.command.timeout': 'Timed out',
+      'status.unknown': 'Unknown'
+    }
+    const translate = (key) => labels[key] || key
+
+    expect(policyStatusLabel('pending', translate)).toBe('Pending delivery')
+    expect(policyStatusLabel('applied', translate)).toBe('Applied')
+    expect(commandStatusLabel('completed', translate)).toBe('Completed')
+    expect(commandStatusLabel('timeout', translate)).toBe('Timed out')
+    expect(commandStatusLabel('', translate)).toBe('Unknown')
+  })
+
   it('只允许失败或过期的策略投递重试', () => {
     expect(isRetryablePolicyStatus('error')).toBe(true)
     expect(isRetryablePolicyStatus('failed')).toBe(true)

@@ -36,7 +36,7 @@
         <el-table-column label="下发状态" width="120">
           <template #default="{ row }">
             <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">
-              {{ formatPolicyStatus(row.policyStatus) }}
+              {{ formatPolicyStatus(row.policyStatus, t) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -140,6 +140,7 @@ import { useRouteApi } from '@/composables/useRouteApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
+import { t } from '@/i18n'
 import {
   policyStatusLabel as formatPolicyStatus,
   policyStatusTagType as getPolicyTagType
