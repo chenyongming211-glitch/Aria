@@ -728,6 +728,34 @@ Purpose:
 | Verification | Local frontend unit tests passed (`143` tests), including focused `controlLoopStatus` and `nodesWorkbench` tests. Local linux/amd64 Controller/ariactl build and frontend build passed. Branch Actions run `28280508971` and master Actions run `28280657776` both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.69`; `aria-controller` and `aria-frontend` were healthy; frontend `index.html` returned `Cache-Control: no-store`. |
 | API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring stats returned `ok`; tenant Policies returned 11 items. |
 
+### 2026-06-27 Frontend Rule Retry Trace Deployment
+
+Status: deployed and server-side smoke validated.
+
+Purpose:
+
+- Close the ACL and QoS page retry handoff gap: after an operator retries a
+  failed rule delivery from the dedicated ACL or QoS page, the console now opens
+  the node detail command section with the newly queued retry command id.
+- Keep this aligned with the Policy Center retry behavior introduced in
+  `0.2.68`.
+- Keep this as a Controller/frontend-only deployment; Rust Agent artifacts were
+  validated by CI but not redeployed.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-27T14:29+08:00 gray deployment; 2026-06-27T14:37+08:00 master deployment; 2026-06-27T14:38+08:00 smoke validation |
+| Git commit | `e1b94d1a810149a1216a4307414b4c709f5c749b` |
+| Branch CI run | `28281076556` |
+| Master CI run | `28281268428` |
+| Version | `0.2.70` |
+| Controller image | Local runtime image `aria-controller:local@sha256:ace467eac064143dbbfe852d02ed4edac6710cf0e0d82a0275c6be08ad3e00d1`. |
+| Gray backup | `/root/aria-controller/deploy-backups/20260627T062919Z-0.2.70-28281076556-e1b94d1a8101` |
+| Master backup | `/root/aria-controller/deploy-backups/20260627T063748Z-0.2.70-28281268428-e1b94d1a8101` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch and master Actions. |
+| Verification | Local frontend unit tests passed (`145` tests), including focused `policyPageContext`, `useAclApi`, and `useQosApi` tests. Local linux/amd64 Controller/ariactl build and frontend build passed. Branch Actions run `28281076556` and master Actions run `28281268428` both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.70`; `aria-controller` and `aria-frontend` were healthy; frontend `index.html` returned `Cache-Control: no-store`. |
+| API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring health returned `ok`; tenant Policies returned 11 items. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
