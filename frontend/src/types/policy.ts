@@ -26,6 +26,33 @@ export interface PolicyDelivery {
   updated_at?: ISODateTimeString
 }
 
+export type IPGroupKind = 'custom' | 'inline' | 'system' | string
+
+export interface IPGroupMember {
+  id?: string
+  group_id?: string
+  cidr: string
+  note?: string
+}
+
+export interface IPGroupRecord {
+  id?: string
+  name?: string
+  description?: string
+  kind?: IPGroupKind
+  members?: IPGroupMember[]
+  warnings?: string[]
+}
+
+export interface NormalizedIPGroup {
+  id: string
+  name: string
+  description: string
+  kind: IPGroupKind
+  members: IPGroupMember[]
+  warnings: string[]
+}
+
 export interface DispatchResult {
   desired_state_version?: string
   desired_state_updated_at?: ISODateTimeString
