@@ -876,6 +876,35 @@ Purpose:
 | API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring health returned `ok`; tenant Policies returned 11 items. |
 | Frontend smoke | Deployed bundle no longer contains Plus Jakarta font assets or `Avenir` references. |
 
+### 2026-06-27 Frontend UI Foundation Components Deployment
+
+Status: deployed and server-side smoke validated.
+
+Purpose:
+
+- Add internal reusable frontend UI foundation components for later product
+  workflow cleanup: page headers, metric strips, data panels, status badges,
+  icon action buttons, and filter bars.
+- Keep the components covered by focused unit tests before wiring them into
+  larger pages.
+- Keep this as a Controller/frontend-only deployment; Rust Agent artifacts were
+  validated by CI but not redeployed.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-27T17:31+08:00 gray deployment; 2026-06-27T17:39+08:00 master deployment; 2026-06-27T17:40+08:00 smoke validation |
+| Git commit | `b8d33be7cef635b407f8c6a09cc53bd7d20efd00` |
+| Branch CI run | `28284981185` |
+| Master CI run | `28285299904` |
+| Version | `0.2.75` |
+| Controller image | Local runtime image `aria-controller:local@sha256:c408f25185afed23aeb63d3e4c8f1e785ee44742c6777ca7ad1bbed85b79f7f4`. |
+| Gray backup | `/root/aria-controller/deploy-backups/20260627T093133Z-0.2.75-28284981185-b8d33be7cef6` |
+| Master backup | `/root/aria-controller/deploy-backups/20260627T093957Z-0.2.75-28285299904-b8d33be7cef6-ldflags` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch and master Actions. |
+| Verification | Local frontend unit tests passed (`161` tests), including focused UI foundation component tests (`6` tests). Local linux/amd64 Controller/ariactl build and frontend build passed. Branch Actions run `28284981185` and master Actions run `28285299904` both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.75`; `aria-controller` and `aria-frontend` were healthy; frontend entry returned HTTP 200. |
+| API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring health returned `ok`; tenant Monitoring alerts returned 0 items; tenant Policies returned 11 items. |
+| Deployment note | An intermediate master local-artifact deploy used the wrong manual ldflags package path and `/api/version` returned `dev`. The Controller was rebuilt with the documented `aria/internal/cli.Version` ldflags and redeployed under the final master backup above. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
