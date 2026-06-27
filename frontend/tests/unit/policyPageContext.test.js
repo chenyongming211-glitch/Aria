@@ -100,7 +100,31 @@ const {
         region: 'shanghai',
         cidr: '10.2.0.0/24'
       }
-    ])
+    ]),
+    addRoute: vi.fn(async () => ({
+      id: '10.3.0.0/24',
+      cidr: '10.3.0.0/24',
+      node_id: 'node-2',
+      policy_ref: '10.3.0.0/24',
+      policy_status: 'pending',
+      last_delivery_command_id: 'cmd-route-create'
+    })),
+    updateRoute: vi.fn(async () => ({
+      id: '10.2.0.0/24',
+      cidr: '10.2.0.0/24',
+      node_id: 'node-2',
+      policy_ref: '10.2.0.0/24',
+      policy_status: 'pending',
+      last_delivery_command_id: 'cmd-route-update'
+    })),
+    deleteRoute: vi.fn(async () => ({
+      id: '10.2.0.0/24',
+      cidr: '10.2.0.0/24',
+      node_id: 'node-2',
+      policy_ref: '10.2.0.0/24',
+      policy_status: 'pending',
+      last_delivery_command_id: 'cmd-route-delete'
+    }))
   },
   ipGroupApiMock: {
     listIPGroups: vi.fn(async () => [])
@@ -283,6 +307,9 @@ describe('policy page context handoff', () => {
     qosApiMock.deleteQoSRule.mockClear()
     qosApiMock.retryQoSPolicySync.mockClear()
     routeApiMock.getRoutes.mockClear()
+    routeApiMock.addRoute.mockClear()
+    routeApiMock.updateRoute.mockClear()
+    routeApiMock.deleteRoute.mockClear()
     ipGroupApiMock.listIPGroups.mockClear()
     policyApiMock.listPolicies.mockClear()
     routeState.params = {}
@@ -623,5 +650,107 @@ describe('policy page context handoff', () => {
     expect(wrapper.vm.searchQuery).toBe('10.2.0.0/24')
     expect(wrapper.vm.filteredRoutes).toHaveLength(1)
     expect(wrapper.vm.filteredRoutes[0].nodeId).toBe('node-2')
+  })
+
+  it('routes Route create to the node command trace', async () => {
+    routeState.query = {
+      nodeId: 'node-2',
+      policyRef: '10.2.0.0/24'
+    }
+    routeState.fullPath = '/routing?nodeId=node-2&policyRef=10.2.0.0%2F24'
+
+    const wrapper = mountWithStubs(Routing)
+    await flushPromises()
+    routerPush.mockReset()
+
+    wrapper.vm.dialogMode = 'add'
+    Object.assign(wrapper.vm.currentRoute, {
+      nodeId: 'node-2',
+      cidr: '10.3.0.0/24',
+      originalCidr: ''
+    })
+
+    await wrapper.vm.confirmRouteAction()
+    await flushPromises()
+
+    expect(routeApiMock.addRoute).toHaveBeenCalledWith('node-2', '10.3.0.0/24')
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-2' },
+      query: {
+        commandId: 'cmd-route-create',
+        focus: 'commands',
+        policyRef: '10.3.0.0/24',
+        policyDomain: 'route'
+      }
+    })
+  })
+
+  it('routes Route update to the node command trace', async () => {
+    routeState.query = {
+      nodeId: 'node-2',
+      policyRef: '10.2.0.0/24'
+    }
+    routeState.fullPath = '/routing?nodeId=node-2&policyRef=10.2.0.0%2F24'
+
+    const wrapper = mountWithStubs(Routing)
+    await flushPromises()
+    routerPush.mockReset()
+
+    wrapper.vm.dialogMode = 'edit'
+    Object.assign(wrapper.vm.currentRoute, {
+      nodeId: 'node-2',
+      cidr: '10.2.0.0/24',
+      originalCidr: '10.2.0.0/25'
+    })
+
+    await wrapper.vm.confirmRouteAction()
+    await flushPromises()
+
+    expect(routeApiMock.updateRoute).toHaveBeenCalledWith('node-2', '10.2.0.0/25', '10.2.0.0/24')
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-2' },
+      query: {
+        commandId: 'cmd-route-update',
+        focus: 'commands',
+        policyRef: '10.2.0.0/24',
+        policyDomain: 'route'
+      }
+    })
+  })
+
+  it('routes Route delete to the node command trace', async () => {
+    routeState.query = {
+      nodeId: 'node-2',
+      policyRef: '10.2.0.0/24'
+    }
+    routeState.fullPath = '/routing?nodeId=node-2&policyRef=10.2.0.0%2F24'
+
+    const wrapper = mountWithStubs(Routing)
+    await flushPromises()
+    routerPush.mockReset()
+
+    wrapper.vm.currentDeleteRoute = {
+      id: '10.2.0.0/24',
+      nodeId: 'node-2',
+      nodeName: 'node-2',
+      cidr: '10.2.0.0/24'
+    }
+
+    await wrapper.vm.confirmDeleteRoute()
+    await flushPromises()
+
+    expect(routeApiMock.deleteRoute).toHaveBeenCalledWith('node-2', '10.2.0.0/24')
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-2' },
+      query: {
+        commandId: 'cmd-route-delete',
+        focus: 'commands',
+        policyRef: '10.2.0.0/24',
+        policyDomain: 'route'
+      }
+    })
   })
 })

@@ -133,7 +133,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Refresh, Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRouteApi } from '@/composables/useRouteApi'
@@ -147,6 +147,7 @@ import {
 
 const { hasPermission } = usePermission()
 const route = useRoute() || { query: {}, fullPath: '' }
+const router = useRouter()
 
 const loading = ref(false)
 const searchQuery = ref('')
@@ -265,11 +266,12 @@ const confirmRouteAction = async () => {
   }
 
   try {
+    let result
     if (dialogMode.value === 'add') {
-      await useRouteApi.addRoute(currentRoute.value.nodeId, currentRoute.value.cidr)
+      result = await useRouteApi.addRoute(currentRoute.value.nodeId, currentRoute.value.cidr)
       ElMessage.success('路由添加成功')
     } else {
-      await useRouteApi.updateRoute(
+      result = await useRouteApi.updateRoute(
         currentRoute.value.nodeId,
         currentRoute.value.originalCidr,
         currentRoute.value.cidr
@@ -277,8 +279,10 @@ const confirmRouteAction = async () => {
       ElMessage.success('路由更新成功')
     }
 
+    const traceRoute = { ...currentRoute.value }
     await loadRoutes()
     closeRouteDialog()
+    openCommandTrace(traceRoute, result)
   } catch (error) {
     console.error('[Routing] 路由操作失败:', error)
     const errorMsg = error.response?.data?.message || error.message || '路由操作失败'
@@ -293,11 +297,13 @@ const confirmDeleteRoute = async () => {
   }
 
   try {
-    await useRouteApi.deleteRoute(currentDeleteRoute.value.nodeId, currentDeleteRoute.value.id)
+    const routeToDelete = currentDeleteRoute.value
+    const result = await useRouteApi.deleteRoute(routeToDelete.nodeId, routeToDelete.id)
     ElMessage.success('路由删除成功')
     await loadRoutes()
     deleteDialogVisible.value = false
     currentDeleteRoute.value = null
+    openCommandTrace(routeToDelete, result)
   } catch (error) {
     console.error('[Routing] 删除路由失败:', error)
     const errorMsg = error.response?.data?.message || error.message || '删除路由失败'
@@ -343,6 +349,48 @@ const shortCommandId = (commandId) => {
     return '-'
   }
   return commandId.slice(0, 8)
+}
+
+const commandIdForMutationResult = (result) => {
+  return result?.last_delivery_command_id ||
+    result?.lastDeliveryCommandId ||
+    result?.last_delivery?.command_id ||
+    result?.lastDelivery?.command_id ||
+    ''
+}
+
+const policyRefForRoute = (row, result) => {
+  return result?.policy_ref ||
+    result?.policyRef ||
+    result?.cidr ||
+    row?.policyRef ||
+    row?.cidr ||
+    row?.id ||
+    ''
+}
+
+const openCommandTrace = (row, result) => {
+  const commandId = commandIdForMutationResult(result)
+  if (!commandId) {
+    return
+  }
+
+  const nodeId = result?.node_id || result?.nodeId || row?.nodeId || row?.node_id || currentRoute.value.nodeId
+  if (!nodeId) {
+    return
+  }
+
+  const policyRef = policyRefForRoute(row, result)
+  router.push({
+    name: 'NodeMonitorDetail',
+    params: { nodeId },
+    query: {
+      commandId,
+      focus: 'commands',
+      ...(policyRef ? { policyRef: String(policyRef) } : {}),
+      policyDomain: 'route'
+    }
+  })
 }
 
 onMounted(() => {
