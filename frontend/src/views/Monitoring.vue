@@ -554,6 +554,26 @@ const buildAlertCommandParams = (alert = {}) => {
   }
 }
 
+const commandIdFromResponse = (response = {}) => (
+  response.command_id || response.commandId || response.id || ''
+)
+
+const openQueuedCommandFromAlert = (alert = {}, commandId = '') => {
+  if (!alert?.node_id) return
+  const context = alert.context || {}
+  router.push({
+    name: 'NodeMonitorDetail',
+    params: { nodeId: alert.node_id },
+    query: buildNodeQuery({
+      alertId: alert.id,
+      eventType: alert.alert_type,
+      command_id: commandId || context.command_id,
+      policy_ref: context.policy_ref,
+      policy_domain: context.policy_domain
+    }, 'commands')
+  })
+}
+
 const buildAlertAIQuery = (alert = {}) => {
   const context = alert.context || {}
   return {
@@ -591,13 +611,14 @@ const handleAlertCommand = async (alert, command) => {
   const actionKey = alertCommandKey(alert, command)
   commandActionKey.value = actionKey
   try {
-    await useAgentProxyApi.sendAgentCommand(alert.node_id, {
+    const response = await useAgentProxyApi.sendAgentCommand(alert.node_id, {
       command,
       params: buildAlertCommandParams(alert),
       timeout: 30
     })
     ElMessage.success(`${command} queued`)
     await Promise.all([loadStats(), loadEvents(), loadAlerts()])
+    openQueuedCommandFromAlert(alert, commandIdFromResponse(response))
   } catch (e) {
     console.error(`Failed to queue ${command} from alert:`, e)
     ElMessage.error(`Failed to queue ${command}`)

@@ -443,6 +443,18 @@ describe('monitoring workflow routing', () => {
     expect(monitorApiMock.getStats).toHaveBeenCalled()
     expect(monitorApiMock.getEvents).toHaveBeenCalled()
     expect(monitorApiMock.getAlerts).toHaveBeenCalled()
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-1' },
+      query: {
+        focus: 'commands',
+        alertId: 'alert-sync-1',
+        eventType: 'sync_failed',
+        commandId: 'cmd-new',
+        policyRef: 'acl-1',
+        policyDomain: 'acl'
+      }
+    })
   })
 
   it('resolves an alert with monitoring operation context', async () => {
