@@ -55,6 +55,7 @@ export interface PolicyRecord {
   applied_state_updated_at?: ISODateTimeString
   observed_state?: PolicyStatus | string
   observed_message?: string
+  last_sync_error?: string
   observed_at?: ISODateTimeString
   state_convergence?: string
   spec?: Record<string, unknown>
@@ -69,3 +70,36 @@ export interface PolicyRecord {
   created_at?: ISODateTimeString
 }
 
+export interface NormalizedPolicy extends PolicyRecord {
+  id?: PolicyId
+  policyId?: PolicyId
+  policyRef?: string
+  tenantId?: TenantId
+  nodeId?: NodeId
+  nodeName?: string
+  targetNodes: NodeId[]
+  scope: PolicyScope | string
+  kind: PolicyKind | string
+  name: string
+  enabled: boolean
+  priority: number
+  version: string
+  status: PolicyStatus | string
+  desiredStateVersion: string
+  desiredStateUpdatedAt: ISODateTimeString | null
+  appliedStateVersion: string
+  appliedStateUpdatedAt: ISODateTimeString | null
+  observedState: PolicyStatus | string
+  observedMessage: string
+  observedAt: ISODateTimeString | null
+  stateConvergence: string
+  spec: Record<string, unknown>
+  pendingCmds: number
+  lastDelivery: PolicyDelivery | null
+  deliveryHistory: PolicyDelivery[]
+  lastDeliveryCommandId: CommandId | string
+  lastDeliveryAction: string
+  lastDeliveryError: string
+  updatedAt: ISODateTimeString | null
+  createdAt: ISODateTimeString | null
+}

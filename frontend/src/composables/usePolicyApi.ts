@@ -1,11 +1,26 @@
 import api from './useApi'
+import { unwrapApiData, unwrapApiList } from './apiResponse'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 import {
   mapCommandStatusToPolicyStatus,
   pendingCountForCommandStatus
 } from '@/utils/controlLoopStatus'
+import type { NormalizedPolicy, PolicyKind, PolicyRecord } from '@/types'
 
-function normalizePolicy(policy) {
+interface PolicyFilters {
+  kind?: string
+  nodeId?: string
+  enabled?: boolean | string
+}
+
+interface PolicyRetryPayload {
+  nodeId?: string
+  kind?: PolicyKind | string
+  policyRef?: string
+  policyName?: string
+}
+
+function normalizePolicy(policy: PolicyRecord): NormalizedPolicy {
   const lastDelivery = policy.last_delivery || null
   const deliveryHistory = Array.isArray(policy.delivery_history)
     ? policy.delivery_history
@@ -64,13 +79,13 @@ function normalizePolicy(policy) {
     last_delivery: normalized.lastDelivery,
     delivery_history: normalized.deliveryHistory,
     pending_cmds: normalized.pendingCmds
-  }
+  } as NormalizedPolicy
 }
 
 export const usePolicyApi = {
-  listPolicies: async (filters = {}) => {
+  listPolicies: async (filters: PolicyFilters = {}): Promise<NormalizedPolicy[]> => {
     const tenantId = requireCurrentTenantId()
-    const params = {}
+    const params: Record<string, string> = {}
 
     if (filters.kind) {
       params.kind = filters.kind
@@ -83,11 +98,11 @@ export const usePolicyApi = {
     }
 
     const response = await api.get(API_ENDPOINTS.TENANT.POLICIES(tenantId), { params })
-    const items = response.data?.data || response.data || []
+    const items = unwrapApiList<PolicyRecord>(response)
     return items.map(normalizePolicy)
   },
 
-  retryPolicySync: async ({ nodeId, kind, policyRef, policyName = '' }) => {
+  retryPolicySync: async ({ nodeId, kind, policyRef, policyName = '' }: PolicyRetryPayload): Promise<NormalizedPolicy> => {
     const tenantId = requireCurrentTenantId()
     if (!nodeId) {
       throw new Error('nodeId is required for policy retry')
@@ -105,6 +120,6 @@ export const usePolicyApi = {
       policy_ref: policyRef,
       policy_name: policyName
     })
-    return normalizePolicy(response.data?.data || response.data || {})
+    return normalizePolicy(unwrapApiData<PolicyRecord>(response) || {})
   }
 }

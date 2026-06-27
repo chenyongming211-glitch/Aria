@@ -6,7 +6,132 @@ import {
   pendingCountForCommandStatus
 } from '@/utils/controlLoopStatus'
 
-function normalizeBandwidthMbps(rule) {
+type QoSRuleID = string | number
+type QoSDirection = 'ingress' | 'egress' | 'both'
+type QoSMode = 'auto' | 'policing' | 'shaping'
+
+interface QoSGroup {
+  kind?: string
+  name?: string
+  members?: Array<{ cidr?: string }>
+}
+
+interface QoSStats {
+  packets?: number
+  bytes?: number
+  passed_packets?: number
+  passed_bytes?: number
+  dropped_packets?: number
+  dropped_bytes?: number
+  shaped_packets?: number
+  shaped_bytes?: number
+  error?: string
+}
+
+interface QoSDelivery {
+  command_id?: string
+  command_status?: string
+  action?: string
+  last_error?: string
+  updated_at?: string
+}
+
+interface QoSDispatch {
+  desired_state_version?: string
+  desired_state_updated_at?: string
+  command_id?: string
+  status?: string
+  last_delivery?: QoSDelivery | null
+}
+
+interface QoSRuleRecord extends Record<string, unknown> {
+  id?: QoSRuleID
+  node_id?: string
+  description?: string
+  name?: string
+  direction?: string
+  mode?: string
+  group_id?: string
+  groupId?: string
+  group_name?: string
+  group?: QoSGroup | string
+  group_cidr?: string
+  runtime_group?: string
+  src_cidr?: string
+  dst_cidr?: string
+  src_net?: string
+  dst_net?: string
+  bandwidth_mbps?: number | string
+  rate_bps?: number | string
+  burst_bytes?: number | string
+  priority?: number | string
+  enabled?: boolean
+  stats?: QoSStats
+  datapath_stats?: QoSStats
+  stats_error?: string
+  datapath_stats_error?: string
+  dispatch?: QoSDispatch
+  last_delivery?: QoSDelivery | null
+  delivery_history?: QoSDelivery[]
+  policy_status?: string
+  pending_cmds?: number
+  desired_state_version?: string
+  desired_state_updated_at?: string
+  last_delivery_at?: string
+  last_sync_at?: string | null
+  last_delivery_command_id?: string
+  last_delivery_action?: string
+  last_delivery_error?: string
+  last_command_error?: string
+  policy_ref?: string
+}
+
+interface NormalizedQoSRule extends QoSRuleRecord {
+  node_id: string
+  direction: QoSDirection
+  mode: QoSMode
+  group_id: string
+  group_name: string
+  rate_bps: number
+  burst_bytes: number
+  priority: number
+  stats: {
+    passed_packets: number
+    passed_bytes: number
+    dropped_packets: number
+    dropped_bytes: number
+    shaped_packets: number
+    shaped_bytes: number
+    load_error: string
+  }
+  bandwidth_mbps: number
+  bandwidth: number
+  status: string
+  runtime_group: string
+  group_cidr: string
+  runtime_rate: number
+  runtime_burst: number
+}
+
+interface QoSSubmitPayload {
+  src_cidr: string
+  dst_cidr: string
+  bandwidth_mbps: number
+  direction: QoSDirection
+  rate_bps: number
+  burst_bytes: number
+  priority: number
+  mode: QoSMode
+  description: string
+  enabled: boolean
+  group_id?: string
+}
+
+interface ApiResponseLike {
+  data?: unknown
+}
+
+function normalizeBandwidthMbps(rule: QoSRuleRecord): number {
   const value = Number(rule.bandwidth_mbps ?? 0)
   if (!Number.isFinite(value) || value <= 0) {
     throw new Error('bandwidth_mbps must be greater than 0')
@@ -14,41 +139,41 @@ function normalizeBandwidthMbps(rule) {
   return value
 }
 
-function normalizeDirection(rule) {
+function normalizeDirection(rule: QoSRuleRecord): QoSDirection {
   const value = String(rule.direction || '').trim().toLowerCase()
-  if (['ingress', 'egress', 'both'].includes(value)) return value
+  if (['ingress', 'egress', 'both'].includes(value)) return value as QoSDirection
   if ((rule.src_cidr || rule.src_net || rule.group_cidr || rule.group) && !(rule.dst_cidr || rule.dst_net)) return 'ingress'
   return 'egress'
 }
 
-function normalizeMode(rule) {
+function normalizeMode(rule: QoSRuleRecord): QoSMode {
   const value = String(rule.mode || '').trim().toLowerCase()
-  if (['auto', 'policing', 'shaping'].includes(value)) return value
+  if (['auto', 'policing', 'shaping'].includes(value)) return value as QoSMode
   return 'auto'
 }
 
-function normalizePayloadMode(rule) {
+function normalizePayloadMode(rule: QoSRuleRecord): QoSMode {
   const value = String(rule.mode || '').trim().toLowerCase()
   if (!value) return 'auto'
   if (!['auto', 'policing', 'shaping'].includes(value)) {
     throw new Error('QoS mode must be auto, policing, or shaping')
   }
-  return value
+  return value as QoSMode
 }
 
-function normalizeRateBps(rule, bandwidthMbps) {
+function normalizeRateBps(rule: QoSRuleRecord, bandwidthMbps: number): number {
   const value = Number(rule.rate_bps || 0)
   if (Number.isFinite(value) && value > 0) return value
   return bandwidthMbps * 1000000
 }
 
-function normalizeBurstBytes(rule, rateBps) {
+function normalizeBurstBytes(rule: QoSRuleRecord, rateBps: number): number {
   const value = Number(rule.burst_bytes || 0)
   if (Number.isFinite(value) && value > 0) return value
   return Math.max(Math.floor(rateBps / 8 / 10), 1500)
 }
 
-function normalizeStats(rule) {
+function normalizeStats(rule: QoSRuleRecord): NormalizedQoSRule['stats'] {
   const stats = rule.stats || rule.datapath_stats || {}
   return {
     passed_packets: Number(stats.passed_packets ?? stats.packets ?? 0),
@@ -61,7 +186,7 @@ function normalizeStats(rule) {
   }
 }
 
-function normalizeDeliveryFields(rule) {
+function normalizeDeliveryFields(rule: QoSRuleRecord) {
   const dispatch = rule.dispatch || {}
   const lastDelivery = rule.last_delivery || dispatch.last_delivery || null
   const deliveryHistory = Array.isArray(rule.delivery_history)
@@ -72,7 +197,7 @@ function normalizeDeliveryFields(rule) {
   const pendingCmds = typeof rule.pending_cmds === 'number'
     ? rule.pending_cmds
     : (deliveryHistory.length > 0
-        ? deliveryHistory.reduce((total, delivery) => total + pendingCountForCommandStatus(delivery?.command_status), 0)
+        ? deliveryHistory.reduce((total: number, delivery: QoSDelivery) => total + pendingCountForCommandStatus(delivery?.command_status), 0)
         : pendingCountForCommandStatus(dispatch.status))
   const lastError = rule.last_delivery_error ||
     lastDelivery?.last_error ||
@@ -96,15 +221,16 @@ function normalizeDeliveryFields(rule) {
   }
 }
 
-function qosGroupForRule(rule) {
+function qosGroupForRule(rule: QoSRuleRecord): string {
   const direction = normalizeDirection(rule)
   const src = rule.src_cidr || rule.src_net || ''
   const dst = rule.dst_cidr || rule.dst_net || ''
-  const members = Array.isArray(rule.group?.members) ? rule.group.members : []
+  const groupObject = typeof rule.group === 'object' && rule.group ? rule.group as QoSGroup : undefined
+  const members = Array.isArray(groupObject?.members) ? groupObject.members : []
   const memberCIDRs = members.map(member => member.cidr).filter(Boolean)
   if (memberCIDRs.length > 0) return memberCIDRs.join(', ')
-  const groupName = rule.group_name || rule.group?.name || ''
-  if (groupName && rule.group?.kind !== 'inline') return groupName
+  const groupName = rule.group_name || groupObject?.name || ''
+  if (groupName && groupObject?.kind !== 'inline') return groupName
   const directGroup = typeof rule.group === 'string' ? rule.group : ''
   const explicit = rule.group_cidr || directGroup || rule.runtime_group || ''
   if (explicit && explicit !== rule.group_id) return explicit
@@ -115,15 +241,16 @@ function qosGroupForRule(rule) {
   return 'any'
 }
 
-function normalizeRulePayload(rule) {
+function normalizeRulePayload(rule: QoSRuleRecord): QoSSubmitPayload {
   const bandwidthMbps = normalizeBandwidthMbps(rule)
   const rateBps = normalizeRateBps(rule, bandwidthMbps)
   const direction = normalizeDirection(rule)
   const groupID = rule.group_id || rule.groupId || ''
-  const group = rule.group_cidr || rule.group || ''
+  const directGroup = typeof rule.group === 'string' ? rule.group : ''
+  const group = rule.group_cidr || directGroup || ''
   const srcCIDR = groupID ? '' : (rule.src_cidr || rule.src_net || (direction === 'ingress' ? group : '') || '')
   const dstCIDR = groupID ? '' : (rule.dst_cidr || rule.dst_net || (direction !== 'ingress' ? group : '') || '')
-  const payload = {
+  const payload: QoSSubmitPayload = {
     src_cidr: srcCIDR,
     dst_cidr: dstCIDR,
     bandwidth_mbps: bandwidthMbps,
@@ -141,24 +268,26 @@ function normalizeRulePayload(rule) {
   return payload
 }
 
-function normalizeListResponse(response) {
+function normalizeListResponse(response: ApiResponseLike): QoSRuleRecord[] {
   const body = response?.data
   if (Array.isArray(body)) return body
   if (!body || typeof body !== 'object') return []
 
   if ('success' in body) {
-    const data = body.data
+    const data = (body as { data?: unknown }).data
     if (data == null) return []
     if (Array.isArray(data)) return data
-    if (Array.isArray(data.items)) return data.items
+    if (typeof data === 'object' && data && Array.isArray((data as { items?: unknown }).items)) {
+      return (data as { items: QoSRuleRecord[] }).items
+    }
     throw new Error('Invalid list response')
   }
 
-  if (Array.isArray(body.items)) return body.items
+  if (Array.isArray((body as { items?: unknown }).items)) return (body as { items: QoSRuleRecord[] }).items
   return []
 }
 
-function normalizeQoSRecord(rule, nodeId) {
+function normalizeQoSRecord(rule: QoSRuleRecord, nodeId?: string): NormalizedQoSRule {
   let bandwidthMbps = Number(rule.bandwidth_mbps ?? 0)
   const rateBps = normalizeRateBps(rule, bandwidthMbps)
   if ((!Number.isFinite(bandwidthMbps) || bandwidthMbps <= 0) && rateBps > 0) {
@@ -166,13 +295,13 @@ function normalizeQoSRecord(rule, nodeId) {
   }
   const burstBytes = normalizeBurstBytes(rule, rateBps)
   const deliveryFields = normalizeDeliveryFields(rule)
-  const normalized = {
+  const normalized: NormalizedQoSRule = {
     ...rule,
     node_id: nodeId || rule.node_id || '',
     direction: normalizeDirection(rule),
     mode: normalizeMode(rule),
     group_id: rule.group_id || '',
-    group_name: rule.group_name || rule.group?.name || '',
+    group_name: rule.group_name || (typeof rule.group === 'object' && rule.group ? rule.group.name : '') || '',
     rate_bps: rateBps,
     burst_bytes: burstBytes,
     priority: Number(rule.priority ?? 100),
@@ -180,6 +309,10 @@ function normalizeQoSRecord(rule, nodeId) {
     bandwidth_mbps: bandwidthMbps,
     bandwidth: bandwidthMbps,
     status: rule.enabled ? 'active' : 'inactive',
+    runtime_group: '',
+    group_cidr: '',
+    runtime_rate: rateBps,
+    runtime_burst: burstBytes,
     ...deliveryFields
   }
   normalized.runtime_group = qosGroupForRule(normalized)
@@ -189,18 +322,19 @@ function normalizeQoSRecord(rule, nodeId) {
   return normalized
 }
 
-function normalizeQoSMutationResult(data, nodeId, includeRuleFields = true) {
+function normalizeQoSMutationResult(data: unknown, nodeId?: string, includeRuleFields = true) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return data
-  const hasDeliverySignal = data.dispatch || data.last_delivery || Array.isArray(data.delivery_history) || data.policy_status
+  const record = data as QoSRuleRecord
+  const hasDeliverySignal = record.dispatch || record.last_delivery || Array.isArray(record.delivery_history) || record.policy_status
   if (!hasDeliverySignal) return data
   if (!includeRuleFields) {
     return {
-      ...data,
-      node_id: nodeId || data.node_id || '',
-      ...normalizeDeliveryFields(data)
+      ...record,
+      node_id: nodeId || record.node_id || '',
+      ...normalizeDeliveryFields(record)
     }
   }
-  return normalizeQoSRecord(data, nodeId)
+  return normalizeQoSRecord(record, nodeId)
 }
 
 /**
@@ -212,7 +346,7 @@ export const useQosApi = {
    * 获取指定节点的 QoS 规则
    * @param {string} nodeId - 节点ID
    */
-  getQoSRulesByNode: async (nodeId) => {
+  getQoSRulesByNode: async (nodeId: string): Promise<NormalizedQoSRule[]> => {
     try {
       const tenantId = requireCurrentTenantId()
       if (!nodeId) return []
@@ -231,7 +365,7 @@ export const useQosApi = {
   /**
    * 创建 QoS 规则
    */
-  createQoSRule: async (nodeId, rule) => {
+  createQoSRule: async (nodeId: string, rule: QoSRuleRecord) => {
     try {
       const tenantId = requireCurrentTenantId()
       const payload = normalizeRulePayload(rule)
@@ -250,7 +384,7 @@ export const useQosApi = {
   /**
    * 删除 QoS 规则
    */
-  deleteQoSRule: async (nodeId, ruleId) => {
+  deleteQoSRule: async (nodeId: string, ruleId: QoSRuleID) => {
     try {
       const tenantId = requireCurrentTenantId()
       const response = await api.delete(
@@ -263,7 +397,7 @@ export const useQosApi = {
     }
   },
 
-  updateQoSRule: async (nodeId, ruleId, rule) => {
+  updateQoSRule: async (nodeId: string, ruleId: QoSRuleID, rule: QoSRuleRecord) => {
     try {
       const tenantId = requireCurrentTenantId()
       const payload = normalizeRulePayload(rule)
@@ -279,7 +413,7 @@ export const useQosApi = {
     }
   },
 
-  retryQoSPolicySync: async (nodeId, rule) => {
+  retryQoSPolicySync: async (nodeId: string, rule: QoSRuleRecord) => {
     try {
       const policyRef = rule?.policy_ref || rule?.id
       if (!nodeId) {
@@ -315,8 +449,8 @@ export const useQosApi = {
   },
 
   // 辅助转换函数
-  getProtocolName: (p) => {
+  getProtocolName: (p: number | string) => {
     const map = { 6: 'TCP', 17: 'UDP', 1: 'ICMP', 0: 'Any' }
-    return map[p] || 'Unknown'
+    return map[Number(p) as keyof typeof map] || 'Unknown'
   }
 }

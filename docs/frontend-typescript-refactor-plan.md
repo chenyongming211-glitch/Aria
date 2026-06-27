@@ -767,6 +767,8 @@ git commit -m "refactor: type agent proxy API composable"
 
 ### Task 6: Migrate Policy, ACL, and QoS API Boundaries
 
+Status: completed in `codex/frontend-policy-api-b13`.
+
 **Files:**
 - Rename: `frontend/src/composables/usePolicyApi.js` -> `frontend/src/composables/usePolicyApi.ts`
 - Rename: `frontend/src/composables/useAclApi.js` -> `frontend/src/composables/useAclApi.ts`
