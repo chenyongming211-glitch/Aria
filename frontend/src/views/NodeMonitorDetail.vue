@@ -409,13 +409,24 @@ const nodeId = computed(() => {
   const value = route.params.nodeId
   return Array.isArray(value) ? value[0] || '' : String(value || '')
 })
+
+const queryString = (...keys: string[]) => {
+  for (const key of keys) {
+    const value = route.query[key]
+    if (typeof value === 'string') {
+      return value
+    }
+  }
+  return ''
+}
+
 const contextQuery = computed(() => ({
-  focus: typeof route.query.focus === 'string' ? route.query.focus : '',
-  commandId: typeof route.query.commandId === 'string' ? route.query.commandId : '',
-  policyRef: typeof route.query.policyRef === 'string' ? route.query.policyRef : '',
-  policyDomain: typeof route.query.policyDomain === 'string' ? route.query.policyDomain : '',
-  alertId: typeof route.query.alertId === 'string' ? route.query.alertId : '',
-  eventType: typeof route.query.eventType === 'string' ? route.query.eventType : ''
+  focus: queryString('focus'),
+  commandId: queryString('commandId', 'command_id'),
+  policyRef: queryString('policyRef', 'policy_ref'),
+  policyDomain: queryString('policyDomain', 'policy_domain', 'kind'),
+  alertId: queryString('alertId', 'alert_id'),
+  eventType: queryString('eventType', 'event_type')
 }))
 const hasContext = computed(() => Object.values(contextQuery.value).some(Boolean))
 const contextDescription = computed(() => {

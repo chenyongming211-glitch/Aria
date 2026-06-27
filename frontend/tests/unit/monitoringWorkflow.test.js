@@ -654,6 +654,53 @@ describe('node monitor detail context handling', () => {
       }
     })
   })
+
+  it('accepts snake_case node detail context from external links', async () => {
+    routeState.query = {
+      focus: 'policies',
+      command_id: 'cmd-1',
+      policy_ref: 'acl-1',
+      policy_domain: 'acl',
+      alert_id: 'alert-1',
+      event_type: 'policy_failed'
+    }
+    routeState.fullPath = '/monitoring/nodes/node-1?focus=policies&command_id=cmd-1&policy_ref=acl-1&policy_domain=acl&alert_id=alert-1&event_type=policy_failed'
+
+    const wrapper = mountWithStubs(NodeMonitorDetail)
+    await flushPromises()
+
+    expect(wrapper.vm.contextDescription).toContain('Event: policy_failed')
+    expect(wrapper.vm.contextDescription).toContain('Policy: acl-1')
+    expect(wrapper.vm.contextDescription).toContain('Command: cmd-1')
+    expect(wrapper.vm.policyRowClassName({ row: { policy_ref: 'acl-1', command_id: 'other' } })).toBe('context-match-row')
+    expect(wrapper.vm.alertRowClassName({ row: { id: 'alert-1' } })).toBe('context-match-row')
+
+    await wrapper.vm.runContextCommand('health_check')
+
+    expect(agentApiMock.sendAgentCommand).toHaveBeenCalledWith('node-1', {
+      command: 'health_check',
+      params: {
+        source: 'node_monitor_detail',
+        alert_id: 'alert-1',
+        event_type: 'policy_failed',
+        command_id: 'cmd-1',
+        policy_ref: 'acl-1',
+        policy_domain: 'acl'
+      },
+      timeout: 30
+    })
+
+    wrapper.vm.openPolicyCenter()
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'Policies',
+      query: {
+        nodeId: 'node-1',
+        policyRef: 'acl-1',
+        kind: 'acl'
+      }
+    })
+  })
 })
 
 describe('policy center context handling', () => {
