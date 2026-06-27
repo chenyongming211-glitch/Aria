@@ -309,6 +309,7 @@ docker build -f Dockerfile.controller.runtime-base \
 # Run this for every Controller release.
 docker build -f Dockerfile.controller.runtime \
   --build-arg ARIA_CONTROLLER_RUNTIME_BASE=aria-controller-runtime-base:alpine3.19 \
+  --build-arg ARIA_CONTROLLER_VERSION=${VERSION} \
   -t aria-controller:${VERSION} \
   .
 docker tag aria-controller:${VERSION} aria-controller:local

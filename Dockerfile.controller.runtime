@@ -5,6 +5,9 @@
 ARG ARIA_CONTROLLER_RUNTIME_BASE=aria-controller-runtime-base:alpine3.19
 FROM ${ARIA_CONTROLLER_RUNTIME_BASE}
 
+ARG ARIA_CONTROLLER_VERSION=dev
+ENV ARIA_CONTROLLER_VERSION=${ARIA_CONTROLLER_VERSION}
+
 COPY bin/aria /usr/local/bin/aria
 RUN chmod +x /usr/local/bin/aria
 
