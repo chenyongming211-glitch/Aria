@@ -657,6 +657,8 @@ git commit -m "chore: add typed API response helpers"
 
 ### Task 4: Migrate Monitoring API to TypeScript
 
+Status: completed in `codex/frontend-monitoring-api-b11`.
+
 **Files:**
 - Rename: `frontend/src/composables/useMonitorApi.js` -> `frontend/src/composables/useMonitorApi.ts`
 - Modify: `frontend/tests/unit/monitoringWorkflow.test.js`
