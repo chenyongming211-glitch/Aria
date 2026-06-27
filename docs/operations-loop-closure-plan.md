@@ -311,7 +311,7 @@ IM 联动作为第二阶段：
 - Node Detail 已能携带 alert、policy、command 上下文执行 `sync` / `health_check`，并能人工 resolve 当前 alert。
 - 旧 Ask AI 链路不作为 v0.1.0 验收前置条件；后续由 Hermes Agent 重新设计 AI 建议和确认链路。
 - 本批次补齐了人工命令确认的 `command.queued` audit，以及 Resolve Alert 的 `reason/source/command_id` 留痕。
-- 本阶段剩余工作是线上制造或复用 `sync_failed / policy_failed / node_offline`，验证“告警 -> 人工确认命令 -> Agent 回写 -> resolve/失败留痕”。
+- 2026-06-27 已在线上复用 active `policy_failed` / `sync_failed` alert 完成非 AI 告警处置链路验收：代表性 alert `b3be00da-b560-4ad1-96d0-e90bf8ea8518` 触发 `sync` command `7dc16199-90f7-4c5d-8ec5-f2d85e0dfe8f`，Agent 回写 `completed` / `sync completed`，audit/event 留下 `command.queued -> command.result -> alert_resolved`。另外两个历史 active alert 也在确认对应 sync completed 后 resolved，最终线上 active alerts 为 `0`。
 
 1. 人为制造 `sync_failed` 后，Monitoring 出现 active alert。
 2. 该 alert 的 `context` 包含 `node_id`、`desired_state_version`、`applied_state_version` 和错误原因。
