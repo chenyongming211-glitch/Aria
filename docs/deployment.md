@@ -992,6 +992,35 @@ Purpose:
 | API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Policies returned 11 items; tenant Monitoring health returned `ok`; tenant Monitoring events returned 5 items. |
 | Frontend smoke | Deployed frontend assets contain the Policy Center foundation markers `ui-page-header`, `ui-metric-strip`, and `Policy Center`. |
 
+### 2026-06-27 Frontend Policy Rule Pages Foundation Deployment
+
+Status: deployed and server-side smoke validated.
+
+Purpose:
+
+- Wire the shared UI foundation components into the ACL and QoS policy rule
+  pages: page header, filter bar, data panel, and consistent icon action
+  buttons.
+- Preserve existing ACL/QoS create, edit, delete, retry, command-trace handoff,
+  stats display, and node-scoped API behavior.
+- Keep this as a Controller/frontend-only deployment; Rust Agent artifacts were
+  validated by CI but not redeployed.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-27T19:36+08:00 gray deployment; 2026-06-27T19:44+08:00 master deployment; 2026-06-27T19:45+08:00 smoke validation |
+| Git commit | `ae92781d86eb1e93c68dd7e2751d6b97284f79c7` |
+| Branch CI run | `28287874281` |
+| Master CI run | `28288074140` |
+| Version | `0.2.79` |
+| Controller image | Local runtime image `aria-controller:local@sha256:f83c98988fda30610025263d05b02041b68443ede4f5ad1d4a65f042aa589ebb`. |
+| Gray backup | `/root/aria-controller/deploy-backups/20260627T113628Z-0.2.79-28287874281-ae92781d86eb` |
+| Master backup | `/root/aria-controller/deploy-backups/20260627T114445Z-0.2.79-28288074140-ae92781d86eb` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch and master Actions. |
+| Verification | Local frontend unit tests passed (`168` tests), including focused Policy Center context tests (`19` tests). Local linux/amd64 Controller/ariactl build and frontend build passed from a clean worktree. Branch Actions run `28287874281` and master Actions run `28288074140` both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.79`; `aria-controller` and `aria-frontend` were healthy; frontend entry returned HTTP 200. |
+| API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Policies returned 11 items; tenant Monitoring health returned `ok`; tenant Monitoring events returned 5 items. Node-scoped ACL and QoS list APIs for node `d5c7723c-3d86-48ce-a9fc-4695cd170b1c` both returned HTTP 200. |
+| Frontend smoke | Deployed frontend assets contain the ACL/QoS rule page foundation markers `ui-page-header`, `ui-filter-bar`, and `ui-data-panel`; assets also contain `ACL 规则管理` and `带宽控制`. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
