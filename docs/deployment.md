@@ -284,6 +284,9 @@ It must not install Alpine packages during a normal release:
 ARG ARIA_CONTROLLER_RUNTIME_BASE=aria-controller-runtime-base:alpine3.19
 FROM ${ARIA_CONTROLLER_RUNTIME_BASE}
 
+ARG ARIA_CONTROLLER_VERSION=dev
+ENV ARIA_CONTROLLER_VERSION=${ARIA_CONTROLLER_VERSION}
+
 COPY bin/aria /usr/local/bin/aria
 RUN chmod +x /usr/local/bin/aria
 
@@ -315,6 +318,16 @@ docker build -f Dockerfile.controller.runtime \
 docker tag aria-controller:${VERSION} aria-controller:local
 
 cd /root/aria-controller
+if grep -q '^ARIA_VERSION=' .env; then
+  sed -i "s/^ARIA_VERSION=.*/ARIA_VERSION=${VERSION}/" .env
+else
+  printf '\nARIA_VERSION=%s\n' "${VERSION}" >> .env
+fi
+if grep -q '^ARIA_CONTROLLER_VERSION=' .env; then
+  sed -i "s/^ARIA_CONTROLLER_VERSION=.*/ARIA_CONTROLLER_VERSION=${VERSION}/" .env
+else
+  printf 'ARIA_CONTROLLER_VERSION=%s\n' "${VERSION}" >> .env
+fi
 grep -q 'image: aria-controller:local' docker-compose.yml || sed -i.bak 's#image: .*aria-controller.*#image: aria-controller:local#' docker-compose.yml
 docker compose up -d aria-controller
 docker compose ps aria-controller
