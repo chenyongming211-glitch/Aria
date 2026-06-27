@@ -1085,6 +1085,31 @@ Purpose:
 | Frontend smoke | Deployed frontend assets contain `PolicyContextBanner` and command-focus markers for the cross-page context workflow. |
 | Deployment note | The feature branch was fast-forwarded into `master`, master CI passed, and master Controller/frontend artifacts were deployed through the low-bandwidth runtime image path. Rust Agent artifacts were validated by CI but not redeployed. This docs-only deployment record commit does not require a runtime redeploy. |
 
+### 2026-06-28 Node Location Response Deployment
+
+Status: deployed from `master` and server-side smoke validated.
+
+Purpose:
+
+- Close the non-AI node response bug batch by returning `region` and `vpc_id`
+  from tenant-scoped node list/detail responses.
+- Publish the fix under a unique release version instead of reusing `0.2.81`.
+- Keep this as a Controller/frontend low-bandwidth deployment; Rust Agent
+  artifacts were validated by CI but not redeployed.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-28T05:38+08:00 master deployment; 2026-06-28T05:40+08:00 smoke validation |
+| Git commit | `42906d0f3ed62c2b76549c63d5061980212984e1` |
+| Master CI run | `28302385567` |
+| Version | `0.2.82` |
+| Controller image | Local runtime image `aria-controller:0.2.82` / `aria-controller:local@sha256:976d20307df3cafac32dbb16509a2f62aacb0c0d2dd864ac2995bdfa2d1950e8`. |
+| Backup | `/root/aria-controller/deploy-backups/20260627T213841Z-0.2.82-28302385567-42906d0` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in master Actions. |
+| Verification | Local `go test ./...` passed, local linux/amd64 Controller/ariactl build passed, local frontend unit tests passed (`192` tests), and local frontend build passed. Master Actions run `28302385567` passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` returned `0.2.82`; `aria-controller` and `aria-frontend` were healthy; frontend entry returned HTTP 200 and referenced `/assets/index-bc990307.js`; Controller logs showed HTTP and gRPC TLS listeners ready. |
+| API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; first node `node-82-156-137-42` returned `region=beijing`, `vpc_id=""`, `public_ip=82.156.137.42`, and `assigned_ip=100.64.0.40`. |
+| Deployment note | This docs-only deployment record commit does not require a runtime redeploy. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
