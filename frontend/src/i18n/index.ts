@@ -1,8 +1,11 @@
-// src/i18n/index.js
+// src/i18n/index.ts
 import { useAppStore } from '@/stores'
 
+type TranslationNode = string | { [key: string]: TranslationNode }
+type LocaleMessages = Record<string, TranslationNode>
+
 // 翻译资源
-const messages = {
+const messages: Record<string, LocaleMessages> = {
   en: {
     common: {
       dashboard: 'Dashboard',
@@ -124,7 +127,6 @@ const messages = {
     },
     tenantManagement: {
       title: 'Tenant Management',
-      description: 'Manage your tenants and allocate resources',
       total: 'Total Tenants',
       active: 'Active Tenants',
       suspended: 'Suspended Tenants',
@@ -346,7 +348,6 @@ const messages = {
     },
     tenantManagement: {
       title: '租户管理',
-      description: '管理您的租户并分配资源',
       total: '总租户数',
       active: '活跃租户',
       suspended: '暂停租户',
@@ -449,7 +450,7 @@ const messages = {
   }
 }
 
-const readLang = () => {
+const readLang = (): string => {
   try {
     const appStore = useAppStore()
     return appStore.lang || 'zh'
@@ -459,17 +460,18 @@ const readLang = () => {
 }
 
 // 翻译函数
-export function t(key) {
+export function t(key: string): string {
   const lang = readLang()
+  const locale = messages[lang] || messages.zh
 
   // 尝試直接翻譯
-  if (messages[lang] && messages[lang][key]) {
-    return messages[lang][key]
+  if (typeof locale[key] === 'string') {
+    return locale[key]
   }
 
   // 拆分鍵值來處理嵌套翻譯 (如 'nav.dashboard')
   const keys = key.split('.')
-  let result = messages[lang]
+  let result: TranslationNode | undefined = locale
 
   for (const k of keys) {
     if (result && typeof result === 'object') {
