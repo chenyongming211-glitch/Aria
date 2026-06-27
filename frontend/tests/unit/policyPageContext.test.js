@@ -341,6 +341,42 @@ describe('policy page context handoff', () => {
     })
   })
 
+  it('uses shared UI foundation components for the Policy Center operations shell', async () => {
+    const wrapper = mountWithStubs(Policies)
+    await flushPromises()
+
+    expect(wrapper.find('.ui-page-header').exists()).toBe(true)
+    expect(wrapper.find('.ui-metric-strip').exists()).toBe(true)
+    expect(wrapper.find('.ui-filter-bar').exists()).toBe(true)
+    expect(wrapper.find('.ui-data-panel').exists()).toBe(true)
+    expect(wrapper.find('.page-hero').exists()).toBe(false)
+    expect(wrapper.find('.policy-card').exists()).toBe(false)
+  })
+
+  it('filters policy inventory from shared metric shortcuts', async () => {
+    const wrapper = mountWithStubs(Policies)
+    await flushPromises()
+
+    const metricItems = wrapper.findAll('.ui-metric-strip__item')
+    const failedMetric = metricItems.find(item => item.text().includes('Failed'))
+    expect(failedMetric).toBeTruthy()
+
+    await failedMetric.trigger('click')
+
+    expect(wrapper.vm.filters.status).toBe('error')
+    expect(wrapper.vm.filteredPolicies).toHaveLength(1)
+    expect(wrapper.vm.filteredPolicies[0].policyRef).toBe('acl-special')
+
+    const pendingMetric = wrapper.findAll('.ui-metric-strip__item').find(item => item.text().includes('Pending'))
+    expect(pendingMetric).toBeTruthy()
+
+    await pendingMetric.trigger('click')
+
+    expect(wrapper.vm.filters.status).toBe('pending')
+    expect(wrapper.vm.filteredPolicies).toHaveLength(1)
+    expect(wrapper.vm.filteredPolicies[0].policyRef).toBe('qos-special')
+  })
+
   it('preserves policy context when opening the QoS page from Policy Center', async () => {
     routeState.query = {
       nodeId: 'node-2',
