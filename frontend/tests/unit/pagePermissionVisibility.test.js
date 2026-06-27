@@ -46,20 +46,6 @@ vi.mock('/src/composables/usePermission', () => ({
   })
 }))
 
-vi.mock('@/composables/usePermission.js', () => ({
-  usePermission: () => ({
-    hasPermission,
-    hasAnyPermission
-  })
-}))
-
-vi.mock('/src/composables/usePermission.js', () => ({
-  usePermission: () => ({
-    hasPermission,
-    hasAnyPermission
-  })
-}))
-
 vi.mock('/src/stores/node', () => ({
   default: () => mockNodeStore
 }))

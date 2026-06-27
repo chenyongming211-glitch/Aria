@@ -204,15 +204,6 @@ vi.mock('/src/composables/usePermission', () => ({
   })
 }))
 
-vi.mock('/src/composables/usePermission.js', () => ({
-  usePermission: () => ({
-    hasPermission: () => true,
-    hasAnyPermission: () => true,
-    hasAllPermissions: () => true,
-    canAccessRoute: () => true
-  })
-}))
-
 vi.mock('element-plus', () => ({
   ElMessage: {
     success: vi.fn(),

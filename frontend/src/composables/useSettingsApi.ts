@@ -1,7 +1,19 @@
 import api from './useApi'
 import { API_ENDPOINTS } from '@/config/api'
 
-const contentDispositionFilename = (value) => {
+interface ResponseHeaders {
+  get?: (name: string) => unknown
+  [key: string]: unknown
+}
+
+interface BackupLike {
+  id?: string
+  filename?: string
+}
+
+type BackupInput = string | BackupLike
+
+const contentDispositionFilename = (value?: string | null): string => {
   if (!value) return ''
 
   const encoded = /filename\*=UTF-8''([^;]+)/i.exec(value)
@@ -17,15 +29,15 @@ const contentDispositionFilename = (value) => {
   return plain?.[1]?.trim() || ''
 }
 
-const responseHeader = (headers, name) => {
+const responseHeader = (headers: ResponseHeaders | undefined | null, name: string): string => {
   if (!headers) return ''
   if (typeof headers.get === 'function') {
-    return headers.get(name) || headers.get(name.toLowerCase()) || ''
+    return String(headers.get(name) || headers.get(name.toLowerCase()) || '')
   }
-  return headers[name] || headers[name.toLowerCase()] || ''
+  return String(headers[name] || headers[name.toLowerCase()] || '')
 }
 
-const saveBlob = (blob, filename) => {
+const saveBlob = (blob: Blob, filename: string) => {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
     return
   }
@@ -51,7 +63,7 @@ export const useSettingsApi = {
     return response.data?.data || response.data
   },
 
-  uploadBackup: async (file) => {
+  uploadBackup: async (file: File) => {
     const formData = new FormData()
     formData.append('file', file)
     const response = await api.post(API_ENDPOINTS.SETTINGS.BACKUP_UPLOAD, formData, {
@@ -62,17 +74,17 @@ export const useSettingsApi = {
     return response.data?.data || response.data
   },
 
-  deleteBackup: async (backupId) => {
+  deleteBackup: async (backupId: string) => {
     const response = await api.delete(API_ENDPOINTS.SETTINGS.BACKUP_DETAIL(backupId))
     return response.data?.data || response.data
   },
 
-  restoreBackup: async (backupId) => {
+  restoreBackup: async (backupId: string) => {
     const response = await api.post(API_ENDPOINTS.SETTINGS.BACKUP_RESTORE(backupId))
     return response.data?.data || response.data
   },
 
-  downloadBackup: async (backup) => {
+  downloadBackup: async (backup: BackupInput) => {
     const backupId = typeof backup === 'string' ? backup : backup?.id
     if (!backupId) {
       throw new Error('backup id is required')
@@ -85,7 +97,7 @@ export const useSettingsApi = {
       (typeof backup === 'object' ? backup.filename : '') ||
       `${backupId}.json`
 
-    saveBlob(response.data, filename)
+    saveBlob(response.data as Blob, filename)
     return { id: backupId, filename }
   }
 }

@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS roles (
 ### usePermission Composable
 
 ```js
-// usePermission.js
+// usePermission.ts
 export function usePermission() {
   const userStore = useUserStore()
   const hasPermission = (perm) => userStore.permissions.includes(perm)
@@ -184,6 +184,6 @@ export function usePermission() {
 | `internal/api/v2/roles.go` | 新建：角色管理 API handler |
 | `internal/api/v2/setup.go` | 修改：注册路由 + 权限检查替换 |
 | `frontend/src/config/api.js` | 修改：新增角色 API 端点 |
-| `frontend/src/composables/usePermission.js` | 新建：权限 composable |
+| `frontend/src/composables/usePermission.ts` | 新建：权限 composable |
 | `frontend/src/views/Roles.vue` | 新建：角色管理页面 |
 | `frontend/src/views/*.vue` | 修改：权限控制的 UI 元素 |
