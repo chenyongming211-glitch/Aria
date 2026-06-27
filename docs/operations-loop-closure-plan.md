@@ -1,8 +1,10 @@
 # 运维闭环实施方案
 
-本文定义 Aria SD-WAN 运维闭环的目标链路、事件模型、AI 建议、人为确认、执行结果和留痕方式。
+本文定义 Aria SD-WAN 运维闭环的目标链路、事件模型、人为确认、执行结果和留痕方式。
 
-运维闭环的目标不是“有监控页面”或“有 AI 聊天入口”，而是当系统发现异常后，能把监控、上下文、建议、确认、执行和审计串成一条可追踪链路。
+运维闭环的目标不是“有监控页面”或“有聊天入口”，而是当系统发现异常后，能把监控、上下文、确认、执行和审计串成一条可追踪链路。
+
+2026-06-27 范围调整：旧 AI Agent 暂停继续开发，后续计划替换为 Hermes Agent。v0.1.0 运维闭环先收口非 AI 链路：`Monitoring -> Alert -> 用户查看证据 -> Run Sync/Health Check -> Agent 回写 -> audit/event/resolve`。本文中涉及 AI Copilot、ActionPlan、Ask AI、IM 卡片确认的内容保留为 Hermes 阶段设计输入，不作为当前验收前置条件。
 
 ## 目标链路
 
@@ -10,8 +12,6 @@
 Monitoring 发现节点离线、同步失败、策略失败、证书风险或命令失败
 -> Controller 生成 Alert / Event
 -> Nodes / Monitoring 展示异常上下文
--> AI Copilot 读取节点、策略、监控、命令和审计上下文
--> AI 生成建议和待确认 ActionPlan
 -> 用户在控制台或 IM 卡片确认
 -> Controller 重新校验权限和当前状态
 -> Controller 执行低风险命令或策略变更
@@ -20,7 +20,7 @@ Monitoring 发现节点离线、同步失败、策略失败、证书风险或命
 -> 前端和 IM 展示执行结果与恢复证据
 ```
 
-第一阶段应复用现有 Monitoring API、AI tools、`alerts`、`audit_events`、`ai_audit_logs`、`agent_commands` 和 `policy_deliveries`，先把闭环跑通，再扩展更复杂的自动化。
+第一阶段应复用现有 Monitoring API、`alerts`、`audit_events`、`agent_commands` 和 `policy_deliveries`，先把非 AI 闭环跑通，再在 Hermes 阶段扩展更复杂的自动化。
 
 ## v0.1.0 闭环终点
 
@@ -30,14 +30,13 @@ Monitoring 发现节点离线、同步失败、策略失败、证书风险或命
 Monitoring 发现 sync_failed、policy_failed 或 node_offline
 -> Controller 生成 active alert
 -> 用户点进 alert 看到证据
--> Ask AI 生成解释和建议
 -> 用户在控制台确认 sync 或 health_check
 -> Controller 执行命令
 -> Agent 回写结果
 -> alert / event / audit / node detail 都能看到处理结果
 ```
 
-到这里即视为 v0.1.0 运维闭环完成，可以停止扩展。第一阶段优先用 `sync_failed` 跑通样板链路，再复制到 `policy_failed` 和 `node_offline`。IM 卡片确认、无人值守自动修复、复杂 ML 异常检测、多步骤 ActionPlan、自动回滚和熔断系统都不进入第一阶段终点。
+到这里即视为 v0.1.0 运维闭环完成，可以停止扩展。第一阶段优先用 `sync_failed` 跑通样板链路，再复制到 `policy_failed` 和 `node_offline`。Hermes AI 建议、IM 卡片确认、无人值守自动修复、复杂 ML 异常检测、多步骤 ActionPlan、自动回滚和熔断系统都不进入第一阶段终点。
 
 停止规则：用户能从一个告警出发，完成一次“诊断 -> 确认 -> 执行 -> 留痕”，并且成功和失败都可见。
 
@@ -339,22 +338,22 @@ IM 联动作为第二阶段：
    - 从节点状态、控制状态、命令和策略投递生成 active alert。
    - 加入去重键和恢复判断。
 
-3. 打通 Monitoring -> AI 上下文
-   - Ask AI 时传 `tenant_id`、`node_id`、`alert_id`、`focus`。
-   - AI 服务先查上下文，再给建议。
+3. 打通 Monitoring -> Node / Command 上下文
+   - Alert 详情携带 `tenant_id`、`node_id`、`alert_id`、`focus`。
+   - Monitoring 和 Node Detail 展示节点状态、控制状态、最近命令、最近策略投递和失败原因。
 
-4. 规范 AI ActionPlan
-   - AI 返回结构化建议。
-   - 写操作必须 `requires_confirmation=true`。
-   - 第一阶段把 action plan 写入 `audit_events.detail` 或 AI 会话上下文。
+4. 规范人工处置动作
+   - 第一阶段只提供 `sync`、`health_check`、查看策略投递和 resolve alert 等明确动作。
+   - 写操作必须重新鉴权、重新校验当前状态，并写入 audit。
+   - Hermes 阶段再恢复 AI ActionPlan，并要求写操作 `requires_confirmation=true`。
 
 5. 实现控制台确认执行
    - 确认时重新鉴权和重新校验状态。
    - 执行动作进入控制闭环。
-   - 写入 `ai.action_confirmed` 和后续执行审计。
+   - 写入命令确认和后续执行审计。
 
 6. 回写执行结果
-   - AI 面板、Monitoring、Nodes 同步展示 command / delivery 结果。
+   - Monitoring、Nodes 同步展示 command / delivery 结果。
    - Alert resolve 关联执行证据。
 
 7. 接 IM
@@ -363,14 +362,14 @@ IM 联动作为第二阶段：
    - 卡片状态回写。
 
 8. 补端到端测试
-   - `sync_failed -> AI 建议 -> 用户确认 -> Agent 执行 -> alert resolved`
-   - `policy_failed -> AI 建议 -> 修正策略 -> delivery applied`
-   - `node_offline -> AI 诊断 -> health_check pending -> 节点恢复`
+   - `sync_failed -> 用户确认 sync -> Agent 执行 -> alert resolved`
+   - `policy_failed -> 用户查看失败原因 -> 修正策略 -> delivery applied`
+   - `node_offline -> 用户确认 health_check -> 节点恢复或失败留痕`
 
 ## 非目标
 
 - 不在第一阶段实现无人值守自动修网。
-- 不把 AI 建议作为权限绕过通道。
+- 不在旧 AI Agent 上继续扩展写操作；Hermes Agent 阶段重新设计 AI 建议与确认链路。
 - 不实现复杂 ML 异常检测。
 - 不要求 IM 成为唯一操作入口，控制台仍是主入口。
 - 不把 Monitoring 重做成独立 BI 大屏。

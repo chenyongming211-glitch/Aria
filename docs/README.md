@@ -9,12 +9,13 @@
 - `docs/api-version-audit.md`：API 版本收敛审计，当前基线为 v2-only。
 - `docs/known-issues-status.md`：按当前代码复核后的结构问题状态，区分“底层已收敛”和“产品闭环未完成”的部分。
 - `docs/confirmed-bugs.md`：当前仍开放的真实 bug，以及本轮已重新验证关闭的历史问题。
+- `docs/superpowers/plans/2026-06-27-confirmed-bugfix-closure.md`：当前非 AI OPEN bug 的分批修复计划，覆盖租户/节点生命周期、路由下发、Agent 命令状态和监控口径；旧 AI 写操作已暂缓到 Hermes Agent 阶段。
 - `docs/test-coverage-status.md`：测试覆盖现状与 CI 接入状态。
 - `docs/cert-auto-issuance-design.md`：自动证书签发方案（第一阶段设计）。
 - `docs/v0.1.0-product-blueprint.md`：v0.1.0 产品蓝图与后续 6 周实施基线，定义前端导航、后端分层、节点接入、策略与运维闭环。
 - `docs/node-onboarding-closure-plan.md`：节点接入闭环实施方案，定义 `init -> 注册 -> 获取身份/配置 -> Agent online` 的状态机、实施步骤和验收标准。
 - `docs/control-loop-closure-plan.md`：控制闭环实施方案，定义 `前端下发 -> Controller 校验/存储 -> Agent 执行 -> 前端回显` 的状态模型、实施步骤和验收标准。
-- `docs/operations-loop-closure-plan.md`：运维闭环实施方案，定义 `监控发现 -> AI 建议 -> 人工确认 -> 执行结果留痕` 的事件模型、确认流和验收标准。
+- `docs/operations-loop-closure-plan.md`：运维闭环实施方案，定义 `监控发现 -> 人工确认 -> 执行结果留痕` 的事件模型、确认流和验收标准；AI 建议暂缓到 Hermes Agent 阶段。
 - `docs/frontend-typescript-refactor-plan.md`：前端 TypeScript 渐进重构计划，定义从类型检查、DTO、API composables、Pinia store 到高风险页面迁移的分批实施路径。
 - `docs/qos-product-decision.md`：QoS/ACL 产品决策；明确取消旧的“三级 QoS”/`service / peers / ip` 分类模型，统一为节点级策略，并确立 IP Group 为主的产品模型。
 - `docs/rbac-design.md`：高级 RBAC 设计与落地进度（含 audit/enforce 模式）。
