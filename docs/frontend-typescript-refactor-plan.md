@@ -1076,6 +1076,8 @@ git commit -m "refactor: type frontend config and utilities"
 - Modify: `frontend/src/views/ACLRules.vue`
 - Modify: `frontend/src/views/BandwidthControl.vue`
 
+Status: completed in `codex/frontend-utils-b15`.
+
 - [ ] **Step 1: Migrate monitoring pages**
 
 Convert only the script blocks:
@@ -1117,6 +1119,8 @@ git commit -m "refactor: type high-risk frontend views"
 
 **Files:**
 - Modify: `.github/workflows/build.yml`
+
+Status: already satisfied before this batch; `.github/workflows/build.yml` runs `npm run type-check` in `frontend-build`.
 
 - [ ] **Step 1: Add CI type-check step**
 

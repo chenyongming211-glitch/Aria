@@ -213,7 +213,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, ref, reactive, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Delete, Edit, Plus, Refresh } from '@element-plus/icons-vue'
@@ -238,15 +238,61 @@ const { hasPermission } = usePermission()
 const route = useRoute() || { query: {}, fullPath: '' }
 const router = useRouter()
 
+type RuleId = string | number
+type FormRef = {
+  validate: () => Promise<void>
+  resetFields: () => void
+}
+
+interface TenantNodeOption {
+  id: string
+  hostname?: string
+}
+
+interface IPGroupOption {
+  id: string
+  kind?: string
+  name: string
+  members?: Array<{ cidr?: string }>
+}
+
+interface QoSRuleRow extends Record<string, any> {
+  id?: RuleId
+  node_id?: string
+}
+
+interface QoSFormState extends Record<string, any> {
+  id: RuleId | null
+  description: string
+  group_id: string
+  group_cidr: string
+  bandwidth_mbps: number
+  direction: string
+  rate_bps: number
+  burst_bytes: number
+  priority: number
+  mode: string
+  enabled: boolean
+}
+
+interface EditingOriginal {
+  bandwidth_mbps: number
+  rate_bps: number
+  burst_bytes: number
+}
+
+const errorMessage = (error: unknown, fallback = '未知错误'): string =>
+  error instanceof Error ? error.message : (typeof error === 'string' ? error : fallback)
+
 const loading = ref(false)
 const submitting = ref(false)
 const dialogVisible = ref(false)
 const selectedNodeId = ref('')
-const tenantNodes = ref([])
-const ipGroups = ref([])
-const rules = ref([])
-const formRef = ref(null)
-const editingOriginal = ref(null)
+const tenantNodes = ref<TenantNodeOption[]>([])
+const ipGroups = ref<IPGroupOption[]>([])
+const rules = ref<QoSRuleRow[]>([])
+const formRef = ref<FormRef | null>(null)
+const editingOriginal = ref<EditingOriginal | null>(null)
 const selectedNodeName = computed(() => {
   const node = tenantNodes.value.find(item => item.id === selectedNodeId.value)
   return node?.hostname || node?.id || ''
@@ -269,7 +315,7 @@ const routeContext = computed(() => ({
   commandId: typeof routeQuery.value.commandId === 'string' ? routeQuery.value.commandId : ''
 }))
 
-const form = reactive({
+const form = reactive<QoSFormState>({
   id: null,
   description: '',
   group_id: '',
@@ -288,10 +334,10 @@ const formRules = {
   bandwidth_mbps: [{ required: true, message: '请设置带宽限制', trigger: 'blur' }]
 }
 
-const selectableGroups = computed(() => ipGroups.value.filter((group) => group.kind !== 'inline'))
+const selectableGroups = computed<IPGroupOption[]>(() => ipGroups.value.filter((group) => group.kind !== 'inline'))
 
 const groupById = computed(() => {
-  const result = new Map()
+  const result = new Map<string, IPGroupOption>()
   ipGroups.value.forEach((group) => result.set(group.id, group))
   return result
 })
@@ -338,17 +384,17 @@ const onNodeChange = () => {
   refreshData()
 }
 
-const formatDirection = (direction) => {
-  const map = { ingress: '入站', egress: '出站', both: '双向' }
-  return map[direction] || direction || '出站'
+const formatDirection = (direction?: string) => {
+  const map: Record<string, string> = { ingress: '入站', egress: '出站', both: '双向' }
+  return map[direction || ''] || direction || '出站'
 }
 
-const formatMode = (mode) => {
-  const map = { auto: 'Auto', policing: 'Policing', shaping: 'Shaping' }
-  return map[mode] || mode || 'Auto'
+const formatMode = (mode?: string) => {
+  const map: Record<string, string> = { auto: 'Auto', policing: 'Policing', shaping: 'Shaping' }
+  return map[mode || ''] || mode || 'Auto'
 }
 
-const formatRate = (rateBps) => {
+const formatRate = (rateBps: unknown) => {
   const value = Number(rateBps || 0)
   if (value >= 1000000000) return `${(value / 1000000000).toFixed(2)} Gbps`
   if (value >= 1000000) return `${(value / 1000000).toFixed(1)} Mbps`
@@ -356,24 +402,24 @@ const formatRate = (rateBps) => {
   return `${value} bps`
 }
 
-const formatBytes = (bytes) => {
+const formatBytes = (bytes: unknown) => {
   const value = Number(bytes || 0)
   if (value >= 1048576) return `${(value / 1048576).toFixed(1)} MB`
   if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${value} B`
 }
 
-const shortCommandId = (commandId) => {
+const shortCommandId = (commandId?: string) => {
   if (!commandId) return '-'
   return String(commandId).slice(0, 8)
 }
 
-const formatGroupOption = (group) => {
+const formatGroupOption = (group: IPGroupOption) => {
   const cidrs = Array.isArray(group.members) ? group.members.map((member) => member.cidr).join(', ') : ''
   return cidrs ? `${group.name} (${cidrs})` : group.name
 }
 
-const formatGroupRef = (groupId, fallback) => {
+const formatGroupRef = (groupId?: string, fallback?: string) => {
   if (groupId) {
     const group = groupById.value.get(groupId)
     if (group) return group.name
@@ -406,7 +452,7 @@ const resetForm = () => {
   if (formRef.value) formRef.value.resetFields()
 }
 
-const directGroupCidrForEdit = (row) => {
+const directGroupCidrForEdit = (row: QoSRuleRow) => {
   if (row.group_id) return ''
   const direction = row.direction || 'egress'
   const cidr = row.group_cidr ||
@@ -417,7 +463,7 @@ const directGroupCidrForEdit = (row) => {
   return cidr === 'any' ? '' : cidr
 }
 
-const handleEdit = (row) => {
+const handleEdit = (row: QoSRuleRow) => {
   const bandwidthMbps = Number(row.bandwidth_mbps ?? row.bandwidth ?? 100)
   const rateBps = Number(row.rate_bps || 0)
   const burstBytes = Number(row.burst_bytes || 0)
@@ -443,8 +489,8 @@ const handleEdit = (row) => {
   dialogVisible.value = true
 }
 
-const buildSavePayload = () => {
-  const payload = { ...form }
+const buildSavePayload = (): QoSRuleRow => {
+  const payload = { ...form } as QoSRuleRow
   const original = editingOriginal.value
   if (
     form.id &&
@@ -477,26 +523,26 @@ const handleSave = async () => {
     const ruleId = form.id
     let result
     if (ruleId) {
-      result = await useQosApi.updateQoSRule(nodeId, ruleId, payload)
+      result = await useQosApi.updateQoSRule(nodeId, ruleId, payload as Parameters<typeof useQosApi.updateQoSRule>[2])
       ElMessage.success('规则已更新并排队下发')
     } else {
-      result = await useQosApi.createQoSRule(nodeId, payload)
+      result = await useQosApi.createQoSRule(nodeId, payload as Parameters<typeof useQosApi.createQoSRule>[1])
       ElMessage.success('规则已创建并排队下发')
     }
     dialogVisible.value = false
     await refreshData()
-    openCommandTrace(nodeId, { ...payload, id: ruleId || result?.id, node_id: nodeId }, result)
+    openCommandTrace(nodeId, { ...payload, id: ruleId || (result as QoSRuleRow | undefined)?.id, node_id: nodeId }, result as Record<string, any> | undefined)
   } catch (error) {
     if (error !== false) {
       const action = form.id ? '更新失败' : '创建失败'
-      ElMessage.error(`${action}: ${error.message || '未知错误'}`)
+      ElMessage.error(`${action}: ${errorMessage(error)}`)
     }
   } finally {
     submitting.value = false
   }
 }
 
-const handleDelete = async (row) => {
+const handleDelete = async (row: QoSRuleRow) => {
   if (!hasPermission('qos:write')) {
     ElMessage.error('缺少 QoS 管理权限')
     return
@@ -510,10 +556,11 @@ const handleDelete = async (row) => {
     })
 
     const nodeId = selectedNodeId.value || row.node_id
+    if (!nodeId || !row.id) return
     const result = await useQosApi.deleteQoSRule(nodeId, row.id)
     ElMessage.success('删除指令已下发')
     await refreshData()
-    openCommandTrace(nodeId, row, result)
+    openCommandTrace(nodeId, row, result as Record<string, any>)
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('删除失败')
@@ -521,11 +568,11 @@ const handleDelete = async (row) => {
   }
 }
 
-const canRetryPolicy = (row) => {
+const canRetryPolicy = (row?: QoSRuleRow) => {
   return isRetryablePolicyStatus(row?.policyStatus || row?.policy_status)
 }
 
-const commandIdForMutationResult = (result) => {
+const commandIdForMutationResult = (result?: Record<string, any>) => {
   return result?.last_delivery_command_id ||
     result?.lastDeliveryCommandId ||
     result?.last_delivery?.command_id ||
@@ -533,7 +580,7 @@ const commandIdForMutationResult = (result) => {
     ''
 }
 
-const policyRefForRule = (row, result) => {
+const policyRefForRule = (row?: QoSRuleRow, result?: Record<string, any>) => {
   return result?.policy_ref ||
     result?.policyRef ||
     row?.policy_ref ||
@@ -541,7 +588,7 @@ const policyRefForRule = (row, result) => {
     ''
 }
 
-const openCommandTrace = (nodeId, row, result) => {
+const openCommandTrace = (nodeId: string, row: QoSRuleRow, result?: Record<string, any>) => {
   const commandId = commandIdForMutationResult(result)
   if (!commandId || !nodeId) {
     return
@@ -560,7 +607,7 @@ const openCommandTrace = (nodeId, row, result) => {
   })
 }
 
-const handleRetry = async (row) => {
+const handleRetry = async (row: QoSRuleRow) => {
   if (!hasPermission('qos:write')) {
     ElMessage.error('缺少 QoS 管理权限')
     return
@@ -568,12 +615,13 @@ const handleRetry = async (row) => {
 
   try {
     const nodeId = selectedNodeId.value || row.node_id
+    if (!nodeId) return
     const result = await useQosApi.retryQoSPolicySync(nodeId, row)
     ElMessage.success('重试下发已排队')
     await refreshData()
-    openCommandTrace(nodeId, row, result)
+    openCommandTrace(nodeId, row, result as Record<string, any>)
   } catch (error) {
-    ElMessage.error(`重试失败: ${error.message || '未知错误'}`)
+    ElMessage.error(`重试失败: ${errorMessage(error)}`)
   }
 }
 

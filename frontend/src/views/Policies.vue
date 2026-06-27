@@ -241,7 +241,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Connection, Histogram, Lock, Refresh, View } from '@element-plus/icons-vue'
@@ -254,6 +254,7 @@ import { usePolicyApi } from '@/composables/usePolicyApi'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
 import { t } from '@/i18n'
+import type { NormalizedPolicy, PolicyDelivery, PolicyKind } from '@/types'
 import {
   commandStatusLabel,
   commandStatusTagType,
@@ -267,18 +268,60 @@ const route = useRoute()
 const { hasPermission } = usePermission()
 
 const loading = ref(false)
-const policies = ref([])
+const policies = ref<NormalizedPolicy[]>([])
 const detailVisible = ref(false)
-const selectedPolicy = ref(null)
+const selectedPolicy = ref<NormalizedPolicy | null>(null)
 const autoFocusedPolicyId = ref('')
-const filters = ref({
+
+interface PolicyFilters {
+  keyword: string
+  kind: string
+  status: string
+  nodeId: string
+}
+
+interface RouteContext {
+  nodeId: string
+  policyRef: string
+  kind: string
+  commandId: string
+}
+
+interface MetricFilter {
+  kind?: string
+  status?: string
+}
+
+interface PolicyMetric {
+  key: string
+  label: string
+  value: number
+  meta: string
+  status: string
+  clickable: boolean
+  filter: MetricFilter
+}
+
+interface NodeOption {
+  id?: string
+  name?: string
+}
+
+interface NodeDetailOptions {
+  commandId?: string
+  focus?: string
+}
+
+const filters = ref<PolicyFilters>({
   keyword: '',
   kind: '',
   status: '',
   nodeId: ''
 })
 
-const kindLabel = (kind) => {
+const stringValue = (value: unknown): string => typeof value === 'string' ? value : ''
+
+const kindLabel = (kind?: string) => {
   switch (kind) {
     case 'acl': return 'ACL'
     case 'qos': return 'QoS'
@@ -287,7 +330,7 @@ const kindLabel = (kind) => {
   }
 }
 
-const kindTagType = (kind) => {
+const kindTagType = (kind?: string) => {
   switch (kind) {
     case 'acl': return 'danger'
     case 'qos': return 'warning'
@@ -296,17 +339,17 @@ const kindTagType = (kind) => {
   }
 }
 
-const convergenceLabel = (value) => {
-  const labels = {
+const convergenceLabel = (value?: string) => {
+  const labels: Record<string, string> = {
     converged: 'Converged',
     pending: 'Pending',
     diverged: 'Diverged',
     idle: 'Idle'
   }
-  return labels[value] || value || 'Unknown'
+  return labels[value || ''] || value || 'Unknown'
 }
 
-const convergenceTagType = (value) => {
+const convergenceTagType = (value?: string) => {
   switch (value) {
     case 'converged':
       return 'success'
@@ -319,11 +362,11 @@ const convergenceTagType = (value) => {
   }
 }
 
-const shortCommandId = (value) => value ? value.slice(0, 8) : '-'
+const shortCommandId = (value?: string) => value ? value.slice(0, 8) : '-'
 
-const prettySpec = (spec) => JSON.stringify(spec || {}, null, 2)
+const prettySpec = (spec?: Record<string, unknown>) => JSON.stringify(spec || {}, null, 2)
 
-const formatTimestamp = (value) => {
+const formatTimestamp = (value?: string | null) => {
   if (!value) {
     return '-'
   }
@@ -334,7 +377,7 @@ const formatTimestamp = (value) => {
   return date.toLocaleString()
 }
 
-const routeContext = computed(() => ({
+const routeContext = computed<RouteContext>(() => ({
   nodeId: typeof route.query.nodeId === 'string' ? route.query.nodeId : '',
   policyRef: typeof route.query.policyRef === 'string' ? route.query.policyRef : '',
   kind: typeof route.query.kind === 'string' ? route.query.kind : '',
@@ -360,8 +403,8 @@ const routeContextSummary = computed(() => {
   return parts.join(' | ')
 })
 
-const summarizePolicy = (policy) => {
-  const spec = policy.spec || {}
+const summarizePolicy = (policy: NormalizedPolicy) => {
+  const spec = (policy.spec || {}) as Record<string, unknown>
   switch (policy.kind) {
     case 'acl':
       return `${spec.src_net || '*'} -> ${spec.dst_net || '*'} / proto ${spec.protocol ?? 0} / ports ${spec.min_port ?? 0}-${spec.max_port ?? 65535}`
@@ -374,8 +417,8 @@ const summarizePolicy = (policy) => {
   }
 }
 
-const nodeOptions = computed(() => {
-  const seen = new Map()
+const nodeOptions = computed<NodeOption[]>(() => {
+  const seen = new Map<string | undefined, NodeOption>()
   for (const policy of policies.value) {
     if (!seen.has(policy.nodeId)) {
       seen.set(policy.nodeId, { id: policy.nodeId, name: policy.nodeName })
@@ -384,7 +427,7 @@ const nodeOptions = computed(() => {
   return Array.from(seen.values())
 })
 
-const filteredPolicies = computed(() => {
+const filteredPolicies = computed<NormalizedPolicy[]>(() => {
   const keyword = filters.value.keyword.trim().toLowerCase()
   return policies.value.filter((policy) => {
     if (filters.value.kind && policy.kind !== filters.value.kind) {
@@ -411,7 +454,7 @@ const filteredPolicies = computed(() => {
   })
 })
 
-const findContextPolicy = () => {
+const findContextPolicy = (): NormalizedPolicy | null => {
   if (!hasRouteContext.value) {
     return null
   }
@@ -445,7 +488,7 @@ const stats = computed(() => {
   }
 })
 
-const policyMetricItems = computed(() => [
+const policyMetricItems = computed<PolicyMetric[]>(() => [
   {
     key: 'total',
     label: 'Total',
@@ -511,15 +554,18 @@ const policyMetricItems = computed(() => [
   }
 ])
 
-const handleMetricSelect = (metric) => {
+const handleMetricSelect = (metric?: PolicyMetric) => {
   const filter = metric?.filter || {}
   if (Object.prototype.hasOwnProperty.call(filter, 'kind')) {
-    filters.value.kind = filter.kind
+    filters.value.kind = filter.kind || ''
   }
   if (Object.prototype.hasOwnProperty.call(filter, 'status')) {
-    filters.value.status = filter.status
+    filters.value.status = filter.status || ''
   }
 }
+
+const errorMessage = (error: unknown, fallback = '未知错误'): string =>
+  error instanceof Error ? error.message : (typeof error === 'string' ? error : fallback)
 
 const fetchPolicies = async () => {
   loading.value = true
@@ -529,7 +575,7 @@ const fetchPolicies = async () => {
     focusPolicyFromRoute()
   } catch (error) {
     console.error('Failed to fetch unified policies:', error)
-    ElMessage.error(`获取统一策略视图失败: ${error.message || error}`)
+    ElMessage.error(`获取统一策略视图失败: ${errorMessage(error, String(error || '未知错误'))}`)
   } finally {
     loading.value = false
   }
@@ -549,7 +595,8 @@ const syncSelectedPolicy = () => {
   if (!selectedPolicy.value) {
     return
   }
-  const fresh = policies.value.find((policy) => policy.policyId === selectedPolicy.value.policyId)
+  const currentPolicyId = selectedPolicy.value.policyId
+  const fresh = policies.value.find((policy) => policy.policyId === currentPolicyId)
   if (fresh) {
     selectedPolicy.value = fresh
   }
@@ -565,14 +612,15 @@ const focusPolicyFromRoute = () => {
     return
   }
   selectedPolicy.value = matched
-  if (autoFocusedPolicyId.value !== matched.policyId || !detailVisible.value) {
+  const matchedPolicyId = matched.policyId || ''
+  if (autoFocusedPolicyId.value !== matchedPolicyId || !detailVisible.value) {
     detailVisible.value = true
-    autoFocusedPolicyId.value = matched.policyId
+    autoFocusedPolicyId.value = matchedPolicyId
   }
 }
 
-const policyPageQuery = (policy) => {
-  const query = {}
+const policyPageQuery = (policy?: NormalizedPolicy | null): Record<string, string> => {
+  const query: Record<string, string> = {}
   const nodeId = policy?.nodeId || routeContext.value.nodeId
   const policyRef = policy?.policyRef || routeContext.value.policyRef
   const commandId = commandIdForPolicy(policy) || routeContext.value.commandId
@@ -589,7 +637,7 @@ const policyPageQuery = (policy) => {
   return query
 }
 
-const goToKind = (kind, policy = selectedPolicy.value) => {
+const goToKind = (kind: PolicyKind | string, policy: NormalizedPolicy | null = selectedPolicy.value) => {
   const query = policyPageQuery(policy)
   switch (kind) {
     case 'acl':
@@ -606,12 +654,12 @@ const goToKind = (kind, policy = selectedPolicy.value) => {
   }
 }
 
-const showDetails = (policy) => {
+const showDetails = (policy: NormalizedPolicy) => {
   selectedPolicy.value = policy
   detailVisible.value = true
 }
 
-const commandIdForPolicy = (policy) => {
+const commandIdForPolicy = (policy?: NormalizedPolicy | null): string => {
   if (!policy) {
     return ''
   }
@@ -619,12 +667,12 @@ const commandIdForPolicy = (policy) => {
     policy.last_delivery_command_id ||
     policy.lastDelivery?.command_id ||
     policy.last_delivery?.command_id ||
-    policy.deliveryHistory?.find((item) => item.command_id)?.command_id ||
-    policy.delivery_history?.find((item) => item.command_id)?.command_id ||
+    policy.deliveryHistory?.find((item: PolicyDelivery) => item.command_id)?.command_id ||
+    policy.delivery_history?.find((item: PolicyDelivery) => item.command_id)?.command_id ||
     ''
 }
 
-const openNodeDetail = (policy, options = {}) => {
+const openNodeDetail = (policy: NormalizedPolicy, options: NodeDetailOptions = {}) => {
   if (!policy?.nodeId) {
     ElMessage.warning('该策略没有目标节点')
     return
@@ -643,7 +691,7 @@ const openNodeDetail = (policy, options = {}) => {
   })
 }
 
-const policyWritePermission = (kind) => {
+const policyWritePermission = (kind?: string) => {
   switch (kind) {
     case 'acl':
       return 'acls:write'
@@ -656,14 +704,14 @@ const policyWritePermission = (kind) => {
   }
 }
 
-const canRetryPolicy = (policy) => {
+const canRetryPolicy = (policy?: NormalizedPolicy | null) => {
   if (!policy) return false
   const permission = policyWritePermission(policy.kind)
   if (!permission || !hasPermission(permission)) return false
   return isRetryablePolicyStatus(policy.status || policy.observedState)
 }
 
-const retryPolicyDelivery = async (policy) => {
+const retryPolicyDelivery = async (policy: NormalizedPolicy) => {
   if (!canRetryPolicy(policy)) {
     ElMessage.warning('当前策略状态或权限不允许重试')
     return
@@ -689,24 +737,25 @@ const retryPolicyDelivery = async (policy) => {
       }, { commandId, focus: 'commands' })
     }
   } catch (error) {
-    ElMessage.error(`重试失败: ${error.message || '未知错误'}`)
+    ElMessage.error(`重试失败: ${errorMessage(error)}`)
   }
 }
 
-const isDeliveryMatch = (delivery) => {
+const isDeliveryMatch = (delivery?: PolicyDelivery | null) => {
   if (!delivery) {
     return false
   }
   if (routeContext.value.commandId && delivery.command_id === routeContext.value.commandId) {
     return true
   }
-  if (routeContext.value.policyRef && delivery.policy_ref === routeContext.value.policyRef) {
+  const deliveryRecord = delivery as PolicyDelivery & { policy_ref?: string }
+  if (routeContext.value.policyRef && deliveryRecord.policy_ref === routeContext.value.policyRef) {
     return true
   }
   return false
 }
 
-const policyRowClassName = ({ row }) => {
+const policyRowClassName = ({ row }: { row?: NormalizedPolicy }) => {
   if (!row) {
     return ''
   }

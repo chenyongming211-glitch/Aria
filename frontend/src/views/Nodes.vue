@@ -804,7 +804,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, reactive, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -854,21 +854,53 @@ const nodeStore = useNodeStore()
 const { hasPermission } = usePermission()
 const router = useRouter()
 
+type AnyRecord = Record<string, any>
+type TimerHandle = ReturnType<typeof setTimeout>
+type InputRefType = { focus?: () => void }
+
+interface EditFormState {
+  id: string
+  hostname: string
+  region: string
+  advertised_routes: string[]
+}
+
+interface OnboardingFormState {
+  tokenTag: string
+  maxUses: number
+  ttlHours: number
+  server: string
+  controllerApiUrl: string
+  caCertPath: string
+  caUrl: string
+  caSha256: string
+  agentUrl: string
+  agentSha256: string
+  tlsServerName: string
+  region: string
+  interface: string
+  hostname: string
+  advertiseRoutes: string
+}
+
+const errorMessage = (error: unknown, fallback = '未知错误'): string =>
+  error instanceof Error ? error.message : (typeof error === 'string' ? error : fallback)
+
 // 节点数据从 store 获取
-const nodes = computed(() => nodeStore.nodes)
+const nodes = computed<AnyRecord[]>(() => nodeStore.nodes as AnyRecord[])
 const loading = computed(() => nodeStore.loading)
 
 const searchQuery = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
 const detailDialogVisible = ref(false)
-const selectedNode = ref(null)
+const selectedNode = ref<AnyRecord | null>(null)
 const commandLoading = ref(false)
-const commandPollTimer = ref(null)
+const commandPollTimer = ref<TimerHandle | null>(null)
 const onboardingDialogVisible = ref(false)
 const onboardingCreating = ref(false)
-const onboardingToken = ref(null)
-const onboardingControllerInfo = ref({})
+const onboardingToken = ref<AnyRecord | null>(null)
+const onboardingControllerInfo = ref<AnyRecord>({})
 
 const currentOrigin = () => {
   if (typeof window !== 'undefined' && window.location?.origin) {
@@ -886,7 +918,7 @@ const defaultGrpcServer = () => {
   }
 }
 
-const inferTLSServerName = (server) => {
+const inferTLSServerName = (server?: string) => {
   try {
     return new URL(server || defaultGrpcServer()).hostname || 'aria.yun'
   } catch {
@@ -894,7 +926,7 @@ const inferTLSServerName = (server) => {
   }
 }
 
-const onboardingForm = reactive({
+const onboardingForm = reactive<OnboardingFormState>({
   tokenTag: 'node-onboarding',
   maxUses: 1,
   ttlHours: 24,
@@ -915,7 +947,7 @@ const onboardingForm = reactive({
 // 编辑相关状态
 const editDialogVisible = ref(false)
 const submitting = ref(false)
-const editForm = reactive({
+const editForm = reactive<EditFormState>({
   id: '',
   hostname: '',
   region: '',
@@ -925,7 +957,7 @@ const editForm = reactive({
 // 路由输入相关
 const inputVisible = ref(false)
 const inputValue = ref('')
-const InputRef = ref(null)
+const InputRef = ref<InputRefType | null>(null)
 
 // 计算属性
 const onlineCount = computed(() => nodes.value.filter(n => n.status === 'online').length)
@@ -964,10 +996,10 @@ const nodeMetricItems = computed(() => [
 const recentCommandCount = computed(() => selectedNode.value?.recentCommands?.length || 0)
 const recentDeliveryCount = computed(() => selectedNode.value?.recentPolicyDeliveries?.length || 0)
 const activeAlertCount = computed(() => selectedNode.value?.activeAlerts?.length || 0)
-const failedCommandCount = computed(() => (selectedNode.value?.recentCommands || []).filter(item => isFailedCommandStatus(item.status)).length)
-const pendingCommandCount = computed(() => (selectedNode.value?.recentCommands || []).filter(item => isPendingCommandStatus(item.status)).length)
-const failedDeliveryCount = computed(() => (selectedNode.value?.recentPolicyDeliveries || []).filter(item => isFailedCommandStatus(item.command_status)).length)
-const pendingDeliveryCount = computed(() => (selectedNode.value?.recentPolicyDeliveries || []).filter(item => isPendingCommandStatus(item.command_status)).length)
+const failedCommandCount = computed(() => (selectedNode.value?.recentCommands || []).filter((item: AnyRecord) => isFailedCommandStatus(item.status)).length)
+const pendingCommandCount = computed(() => (selectedNode.value?.recentCommands || []).filter((item: AnyRecord) => isPendingCommandStatus(item.status)).length)
+const failedDeliveryCount = computed(() => (selectedNode.value?.recentPolicyDeliveries || []).filter((item: AnyRecord) => isFailedCommandStatus(item.command_status)).length)
+const pendingDeliveryCount = computed(() => (selectedNode.value?.recentPolicyDeliveries || []).filter((item: AnyRecord) => isPendingCommandStatus(item.command_status)).length)
 const policyDatapathStats = computed(() => {
   const raw = selectedNode.value?.policyStats || selectedNode.value?.policy_stats || {}
   const acl = raw.acl || {}
@@ -1112,13 +1144,13 @@ const createOnboardingToken = async () => {
     ElMessage.success('Enrollment token created')
   } catch (error) {
     console.error('Failed to create enrollment token:', error)
-    ElMessage.error(`Failed to create token: ${error.message || error}`)
+    ElMessage.error(`Failed to create token: ${errorMessage(error, String(error || '未知错误'))}`)
   } finally {
     onboardingCreating.value = false
   }
 }
 
-const shellArg = (value) => {
+const shellArg = (value: unknown) => {
   const raw = String(value || '').trim()
   if (!raw) return ''
   if (/^[A-Za-z0-9_./:@,+-]+$/.test(raw)) return raw
@@ -1196,7 +1228,7 @@ const buildOnboardingInstallCommand = () => {
   return parts.join(' ')
 }
 
-const copyText = async (value, successMessage) => {
+const copyText = async (value: string, successMessage: string) => {
   if (!value) {
     ElMessage.warning('Nothing to copy')
     return
@@ -1215,14 +1247,14 @@ const copyOnboardingCommand = () => copyText(onboardingInstallCommand.value, 'In
 
 const copyOnboardingInitCommand = () => copyText(onboardingInitCommand.value, 'Init command copied')
 
-const tokenPreview = (value) => {
+const tokenPreview = (value: unknown) => {
   const raw = String(value || '').trim()
   if (!raw) return ''
   if (raw.length <= 10) return 'redacted'
   return `${raw.slice(0, 6)}...${raw.slice(-4)}`
 }
 
-const getOnboardingPhaseTagType = (phase) => {
+const getOnboardingPhaseTagType = (phase?: string) => {
   switch (phase) {
     case 'online':
       return 'success'
@@ -1236,7 +1268,7 @@ const getOnboardingPhaseTagType = (phase) => {
   }
 }
 
-const formatOnboardingPhase = (phase) => {
+const formatOnboardingPhase = (phase?: string) => {
   switch (phase) {
     case 'online':
       return 'Online'
@@ -1250,7 +1282,7 @@ const formatOnboardingPhase = (phase) => {
   }
 }
 
-const onboardingTroubleshootingCommand = (node) => {
+const onboardingTroubleshootingCommand = (node: AnyRecord) => {
   const configPath = onboardingControllerInfo.value?.agent?.config_path || '/etc/aria/agent.yaml'
   const lines = [
     `sudo aria-agent doctor --config ${configPath}`,
@@ -1263,12 +1295,12 @@ const onboardingTroubleshootingCommand = (node) => {
   return lines.join('\n')
 }
 
-const openNodeDetailFromOnboarding = async (node) => {
+const openNodeDetailFromOnboarding = async (node: AnyRecord) => {
   onboardingDialogVisible.value = false
   await viewNodeDetails(node)
 }
 
-const viewNodeDetails = async (node) => {
+const viewNodeDetails = async (node: AnyRecord) => {
   try {
     selectedNode.value = await nodeStore.loadNodeDetail(node.id)
     // Fetch real bandwidth/latency metrics
@@ -1276,8 +1308,8 @@ const viewNodeDetails = async (node) => {
       const metrics = await useMonitorApi.getNodeMetrics(node.id)
       if (metrics && selectedNode.value) {
         selectedNode.value.bandwidth = {
-          upload: metrics.upload_mbps != null ? Number(metrics.upload_mbps.toFixed(2)) : 0,
-          download: metrics.download_mbps != null ? Number(metrics.download_mbps.toFixed(2)) : 0
+          upload: (metrics as AnyRecord).upload_mbps != null ? Number((metrics as AnyRecord).upload_mbps.toFixed(2)) : 0,
+          download: (metrics as AnyRecord).download_mbps != null ? Number((metrics as AnyRecord).download_mbps.toFixed(2)) : 0
         }
         selectedNode.value.latency = metrics.latency_ms != null ? Number(metrics.latency_ms.toFixed(1)) : 0
       }
@@ -1292,7 +1324,7 @@ const viewNodeDetails = async (node) => {
 }
 
 // 编辑逻辑
-const handleEditNode = (node) => {
+const handleEditNode = (node: AnyRecord) => {
   editForm.id = node.id
   editForm.hostname = node.hostname
   editForm.region = node.region
@@ -1301,14 +1333,14 @@ const handleEditNode = (node) => {
   editDialogVisible.value = true
 }
 
-const handleRemoveRoute = (tag) => {
+const handleRemoveRoute = (tag: string) => {
   editForm.advertised_routes.splice(editForm.advertised_routes.indexOf(tag), 1)
 }
 
 const showInput = () => {
   inputVisible.value = true
   nextTick(() => {
-    InputRef.value?.focus()
+    InputRef.value?.focus?.()
   })
 }
 
@@ -1344,7 +1376,7 @@ const saveNodeChanges = async () => {
   }
 }
 
-const handleDeleteNode = async (id) => {
+const handleDeleteNode = async (id: string) => {
   try {
     await nodeStore.deleteNodeRemote(id)
     ElMessage.success('Node deleted')
@@ -1369,7 +1401,7 @@ const openMonitoringDetail = (focus = '') => {
   })
 }
 
-const openPolicyCenter = (delivery = null) => {
+const openPolicyCenter = (delivery: AnyRecord | null = null) => {
   if (!selectedNode.value?.id) return
   detailDialogVisible.value = false
   router.push({
@@ -1383,7 +1415,7 @@ const openPolicyCenter = (delivery = null) => {
   })
 }
 
-const handleSummaryClick = (focus) => {
+const handleSummaryClick = (focus: string) => {
   if (focus === 'policies') {
     openPolicyCenter()
     return
@@ -1391,16 +1423,16 @@ const handleSummaryClick = (focus) => {
   openMonitoringDetail(focus)
 }
 
-const handleSizeChange = (size) => {
+const handleSizeChange = (size: number) => {
   pageSize.value = size
   currentPage.value = 1
 }
 
-const handleCurrentChange = (page) => {
+const handleCurrentChange = (page: number) => {
   currentPage.value = page
 }
 
-const reloadSelectedNode = async (preserveCommand = null) => {
+const reloadSelectedNode = async (preserveCommand: AnyRecord | null = null) => {
   if (!selectedNode.value?.id) return
   selectedNode.value = await nodeStore.loadNodeDetail(selectedNode.value.id)
   if (preserveCommand) {
@@ -1408,9 +1440,9 @@ const reloadSelectedNode = async (preserveCommand = null) => {
   }
 }
 
-const findRecentCommand = (commandId) => {
+const findRecentCommand = (commandId?: string) => {
   if (!commandId || !selectedNode.value?.recentCommands) return null
-  return selectedNode.value.recentCommands.find(item => item.id === commandId) || null
+  return selectedNode.value.recentCommands.find((item: AnyRecord) => item.id === commandId) || null
 }
 
 const stopCommandPolling = () => {
@@ -1420,7 +1452,7 @@ const stopCommandPolling = () => {
   }
 }
 
-const pollCommandStatus = (command, attemptsRemaining = 15) => {
+const pollCommandStatus = (command: AnyRecord, attemptsRemaining = 15) => {
   stopCommandPolling()
   if (!command?.id || attemptsRemaining <= 0 || !detailDialogVisible.value) return
 
@@ -1441,7 +1473,7 @@ const pollCommandStatus = (command, attemptsRemaining = 15) => {
   }, 2000)
 }
 
-const normalizeQueuedCommand = (command, response) => ({
+const normalizeQueuedCommand = (command: string, response: AnyRecord = {}) => ({
   id: response?.command_id || response?.id || '',
   command: response?.command || command,
   status: response?.status || 'pending',
@@ -1452,7 +1484,7 @@ const normalizeQueuedCommand = (command, response) => ({
   priority: response?.priority
 })
 
-const prependCommandIfMissing = (command) => {
+const prependCommandIfMissing = (command: AnyRecord) => {
   if (!selectedNode.value || !command?.id) return
   const existing = Array.isArray(selectedNode.value.recentCommands) ? selectedNode.value.recentCommands : []
   if (existing.some(item => item.id === command.id)) {
@@ -1462,7 +1494,7 @@ const prependCommandIfMissing = (command) => {
   selectedNode.value.recentCommands = [command, ...existing]
 }
 
-const runQuickCommand = async (command) => {
+const runQuickCommand = async (command: string) => {
   if (!selectedNode.value?.id) return
   if (!hasPermission('commands:write')) {
     ElMessage.error('Missing permission to send commands')
@@ -1475,7 +1507,7 @@ const runQuickCommand = async (command) => {
       command,
       params: {},
       timeout: 30
-    })
+    } as any)
     const queuedCommand = normalizeQueuedCommand(command, response)
     prependCommandIfMissing(queuedCommand)
     ElMessage.success(`${command} queued`)
@@ -1492,17 +1524,17 @@ const runQuickCommand = async (command) => {
   }
 }
 
-const formatConvergence = (state) => {
-  const map = {
+const formatConvergence = (state?: string) => {
+  const map: Record<string, string> = {
     converged: 'Converged',
     pending: 'Pending',
     diverged: 'Diverged',
     idle: 'Idle'
   }
-  return map[state] || state || 'Unknown'
+  return map[state || ''] || state || 'Unknown'
 }
 
-const getConvergenceTagType = (state) => {
+const getConvergenceTagType = (state?: string) => {
   switch (state) {
     case 'converged': return 'success'
     case 'pending': return 'warning'
@@ -1511,7 +1543,7 @@ const getConvergenceTagType = (state) => {
   }
 }
 
-const getAlertSeverityTagType = (severity) => {
+const getAlertSeverityTagType = (severity?: string) => {
   switch (severity) {
     case 'critical':
     case 'error':
@@ -1525,7 +1557,7 @@ const getAlertSeverityTagType = (severity) => {
   }
 }
 
-const getCertificateStatusTagType = (status) => {
+const getCertificateStatusTagType = (status?: string) => {
   switch (status) {
     case 'issued':
       return 'success'
@@ -1539,24 +1571,24 @@ const getCertificateStatusTagType = (status) => {
   }
 }
 
-const shortStateVersion = (value) => {
+const shortStateVersion = (value?: string) => {
   if (!value) return 'N/A'
   return value.length > 12 ? `${value.slice(0, 12)}...` : value
 }
 
-const shortCommandId = (value) => {
+const shortCommandId = (value?: string) => {
   if (!value) return '-'
   return String(value).length > 10 ? `${String(value).slice(0, 10)}...` : String(value)
 }
 
-const formatLargeNumber = (value) => {
+const formatLargeNumber = (value: unknown) => {
   const number = Number(value || 0)
   if (number >= 1000000) return `${(number / 1000000).toFixed(1)}M`
   if (number >= 1000) return `${(number / 1000).toFixed(1)}K`
   return String(number)
 }
 
-const formatMetricBytes = (value) => {
+const formatMetricBytes = (value: unknown) => {
   const bytes = Number(value || 0)
   if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`
   if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`
@@ -1564,7 +1596,7 @@ const formatMetricBytes = (value) => {
   return `${bytes} B`
 }
 
-const formatCommandTime = (value) => {
+const formatCommandTime = (value?: string) => {
   if (!value) return 'N/A'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return 'N/A'

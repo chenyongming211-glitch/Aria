@@ -276,7 +276,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -301,15 +301,71 @@ const { hasPermission } = usePermission()
 const route = useRoute() || { query: {}, fullPath: '' }
 const router = useRouter()
 
+type RuleId = string | number
+type TimerHandle = ReturnType<typeof setTimeout>
+type FormRef = {
+  validate: () => Promise<void>
+  resetFields: () => void
+}
+
+interface TenantNodeOption {
+  id: string
+  hostname?: string
+  public_key?: string
+}
+
+interface IPGroupOption {
+  id: string
+  kind?: string
+  name: string
+  members?: Array<{ cidr?: string }>
+}
+
+interface ACLRuleRow extends Record<string, any> {
+  id?: RuleId
+  node_id?: string
+  name?: string
+  enabled?: boolean
+}
+
+interface ACLFilters {
+  node_id?: string
+  name: string
+  action: string
+  enabled?: boolean
+}
+
+interface ACLFormState extends Record<string, any> {
+  node_id: string
+  node_name: string
+  id: RuleId | null
+  name: string
+  src_group_id: string
+  dst_group_id: string
+  src_cidr: string
+  dst_cidr: string
+  protocol: number
+  dst_port: number
+  direction: string
+  ports: string
+  action: string
+  enabled: boolean
+  priority: number
+  description: string
+}
+
+const errorMessage = (error: unknown, fallback = '未知错误'): string =>
+  error instanceof Error ? error.message : (typeof error === 'string' ? error : fallback)
+
 const loading = ref(false)
-const rules = ref([])
-const tenantNodes = ref([])
-const ipGroups = ref([])
+const rules = ref<ACLRuleRow[]>([])
+const tenantNodes = ref<TenantNodeOption[]>([])
+const ipGroups = ref<IPGroupOption[]>([])
 const dialogVisible = ref(false)
 const submitting = ref(false)
-const formRef = ref(null)
+const formRef = ref<FormRef | null>(null)
 
-const filters = reactive({
+const filters = reactive<ACLFilters>({
   node_id: '',
   name: '',
   action: '',
@@ -322,7 +378,7 @@ const pagination = reactive({
   total: 0
 })
 
-const form = reactive({
+const form = reactive<ACLFormState>({
   node_id: '',
   node_name: '',
   id: null,
@@ -384,10 +440,10 @@ const routeContext = computed(() => ({
   commandId: typeof routeQuery.value.commandId === 'string' ? routeQuery.value.commandId : ''
 }))
 
-const selectableGroups = computed(() => ipGroups.value.filter((group) => group.kind !== 'inline'))
+const selectableGroups = computed<IPGroupOption[]>(() => ipGroups.value.filter((group) => group.kind !== 'inline'))
 
 const groupById = computed(() => {
-  const result = new Map()
+  const result = new Map<string, IPGroupOption>()
   ipGroups.value.forEach((group) => result.set(group.id, group))
   return result
 })
@@ -438,15 +494,18 @@ const loadRules = async () => {
 
   loading.value = true
   try {
-    const f = { ...filters }
-    const nodeId = f.node_id
-    delete f.node_id
+    const nodeId = filters.node_id
+    const f = {
+      name: filters.name,
+      action: filters.action,
+      enabled: filters.enabled
+    }
     
     const response = await useAclApi.getACLRulesByNode(nodeId, f)
     rules.value = response
     pagination.total = rules.value.length
   } catch (error) {
-    ElMessage.error('加载规则失败: ' + (error.message || '未知错误'))
+    ElMessage.error('加载规则失败: ' + errorMessage(error))
   } finally {
     loading.value = false
   }
@@ -457,9 +516,9 @@ const handleNodeChange = () => {
   loadRules()
 }
 
-let searchTimer = null
+let searchTimer: TimerHandle | null = null
 const debouncedSearch = () => {
-  clearTimeout(searchTimer)
+  if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
     pagination.page = 1
     loadRules()
@@ -471,7 +530,7 @@ const handleCreate = () => {
   dialogVisible.value = true
 }
 
-const handleEdit = (row) => {
+const handleEdit = (row: ACLRuleRow) => {
   Object.assign(form, {
     ...row,
     node_id: row.node_id,
@@ -486,7 +545,7 @@ const handleEdit = (row) => {
   dialogVisible.value = true
 }
 
-const handleDelete = async (row) => {
+const handleDelete = async (row: ACLRuleRow) => {
   try {
     await ElMessageBox.confirm(`确定要删除规则 "${row.name}" 吗？`, '删除确认', {
       confirmButtonText: '确定',
@@ -494,22 +553,23 @@ const handleDelete = async (row) => {
       type: 'warning'
     })
     
+    if (!row.id) return
     const result = await useAclApi.deleteACLRule(row.id, row.node_id)
     ElMessage.success('删除指令已下发')
     await loadRules()
-    openCommandTrace(row, result)
+    openCommandTrace(row, result as Record<string, any>)
   } catch (error) {
     if (error !== 'cancel') {
-      ElMessage.error('删除失败: ' + (error.message || '未知错误'))
+      ElMessage.error('删除失败: ' + errorMessage(error))
     }
   }
 }
 
-const canRetryPolicy = (row) => {
+const canRetryPolicy = (row?: ACLRuleRow) => {
   return isRetryablePolicyStatus(row?.policy_status || row?.policyStatus)
 }
 
-const commandIdForMutationResult = (result) => {
+const commandIdForMutationResult = (result?: Record<string, any>) => {
   return result?.last_delivery_command_id ||
     result?.lastDeliveryCommandId ||
     result?.last_delivery?.command_id ||
@@ -517,7 +577,7 @@ const commandIdForMutationResult = (result) => {
     ''
 }
 
-const policyRefForRule = (row, result) => {
+const policyRefForRule = (row?: ACLRuleRow, result?: Record<string, any>) => {
   return result?.policy_ref ||
     result?.policyRef ||
     row?.policy_ref ||
@@ -525,7 +585,7 @@ const policyRefForRule = (row, result) => {
     ''
 }
 
-const openCommandTrace = (row, result) => {
+const openCommandTrace = (row: ACLRuleRow, result?: Record<string, any>) => {
   const commandId = commandIdForMutationResult(result)
   if (!commandId) {
     return
@@ -549,7 +609,7 @@ const openCommandTrace = (row, result) => {
   })
 }
 
-const handleRetry = async (row) => {
+const handleRetry = async (row: ACLRuleRow) => {
   if (!hasPermission('acls:write')) {
     ElMessage.error('缺少 ACL 管理权限')
     return
@@ -559,21 +619,22 @@ const handleRetry = async (row) => {
     const result = await useAclApi.retryACLPolicySync(row)
     ElMessage.success('重试下发已排队')
     await loadRules()
-    openCommandTrace(row, result)
+    openCommandTrace(row, result as Record<string, any>)
   } catch (error) {
-    ElMessage.error('重试失败: ' + (error.message || '未知错误'))
+    ElMessage.error('重试失败: ' + errorMessage(error))
   }
 }
 
-const handleToggleEnabled = async (row) => {
+const handleToggleEnabled = async (row: ACLRuleRow) => {
   try {
+    if (!row.id) return
     const result = await useAclApi.updateACLRule(row.id, { ...row, enabled: row.enabled, node_id: row.node_id })
     ElMessage.success(row.enabled ? '已启用' : '已禁用')
     await loadRules()
-    openCommandTrace(row, result)
+    openCommandTrace(row, result as Record<string, any>)
   } catch (error) {
     row.enabled = !row.enabled
-    ElMessage.error('操作失败: ' + (error.message || '未知错误'))
+    ElMessage.error('操作失败: ' + errorMessage(error))
   }
 }
 
@@ -584,7 +645,7 @@ const handleSubmit = async () => {
     await formRef.value.validate()
     submitting.value = true
     
-    const data = { ...form }
+    const data = { ...form } as ACLRuleRow
     
     if (data.dst_port < 0 || data.dst_port > 65535) {
       ElMessage.error('目标端口必须在 0 到 65535 之间')
@@ -593,19 +654,19 @@ const handleSubmit = async () => {
     
     let result
     if (form.id) {
-      result = await useAclApi.updateACLRule(form.id, data)
+      result = await useAclApi.updateACLRule(form.id, data as Parameters<typeof useAclApi.updateACLRule>[1])
       ElMessage.success('更新成功')
     } else {
-      result = await useAclApi.createACLRule(data)
+      result = await useAclApi.createACLRule(data as Parameters<typeof useAclApi.createACLRule>[0])
       ElMessage.success('创建成功')
     }
     
     dialogVisible.value = false
     await loadRules()
-    openCommandTrace(data, result)
+    openCommandTrace(data, result as Record<string, any>)
   } catch (error) {
     if (error !== false) {
-      ElMessage.error('操作失败: ' + (error.message || '未知错误'))
+      ElMessage.error('操作失败: ' + errorMessage(error))
     }
   } finally {
     submitting.value = false
@@ -623,32 +684,32 @@ const resetForm = () => {
   if (formRef.value) formRef.value.resetFields()
 }
 
-const getProtocolName = (protocol) => {
-  const map = { 0: 'Any', 6: 'TCP', 17: 'UDP', 1: 'ICMP' }
-  return map[protocol] || 'Unknown'
+const getProtocolName = (protocol: string | number) => {
+  const map: Record<string, string> = { 0: 'Any', 6: 'TCP', 17: 'UDP', 1: 'ICMP' }
+  return map[String(protocol)] || 'Unknown'
 }
 
-const getActionName = (action) => {
-  const map = { allow: '允许', deny: '拒绝' }
-  return map[action] || action
+const getActionName = (action?: string) => {
+  const map: Record<string, string> = { allow: '允许', deny: '拒绝' }
+  return map[action || ''] || action
 }
 
-const getActionType = (action) => {
-  const map = { allow: 'success', deny: 'danger' }
-  return map[action] || ''
+const getActionType = (action?: string) => {
+  const map: Record<string, string> = { allow: 'success', deny: 'danger' }
+  return map[action || ''] || ''
 }
 
-const formatDirection = (direction) => {
-  const map = { ingress: '入站', egress: '出站', both: '双向' }
-  return map[direction] || direction || '入站'
+const formatDirection = (direction?: string) => {
+  const map: Record<string, string> = { ingress: '入站', egress: '出站', both: '双向' }
+  return map[direction || ''] || direction || '入站'
 }
 
-const formatGroupOption = (group) => {
+const formatGroupOption = (group: IPGroupOption) => {
   const cidrs = Array.isArray(group.members) ? group.members.map((member) => member.cidr).join(', ') : ''
   return cidrs ? `${group.name} (${cidrs})` : group.name
 }
 
-const formatGroupRef = (groupId, fallback) => {
+const formatGroupRef = (groupId?: string, fallback?: string) => {
   if (groupId) {
     const group = groupById.value.get(groupId)
     if (group) return group.name
@@ -658,21 +719,21 @@ const formatGroupRef = (groupId, fallback) => {
   return fallback || 'any'
 }
 
-const shortCommandId = (commandId) => {
+const shortCommandId = (commandId?: string) => {
   if (!commandId) {
     return '-'
   }
   return commandId.slice(0, 8)
 }
 
-const formatNumber = (value) => {
+const formatNumber = (value: unknown) => {
   const number = Number(value || 0)
   if (number >= 1000000) return `${(number / 1000000).toFixed(1)}M`
   if (number >= 1000) return `${(number / 1000).toFixed(1)}K`
   return String(number)
 }
 
-const formatBytes = (value) => {
+const formatBytes = (value: unknown) => {
   const bytes = Number(value || 0)
   if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`
   if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`

@@ -374,7 +374,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
@@ -393,16 +393,22 @@ const route = useRoute()
 const router = useRouter()
 const { hasPermission } = usePermission()
 
+type AnyRecord = Record<string, any>
+type SectionRef = { $el?: Element; scrollIntoView?: (options?: ScrollIntoViewOptions) => void } | Element
+
 const loading = ref(false)
 const contextCommandLoading = ref('')
 const resolvingContextAlert = ref(false)
-const node = ref(null)
-const certificateSectionRef = ref(null)
-const commandsSectionRef = ref(null)
-const policiesSectionRef = ref(null)
-const alertsSectionRef = ref(null)
+const node = ref<AnyRecord | null>(null)
+const certificateSectionRef = ref<SectionRef | null>(null)
+const commandsSectionRef = ref<SectionRef | null>(null)
+const policiesSectionRef = ref<SectionRef | null>(null)
+const alertsSectionRef = ref<SectionRef | null>(null)
 
-const nodeId = computed(() => route.params.nodeId)
+const nodeId = computed(() => {
+  const value = route.params.nodeId
+  return Array.isArray(value) ? value[0] || '' : String(value || '')
+})
 const contextQuery = computed(() => ({
   focus: typeof route.query.focus === 'string' ? route.query.focus : '',
   commandId: typeof route.query.commandId === 'string' ? route.query.commandId : '',
@@ -464,15 +470,15 @@ const certificateBadgeType = computed(() => {
   }
 })
 
-const statusCount = (items, statuses, field = 'status') => (
+const statusCount = (items: AnyRecord[], statuses: string[], field = 'status') => (
   items.filter((item) => statuses.includes(item?.[field])).length
 )
 
 const workbenchSummary = computed(() => {
   const failedCommands = statusCount(recentCommands.value, ['failed'])
-  const pendingCommands = recentCommands.value.filter((item) => isPendingCommandStatus(item?.status)).length
+  const pendingCommands = recentCommands.value.filter((item: AnyRecord) => isPendingCommandStatus(item?.status)).length
   const failedDeliveries = statusCount(recentPolicyDeliveries.value, ['failed'], 'command_status')
-  const pendingDeliveries = recentPolicyDeliveries.value.filter((item) => isPendingCommandStatus(item?.command_status)).length
+  const pendingDeliveries = recentPolicyDeliveries.value.filter((item: AnyRecord) => isPendingCommandStatus(item?.command_status)).length
   const certificateStatus = certificateStatusLabel.value
 
   return [
@@ -532,7 +538,7 @@ const buildContextCommandParams = () => ({
   ...(contextQuery.value.policyDomain ? { policy_domain: contextQuery.value.policyDomain } : {})
 })
 
-const normalizeQueuedCommand = (command, response = {}) => ({
+const normalizeQueuedCommand = (command: string, response: AnyRecord = {}) => ({
   id: response.command_id || response.id || '',
   command: response.command || command,
   status: response.status || 'pending',
@@ -543,7 +549,7 @@ const normalizeQueuedCommand = (command, response = {}) => ({
   priority: response.priority
 })
 
-const prependQueuedCommand = (command) => {
+const prependQueuedCommand = (command: AnyRecord) => {
   if (!node.value || !command?.id) return
   const existing = Array.isArray(node.value.recent_commands) ? node.value.recent_commands : []
   if (existing.some((item) => item.id === command.id)) {
@@ -553,7 +559,7 @@ const prependQueuedCommand = (command) => {
   node.value.recent_commands = [command, ...existing]
 }
 
-const runContextCommand = async (command) => {
+const runContextCommand = async (command: string) => {
   if (!hasPermission('commands:write')) {
     ElMessage.error('Missing command permission')
     return
@@ -569,7 +575,7 @@ const runContextCommand = async (command) => {
       command,
       params: buildContextCommandParams(),
       timeout: 30
-    })
+    } as any)
     const queuedCommand = normalizeQueuedCommand(command, response)
     prependQueuedCommand(queuedCommand)
     ElMessage.success(`${command} queued`)
@@ -629,7 +635,7 @@ const askAIForContext = () => {
   })
 }
 
-const sectionRefForFocus = (focus) => {
+const sectionRefForFocus = (focus: string): SectionRef | null => {
   if (focus === 'commands') return commandsSectionRef.value
   if (focus === 'certificate') return certificateSectionRef.value
   if (focus === 'policies') return policiesSectionRef.value
@@ -637,10 +643,10 @@ const sectionRefForFocus = (focus) => {
   return null
 }
 
-const scrollToSection = async (focus) => {
+const scrollToSection = async (focus: string) => {
   await nextTick()
   const targetRef = sectionRefForFocus(focus)
-  const target = targetRef?.$el || targetRef
+  const target = (targetRef as any)?.$el || targetRef
   if (typeof target?.scrollIntoView === 'function') {
     target.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
@@ -648,14 +654,14 @@ const scrollToSection = async (focus) => {
 
 const scrollToFocusSection = () => scrollToSection(contextQuery.value.focus)
 
-const formatTime = (iso) => {
+const formatTime = (iso?: string) => {
   if (!iso) return ''
   return new Date(iso).toLocaleString()
 }
 
 const cmdStatusType = commandStatusTagType
 
-const alertSeverityType = (severity) => {
+const alertSeverityType = (severity?: string) => {
   switch (severity) {
     case 'critical':
     case 'error':
@@ -667,12 +673,12 @@ const alertSeverityType = (severity) => {
   }
 }
 
-const commandRowClassName = ({ row }) => {
+const commandRowClassName = ({ row }: { row: AnyRecord }) => {
   if (!contextQuery.value.commandId) return ''
   return String(row.id) === contextQuery.value.commandId ? 'context-match-row' : ''
 }
 
-const policyRowClassName = ({ row }) => {
+const policyRowClassName = ({ row }: { row: AnyRecord }) => {
   if (contextQuery.value.commandId && row.command_id === contextQuery.value.commandId) {
     return 'context-match-row'
   }
@@ -682,7 +688,7 @@ const policyRowClassName = ({ row }) => {
   return ''
 }
 
-const alertRowClassName = ({ row }) => {
+const alertRowClassName = ({ row }: { row: AnyRecord }) => {
   if (!contextQuery.value.alertId) return ''
   return row.id === contextQuery.value.alertId ? 'context-match-row' : ''
 }

@@ -275,7 +275,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -295,17 +295,42 @@ import StatusBadge from '@/components/ui/StatusBadge.vue'
 const router = useRouter()
 const { hasPermission } = usePermission()
 
+type AnyRecord = Record<string, any>
+type SectionRef = { value?: any } | any
+
+interface MonitorStats {
+  total_nodes: number
+  online_nodes: number
+  offline_nodes: number
+  sync_success_rate: number
+  total_peers: number
+  total_acl_rules: number
+  total_qos_rules: number
+  failed_commands_count: number
+  active_alerts_count: number
+}
+
+interface EventParams {
+  limit: number
+  offset: number
+  event_type?: string
+  severity?: string
+}
+
+const errorMessage = (error: unknown, fallback = '未知错误'): string =>
+  error instanceof Error ? error.message : (typeof error === 'string' ? error : fallback)
+
 // --- State ---
 const statsLoading = ref(false)
 const eventsLoading = ref(false)
 const alertsLoading = ref(false)
 const refreshing = ref(false)
-const resolvingId = ref(null)
+const resolvingId = ref<string | null>(null)
 const commandActionKey = ref('')
-const alertsSectionRef = ref(null)
-const eventsSectionRef = ref(null)
+const alertsSectionRef = ref<SectionRef | null>(null)
+const eventsSectionRef = ref<SectionRef | null>(null)
 
-const stats = ref({
+const stats = ref<MonitorStats>({
   total_nodes: 0,
   online_nodes: 0,
   offline_nodes: 0,
@@ -317,8 +342,8 @@ const stats = ref({
   active_alerts_count: 0
 })
 
-const events = ref([])
-const alerts = ref([])
+const events = ref<AnyRecord[]>([])
+const alerts = ref<AnyRecord[]>([])
 const eventsTotal = ref(0)
 const eventsPage = ref(1)
 const eventsLimit = 50
@@ -404,9 +429,9 @@ const certificateAlertsCount = computed(() => (
   alerts.value.filter((alert) => isCertificateAlert(alert?.alert_type)).length
 ))
 
-const isStatCardClickable = (key) => ['nodes', 'failed', 'alerts', 'certificates'].includes(key)
+const isStatCardClickable = (key?: string) => ['nodes', 'failed', 'alerts', 'certificates'].includes(key || '')
 
-const handleMetricSelect = (metric = {}) => handleStatCardClick(metric.key)
+const handleMetricSelect = (metric: AnyRecord = {}) => handleStatCardClick(metric.key)
 
 // --- Methods ---
 const loadStats = async () => {
@@ -426,7 +451,7 @@ const loadStats = async () => {
 const loadEvents = async () => {
   try {
     eventsLoading.value = true
-    const params = {
+    const params: EventParams = {
       limit: eventsLimit,
       offset: (eventsPage.value - 1) * eventsLimit
     }
@@ -466,7 +491,7 @@ const refreshAll = async () => {
   refreshing.value = false
 }
 
-const scrollToSection = async (sectionRef) => {
+const scrollToSection = async (sectionRef: SectionRef | null) => {
   await nextTick()
   const target = sectionRef?.value?.$el || sectionRef?.value
   if (typeof target?.scrollIntoView === 'function') {
@@ -478,7 +503,7 @@ const onPageChange = () => {
   loadEvents()
 }
 
-const buildResolvePayload = (alert = {}) => {
+const buildResolvePayload = (alert: AnyRecord = {}) => {
   const context = alert.context || {}
   return {
     source: 'monitoring',
@@ -487,7 +512,7 @@ const buildResolvePayload = (alert = {}) => {
   }
 }
 
-const handleResolve = async (alert) => {
+const handleResolve = async (alert: AnyRecord | string) => {
   if (!hasPermission('commands:write')) {
     ElMessage.error('Missing command permission')
     return
@@ -512,13 +537,13 @@ const handleResolve = async (alert) => {
 
 const isCertificateAlert = (alertType = '') => certificateAlertTypes.includes(alertType)
 
-const isActionableAlert = (alert = {}) => (
+const isActionableAlert = (alert: AnyRecord = {}) => (
   Boolean(alert?.node_id) && actionableAlertTypes.includes(alert?.alert_type)
 )
 
-const alertCommandKey = (alert = {}, command = '') => `${alert?.id || alert?.node_id || 'alert'}:${command}`
+const alertCommandKey = (alert: AnyRecord = {}, command = '') => `${alert?.id || alert?.node_id || 'alert'}:${command}`
 
-const buildAlertCommandParams = (alert = {}) => {
+const buildAlertCommandParams = (alert: AnyRecord = {}) => {
   const context = alert.context || {}
   return {
     source: 'monitoring',
@@ -530,11 +555,11 @@ const buildAlertCommandParams = (alert = {}) => {
   }
 }
 
-const commandIdFromResponse = (response = {}) => (
+const commandIdFromResponse = (response: AnyRecord = {}) => (
   response.command_id || response.commandId || response.id || ''
 )
 
-const openQueuedCommandFromAlert = (alert = {}, commandId = '') => {
+const openQueuedCommandFromAlert = (alert: AnyRecord = {}, commandId = '') => {
   if (!alert?.node_id) return
   const context = alert.context || {}
   router.push({
@@ -550,7 +575,7 @@ const openQueuedCommandFromAlert = (alert = {}, commandId = '') => {
   })
 }
 
-const buildAlertAIQuery = (alert = {}) => {
+const buildAlertAIQuery = (alert: AnyRecord = {}) => {
   const context = alert.context || {}
   return {
     source: 'monitoring',
@@ -563,7 +588,7 @@ const buildAlertAIQuery = (alert = {}) => {
   }
 }
 
-const askAIForAlert = (alert = {}) => {
+const askAIForAlert = (alert: AnyRecord = {}) => {
   if (!hasPermission('ai:use')) {
     ElMessage.error('Missing AI permission')
     return
@@ -574,7 +599,7 @@ const askAIForAlert = (alert = {}) => {
   })
 }
 
-const handleAlertCommand = async (alert, command) => {
+const handleAlertCommand = async (alert: AnyRecord, command: string) => {
   if (!hasPermission('commands:write')) {
     ElMessage.error('Missing command permission')
     return
@@ -591,7 +616,7 @@ const handleAlertCommand = async (alert, command) => {
       command,
       params: buildAlertCommandParams(alert),
       timeout: 30
-    })
+    } as any)
     ElMessage.success(`${command} queued`)
     await Promise.all([loadStats(), loadEvents(), loadAlerts()])
     openQueuedCommandFromAlert(alert, commandIdFromResponse(response))
@@ -605,17 +630,17 @@ const handleAlertCommand = async (alert, command) => {
   }
 }
 
-const setAlertsFilterMode = async (mode) => {
+const setAlertsFilterMode = async (mode: string) => {
   alertsFilterMode.value = mode
   await loadAlerts()
   await scrollToSection(alertsSectionRef)
 }
 
-const goToNodeDetail = (nodeId) => {
+const goToNodeDetail = (nodeId: string) => {
   router.push({ name: 'NodeMonitorDetail', params: { nodeId } })
 }
 
-const handleStatCardClick = async (key) => {
+const handleStatCardClick = async (key?: string) => {
   if (!isStatCardClickable(key)) {
     return
   }
@@ -644,8 +669,8 @@ const handleStatCardClick = async (key) => {
   }
 }
 
-const buildNodeQuery = (context = {}, focus = '') => {
-  const query = {}
+const buildNodeQuery = (context: AnyRecord = {}, focus = '') => {
+  const query: Record<string, string> = {}
   if (focus) {
     query.focus = focus
   }
@@ -670,14 +695,14 @@ const buildNodeQuery = (context = {}, focus = '') => {
   return query
 }
 
-const defaultNodeFocus = (context = {}, eventType = '') => {
+const defaultNodeFocus = (context: AnyRecord = {}, eventType = '') => {
   if (context.command_id) return 'commands'
   if (context.policy_ref) return 'policies'
   if (String(eventType).startsWith('certificate_')) return 'certificate'
   return 'alerts'
 }
 
-const goToNodeFromAlert = (alert) => {
+const goToNodeFromAlert = (alert: AnyRecord) => {
   if (!alert?.node_id) return
   router.push({
     name: 'NodeMonitorDetail',
@@ -692,7 +717,7 @@ const goToNodeFromAlert = (alert) => {
   })
 }
 
-const goToNodeFromEvent = (event, explicitFocus = '') => {
+const goToNodeFromEvent = (event: AnyRecord, explicitFocus = '') => {
   if (!event?.node_id) return
   router.push({
     name: 'NodeMonitorDetail',
@@ -707,7 +732,7 @@ const goToNodeFromEvent = (event, explicitFocus = '') => {
   })
 }
 
-const goToPolicyFromContext = (nodeId, context = {}) => {
+const goToPolicyFromContext = (nodeId: string, context: AnyRecord = {}) => {
   router.push({
     name: 'Policies',
     query: {
@@ -718,24 +743,24 @@ const goToPolicyFromContext = (nodeId, context = {}) => {
   })
 }
 
-const shortId = (value) => {
+const shortId = (value?: string) => {
   if (!value) return ''
   return value.length > 8 ? `${value.slice(0, 8)}...` : value
 }
 
 // --- Formatters ---
-const formatTime = (iso) => {
+const formatTime = (iso?: string) => {
   if (!iso) return ''
   const d = new Date(iso)
   return d.toLocaleString()
 }
 
-const formatEventType = (type) => {
+const formatEventType = (type?: string) => {
   if (!type) return ''
   return type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
-const eventTypeTone = (type) => {
+const eventTypeTone = (type?: string) => {
   if (!type) return 'info'
   if (type.includes('failed')) return 'danger'
   if (type.includes('offline')) return 'danger'
@@ -745,7 +770,7 @@ const eventTypeTone = (type) => {
   return 'info'
 }
 
-const severityTone = (severity) => {
+const severityTone = (severity?: string) => {
   switch (severity) {
     case 'critical': return 'danger'
     case 'warning': return 'warning'
@@ -754,7 +779,7 @@ const severityTone = (severity) => {
   }
 }
 
-const severityDotClass = (event) => {
+const severityDotClass = (event: AnyRecord) => {
   if (event.source === 'alert') {
     return `dot-${event.severity || 'info'}`
   }
