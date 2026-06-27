@@ -596,7 +596,31 @@ describe('node monitor detail context handling', () => {
       query: {
         nodeId: 'node-1',
         policyRef: 'acl-1',
-        kind: 'acl'
+        kind: 'acl',
+        commandId: 'cmd-1'
+      }
+    })
+  })
+
+  it('routes command-only node detail context back to policy center', async () => {
+    routeState.query = {
+      focus: 'commands',
+      command_id: 'cmd-1'
+    }
+    routeState.fullPath = '/monitoring/nodes/node-1?focus=commands&command_id=cmd-1'
+
+    const wrapper = mountWithStubs(NodeMonitorDetail)
+    await flushPromises()
+
+    expect(wrapper.vm.contextDescription).toContain('Command: cmd-1')
+
+    wrapper.vm.openPolicyCenter()
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'Policies',
+      query: {
+        nodeId: 'node-1',
+        commandId: 'cmd-1'
       }
     })
   })
@@ -699,7 +723,8 @@ describe('node monitor detail context handling', () => {
       query: {
         nodeId: 'node-1',
         policyRef: 'acl-1',
-        kind: 'acl'
+        kind: 'acl',
+        commandId: 'cmd-1'
       }
     })
   })

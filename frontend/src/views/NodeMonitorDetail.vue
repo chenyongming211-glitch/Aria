@@ -16,7 +16,7 @@
             <div class="context-description">{{ contextDescription }}</div>
           </div>
           <div class="context-actions">
-            <el-button v-if="contextQuery.policyRef" size="small" @click="openPolicyCenter">
+            <el-button v-if="contextQuery.policyRef || contextQuery.policyDomain || contextQuery.commandId" size="small" @click="openPolicyCenter">
               Open Policy
             </el-button>
             <el-button
@@ -710,7 +710,8 @@ const openPolicyCenter = () => {
     query: {
       nodeId: nodeId.value,
       ...(contextQuery.value.policyRef ? { policyRef: contextQuery.value.policyRef } : {}),
-      ...(contextQuery.value.policyDomain ? { kind: contextQuery.value.policyDomain } : {})
+      ...(contextQuery.value.policyDomain ? { kind: contextQuery.value.policyDomain } : {}),
+      ...(contextQuery.value.commandId ? { commandId: contextQuery.value.commandId } : {})
     }
   })
 }
