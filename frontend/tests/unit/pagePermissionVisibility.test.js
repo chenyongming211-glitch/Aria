@@ -177,7 +177,7 @@ vi.mock('/src/stores', () => ({
   useTenantStore: () => ({})
 }))
 
-vi.mock('/src/stores/index.js', () => ({
+vi.mock('/src/stores/index', () => ({
   useAppStore: () => ({
     sidebarCollapsed: false,
     version: 'test',

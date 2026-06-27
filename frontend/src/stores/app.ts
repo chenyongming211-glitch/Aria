@@ -1,4 +1,4 @@
-// src/stores/app.js
+// src/stores/app.ts
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/composables/useApi'
@@ -9,7 +9,7 @@ export default defineStore('app', () => {
   const version = ref('0.0.0')
   const sidebarCollapsed = ref(false)
 
-  const setLang = (newLang) => {
+  const setLang = (newLang: string) => {
     lang.value = newLang
     localStorage.setItem('aria-lang', newLang)
   }

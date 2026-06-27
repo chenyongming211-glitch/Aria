@@ -1,6 +1,21 @@
 import api from './useApi'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 
+type TokenId = string
+
+interface CreateTokenParams extends Record<string, unknown> {
+  tag?: string
+  max_uses?: number
+  ttl?: string
+  ttl_hours?: number | string
+}
+
+interface TokenRecord extends Record<string, unknown> {
+  id?: TokenId
+  token?: string
+  nodes?: unknown[]
+}
+
 /**
  * 令牌管理API接口
  * 与后端 /v2/tenants/{tenant_id}/tokens API 对接
@@ -31,7 +46,7 @@ export const useTokenApi = {
    *    ttl: string            // 有效期 "1h", "24h", "7d", "30d"（可选）
    *  }
    */
-  createToken: async (params) => {
+  createToken: async (params: CreateTokenParams) => {
     try {
       const tenantId = requireCurrentTenantId()
       const payload = { ...params }
@@ -53,7 +68,7 @@ export const useTokenApi = {
    * 删除/吊销令牌（新 API）
    * @param {string} tokenId - 令牌ID
    */
-  deleteToken: async (tokenId) => {
+  deleteToken: async (tokenId: TokenId) => {
     try {
       const tenantId = requireCurrentTenantId()
       const response = await api.delete(API_ENDPOINTS.TENANT.TOKEN_DETAIL(tenantId, tokenId))
@@ -68,7 +83,7 @@ export const useTokenApi = {
    * 获取令牌详情（查询参数方式）
    * @param {string} token - 令牌值
    */
-  getTokenDetail: async (tokenId) => {
+  getTokenDetail: async (tokenId: TokenId) => {
     try {
       const tenantId = requireCurrentTenantId()
       const response = await api.get(API_ENDPOINTS.TENANT.TOKEN_DETAIL(tenantId, tokenId))
@@ -85,7 +100,7 @@ export const useTokenApi = {
    * 吊销令牌（旧版兼容）
    * @param {string} tokenId - 令牌ID
    */
-  revokeToken: async (tokenId) => {
+  revokeToken: async (tokenId: TokenId) => {
     console.warn('revokeToken 已弃用，请使用 deleteToken')
     return await useTokenApi.deleteToken(tokenId)
   },
@@ -94,7 +109,7 @@ export const useTokenApi = {
    * 获取令牌的使用节点
    * @param {string} token - 令牌值
    */
-  getTokenNodes: async (token) => {
+  getTokenNodes: async (token: TokenId) => {
     try {
       const tenantId = requireCurrentTenantId()
       const detail = await useTokenApi.getTokenDetail(token)
@@ -102,7 +117,7 @@ export const useTokenApi = {
         return []
       }
       const response = await api.get(API_ENDPOINTS.TENANT.TOKENS(tenantId))
-      const tokens = response.data?.data || response.data || []
+      const tokens = (response.data?.data || response.data || []) as TokenRecord[]
       const current = tokens.find((item) => item.id === token)
       return current?.nodes || detail?.nodes || []
     } catch (error) {
