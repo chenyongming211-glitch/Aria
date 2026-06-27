@@ -693,6 +693,16 @@ describe('policy center context handling', () => {
       policyName: 'ACL 1'
     })
     expect(policyApiMock.listPolicies.mock.calls.length).toBeGreaterThan(callsBeforeRetry)
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-1' },
+      query: {
+        commandId: 'cmd-retry',
+        focus: 'commands',
+        policyRef: 'acl-1',
+        policyDomain: 'acl'
+      }
+    })
   })
 })
 

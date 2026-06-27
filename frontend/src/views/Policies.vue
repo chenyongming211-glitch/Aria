@@ -533,9 +533,7 @@ const policyPageQuery = (policy) => {
   const query = {}
   const nodeId = policy?.nodeId || routeContext.value.nodeId
   const policyRef = policy?.policyRef || routeContext.value.policyRef
-  const commandId = policy?.lastDeliveryCommandId ||
-    policy?.deliveryHistory?.find((item) => item.command_id)?.command_id ||
-    routeContext.value.commandId
+  const commandId = commandIdForPolicy(policy) || routeContext.value.commandId
 
   if (nodeId) {
     query.nodeId = nodeId
@@ -571,16 +569,32 @@ const showDetails = (policy) => {
   detailVisible.value = true
 }
 
-const openNodeDetail = (policy) => {
+const commandIdForPolicy = (policy) => {
+  if (!policy) {
+    return ''
+  }
+  return policy.lastDeliveryCommandId ||
+    policy.last_delivery_command_id ||
+    policy.lastDelivery?.command_id ||
+    policy.last_delivery?.command_id ||
+    policy.deliveryHistory?.find((item) => item.command_id)?.command_id ||
+    policy.delivery_history?.find((item) => item.command_id)?.command_id ||
+    ''
+}
+
+const openNodeDetail = (policy, options = {}) => {
   if (!policy?.nodeId) {
     ElMessage.warning('该策略没有目标节点')
     return
   }
+  const commandId = options.commandId || routeContext.value.commandId
+  const focus = options.focus || (commandId ? 'policies' : '')
   router.push({
     name: 'NodeMonitorDetail',
     params: { nodeId: policy.nodeId },
     query: {
-      ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId, focus: 'policies' } : {}),
+      ...(commandId ? { commandId } : {}),
+      ...(focus ? { focus } : {}),
       ...(policy.policyRef ? { policyRef: policy.policyRef } : {}),
       ...(policy.kind ? { policyDomain: policy.kind } : {})
     }
@@ -614,7 +628,7 @@ const retryPolicyDelivery = async (policy) => {
   }
 
   try {
-    await usePolicyApi.retryPolicySync({
+    const response = await usePolicyApi.retryPolicySync({
       nodeId: policy.nodeId,
       kind: policy.kind,
       policyRef: policy.policyRef,
@@ -622,6 +636,16 @@ const retryPolicyDelivery = async (policy) => {
     })
     ElMessage.success('重试下发已排队')
     await fetchPolicies()
+    const commandId = commandIdForPolicy(response)
+    if (commandId) {
+      openNodeDetail({
+        ...policy,
+        ...response,
+        nodeId: response.nodeId || policy.nodeId,
+        policyRef: response.policyRef || policy.policyRef,
+        kind: response.kind || policy.kind
+      }, { commandId, focus: 'commands' })
+    }
   } catch (error) {
     ElMessage.error(`重试失败: ${error.message || '未知错误'}`)
   }
