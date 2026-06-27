@@ -367,7 +367,8 @@ describe('monitoring workflow routing', () => {
 
     wrapper.vm.goToPolicyFromContext('node-1', {
       policy_ref: 'acl-1',
-      policy_domain: 'acl'
+      policy_domain: 'acl',
+      command_id: 'cmd-1'
     })
 
     expect(routerPush).toHaveBeenCalledWith({
@@ -375,7 +376,8 @@ describe('monitoring workflow routing', () => {
       query: {
         nodeId: 'node-1',
         policyRef: 'acl-1',
-        kind: 'acl'
+        kind: 'acl',
+        commandId: 'cmd-1'
       }
     })
   })
@@ -782,6 +784,7 @@ describe('policy center context handling', () => {
       query: {
         nodeId: 'node-1',
         policyRef: 'acl-1',
+        kind: 'acl',
         commandId: 'cmd-1'
       }
     })

@@ -181,15 +181,17 @@ const queryString = (...keys) => {
 const routeContext = computed(() => ({
   nodeId: queryString('nodeId', 'node_id'),
   policyRef: queryString('policyRef', 'policy_ref'),
+  policyDomain: queryString('kind', 'policyDomain', 'policy_domain'),
   commandId: queryString('commandId', 'command_id')
 }))
 const hasRouteContext = computed(() => Boolean(
-  routeContext.value.nodeId || routeContext.value.policyRef || routeContext.value.commandId
+  routeContext.value.nodeId || routeContext.value.policyRef || routeContext.value.policyDomain || routeContext.value.commandId
 ))
 
 const contextQuery = computed(() => ({
   ...(routeContext.value.nodeId ? { nodeId: routeContext.value.nodeId } : {}),
   ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
+  ...(routeContext.value.policyDomain ? { kind: routeContext.value.policyDomain } : {}),
   ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {})
 }))
 
@@ -210,6 +212,7 @@ const openContextNodeDetail = () => {
     params: { nodeId: routeContext.value.nodeId },
     query: {
       ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
+      ...(routeContext.value.policyDomain ? { policyDomain: routeContext.value.policyDomain } : {}),
       ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {})
     }
   })

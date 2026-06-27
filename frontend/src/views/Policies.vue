@@ -672,6 +672,7 @@ const goToIpGroups = () => {
   const query: Record<string, string> = {}
   if (routeContext.value.nodeId) query.nodeId = routeContext.value.nodeId
   if (routeContext.value.policyRef) query.policyRef = routeContext.value.policyRef
+  if (routeContext.value.kind) query.kind = routeContext.value.kind
   if (routeContext.value.commandId) query.commandId = routeContext.value.commandId
   router.push({ name: 'IPGroups', query })
 }

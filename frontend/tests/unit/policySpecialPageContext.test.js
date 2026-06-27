@@ -279,8 +279,8 @@ describe('policy special page context filters', () => {
   })
 
   it('keeps policy context visible on IP Group management and returns to Policy Center', async () => {
-    routeState.query = { node_id: 'node-1', policy_ref: 'acl-1', command_id: 'cmd-1' }
-    routeState.fullPath = '/ip-groups?node_id=node-1&policy_ref=acl-1&command_id=cmd-1'
+    routeState.query = { node_id: 'node-1', policy_ref: 'acl-1', policy_domain: 'acl', command_id: 'cmd-1' }
+    routeState.fullPath = '/ip-groups?node_id=node-1&policy_ref=acl-1&policy_domain=acl&command_id=cmd-1'
 
     const wrapper = mountPage(IPGroups)
     await flushPromises()
@@ -294,14 +294,15 @@ describe('policy special page context filters', () => {
       query: {
         nodeId: 'node-1',
         policyRef: 'acl-1',
+        kind: 'acl',
         commandId: 'cmd-1'
       }
     })
   })
 
   it('opens node detail from IP Group context without losing policy trace', async () => {
-    routeState.query = { nodeId: 'node-1', policyRef: 'acl-1', commandId: 'cmd-1' }
-    routeState.fullPath = '/ip-groups?nodeId=node-1&policyRef=acl-1&commandId=cmd-1'
+    routeState.query = { nodeId: 'node-1', policyRef: 'acl-1', kind: 'acl', commandId: 'cmd-1' }
+    routeState.fullPath = '/ip-groups?nodeId=node-1&policyRef=acl-1&kind=acl&commandId=cmd-1'
 
     const wrapper = mountPage(IPGroups)
     await flushPromises()
@@ -313,6 +314,7 @@ describe('policy special page context filters', () => {
       params: { nodeId: 'node-1' },
       query: {
         policyRef: 'acl-1',
+        policyDomain: 'acl',
         commandId: 'cmd-1'
       }
     })

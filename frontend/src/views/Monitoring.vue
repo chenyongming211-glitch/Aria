@@ -738,7 +738,8 @@ const goToPolicyFromContext = (nodeId: string, context: AnyRecord = {}) => {
     query: {
       ...(nodeId ? { nodeId } : {}),
       ...(context.policy_ref ? { policyRef: context.policy_ref } : {}),
-      ...(context.policy_domain ? { kind: context.policy_domain } : {})
+      ...(context.policy_domain ? { kind: context.policy_domain } : {}),
+      ...(context.command_id ? { commandId: context.command_id } : {})
     }
   })
 }
