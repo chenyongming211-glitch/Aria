@@ -327,6 +327,17 @@ const filters = ref<PolicyFilters>({
 })
 
 const activePolicyStatuses = new Set(['pending', 'in_progress', 'sent', 'acknowledged'])
+const failedPolicyStatuses = new Set(['error', 'failed', 'timeout', 'timed_out'])
+const policyMatchesStatusGroup = (policy: NormalizedPolicy, group: string) => {
+  switch (group) {
+    case 'active':
+      return activePolicyStatuses.has(policy.status || '')
+    case 'failed':
+      return failedPolicyStatuses.has(policy.status || '') || failedPolicyStatuses.has(policy.observedState || '')
+    default:
+      return true
+  }
+}
 
 const stringValue = (value: unknown): string => typeof value === 'string' ? value : ''
 
@@ -455,7 +466,7 @@ const filteredPolicies = computed<NormalizedPolicy[]>(() => {
     if (filters.value.status && policy.status !== filters.value.status) {
       return false
     }
-    if (!filters.value.status && filters.value.statusGroup === 'active' && !activePolicyStatuses.has(policy.status || '')) {
+    if (!filters.value.status && filters.value.statusGroup && !policyMatchesStatusGroup(policy, filters.value.statusGroup)) {
       return false
     }
     if (filters.value.nodeId && policy.nodeId !== filters.value.nodeId) {
@@ -509,7 +520,7 @@ const stats = computed(() => {
     route: current.filter((item) => item.kind === 'route').length,
     applied: current.filter((item) => item.status === 'applied').length,
     pending: current.filter((item) => ['pending', 'in_progress', 'sent', 'acknowledged'].includes(item.status)).length,
-    failed: current.filter((item) => item.status === 'error' || item.observedState === 'error').length
+    failed: current.filter((item) => policyMatchesStatusGroup(item, 'failed')).length
   }
 })
 
@@ -575,7 +586,7 @@ const policyMetricItems = computed<PolicyMetric[]>(() => [
     meta: 'needs retry',
     status: 'danger',
     clickable: true,
-    filter: { status: 'error' }
+    filter: { status: '', statusGroup: 'failed' }
   }
 ])
 
@@ -748,7 +759,7 @@ const canRetryPolicy = (policy?: NormalizedPolicy | null) => {
   if (!policy) return false
   const permission = policyWritePermission(policy.kind)
   if (!permission || !hasPermission(permission)) return false
-  return isRetryablePolicyStatus(policy.status || policy.observedState)
+  return isRetryablePolicyStatus(policy.status) || isRetryablePolicyStatus(policy.observedState)
 }
 
 const retryPolicyDelivery = async (policy: NormalizedPolicy) => {

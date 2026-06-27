@@ -184,6 +184,17 @@ const {
         name: 'Route in progress',
         status: 'in_progress',
         deliveryHistory: []
+      },
+      {
+        policyId: 'policy-qos-observed-error',
+        policyRef: 'qos-observed-error',
+        nodeId: 'node-1',
+        nodeName: 'node-1',
+        kind: 'qos',
+        name: 'QoS observed error',
+        status: 'idle',
+        observedState: 'error',
+        deliveryHistory: []
       }
     ]),
     retryPolicySync: vi.fn(async () => ({}))
@@ -379,9 +390,11 @@ describe('policy page context handoff', () => {
 
     await failedMetric.trigger('click')
 
-    expect(wrapper.vm.filters.status).toBe('error')
-    expect(wrapper.vm.filteredPolicies).toHaveLength(1)
+    expect(wrapper.vm.filters.status).toBe('')
+    expect(wrapper.vm.filters.statusGroup).toBe('failed')
+    expect(wrapper.vm.filteredPolicies).toHaveLength(2)
     expect(wrapper.vm.filteredPolicies[0].policyRef).toBe('acl-special')
+    expect(wrapper.vm.filteredPolicies[1].policyRef).toBe('qos-observed-error')
 
     const pendingMetric = wrapper.findAll('.ui-metric-strip__item').find(item => item.text().includes('Pending'))
     expect(pendingMetric).toBeTruthy()
