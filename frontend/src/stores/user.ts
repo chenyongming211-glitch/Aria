@@ -1,11 +1,40 @@
-// src/stores/user.js
+// src/stores/user.ts
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/composables/useApi'
 import { API_ENDPOINTS } from '@/config/api'
 import { clearSession } from '@/utils/session'
+import type { Permission, RoleName, UserProfile } from '@/types'
 
-export const SYSTEM_ROLE_PERMISSIONS = Object.freeze({
+type BuiltInRole = 'admin' | 'operator' | 'viewer'
+type RawUserProfile = Partial<UserProfile> & Record<string, any>
+
+interface JwtClaims {
+  uid?: string
+  sub?: string
+  unm?: string
+  rol?: RoleName | string
+  tid?: string
+  mcp?: boolean
+}
+
+interface HttpErrorLike {
+  response?: {
+    status?: number
+    data?: {
+      message?: string
+    }
+  }
+  message?: string
+}
+
+const BUILT_IN_ROLES: BuiltInRole[] = ['admin', 'operator', 'viewer']
+
+const isBuiltInRole = (role: string): role is BuiltInRole => BUILT_IN_ROLES.includes(role as BuiltInRole)
+
+const asHttpError = (error: unknown): HttpErrorLike => error as HttpErrorLike
+
+export const SYSTEM_ROLE_PERMISSIONS: Readonly<Record<BuiltInRole, readonly Permission[]>> = Object.freeze({
   admin: Object.freeze([
     'nodes:read', 'nodes:write',
     'routes:read', 'routes:write',
@@ -21,7 +50,7 @@ export const SYSTEM_ROLE_PERMISSIONS = Object.freeze({
     'ai:use',
     'policies:read',
     'settings:read', 'settings:write'
-  ]),
+  ] as Permission[]),
   operator: Object.freeze([
     'nodes:read', 'nodes:write',
     'routes:read', 'routes:write',
@@ -33,7 +62,7 @@ export const SYSTEM_ROLE_PERMISSIONS = Object.freeze({
     'commands:write',
     'ai:use',
     'policies:read'
-  ]),
+  ] as Permission[]),
   viewer: Object.freeze([
     'nodes:read',
     'routes:read',
@@ -44,10 +73,10 @@ export const SYSTEM_ROLE_PERMISSIONS = Object.freeze({
     'monitoring:read',
     'ai:use',
     'policies:read'
-  ])
+  ] as Permission[])
 })
 
-export const normalizeRoleName = (role) => {
+export const normalizeRoleName = (role: unknown): RoleName | string => {
   const roleName = String(role || '').trim()
   const lowerRoleName = roleName.toLowerCase()
   if (lowerRoleName === 'member') return 'operator'
@@ -56,13 +85,13 @@ export const normalizeRoleName = (role) => {
   return roleName
 }
 
-export const permissionsForRole = (role) => {
+export const permissionsForRole = (role: unknown): Permission[] => {
   const roleName = normalizeRoleName(role)
   if (roleName === 'super_admin') return ['*']
-  return SYSTEM_ROLE_PERMISSIONS[roleName] ? [...SYSTEM_ROLE_PERMISSIONS[roleName]] : []
+  return isBuiltInRole(roleName) ? [...SYSTEM_ROLE_PERMISSIONS[roleName]] : []
 }
 
-const deriveInitials = (value) => {
+const deriveInitials = (value: unknown): string => {
   const text = String(value || '').trim()
   if (!text) return ''
   const parts = text.split(/\s+/).filter(Boolean)
@@ -72,7 +101,7 @@ const deriveInitials = (value) => {
   return Array.from(text).slice(0, 2).join('').toUpperCase()
 }
 
-const normalizeUser = (rawUser, fallbackUsername = '') => {
+const normalizeUser = (rawUser?: RawUserProfile | null, fallbackUsername = ''): UserProfile => {
   const source = rawUser || {}
   const username = source.username || source.name || fallbackUsername
   const name = source.name || username
@@ -84,7 +113,7 @@ const normalizeUser = (rawUser, fallbackUsername = '') => {
   }
 }
 
-const decodeJwtPayload = (token) => {
+const decodeJwtPayload = (token: string | null | undefined): JwtClaims | null => {
   const payload = String(token || '').split('.')[1]
   if (!payload) return null
 
@@ -100,7 +129,7 @@ const decodeJwtPayload = (token) => {
   }
 }
 
-const userFromTokenClaims = (token) => {
+const userFromTokenClaims = (token: string | null | undefined): UserProfile | null => {
   const claims = decodeJwtPayload(token)
   if (!claims) return null
 
@@ -112,12 +141,12 @@ const userFromTokenClaims = (token) => {
   })
 }
 
-export const tokenRequiresPasswordChange = (token) => {
+export const tokenRequiresPasswordChange = (token: string | null | undefined): boolean => {
   const claims = decodeJwtPayload(token)
   return Boolean(claims?.mcp)
 }
 
-const mergeTokenUserClaims = (cachedUser, token) => {
+const mergeTokenUserClaims = (cachedUser: RawUserProfile | null | undefined, token: string): UserProfile => {
   const tokenUser = userFromTokenClaims(token)
   if (!tokenUser) return normalizeUser(cachedUser)
 
@@ -131,10 +160,10 @@ const mergeTokenUserClaims = (cachedUser, token) => {
 }
 
 export default defineStore('user', () => {
-  const user = ref(null)
+  const user = ref<UserProfile | null>(null)
   const isAuthenticated = ref(false)
   const mustChangePassword = ref(false)
-  const permissions = ref([])
+  const permissions = ref<Permission[]>([])
 
   const resetSessionState = () => {
     user.value = null
@@ -147,14 +176,15 @@ export default defineStore('user', () => {
     window.addEventListener('aria-session-cleared', resetSessionState)
   }
 
-  const setPermissions = (nextPermissions) => {
-    const normalized = Array.from(new Set((nextPermissions || []).filter(Boolean)))
+  const setPermissions = (nextPermissions?: unknown): Permission[] => {
+    const list = Array.isArray(nextPermissions) ? nextPermissions : []
+    const normalized = Array.from(new Set(list.filter(Boolean))) as Permission[]
     permissions.value = normalized
     localStorage.setItem('aria_permissions', JSON.stringify(permissions.value))
     return permissions.value
   }
 
-  const persistCurrentTenant = (tenantId) => {
+  const persistCurrentTenant = (tenantId?: string | null) => {
     if (tenantId) {
       localStorage.setItem('aria-current-tenant', JSON.stringify({ id: tenantId }))
       return
@@ -162,13 +192,13 @@ export default defineStore('user', () => {
     localStorage.removeItem('aria-current-tenant')
   }
 
-  const readCachedPermissions = () => {
+  const readCachedPermissions = (): Permission[] | null | undefined => {
     const cached = localStorage.getItem('aria_permissions')
     if (!cached) return undefined
 
     try {
       const parsed = JSON.parse(cached)
-      if (Array.isArray(parsed)) return parsed
+      if (Array.isArray(parsed)) return parsed as Permission[]
       localStorage.removeItem('aria_permissions')
       return null
     } catch (error) {
@@ -178,7 +208,7 @@ export default defineStore('user', () => {
     }
   }
 
-  const login = async (credentials) => {
+  const login = async (credentials: { username?: string; password?: string; [key: string]: unknown }) => {
     try {
       // 调用真实的登录 API
       const response = await api.post(API_ENDPOINTS.AUTH.LOGIN, credentials)
@@ -234,25 +264,26 @@ export default defineStore('user', () => {
         throw new Error('Invalid login response: no token found')
       }
     } catch (error) {
+      const httpError = asHttpError(error)
       console.error('[Login] Error:', error)
       
       // 如果是认证错误，返回错误消息
-      if (error.response?.status === 401) {
+      if (httpError.response?.status === 401) {
         return {
           success: false,
-          message: error.response?.data?.message || 'Invalid username or password'
+          message: httpError.response?.data?.message || 'Invalid username or password'
         }
       }
       
       // 其他错误
       return {
         success: false,
-        message: error.response?.data?.message || error.message || 'Login failed'
+        message: httpError.response?.data?.message || httpError.message || 'Login failed'
       }
     }
   }
 
-  const changePassword = async (oldPassword, newPassword) => {
+  const changePassword = async (oldPassword: string, newPassword: string) => {
     try {
       const response = await api.post(API_ENDPOINTS.AUTH.FORCE_CHANGE_PASSWORD, {
         old_password: oldPassword,
@@ -269,10 +300,11 @@ export default defineStore('user', () => {
         return { success: false, message: response.data?.message || 'Password change failed' }
       }
     } catch (error) {
+      const httpError = asHttpError(error)
       console.error('[ChangePassword] Error:', error)
       return { 
         success: false, 
-        message: error.response?.data?.message || error.message || 'Password change failed' 
+        message: httpError.response?.data?.message || httpError.message || 'Password change failed'
       }
     }
   }
@@ -339,7 +371,7 @@ export default defineStore('user', () => {
   }
 
   // 加载租户列表
-  const loadTenants = async () => {
+  const loadTenants = async (): Promise<unknown[]> => {
     try {
       const response = await api.get(API_ENDPOINTS.TENANT.LIST)
       return response.data?.data || response.data || []
@@ -349,7 +381,7 @@ export default defineStore('user', () => {
     }
   }
 
-  const loadCurrentPermissions = async () => {
+  const loadCurrentPermissions = async (): Promise<Permission[]> => {
     const response = await api.get(API_ENDPOINTS.AUTH.PERMISSIONS)
     const data = response.data?.data || response.data || {}
     if (Array.isArray(data.permissions)) {
@@ -359,7 +391,7 @@ export default defineStore('user', () => {
   }
 
   // 加载用户权限：普通租户用户只接受后端当前上下文返回的权限，失败时按空权限处理。
-  const loadPermissions = async (tenantId, role) => {
+  const loadPermissions = async (_tenantId: string | null | undefined, role: unknown): Promise<Permission[]> => {
     const roleName = normalizeRoleName(role)
     if (roleName === 'super_admin') {
       return setPermissions(['*'])
@@ -374,7 +406,7 @@ export default defineStore('user', () => {
   }
 
   // 刷新 token
-  const refreshToken = async () => {
+  const refreshToken = async (): Promise<{ success: boolean }> => {
     try {
       const response = await api.post(API_ENDPOINTS.AUTH.REFRESH)
       const token = response.data?.data?.token || response.data?.token

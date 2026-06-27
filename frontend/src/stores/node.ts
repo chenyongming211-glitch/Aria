@@ -1,17 +1,77 @@
-// src/stores/node.js
+// src/stores/node.ts
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/composables/useApi'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 import { useAgentProxyApi } from '@/composables/useAgentProxyApi'
 import { useMonitorApi } from '@/composables/useMonitorApi'
+import type { NodeRecord } from '@/types'
+
+type RawNodeRecord = Partial<NodeRecord> & Record<string, any>
+
+interface OnboardingViewModel {
+  phase: string
+  tokenPreview: string
+  firstSeenAt: string
+  firstSeenRaw?: string | number | null
+  lastSyncAt: string
+  lastSyncRaw?: string | number | null
+  lastError: string
+  nextAction: string
+}
+
+interface NodeViewModel {
+  id: string
+  hostname: string
+  ip: string
+  publicIp: string
+  vpnIp: string
+  endpoint: string
+  region: string
+  status: string
+  rawStatus: string
+  version: string
+  mode: string
+  lastSeen: string
+  uptime: string
+  routes: string[]
+  pendingCmds: number
+  configurationStatus: string
+  lastSyncAt: string
+  desiredStateVersion: string
+  desiredStateUpdatedAt: string
+  appliedStateVersion: string
+  appliedStateUpdatedAt: string
+  observedState: string
+  observedMessage: string
+  observedAt: string
+  stateConvergence: string
+  onboarding: OnboardingViewModel
+  lastCommand: unknown
+  lastCommandStatus: string
+  lastCommandError: string
+  recentCommands: unknown[]
+  learnedRoutes?: unknown[]
+  recentPolicyDeliveries?: unknown[]
+  activeAlerts?: unknown[]
+  certificate?: unknown
+  certificateActivity?: unknown
+  bandwidth: { upload: number; download: number }
+  latency: number
+}
+
+interface HttpErrorLike {
+  response?: {
+    status?: number
+  }
+}
 
 export default defineStore('node', () => {
-  const nodes = ref([])
-  const currentNode = ref(null)
+  const nodes = ref<NodeViewModel[]>([])
+  const currentNode = ref<NodeViewModel | null>(null)
   const loading = ref(false)
 
-  function normalizeAdvertisedRoutes(routes) {
+  function normalizeAdvertisedRoutes(routes: unknown): string[] {
     if (Array.isArray(routes)) return routes
     if (!routes) return []
     if (typeof routes !== 'string') return []
@@ -25,7 +85,7 @@ export default defineStore('node', () => {
     }
   }
 
-  function normalizeOnboarding(onboarding = {}, fallback = {}) {
+  function normalizeOnboarding(onboarding: RawNodeRecord = {}, fallback: Partial<OnboardingViewModel> & RawNodeRecord = {}): OnboardingViewModel {
     const phase = onboarding.phase || fallback.phase || 'registered'
     const firstSeenRaw = onboarding.first_seen_at ?? fallback.firstSeenRaw
     const lastSyncRaw = onboarding.last_sync_at ?? fallback.lastSyncRaw
@@ -42,7 +102,7 @@ export default defineStore('node', () => {
     }
   }
 
-  function normalizeNodeRecord(node = {}, fallback = {}) {
+  function normalizeNodeRecord(node: RawNodeRecord = {}, fallback: Partial<NodeViewModel> & RawNodeRecord = {}): NodeViewModel {
     const lastSeen = node.last_seen
     const lastSyncAt = node.last_sync_at
     return {
@@ -81,14 +141,14 @@ export default defineStore('node', () => {
     }
   }
 
-  async function loadNodes() {
+  async function loadNodes(): Promise<void> {
     loading.value = true
     try {
       // 使用租户节点 API
       const tenantId = requireCurrentTenantId()
       const response = await api.get(API_ENDPOINTS.TENANT.NODES(tenantId))
       
-      let nodeData = []
+      let nodeData: RawNodeRecord[] = []
       const result = response.data
       
       // 解析响应格式
@@ -101,14 +161,15 @@ export default defineStore('node', () => {
       }
       
       if (nodeData.length > 0) {
-        nodes.value = nodeData.map(node => normalizeNodeRecord(node))
+        nodes.value = nodeData.map((node: RawNodeRecord) => normalizeNodeRecord(node))
       } else {
         nodes.value = []
       }
     } catch (error) {
       console.error('[Node Store] Failed to load nodes:', error)
-      console.error('[Node Store] Error response:', error.response)
-      if (error.response?.status === 401) {
+      const httpError = error as HttpErrorLike
+      console.error('[Node Store] Error response:', httpError.response)
+      if (httpError.response?.status === 401) {
         console.warn('[Node Store] Unauthorized: Missing or invalid token')
       }
       nodes.value = []
@@ -117,7 +178,7 @@ export default defineStore('node', () => {
     }
   }
 
-  async function loadNodeDetail(id) {
+  async function loadNodeDetail(id: string): Promise<NodeViewModel> {
     const tenantId = requireCurrentTenantId()
     const [detailResult, monitorResult, statusResult, commandsResult] = await Promise.allSettled([
       api.get(API_ENDPOINTS.TENANT.NODE_DETAIL(tenantId, id)),
@@ -137,17 +198,17 @@ export default defineStore('node', () => {
       console.warn('[Node Store] Failed to load node command history:', commandsResult.reason)
     }
 
-    const detailResponse = detailResult.status === 'fulfilled' ? detailResult.value : { data: {} }
-    const monitorDetail = monitorResult.status === 'fulfilled' ? (monitorResult.value || {}) : {}
-    const statusResponse = statusResult.status === 'fulfilled' ? (statusResult.value || {}) : {}
-    const commandsResponse = commandsResult.status === 'fulfilled' ? (commandsResult.value || {}) : {}
-    const detail = detailResponse.data?.data || detailResponse.data || {}
+    const detailResponse = (detailResult.status === 'fulfilled' ? detailResult.value : { data: {} }) as RawNodeRecord
+    const monitorDetail = (monitorResult.status === 'fulfilled' ? (monitorResult.value || {}) : {}) as RawNodeRecord
+    const statusResponse = (statusResult.status === 'fulfilled' ? (statusResult.value || {}) : {}) as RawNodeRecord
+    const commandsResponse = (commandsResult.status === 'fulfilled' ? (commandsResult.value || {}) : {}) as RawNodeRecord
+    const detail = (detailResponse.data?.data || detailResponse.data || {}) as RawNodeRecord
     const status = statusResponse || {}
     const commands = Array.isArray(commandsResponse?.items)
       ? commandsResponse.items
       : (Array.isArray(monitorDetail?.recent_commands) ? monitorDetail.recent_commands : [])
 
-    const node = {
+    const node: NodeViewModel = {
       id: detail.id || id,
       hostname: detail.hostname || monitorDetail?.hostname || 'unknown',
       ip: detail.assigned_ip || detail.private_ip || detail.public_ip || 'N/A',
@@ -196,7 +257,7 @@ export default defineStore('node', () => {
   }
 
   // 格式化时间戳（按 Asia/Shanghai 展示，不对原始时间手动加偏移）
-  function formatTimestamp(timestamp) {
+  function formatTimestamp(timestamp: string | number | null | undefined): string {
     if (!timestamp) return 'N/A'
     const date = typeof timestamp === 'number'
       ? new Date(timestamp * 1000)
@@ -215,7 +276,7 @@ export default defineStore('node', () => {
     }).format(date).replace(/\//g, '-')
   }
 
-  function formatDateTime(value) {
+  function formatDateTime(value: string | number | Date | null | undefined): string {
     if (!value) return 'N/A'
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return 'N/A'
@@ -223,7 +284,7 @@ export default defineStore('node', () => {
   }
 
   // 格式化运行时间
-  function formatUptime(lastSeen) {
+  function formatUptime(lastSeen: string | number): string {
     const lastSeenMs = typeof lastSeen === 'number'
       ? lastSeen * 1000
       : new Date(lastSeen).getTime()
@@ -237,7 +298,7 @@ export default defineStore('node', () => {
     return `${Math.floor(diff / 86400)} days`
   }
 
-  function formatDurationSeconds(seconds) {
+  function formatDurationSeconds(seconds: number): string {
     if (!seconds || seconds <= 0) return '0 minutes'
     if (seconds < 60) return `${seconds} seconds`
     if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes`
@@ -245,22 +306,22 @@ export default defineStore('node', () => {
     return `${Math.floor(seconds / 86400)} days`
   }
 
-  function getNodeById(id) {
+  function getNodeById(id: string): NodeViewModel | undefined {
     return nodes.value.find(node => node.id === id)
   }
 
-  function updateNode(updatedNode) {
+  function updateNode(updatedNode: NodeViewModel): void {
     const index = nodes.value.findIndex(node => node.id === updatedNode.id)
     if (index !== -1) {
       nodes.value[index] = { ...updatedNode }
     }
   }
 
-  function deleteNode(id) {
+  function deleteNode(id: string): void {
     nodes.value = nodes.value.filter(node => node.id !== id)
   }
 
-  async function deleteNodeRemote(id) {
+  async function deleteNodeRemote(id: string): Promise<void> {
     loading.value = true
     try {
       const tenantId = requireCurrentTenantId()
@@ -274,7 +335,7 @@ export default defineStore('node', () => {
     }
   }
 
-  async function updateNodeRemote(id, data) {
+  async function updateNodeRemote(id: string, data: RawNodeRecord): Promise<RawNodeRecord> {
     loading.value = true
     try {
       const tenantId = requireCurrentTenantId()
@@ -303,7 +364,7 @@ export default defineStore('node', () => {
     }
   }
 
-  function setCurrentNode(node) {
+  function setCurrentNode(node: NodeViewModel | null): void {
     currentNode.value = node
   }
 

@@ -887,6 +887,8 @@ git commit -m "refactor: type policy delivery API boundaries"
 
 ### Task 7: Migrate User, Tenant, and Node Stores
 
+Status: completed in `codex/frontend-stores-b14`.
+
 **Files:**
 - Rename: `frontend/src/stores/user.js` -> `frontend/src/stores/user.ts`
 - Rename: `frontend/src/stores/tenant.js` -> `frontend/src/stores/tenant.ts`

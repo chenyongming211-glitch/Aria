@@ -5,7 +5,7 @@ export interface UserProfile {
   id?: string
   username: string
   name?: string
-  role: RoleName | string
+  role?: RoleName | string
   tenant_id?: TenantId
   initials?: string
 }
@@ -17,4 +17,3 @@ export interface LoginResponse {
   permissions?: Permission[]
   must_change_password?: boolean
 }
-

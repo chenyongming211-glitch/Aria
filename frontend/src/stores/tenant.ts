@@ -1,26 +1,42 @@
-// src/stores/tenant.js
+// src/stores/tenant.ts
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/composables/useApi'
 import { API_ENDPOINTS } from '@/config/api'
 import useUserStore from '@/stores/user'
+import type { Tenant } from '@/types'
 
-function isSwitchableTenant(tenant) {
+interface HttpErrorLike {
+  response?: {
+    status?: number
+  }
+}
+
+interface TenantApiResponse {
+  data?: {
+    data?: Tenant[]
+  } | Tenant[]
+}
+
+function isSwitchableTenant(tenant: Tenant | null | undefined): boolean {
   const status = String(tenant?.status || 'active').toLowerCase()
   return status === 'active'
 }
 
 export default defineStore('tenant', () => {
-  const currentTenant = ref(null)
-  const tenants = ref([])
+  const currentTenant = ref<Tenant | null>(null)
+  const tenants = ref<Tenant[]>([])
   const loading = ref(false)
 
-  async function loadTenants() {
+  async function loadTenants(): Promise<void> {
     loading.value = true
     try {
-      const response = await api.get(API_ENDPOINTS.TENANT.LIST)
+      const response = await api.get(API_ENDPOINTS.TENANT.LIST) as TenantApiResponse
       console.log('[Tenant] API response:', response.data)
-      const allTenants = response.data?.data || response.data || []
+      const responseBody = response.data
+      const allTenants = Array.isArray(responseBody)
+        ? responseBody
+        : (Array.isArray(responseBody?.data) ? responseBody.data : [])
       tenants.value = allTenants.filter(isSwitchableTenant)
 
       // Restore from localStorage
@@ -51,7 +67,7 @@ export default defineStore('tenant', () => {
       }
     } catch (error) {
       console.error('Failed to load tenants:', error)
-      const status = error?.response?.status
+      const status = (error as HttpErrorLike)?.response?.status
       if (status === 401) {
         tenants.value = []
         currentTenant.value = null
@@ -62,7 +78,7 @@ export default defineStore('tenant', () => {
     }
   }
 
-  async function switchTenant(tenant) {
+  async function switchTenant(tenant: Tenant | null): Promise<void> {
     if (tenant && !isSwitchableTenant(tenant)) {
       console.warn('Refusing to switch to inactive tenant:', tenant)
       return
