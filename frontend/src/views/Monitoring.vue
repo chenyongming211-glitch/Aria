@@ -433,6 +433,13 @@ const isStatCardClickable = (key?: string) => ['nodes', 'failed', 'alerts', 'cer
 
 const handleMetricSelect = (metric: AnyRecord = {}) => handleStatCardClick(metric.key)
 
+const normalizeContextRecord = (context: unknown): AnyRecord => {
+  if (!context || typeof context !== 'object' || Array.isArray(context)) {
+    return {}
+  }
+  return context as AnyRecord
+}
+
 // --- Methods ---
 const loadStats = async () => {
   try {
@@ -504,7 +511,7 @@ const onPageChange = () => {
 }
 
 const buildResolvePayload = (alert: AnyRecord = {}) => {
-  const context = alert.context || {}
+  const context = normalizeContextRecord(alert.context)
   return {
     source: 'monitoring',
     reason: 'Resolved from Monitoring',
@@ -544,7 +551,7 @@ const isActionableAlert = (alert: AnyRecord = {}) => (
 const alertCommandKey = (alert: AnyRecord = {}, command = '') => `${alert?.id || alert?.node_id || 'alert'}:${command}`
 
 const buildAlertCommandParams = (alert: AnyRecord = {}) => {
-  const context = alert.context || {}
+  const context = normalizeContextRecord(alert.context)
   return {
     source: 'monitoring',
     alert_id: alert.id || '',
@@ -561,7 +568,7 @@ const commandIdFromResponse = (response: AnyRecord = {}) => (
 
 const openQueuedCommandFromAlert = (alert: AnyRecord = {}, commandId = '') => {
   if (!alert?.node_id) return
-  const context = alert.context || {}
+  const context = normalizeContextRecord(alert.context)
   router.push({
     name: 'NodeMonitorDetail',
     params: { nodeId: alert.node_id },
@@ -576,7 +583,7 @@ const openQueuedCommandFromAlert = (alert: AnyRecord = {}, commandId = '') => {
 }
 
 const buildAlertAIQuery = (alert: AnyRecord = {}) => {
-  const context = alert.context || {}
+  const context = normalizeContextRecord(alert.context)
   return {
     source: 'monitoring',
     ...(alert.node_id ? { nodeId: alert.node_id } : {}),
@@ -695,51 +702,55 @@ const buildNodeQuery = (context: AnyRecord = {}, focus = '') => {
   return query
 }
 
-const defaultNodeFocus = (context: AnyRecord = {}, eventType = '') => {
-  if (context.command_id) return 'commands'
-  if (context.policy_ref) return 'policies'
+const defaultNodeFocus = (context: unknown = {}, eventType = '') => {
+  const normalized = normalizeContextRecord(context)
+  if (normalized.command_id) return 'commands'
+  if (normalized.policy_ref) return 'policies'
   if (String(eventType).startsWith('certificate_')) return 'certificate'
   return 'alerts'
 }
 
 const goToNodeFromAlert = (alert: AnyRecord) => {
   if (!alert?.node_id) return
+  const context = normalizeContextRecord(alert.context)
   router.push({
     name: 'NodeMonitorDetail',
     params: { nodeId: alert.node_id },
     query: buildNodeQuery({
       alertId: alert.id,
       eventType: alert.alert_type,
-      command_id: alert.context?.command_id,
-      policy_ref: alert.context?.policy_ref,
-      policy_domain: alert.context?.policy_domain
-    }, defaultNodeFocus(alert.context, alert.alert_type))
+      command_id: context.command_id,
+      policy_ref: context.policy_ref,
+      policy_domain: context.policy_domain
+    }, defaultNodeFocus(context, alert.alert_type))
   })
 }
 
 const goToNodeFromEvent = (event: AnyRecord, explicitFocus = '') => {
   if (!event?.node_id) return
+  const detail = normalizeContextRecord(event.detail)
   router.push({
     name: 'NodeMonitorDetail',
     params: { nodeId: event.node_id },
     query: buildNodeQuery({
       eventId: event.id,
       eventType: event.event_type,
-      command_id: event.detail?.command_id,
-      policy_ref: event.detail?.policy_ref,
-      policy_domain: event.detail?.policy_domain
-    }, explicitFocus || defaultNodeFocus(event.detail, event.event_type))
+      command_id: detail.command_id,
+      policy_ref: detail.policy_ref,
+      policy_domain: detail.policy_domain
+    }, explicitFocus || defaultNodeFocus(detail, event.event_type))
   })
 }
 
 const goToPolicyFromContext = (nodeId: string, context: AnyRecord = {}) => {
+  const normalized = normalizeContextRecord(context)
   router.push({
     name: 'Policies',
     query: {
       ...(nodeId ? { nodeId } : {}),
-      ...(context.policy_ref ? { policyRef: context.policy_ref } : {}),
-      ...(context.policy_domain ? { kind: context.policy_domain } : {}),
-      ...(context.command_id ? { commandId: context.command_id } : {})
+      ...(normalized.policy_ref ? { policyRef: normalized.policy_ref } : {}),
+      ...(normalized.policy_domain ? { kind: normalized.policy_domain } : {}),
+      ...(normalized.command_id ? { commandId: normalized.command_id } : {})
     }
   })
 }

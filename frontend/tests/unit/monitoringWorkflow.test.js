@@ -361,6 +361,28 @@ describe('monitoring workflow routing', () => {
     })
   })
 
+  it('routes alerts with null context to node detail without throwing', async () => {
+    const wrapper = mountWithStubs(Monitoring)
+    await flushPromises()
+
+    wrapper.vm.goToNodeFromAlert({
+      id: 'alert-without-context',
+      node_id: 'node-1',
+      alert_type: 'sync_failed',
+      context: null
+    })
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-1' },
+      query: {
+        focus: 'alerts',
+        alertId: 'alert-without-context',
+        eventType: 'sync_failed'
+      }
+    })
+  })
+
   it('routes from an event to policy center with node and policy filters', async () => {
     const wrapper = mountWithStubs(Monitoring)
     await flushPromises()
@@ -443,6 +465,28 @@ describe('monitoring workflow routing', () => {
         focus: 'certificate',
         eventId: 'event-cert-1',
         eventType: 'certificate_renewed'
+      }
+    })
+  })
+
+  it('routes events with null detail to node detail without throwing', async () => {
+    const wrapper = mountWithStubs(Monitoring)
+    await flushPromises()
+
+    wrapper.vm.goToNodeFromEvent({
+      id: 'event-without-detail',
+      node_id: 'node-1',
+      event_type: 'node_offline',
+      detail: null
+    })
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-1' },
+      query: {
+        focus: 'alerts',
+        eventId: 'event-without-detail',
+        eventType: 'node_offline'
       }
     })
   })
