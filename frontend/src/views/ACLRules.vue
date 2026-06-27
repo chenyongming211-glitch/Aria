@@ -265,7 +265,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 import { useAclApi } from '@/composables/useAclApi'
@@ -281,6 +281,7 @@ import {
 
 const { hasPermission } = usePermission()
 const route = useRoute() || { query: {}, fullPath: '' }
+const router = useRouter()
 
 const loading = ref(false)
 const rules = ref([])
@@ -479,6 +480,46 @@ const canRetryPolicy = (row) => {
   return isRetryablePolicyStatus(row?.policy_status || row?.policyStatus)
 }
 
+const commandIdForRetryResult = (result) => {
+  return result?.last_delivery_command_id ||
+    result?.lastDeliveryCommandId ||
+    result?.last_delivery?.command_id ||
+    result?.lastDelivery?.command_id ||
+    ''
+}
+
+const policyRefForRule = (row, result) => {
+  return result?.policy_ref ||
+    result?.policyRef ||
+    row?.policy_ref ||
+    row?.id ||
+    ''
+}
+
+const openCommandTrace = (row, result) => {
+  const commandId = commandIdForRetryResult(result)
+  if (!commandId) {
+    return
+  }
+
+  const nodeId = result?.node_id || result?.nodeId || row?.node_id || filters.node_id
+  if (!nodeId) {
+    return
+  }
+
+  const policyRef = policyRefForRule(row, result)
+  router.push({
+    name: 'NodeMonitorDetail',
+    params: { nodeId },
+    query: {
+      commandId,
+      focus: 'commands',
+      ...(policyRef ? { policyRef: String(policyRef) } : {}),
+      policyDomain: 'acl'
+    }
+  })
+}
+
 const handleRetry = async (row) => {
   if (!hasPermission('acls:write')) {
     ElMessage.error('缺少 ACL 管理权限')
@@ -486,9 +527,10 @@ const handleRetry = async (row) => {
   }
 
   try {
-    await useAclApi.retryACLPolicySync(row)
+    const result = await useAclApi.retryACLPolicySync(row)
     ElMessage.success('重试下发已排队')
-    loadRules()
+    await loadRules()
+    openCommandTrace(row, result)
   } catch (error) {
     ElMessage.error('重试失败: ' + (error.message || '未知错误'))
   }

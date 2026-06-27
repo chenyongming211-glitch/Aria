@@ -25,10 +25,20 @@ const {
     ])
   },
   aclApiMock: {
-    getACLRulesByNode: vi.fn(async () => [])
+    getACLRulesByNode: vi.fn(async () => []),
+    retryACLPolicySync: vi.fn(async () => ({
+      policy_ref: 'acl-special',
+      policy_status: 'pending',
+      last_delivery_command_id: 'cmd-acl-retry'
+    }))
   },
   qosApiMock: {
-    getQoSRulesByNode: vi.fn(async () => [])
+    getQoSRulesByNode: vi.fn(async () => []),
+    retryQoSPolicySync: vi.fn(async () => ({
+      policy_ref: 'qos-special',
+      policyStatus: 'pending',
+      last_delivery_command_id: 'cmd-qos-retry'
+    }))
   },
   routeApiMock: {
     getRoutes: vi.fn(async () => [
@@ -215,7 +225,9 @@ describe('policy page context handoff', () => {
     routerPush.mockReset()
     tenantApiMock.getTenantNodes.mockClear()
     aclApiMock.getACLRulesByNode.mockClear()
+    aclApiMock.retryACLPolicySync.mockClear()
     qosApiMock.getQoSRulesByNode.mockClear()
+    qosApiMock.retryQoSPolicySync.mockClear()
     routeApiMock.getRoutes.mockClear()
     ipGroupApiMock.listIPGroups.mockClear()
     policyApiMock.listPolicies.mockClear()
@@ -314,6 +326,41 @@ describe('policy page context handoff', () => {
     }))
   })
 
+  it('routes ACL retry to the node command trace', async () => {
+    routeState.query = {
+      nodeId: 'node-2',
+      policyRef: 'acl-special',
+      commandId: 'cmd-2'
+    }
+    routeState.fullPath = '/acl?nodeId=node-2&policyRef=acl-special&commandId=cmd-2'
+
+    const wrapper = mountWithStubs(ACLRules)
+    await flushPromises()
+    routerPush.mockReset()
+
+    await wrapper.vm.handleRetry({
+      id: 'acl-special',
+      node_id: 'node-2',
+      name: 'ACL special',
+      policy_status: 'error'
+    })
+
+    expect(aclApiMock.retryACLPolicySync).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'acl-special',
+      node_id: 'node-2'
+    }))
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-2' },
+      query: {
+        commandId: 'cmd-acl-retry',
+        focus: 'commands',
+        policyRef: 'acl-special',
+        policyDomain: 'acl'
+      }
+    })
+  })
+
   it('loads the QoS page against the node from route context', async () => {
     routeState.query = {
       nodeId: 'node-2',
@@ -327,6 +374,41 @@ describe('policy page context handoff', () => {
 
     expect(wrapper.vm.selectedNodeId).toBe('node-2')
     expect(qosApiMock.getQoSRulesByNode).toHaveBeenCalledWith('node-2')
+  })
+
+  it('routes QoS retry to the node command trace', async () => {
+    routeState.query = {
+      nodeId: 'node-2',
+      policyRef: 'qos-special',
+      commandId: 'cmd-qos'
+    }
+    routeState.fullPath = '/qos?nodeId=node-2&policyRef=qos-special&commandId=cmd-qos'
+
+    const wrapper = mountWithStubs(BandwidthControl)
+    await flushPromises()
+    routerPush.mockReset()
+
+    await wrapper.vm.handleRetry({
+      id: 'qos-special',
+      node_id: 'node-2',
+      description: 'QoS special',
+      policyStatus: 'error'
+    })
+
+    expect(qosApiMock.retryQoSPolicySync).toHaveBeenCalledWith('node-2', expect.objectContaining({
+      id: 'qos-special',
+      node_id: 'node-2'
+    }))
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-2' },
+      query: {
+        commandId: 'cmd-qos-retry',
+        focus: 'commands',
+        policyRef: 'qos-special',
+        policyDomain: 'qos'
+      }
+    })
   })
 
   it('loads routing page filters from route context', async () => {

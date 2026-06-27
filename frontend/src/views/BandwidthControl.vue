@@ -205,7 +205,7 @@
 
 <script setup>
 import { computed, ref, reactive, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useQosApi } from '@/composables/useQosApi'
@@ -221,6 +221,7 @@ import {
 
 const { hasPermission } = usePermission()
 const route = useRoute() || { query: {}, fullPath: '' }
+const router = useRouter()
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -497,6 +498,41 @@ const canRetryPolicy = (row) => {
   return isRetryablePolicyStatus(row?.policyStatus || row?.policy_status)
 }
 
+const commandIdForRetryResult = (result) => {
+  return result?.last_delivery_command_id ||
+    result?.lastDeliveryCommandId ||
+    result?.last_delivery?.command_id ||
+    result?.lastDelivery?.command_id ||
+    ''
+}
+
+const policyRefForRule = (row, result) => {
+  return result?.policy_ref ||
+    result?.policyRef ||
+    row?.policy_ref ||
+    row?.id ||
+    ''
+}
+
+const openCommandTrace = (nodeId, row, result) => {
+  const commandId = commandIdForRetryResult(result)
+  if (!commandId || !nodeId) {
+    return
+  }
+
+  const policyRef = policyRefForRule(row, result)
+  router.push({
+    name: 'NodeMonitorDetail',
+    params: { nodeId },
+    query: {
+      commandId,
+      focus: 'commands',
+      ...(policyRef ? { policyRef: String(policyRef) } : {}),
+      policyDomain: 'qos'
+    }
+  })
+}
+
 const handleRetry = async (row) => {
   if (!hasPermission('qos:write')) {
     ElMessage.error('缺少 QoS 管理权限')
@@ -504,9 +540,11 @@ const handleRetry = async (row) => {
   }
 
   try {
-    await useQosApi.retryQoSPolicySync(selectedNodeId.value || row.node_id, row)
+    const nodeId = selectedNodeId.value || row.node_id
+    const result = await useQosApi.retryQoSPolicySync(nodeId, row)
     ElMessage.success('重试下发已排队')
-    refreshData()
+    await refreshData()
+    openCommandTrace(nodeId, row, result)
   } catch (error) {
     ElMessage.error(`重试失败: ${error.message || '未知错误'}`)
   }
