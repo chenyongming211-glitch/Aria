@@ -46,6 +46,8 @@
 - `IP Group` 页面也会保留来自 Policy Center / Monitoring 的节点、策略、命令上下文，并可回跳到节点详情或 `Policy Center`
 - Node Detail 与策略页面都兼容 camelCase 和 snake_case 上下文参数，Monitoring、Policy Center、IP Group 之间不会再丢失 `commandId` 或 `policyDomain/kind`
 - `Policy Center` 对仅包含 `nodeId` 或 `kind` 的列表上下文只做筛选，不再自动打开任意第一条策略，避免把列表筛选误导成具体策略定位
+- 2026-06-28 分支 `codex/frontend-workflow-closure` 继续补齐了三类上下文边界：Monitoring alert/event 的空 context 容错、Nodes 最近命令/活跃告警行级跳转、ACL/QoS/Route/IP Group 策略页回节点详情时自动聚焦 `commands` 或 `policies`
+- 这批分支验证已通过 GitHub Actions：`28297743229`、`28297930570`、`28298116308`
 - 但这些页面仍是多入口工作流，不是单一运维工作台
 - 因此这里应表述为“基础对齐完成”，不应再写成“已完全修复”
 

@@ -1,6 +1,6 @@
 # 测试覆盖状态（v0.1.0）
 
-**更新时间**: 2026-05-29
+**更新时间**: 2026-06-28
 
 ## 1. 当前状态
 
@@ -10,6 +10,7 @@
 - ✅ 自动证书签发（`issue/renew`）已补齐核心 API 行为测试（鉴权/参数/续签链路/错误契约）
 - ✅ Settings / Backup 已覆盖 `super_admin` 权限边界、备份生命周期、上传、下载与恢复行为
 - ✅ 前端单测已接入 CI（`npm run test:run`）
+- ✅ 前端工作流上下文测试已覆盖 `Nodes`、`Monitoring`、`Policy Center`、ACL、QoS、Route、IP Group 之间的 `nodeId`、`policyRef`、`policyDomain/kind`、`commandId` 保真与跳转聚焦
 
 ## 2. 已覆盖重点
 
@@ -41,11 +42,15 @@
 - 路由权限元信息与 guard 跳转
 - 关键页面按钮和菜单可见性/禁用态
 - Settings 下载通过鉴权 API 客户端获取 blob，避免裸浏览器跳转绕过请求拦截器
+- `Monitoring` alert/event context 容错：缺失 `context` / `detail` 时仍能跳到节点详情的告警视图
+- `Nodes` 最近命令和活跃告警行级跳转：能携带 `commandId`、`alertId`、`eventType`、`policyRef`、`policyDomain`
+- 策略专页上下文回跳：ACL、QoS、Route、IP Group 页面回节点详情时根据命令或策略上下文聚焦 `commands` / `policies`
 
 ## 3. CI 状态
 
 - 后端测试与前端单测均已纳入 GitHub Actions
 - 最近多轮提交持续通过，测试基线稳定
+- `codex/frontend-workflow-closure` 分支最近三批前端工作流修复均通过完整 Actions：`28297743229`、`28297930570`、`28298116308`
 
 ## 4. 可选增强（非阻塞 v0.1.0）
 
