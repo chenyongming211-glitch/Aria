@@ -776,6 +776,23 @@ describe('policy center context handling', () => {
     expect(wrapper.vm.detailVisible).toBe(true)
   })
 
+  it('uses node-only context as a list filter without auto-opening an arbitrary policy', async () => {
+    routeState.query = {
+      node_id: 'node-1'
+    }
+    routeState.fullPath = '/policy-center?node_id=node-1'
+
+    const wrapper = mountWithStubs(Policies)
+    await flushPromises()
+
+    expect(wrapper.vm.filters.nodeId).toBe('node-1')
+    expect(wrapper.vm.filteredPolicies).toHaveLength(1)
+    expect(wrapper.vm.filteredPolicies[0].policyRef).toBe('acl-1')
+    expect(wrapper.vm.selectedPolicy).toBeNull()
+    expect(wrapper.vm.detailVisible).toBe(false)
+    expect(wrapper.vm.policyRowClassName({ row: { policyId: 'policy-1' } })).toBe('')
+  })
+
   it('routes back to node detail while preserving policy delivery context', async () => {
     const wrapper = mountWithStubs(Policies)
     await flushPromises()

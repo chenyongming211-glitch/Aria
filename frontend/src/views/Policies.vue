@@ -472,6 +472,9 @@ const findContextPolicy = (): NormalizedPolicy | null => {
   if (!hasRouteContext.value) {
     return null
   }
+  if (!routeContext.value.policyRef && !routeContext.value.commandId) {
+    return null
+  }
   return filteredPolicies.value.find((policy) => {
     if (routeContext.value.nodeId && policy.nodeId !== routeContext.value.nodeId) {
       return false
