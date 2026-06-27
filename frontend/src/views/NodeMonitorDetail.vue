@@ -594,7 +594,11 @@ const resolveContextAlert = async () => {
 
   resolvingContextAlert.value = true
   try {
-    await useMonitorApi.resolveAlert(contextQuery.value.alertId)
+    await useMonitorApi.resolveAlert(contextQuery.value.alertId, {
+      source: 'node_monitor_detail',
+      reason: 'Resolved from node monitoring detail',
+      ...(contextQuery.value.commandId ? { command_id: contextQuery.value.commandId } : {})
+    })
     ElMessage.success('Alert resolved')
     await loadNode()
   } catch (e) {

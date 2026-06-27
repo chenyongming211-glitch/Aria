@@ -80,11 +80,12 @@ export const useMonitorApi = {
   /**
    * 手动解除告警
    * @param {string} alertId - 告警ID
+   * @param {Object} payload - 可选处理上下文
    */
-  resolveAlert: async (alertId) => {
+  resolveAlert: async (alertId, payload = {}) => {
     try {
       const tenantId = requireCurrentTenantId()
-      const response = await api.post(API_ENDPOINTS.MONITOR.ALERT_RESOLVE(tenantId, alertId))
+      const response = await api.post(API_ENDPOINTS.MONITOR.ALERT_RESOLVE(tenantId, alertId), payload)
       return response.data?.data || response.data
     } catch (error) {
       console.error('解除告警失败:', error)

@@ -3,7 +3,10 @@ package v2
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"math"
 	"net/http"
 	"regexp"
@@ -413,6 +416,18 @@ func (r *Router) handleMonitoringAlertResolve(w http.ResponseWriter, req *http.R
 		return
 	}
 
+	var body struct {
+		Reason    string `json:"reason"`
+		Source    string `json:"source"`
+		CommandID string `json:"command_id"`
+	}
+	if req.Body != nil {
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil && err != io.EOF {
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Invalid request body: "+err.Error(), nil)
+			return
+		}
+	}
+
 	// Verify alert exists and belongs to tenant
 	existing, err := r.store.GetAlertByID(alertUUID)
 	if err != nil {
@@ -439,19 +454,38 @@ func (r *Router) handleMonitoringAlertResolve(w http.ResponseWriter, req *http.R
 	}
 
 	// Create alert_resolved audit event
-	r.store.CreateAuditEvent(&controllerstorage.AuditEvent{
+	if _, err := r.store.CreateAuditEvent(&controllerstorage.AuditEvent{
 		TenantID:  tenantID,
 		NodeID:    existing.NodeID,
 		EventType: "alert_resolved",
 		Actor:     "user",
 		Summary:   "Alert resolved: " + existing.Title,
-		Detail: map[string]interface{}{
-			"alert_id":   existing.ID.String(),
-			"alert_type": existing.AlertType,
-		},
-	})
+		Detail:    alertResolveAuditDetail(existing, body.Reason, body.Source, body.CommandID),
+	}); err != nil {
+		log.Printf("[api/v2] failed to create alert_resolved audit event for alert %s: %v", existing.ID, err)
+	}
 
 	apibase.WriteSuccess(w, resolved, "Alert resolved")
+}
+
+func alertResolveAuditDetail(alert *controllerstorage.Alert, reason, source, commandID string) map[string]interface{} {
+	detail := map[string]interface{}{}
+	if alert != nil {
+		detail = map[string]interface{}{
+			"alert_id":   alert.ID.String(),
+			"alert_type": alert.AlertType,
+		}
+	}
+	if strings.TrimSpace(reason) != "" {
+		detail["reason"] = strings.TrimSpace(reason)
+	}
+	if strings.TrimSpace(source) != "" {
+		detail["source"] = strings.TrimSpace(source)
+	}
+	if strings.TrimSpace(commandID) != "" {
+		detail["command_id"] = strings.TrimSpace(commandID)
+	}
+	return detail
 }
 
 // computeStateConvergence determines the convergence status from a NodeControlState.

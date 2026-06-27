@@ -173,7 +173,7 @@
                 type="warning"
                 plain
                 :loading="resolvingId === row.id"
-                @click="handleResolve(row.id)"
+                @click="handleResolve(row)"
               >
                 Resolve
               </el-button>
@@ -502,15 +502,29 @@ const onPageChange = () => {
   loadEvents()
 }
 
-const handleResolve = async (alertId) => {
+const buildResolvePayload = (alert = {}) => {
+  const context = alert.context || {}
+  return {
+    source: 'monitoring',
+    reason: 'Resolved from Monitoring',
+    ...(context.command_id ? { command_id: context.command_id } : {})
+  }
+}
+
+const handleResolve = async (alert) => {
   if (!hasPermission('commands:write')) {
     ElMessage.error('Missing command permission')
+    return
+  }
+  const alertId = typeof alert === 'string' ? alert : alert?.id
+  if (!alertId) {
+    ElMessage.error('Alert context is missing')
     return
   }
 
   try {
     resolvingId.value = alertId
-    await useMonitorApi.resolveAlert(alertId)
+    await useMonitorApi.resolveAlert(alertId, buildResolvePayload(typeof alert === 'string' ? {} : alert))
     ElMessage.success('Alert resolved')
     await Promise.all([loadStats(), loadEvents(), loadAlerts()])
   } catch (e) {

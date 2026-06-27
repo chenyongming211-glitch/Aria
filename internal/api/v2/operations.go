@@ -2,6 +2,7 @@ package v2
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -109,6 +110,7 @@ func (r *Router) handleTenantNodeAgentCommand(w http.ResponseWriter, req *http.R
 		apibase.WriteError(w, http.StatusInternalServerError, codeCommandDispatchFailed, "Failed to queue command: "+err.Error(), nil)
 		return
 	}
+	r.recordAgentCommandQueuedAudit(req, node, cmd)
 
 	apibase.WriteSuccess(w, map[string]interface{}{
 		"command_id":      cmd.ID,
@@ -244,6 +246,7 @@ func (r *Router) handleTenantBatchAgentCommand(w http.ResponseWriter, req *http.
 			})
 			continue
 		}
+		r.recordAgentCommandQueuedAudit(req, node, cmd)
 
 		successCount++
 		results = append(results, map[string]interface{}{
@@ -263,6 +266,71 @@ func (r *Router) handleTenantBatchAgentCommand(w http.ResponseWriter, req *http.
 		"failed_count":  failedCount,
 		"results":       results,
 	}, "Batch command processed")
+}
+
+func (r *Router) recordAgentCommandQueuedAudit(req *http.Request, node *controllerstorage.Node, cmd *controllerstorage.AgentCommand) {
+	if r == nil || r.store == nil || node == nil || cmd == nil || node.ID == uuid.Nil || node.TenantID == uuid.Nil {
+		return
+	}
+
+	actor := "user"
+	if req != nil {
+		if username, ok := middleware.GetUsername(req.Context()); ok && strings.TrimSpace(username) != "" {
+			actor = strings.TrimSpace(username)
+		}
+	}
+
+	detail := map[string]interface{}{
+		"command_id":      cmd.ID,
+		"command":         cmd.Command,
+		"source":          "api.v2",
+		"priority":        cmd.Priority,
+		"timeout_seconds": cmd.TimeoutSeconds,
+	}
+
+	params := cmd.RawParams
+	if params == nil {
+		params = map[string]interface{}{}
+	}
+	if source := commandContextString(params, "source"); source != "" {
+		detail["source"] = source
+	}
+	for _, key := range []string{"alert_id", "event_type", "policy_ref", "policy_domain"} {
+		if value := commandContextString(params, key); value != "" {
+			detail[key] = value
+		}
+	}
+	if relatedCommandID := commandContextString(params, "command_id"); relatedCommandID != "" && relatedCommandID != cmd.ID {
+		detail["related_command_id"] = relatedCommandID
+	}
+
+	nodeID := node.ID
+	if _, err := r.store.CreateAuditEvent(&controllerstorage.AuditEvent{
+		TenantID:  node.TenantID,
+		NodeID:    &nodeID,
+		EventType: controllerstorage.AuditCommandQueued,
+		Actor:     actor,
+		Summary:   "Command queued: " + cmd.Command,
+		Detail:    detail,
+	}); err != nil {
+		log.Printf("[api/v2] failed to create command.queued audit event for node %s command %s: %v", node.ID, cmd.ID, err)
+	}
+}
+
+func commandContextString(params map[string]interface{}, key string) string {
+	if params == nil {
+		return ""
+	}
+	value, ok := params[key]
+	if !ok || value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
 }
 
 func inactiveCommandTargetMessage(node *controllerstorage.Node) string {

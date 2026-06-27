@@ -89,6 +89,69 @@ func TestNodeAgentCommandRejectsInactiveNode(t *testing.T) {
 	}
 }
 
+func TestNodeAgentCommandWritesQueuedAuditWithOperationContext(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	alertID := uuid.New()
+	commandID := uuid.New().String()
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		INSERT INTO agent_commands (node_public_key, command, params, status, priority, timeout_seconds)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, created_at, updated_at
+	`)).
+		WithArgs("node-key-1", "sync", sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, 0, 30).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow(commandID, now, now))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, tenant_id, node_id, event_type, actor, summary, detail, created_at
+	`)).
+		WithArgs(tenantID, nodeID, controllerstorage.AuditCommandQueued, "user", "Command queued: sync", jsonDetailContains{
+			"command_id":    commandID,
+			"command":       "sync",
+			"source":        "monitoring",
+			"alert_id":      alertID.String(),
+			"event_type":    "sync_failed",
+			"policy_ref":    "acl-1",
+			"policy_domain": "acl",
+		}).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at",
+		}).AddRow(uuid.New(), tenantID, nodeID.String(), controllerstorage.AuditCommandQueued, "user", "Command queued: sync", []byte(`{}`), now))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/nodes/"+nodeID.String()+"/agent/command",
+		strings.NewReader(`{"command":"sync","params":{"source":"monitoring","alert_id":"`+alertID.String()+`","event_type":"sync_failed","policy_ref":"acl-1","policy_domain":"acl"}}`))
+	rr := httptest.NewRecorder()
+
+	router.handleTenantNodeAgentCommand(rr, req, &controllerstorage.Node{
+		ID:        nodeID,
+		TenantID:  tenantID,
+		PublicKey: "node-key-1",
+		Status:    "online",
+	})
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if data["command_id"] != commandID {
+		t.Fatalf("expected command id %s, got %#v", commandID, data)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestBatchAgentCommandSkipsInactiveNodes(t *testing.T) {
 	tenantID := uuid.New()
 	activeNodeID := uuid.New()
@@ -113,6 +176,19 @@ func TestBatchAgentCommandSkipsInactiveNodes(t *testing.T) {
 	`)).
 		WithArgs("active-node-key", "sync", sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, 0, 30).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow(commandID, now, now))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, tenant_id, node_id, event_type, actor, summary, detail, created_at
+	`)).
+		WithArgs(tenantID, activeNodeID, controllerstorage.AuditCommandQueued, "user", "Command queued: sync", jsonDetailContains{
+			"command_id": commandID,
+			"command":    "sync",
+			"source":     "api.v2",
+		}).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at",
+		}).AddRow(uuid.New(), tenantID, activeNodeID.String(), controllerstorage.AuditCommandQueued, "user", "Command queued: sync", []byte(`{}`), now))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/agents/command",

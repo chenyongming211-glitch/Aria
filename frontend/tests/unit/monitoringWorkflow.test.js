@@ -445,6 +445,30 @@ describe('monitoring workflow routing', () => {
     expect(monitorApiMock.getAlerts).toHaveBeenCalled()
   })
 
+  it('resolves an alert with monitoring operation context', async () => {
+    const wrapper = mountWithStubs(Monitoring)
+    await flushPromises()
+
+    await wrapper.vm.handleResolve({
+      id: 'alert-sync-1',
+      alert_type: 'sync_failed',
+      context: {
+        command_id: 'cmd-old',
+        policy_ref: 'acl-1',
+        policy_domain: 'acl'
+      }
+    })
+
+    expect(monitorApiMock.resolveAlert).toHaveBeenCalledWith('alert-sync-1', {
+      source: 'monitoring',
+      reason: 'Resolved from Monitoring',
+      command_id: 'cmd-old'
+    })
+    expect(monitorApiMock.getStats).toHaveBeenCalled()
+    expect(monitorApiMock.getEvents).toHaveBeenCalled()
+    expect(monitorApiMock.getAlerts).toHaveBeenCalled()
+  })
+
   it('routes actionable alerts to AI with full diagnostic context', async () => {
     const wrapper = mountWithStubs(Monitoring)
     await flushPromises()
@@ -559,7 +583,11 @@ describe('node monitor detail context handling', () => {
 
     await wrapper.vm.resolveContextAlert()
 
-    expect(monitorApiMock.resolveAlert).toHaveBeenCalledWith('alert-1')
+    expect(monitorApiMock.resolveAlert).toHaveBeenCalledWith('alert-1', {
+      source: 'node_monitor_detail',
+      reason: 'Resolved from node monitoring detail',
+      command_id: 'cmd-1'
+    })
     expect(monitorApiMock.getNodeDetail.mock.calls.length).toBeGreaterThan(callsBeforeResolve)
   })
 

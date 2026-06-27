@@ -2215,7 +2215,11 @@ func TestMonitoringAPI_AlertResolveAlreadyResolvedReturns400(t *testing.T) {
 		))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
-	req := withSuperAdmin(httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts/"+alertID.String()+"/resolve", nil), tenantID)
+	req := withSuperAdmin(
+		httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts/"+alertID.String()+"/resolve",
+			strings.NewReader(`{"reason":"sync succeeded after manual retry","source":"node_monitor_detail","command_id":"cmd-123"}`)),
+		tenantID,
+	)
 	rr := httptest.NewRecorder()
 
 	router.HandleTenantScoped(rr, req)
@@ -2261,7 +2265,11 @@ func TestMonitoringAPI_AlertResolveCrossTenantReturns404(t *testing.T) {
 		))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
-	req := withSuperAdmin(httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts/"+alertID.String()+"/resolve", nil), tenantID)
+	req := withSuperAdmin(
+		httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts/"+alertID.String()+"/resolve",
+			strings.NewReader(`{"reason":"sync succeeded after manual retry","source":"node_monitor_detail","command_id":"cmd-123"}`)),
+		tenantID,
+	)
 	rr := httptest.NewRecorder()
 
 	router.HandleTenantScoped(rr, req)
@@ -2324,13 +2332,23 @@ func TestMonitoringAPI_AlertResolveSuccessReturnsResolvedAlert(t *testing.T) {
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, tenant_id, node_id, event_type, actor, summary, detail, created_at
 	`)).
-		WithArgs(tenantID, nodeID, "alert_resolved", "user", "Alert resolved: Latency high", sqlmock.AnyArg()).
+		WithArgs(tenantID, nodeID, "alert_resolved", "user", "Alert resolved: Latency high", jsonDetailContains{
+			"alert_id":   alertID.String(),
+			"alert_type": "high_latency",
+			"reason":     "sync succeeded after manual retry",
+			"source":     "node_monitor_detail",
+			"command_id": "cmd-123",
+		}).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at",
 		}).AddRow(uuid.New(), tenantID, nodeID.String(), "alert_resolved", "user", "Alert resolved: Latency high", []byte(`{}`), now))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
-	req := withSuperAdmin(httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts/"+alertID.String()+"/resolve", nil), tenantID)
+	req := withSuperAdmin(
+		httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/monitoring/alerts/"+alertID.String()+"/resolve",
+			strings.NewReader(`{"reason":"sync succeeded after manual retry","source":"node_monitor_detail","command_id":"cmd-123"}`)),
+		tenantID,
+	)
 	rr := httptest.NewRecorder()
 
 	router.HandleTenantScoped(rr, req)

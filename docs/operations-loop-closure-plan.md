@@ -305,25 +305,23 @@ IM 联动作为第二阶段：
 
 运维闭环完成后，至少应能通过以下验收：
 
-### 2026-06-25 当前收口状态
+### 2026-06-27 当前收口状态
 
 - Monitoring 已能从 active alert 跳 Node Detail / Policy Center，并能直接下发 `sync` 或 `health_check`。
 - Node Detail 已能携带 alert、policy、command 上下文执行 `sync` / `health_check`，并能人工 resolve 当前 alert。
-- Monitoring 和 Node Detail 已新增 Ask AI 入口；AI 页面会用告警上下文预填诊断提示，但不会自动执行写操作。
-- 本阶段剩余工作是线上制造或复用 `sync_failed / policy_failed / node_offline`，验证“告警 -> Ask AI -> 人工确认命令 -> Agent 回写 -> resolve/失败留痕”。
+- 旧 Ask AI 链路不作为 v0.1.0 验收前置条件；后续由 Hermes Agent 重新设计 AI 建议和确认链路。
+- 本批次补齐了人工命令确认的 `command.queued` audit，以及 Resolve Alert 的 `reason/source/command_id` 留痕。
+- 本阶段剩余工作是线上制造或复用 `sync_failed / policy_failed / node_offline`，验证“告警 -> 人工确认命令 -> Agent 回写 -> resolve/失败留痕”。
 
 1. 人为制造 `sync_failed` 后，Monitoring 出现 active alert。
 2. 该 alert 的 `context` 包含 `node_id`、`desired_state_version`、`applied_state_version` 和错误原因。
-3. 从 Monitoring 点击 Ask AI，AI 能读取节点、控制状态、最近命令和策略投递。
-4. AI 能给出只读解释和至少一个待确认动作。
-5. 未确认时，写工具不会执行。
-6. 用户确认 `sync` 后，Controller 创建 `agent_commands`，并写入确认审计。
-7. Agent 执行成功后，Nodes 展示最近命令成功，Monitoring 事件流展示执行结果。
-8. 若执行后 desired/applied 收敛，`sync_failed` 告警自动或人工 resolved。
-9. 若执行失败，alert 保持 active，并显示新的失败原因。
-10. 跨租户用户无法看到或确认其他租户的 alert 和 AI 动作。
-11. IM 卡片确认时，过期、权限不足、状态变化都能被拒绝。
-12. 回归测试覆盖告警创建、AI 建议、确认执行、失败留痕和 resolve。
+3. 从 Monitoring 或 Node Detail 确认 `sync` 后，Controller 创建 `agent_commands`，并写入 `command.queued` 审计。
+4. Agent 执行成功后，Nodes 展示最近命令成功，Monitoring 事件流展示执行结果。
+5. 若执行后 desired/applied 收敛，`sync_failed` 告警自动或人工 resolved。
+6. 人工 resolve 必须保留 `reason/source/command_id` 等处理证据。
+7. 若执行失败，alert 保持 active，并显示新的失败原因。
+8. 跨租户用户无法看到或确认其他租户的 alert 和处置动作。
+9. 回归测试覆盖告警创建、人工确认执行、失败留痕和 resolve。
 
 ## 实施顺序
 
