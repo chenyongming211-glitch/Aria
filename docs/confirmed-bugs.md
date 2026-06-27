@@ -7,7 +7,7 @@
 
 ---
 
-## BUG-25 到 BUG-35 闭合总览
+## BUG-25 到 BUG-37 闭合总览
 
 | Bug | 优先级 | 归属闭环 | 批次 | 当前状态 |
 | --- | --- | --- | --- | --- |
@@ -22,6 +22,8 @@
 | BUG-33 | P1 | 接入闭环 / 节点生命周期 | B1 | ✅ FIXED: hostname 复用不再回收 suspended/banned 节点 |
 | BUG-34 | P1 | 接入闭环 / 节点生命周期 | B1 | ✅ FIXED: unregister 拒绝 suspended/banned runtime token |
 | BUG-35 | P1 | 控制闭环 / Agent 命令 | B3 | ✅ FIXED: Agent command status 增加枚举和合法流转校验 |
+| BUG-36 | P1 | 控制闭环 / 节点 API 响应 | B2 | ✅ FIXED: 租户节点响应返回 `region` |
+| BUG-37 | P2 | 控制闭环 / 节点 API 响应 | B2 | ✅ FIXED: 租户节点响应返回 `vpc_id` |
 
 ## 修复计划总览
 
@@ -42,7 +44,7 @@
 
 ---
 
-## BUG-25 到 BUG-35 本轮修复详情
+## BUG-25 到 BUG-37 本轮修复详情
 
 ### BUG-25: AI 普通聊天阶段会直接执行写工具，确认弹窗未形成后端门禁
 
@@ -111,6 +113,18 @@
 - **状态**: ✅ FIXED
 - **文件**: `pkg/controllerstorage/agent_commands.go`, `pkg/controllerstorage/agent_commands_test.go`, `internal/controller/grpc/command_stream_test.go`
 - **修复结果**: Agent command status 增加支持状态枚举、行锁读取当前状态、合法流转校验和 terminal 状态保护；未知状态或 terminal downgrade 不会写入 `agent_commands` / `policy_deliveries`。
+
+### BUG-36: 节点 API 响应未返回 `region`，编辑保存后前端显示仍为 `unknown`
+
+- **状态**: ✅ FIXED
+- **文件**: `internal/api/v2/setup.go`, `internal/api/v2/node_response_security_test.go`
+- **修复结果**: `buildTenantNodeResponse()` 返回 `region`，节点列表和详情能拿到 DB 中真实区域；新增回归测试覆盖响应字段合同。
+
+### BUG-37: 节点 API 响应未返回 `vpc_id`
+
+- **状态**: ✅ FIXED
+- **文件**: `internal/api/v2/setup.go`, `internal/api/v2/node_response_security_test.go`
+- **修复结果**: `buildTenantNodeResponse()` 返回 `vpc_id`，避免节点详情响应与存储字段不一致；新增回归测试与 BUG-36 共用响应合同覆盖。
 
 ## 本轮验证命令
 

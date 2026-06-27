@@ -741,6 +741,8 @@ func (r *Router) buildTenantNodeResponse(node *controllerstorage.Node) map[strin
 		"endpoint":            node.Endpoint,
 		"private_ip":          node.PrivateIP,
 		"public_ip":           node.PublicIP,
+		"region":              node.Region,
+		"vpc_id":              node.VPCID,
 		"assigned_ip":         node.AssignedIP,
 		"ip_offset":           node.IPOffset,
 		"last_seen":           node.LastSeen,
