@@ -516,6 +516,13 @@
                 {{ formatCommandTime(row.completed_at || row.updated_at) }}
               </template>
             </el-table-column>
+            <el-table-column label="Actions" width="100">
+              <template #default="{ row }">
+                <el-button size="small" link @click="openMonitoringCommand(row)">
+                  Open
+                </el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </div>
 
@@ -547,6 +554,13 @@
             <el-table-column label="Created" width="180">
               <template #default="{ row }">
                 {{ formatCommandTime(row.created_at) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="Actions" width="100">
+              <template #default="{ row }">
+                <el-button size="small" link @click="openMonitoringAlert(row)">
+                  Open
+                </el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -1391,13 +1405,57 @@ const closeDetailDialog = () => {
   selectedNode.value = null
 }
 
-const openMonitoringDetail = (focus = '') => {
+const normalizeContextRecord = (context: unknown): AnyRecord => {
+  if (!context || typeof context !== 'object' || Array.isArray(context)) {
+    return {}
+  }
+  return context as AnyRecord
+}
+
+const buildMonitoringQuery = (focus = '', context: AnyRecord = {}) => {
+  const query: Record<string, string> = {}
+  if (focus) query.focus = focus
+  if (context.commandId) query.commandId = String(context.commandId)
+  if (context.alertId) query.alertId = String(context.alertId)
+  if (context.eventType) query.eventType = String(context.eventType)
+  if (context.policyRef) query.policyRef = String(context.policyRef)
+  if (context.policyDomain) query.policyDomain = String(context.policyDomain)
+  return query
+}
+
+const openMonitoringDetail = (focus = '', context: AnyRecord = {}) => {
   if (!selectedNode.value?.id) return
+  const query = buildMonitoringQuery(focus, context)
   detailDialogVisible.value = false
   router.push({
     name: 'NodeMonitorDetail',
     params: { nodeId: selectedNode.value.id },
-    ...(focus ? { query: { focus } } : {})
+    ...(Object.keys(query).length > 0 ? { query } : {})
+  })
+}
+
+const openMonitoringCommand = (command: AnyRecord = {}) => {
+  openMonitoringDetail('commands', {
+    commandId: command.id
+  })
+}
+
+const monitoringFocusForAlert = (alert: AnyRecord = {}) => {
+  const context = normalizeContextRecord(alert.context)
+  if (context.command_id) return 'commands'
+  if (context.policy_ref) return 'policies'
+  if (String(alert.alert_type || '').startsWith('certificate_')) return 'certificate'
+  return 'alerts'
+}
+
+const openMonitoringAlert = (alert: AnyRecord = {}) => {
+  const context = normalizeContextRecord(alert.context)
+  openMonitoringDetail(monitoringFocusForAlert(alert), {
+    alertId: alert.id,
+    eventType: alert.alert_type,
+    commandId: context.command_id,
+    policyRef: context.policy_ref,
+    policyDomain: context.policy_domain
   })
 }
 

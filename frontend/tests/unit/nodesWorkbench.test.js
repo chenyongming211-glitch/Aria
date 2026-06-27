@@ -379,6 +379,60 @@ describe('Nodes workbench detail', () => {
     })
   })
 
+  it('opens node monitoring with row-level command and alert context', async () => {
+    const wrapper = mountNodes()
+    await wrapper.vm.viewNodeDetails(mockNodeStore.nodes[0])
+
+    wrapper.vm.openMonitoringCommand({ id: 'cmd-policy-1' })
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-1' },
+      query: {
+        focus: 'commands',
+        commandId: 'cmd-policy-1'
+      }
+    })
+
+    wrapper.vm.detailDialogVisible = true
+    wrapper.vm.openMonitoringAlert({
+      id: 'alert-policy-1',
+      alert_type: 'policy_failed',
+      context: {
+        command_id: 'cmd-policy-1',
+        policy_ref: 'acl-1',
+        policy_domain: 'acl'
+      }
+    })
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-1' },
+      query: {
+        focus: 'commands',
+        alertId: 'alert-policy-1',
+        eventType: 'policy_failed',
+        commandId: 'cmd-policy-1',
+        policyRef: 'acl-1',
+        policyDomain: 'acl'
+      }
+    })
+
+    wrapper.vm.detailDialogVisible = true
+    wrapper.vm.openMonitoringAlert({
+      id: 'alert-cert-1',
+      alert_type: 'certificate_expiring',
+      context: null
+    })
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-1' },
+      query: {
+        focus: 'certificate',
+        alertId: 'alert-cert-1',
+        eventType: 'certificate_expiring'
+      }
+    })
+  })
+
   it('opens onboarding wizard, creates an enrollment token, and builds install and init commands', async () => {
     const writeText = vi.fn(async () => {})
     Object.defineProperty(navigator, 'clipboard', {
