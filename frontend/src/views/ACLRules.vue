@@ -1,53 +1,59 @@
 <template>
-  <div class="acl-rules-container">
-    <div class="page-header">
-      <h2>ACL 规则管理</h2>
-      <el-button v-if="hasPermission('acls:write')" type="primary" @click="handleCreate">
-        <el-icon><Plus /></el-icon>
-        新建规则
-      </el-button>
-    </div>
+  <div class="policy-rule-page">
+    <PageHeader
+      title="ACL 规则管理"
+      subtitle="按节点管理访问控制策略，查看下发状态、最近命令和运行时命中统计。"
+    >
+      <template #actions>
+        <el-button v-if="hasPermission('acls:write')" type="primary" @click="handleCreate">
+          <el-icon><Plus /></el-icon>
+          新建规则
+        </el-button>
+      </template>
+    </PageHeader>
 
-    <div class="filter-section">
-      <el-select v-model="filters.node_id" placeholder="选择节点 (必选)" style="width: 220px" @change="handleNodeChange">
-        <el-option
-          v-for="node in tenantNodes"
-          :key="node.id"
-          :label="node.hostname || node.public_key || node.id"
-          :value="node.id"
-        />
-      </el-select>
+    <FilterBar>
+      <template #filters>
+        <el-select v-model="filters.node_id" placeholder="选择节点 (必选)" style="width: 220px" @change="handleNodeChange">
+          <el-option
+            v-for="node in tenantNodes"
+            :key="node.id"
+            :label="node.hostname || node.public_key || node.id"
+            :value="node.id"
+          />
+        </el-select>
 
-      <el-divider direction="vertical" />
+        <el-input
+          v-model="filters.name"
+          placeholder="搜索规则名称"
+          style="width: 200px"
+          @input="debouncedSearch"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
 
-      <el-input
-        v-model="filters.name"
-        placeholder="搜索规则名称"
-        style="width: 200px"
-        @input="debouncedSearch"
-      >
-        <template #prefix>
+        <el-select v-model="filters.action" placeholder="动作" clearable @change="loadRules">
+          <el-option label="允许" value="allow" />
+          <el-option label="拒绝" value="deny" />
+        </el-select>
+
+        <el-select v-model="filters.enabled" placeholder="状态" clearable @change="loadRules">
+          <el-option label="启用" :value="true" />
+          <el-option label="禁用" :value="false" />
+        </el-select>
+      </template>
+      <template #actions>
+        <el-button @click="loadRules">
           <el-icon><Search /></el-icon>
-        </template>
-      </el-input>
-      
-      <el-select v-model="filters.action" placeholder="动作" clearable @change="loadRules">
-        <el-option label="允许" value="allow" />
-        <el-option label="拒绝" value="deny" />
-      </el-select>
-      
-      <el-select v-model="filters.enabled" placeholder="状态" clearable @change="loadRules">
-        <el-option label="启用" :value="true" />
-        <el-option label="禁用" :value="false" />
-      </el-select>
-      
-      <el-button @click="loadRules">
-        <el-icon><Search /></el-icon>
-        搜索
-      </el-button>
-    </div>
+          搜索
+        </el-button>
+      </template>
+    </FilterBar>
 
-    <el-table :data="paginatedRules" v-loading="loading" style="width: 100%">
+    <DataPanel title="ACL 规则" :subtitle="aclPanelSubtitle">
+      <el-table :data="paginatedRules" v-loading="loading" style="width: 100%">
       <el-table-column prop="node_name" label="节点" width="160" />
       <el-table-column prop="priority" label="优先级" width="80" sortable />
       <el-table-column prop="name" label="名称" width="150" />
@@ -121,31 +127,38 @@
       <el-table-column prop="last_command_error" label="失败原因" min-width="180" show-overflow-tooltip />
       <el-table-column label="操作" width="210" fixed="right">
         <template #default="{ row }">
-          <el-button
-            v-if="hasPermission('acls:write') && canRetryPolicy(row)"
-            link
-            type="warning"
-            @click="handleRetry(row)"
-          >
-            重试
-          </el-button>
-          <el-button v-if="hasPermission('acls:write')" link type="primary" @click="handleEdit(row)">编辑</el-button>
-          <el-button v-if="hasPermission('acls:write')" link type="danger" @click="handleDelete(row)">删除</el-button>
+          <div class="table-actions">
+            <ActionIconButton
+              v-if="hasPermission('acls:write') && canRetryPolicy(row)"
+              label="重试"
+              tone="primary"
+              @click="handleRetry(row)"
+            >
+              <el-icon><Refresh /></el-icon>
+            </ActionIconButton>
+            <ActionIconButton v-if="hasPermission('acls:write')" label="编辑" tone="primary" @click="handleEdit(row)">
+              <el-icon><Edit /></el-icon>
+            </ActionIconButton>
+            <ActionIconButton v-if="hasPermission('acls:write')" label="删除" tone="danger" @click="handleDelete(row)">
+              <el-icon><Delete /></el-icon>
+            </ActionIconButton>
+          </div>
         </template>
       </el-table-column>
-    </el-table>
+      </el-table>
 
-    <div class="pagination-section">
-      <el-pagination
-        v-model:current-page="pagination.page"
-        v-model:page-size="pagination.pageSize"
-        :page-sizes="[10, 20, 50, 100]"
-        :total="pagination.total"
-        layout="total, sizes, prev, pager, next, jumper"
-        @size-change="loadRules"
-        @current-change="loadRules"
-      />
-    </div>
+      <div class="pagination-section">
+        <el-pagination
+          v-model:current-page="pagination.page"
+          v-model:page-size="pagination.pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @size-change="loadRules"
+          @current-change="loadRules"
+        />
+      </div>
+    </DataPanel>
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="600px" @closed="resetForm">
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="120px">
@@ -267,7 +280,11 @@
 import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search } from '@element-plus/icons-vue'
+import { Delete, Edit, Plus, Refresh, Search } from '@element-plus/icons-vue'
+import ActionIconButton from '@/components/ui/ActionIconButton.vue'
+import DataPanel from '@/components/ui/DataPanel.vue'
+import FilterBar from '@/components/ui/FilterBar.vue'
+import PageHeader from '@/components/ui/PageHeader.vue'
 import { useAclApi } from '@/composables/useAclApi'
 import { useIpGroupApi } from '@/composables/useIpGroupApi'
 import { useTenantApi } from '@/composables/useTenantApi'
@@ -349,6 +366,16 @@ const formRules = {
 }
 
 const dialogTitle = computed(() => form.id ? '编辑规则' : '新建规则')
+const selectedNodeName = computed(() => {
+  const node = tenantNodes.value.find((item) => item.id === filters.node_id)
+  return node?.hostname || node?.public_key || node?.id || ''
+})
+const aclPanelSubtitle = computed(() => {
+  if (!filters.node_id) {
+    return '选择节点后查看访问控制规则和下发结果。'
+  }
+  return `${selectedNodeName.value || '当前节点'} · ${pagination.total} 条规则`
+})
 
 const routeQuery = computed(() => route.query || {})
 const routeContext = computed(() => ({
@@ -681,11 +708,26 @@ watch(() => route.fullPath || '', async () => {
 </script>
 
 <style scoped>
-.acl-rules-container { padding: 20px; }
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-.page-header h2 { margin: 0; font-size: 20px; }
-.filter-section { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
-.pagination-section { margin-top: 20px; display: flex; justify-content: flex-end; }
+.policy-rule-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+}
+
+.pagination-section {
+  display: flex;
+  justify-content: flex-end;
+  padding: 14px 16px;
+  border-top: 1px solid var(--aria-border-primary);
+}
+
+.table-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .form-help { font-size: 12px; color: #909399; margin-top: 5px; }
 .acl-runtime-cell { display: flex; flex-direction: column; gap: 4px; line-height: 1.25; }
 .acl-runtime-cell small { color: var(--aria-text-muted, #8a93a6); }

@@ -9,6 +9,7 @@
     @click="handleClick"
   >
     <slot />
+    <span class="ui-action-icon-button__label">{{ label }}</span>
   </button>
 </template>
 
@@ -78,5 +79,17 @@ const handleClick = (event) => {
 .ui-action-icon-button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+.ui-action-icon-button__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 </style>

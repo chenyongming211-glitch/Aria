@@ -443,6 +443,17 @@ describe('policy page context handoff', () => {
     }))
   })
 
+  it('uses shared UI foundation components for the ACL rules operations shell', async () => {
+    const wrapper = mountWithStubs(ACLRules)
+    await flushPromises()
+
+    expect(wrapper.find('.ui-page-header').exists()).toBe(true)
+    expect(wrapper.find('.ui-filter-bar').exists()).toBe(true)
+    expect(wrapper.find('.ui-data-panel').exists()).toBe(true)
+    expect(wrapper.find('.page-header').exists()).toBe(false)
+    expect(wrapper.find('.filter-section').exists()).toBe(false)
+  })
+
   it('routes ACL retry to the node command trace', async () => {
     routeState.query = {
       nodeId: 'node-2',
@@ -563,6 +574,16 @@ describe('policy page context handoff', () => {
 
     expect(wrapper.vm.selectedNodeId).toBe('node-2')
     expect(qosApiMock.getQoSRulesByNode).toHaveBeenCalledWith('node-2')
+  })
+
+  it('uses shared UI foundation components for the QoS operations shell', async () => {
+    const wrapper = mountWithStubs(BandwidthControl)
+    await flushPromises()
+
+    expect(wrapper.find('.ui-page-header').exists()).toBe(true)
+    expect(wrapper.find('.ui-filter-bar').exists()).toBe(true)
+    expect(wrapper.find('.ui-data-panel').exists()).toBe(true)
+    expect(wrapper.find('.card-header').exists()).toBe(false)
   })
 
   it('routes QoS retry to the node command trace', async () => {

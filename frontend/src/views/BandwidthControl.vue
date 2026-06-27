@@ -1,52 +1,56 @@
 <!-- src/views/BandwidthControl.vue -->
 <template>
-  <div class="bandwidth-control">
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <div class="header-left">
-            <h3>带宽控制 (QoS)</h3>
-            <el-select
-              v-model="selectedNodeId"
-              placeholder="选择节点 (必选)"
-              style="width: 240px; margin-left: 20px;"
-              @change="onNodeChange"
-            >
-              <el-option
-                v-for="node in tenantNodes"
-                :key="node.id"
-                :label="node.hostname || node.id"
-                :value="node.id"
-              />
-            </el-select>
-          </div>
-          <div class="header-actions">
-            <el-button
-              v-if="hasPermission('qos:write')"
-              type="primary"
-              @click="showAddDialog"
-              :disabled="!selectedNodeId"
-            >
-              <el-icon><Plus /></el-icon>
-              添加规则
-            </el-button>
-            <el-button @click="refreshData">
-              <el-icon><Refresh /></el-icon>
-              刷新
-            </el-button>
-          </div>
-        </div>
+  <div class="policy-rule-page">
+    <PageHeader
+      title="带宽控制 (QoS)"
+      subtitle="按节点管理带宽策略，查看下发状态、最近命令和运行时统计。"
+    >
+      <template #actions>
+        <el-button
+          v-if="hasPermission('qos:write')"
+          type="primary"
+          @click="showAddDialog"
+          :disabled="!selectedNodeId"
+        >
+          <el-icon><Plus /></el-icon>
+          添加规则
+        </el-button>
       </template>
+    </PageHeader>
 
-      <el-alert
-        title="Agent QoS 运行模型"
-        type="warning"
-        description="每条 QoS 规则直接下发为 group + direction + rate_bps + burst_bytes + mode。默认 auto 会在 egress 优先使用 shaping；内核/qdisc 不支持时降级为 policing。"
-        :closable="false"
-        show-icon
-        style="margin-bottom: 20px;"
-      />
+    <FilterBar>
+      <template #filters>
+        <el-select
+          v-model="selectedNodeId"
+          placeholder="选择节点 (必选)"
+          style="width: 240px;"
+          @change="onNodeChange"
+        >
+          <el-option
+            v-for="node in tenantNodes"
+            :key="node.id"
+            :label="node.hostname || node.id"
+            :value="node.id"
+          />
+        </el-select>
+      </template>
+      <template #actions>
+        <el-button @click="refreshData">
+          <el-icon><Refresh /></el-icon>
+          刷新
+        </el-button>
+      </template>
+    </FilterBar>
 
+    <el-alert
+      title="Agent QoS 运行模型"
+      type="warning"
+      description="每条 QoS 规则直接下发为 group + direction + rate_bps + burst_bytes + mode。默认 auto 会在 egress 优先使用 shaping；内核/qdisc 不支持时降级为 policing。"
+      :closable="false"
+      show-icon
+    />
+
+    <DataPanel title="QoS 规则" :subtitle="qosPanelSubtitle">
       <el-table :data="rules" stripe v-loading="loading" :empty-text="qosEmptyText">
         <el-table-column prop="description" label="描述" min-width="160" />
         <el-table-column label="Group" min-width="180">
@@ -108,20 +112,26 @@
         <el-table-column prop="last_command_error" label="失败原因" min-width="180" show-overflow-tooltip />
         <el-table-column v-if="hasPermission('qos:write')" label="操作" width="210" fixed="right">
           <template #default="{ row }">
-            <el-button
-              v-if="canRetryPolicy(row)"
-              link
-              type="warning"
-              @click="handleRetry(row)"
-            >
-              重试
-            </el-button>
-            <el-button link type="primary" @click="handleEdit(row)">编辑</el-button>
-            <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
+            <div class="table-actions">
+              <ActionIconButton
+                v-if="canRetryPolicy(row)"
+                label="重试"
+                tone="primary"
+                @click="handleRetry(row)"
+              >
+                <el-icon><Refresh /></el-icon>
+              </ActionIconButton>
+              <ActionIconButton label="编辑" tone="primary" @click="handleEdit(row)">
+                <el-icon><Edit /></el-icon>
+              </ActionIconButton>
+              <ActionIconButton label="删除" tone="danger" @click="handleDelete(row)">
+                <el-icon><Delete /></el-icon>
+              </ActionIconButton>
+            </div>
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
+    </DataPanel>
 
     <el-dialog
       v-model="dialogVisible"
@@ -206,8 +216,12 @@
 <script setup>
 import { computed, ref, reactive, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Plus, Refresh } from '@element-plus/icons-vue'
+import { Delete, Edit, Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import ActionIconButton from '@/components/ui/ActionIconButton.vue'
+import DataPanel from '@/components/ui/DataPanel.vue'
+import FilterBar from '@/components/ui/FilterBar.vue'
+import PageHeader from '@/components/ui/PageHeader.vue'
 import { useQosApi } from '@/composables/useQosApi'
 import { useIpGroupApi } from '@/composables/useIpGroupApi'
 import { useTenantApi } from '@/composables/useTenantApi'
@@ -241,6 +255,12 @@ const dialogTitle = computed(() => form.id ? '编辑 QoS 规则' : '添加 QoS �
 const qosEmptyText = computed(() => {
   if (!selectedNodeId.value) return '请选择节点'
   return `${selectedNodeName.value || '当前节点'} 暂无 QoS 规则`
+})
+const qosPanelSubtitle = computed(() => {
+  if (!selectedNodeId.value) {
+    return '选择节点后查看带宽控制规则和下发结果。'
+  }
+  return `${selectedNodeName.value || '当前节点'} · ${rules.value.length} 条规则`
 })
 const routeQuery = computed(() => route.query || {})
 const routeContext = computed(() => ({
@@ -585,10 +605,19 @@ watch(() => route.fullPath || '', async () => {
 </script>
 
 <style scoped>
-.bandwidth-control { padding: 20px; }
-.card-header { display: flex; justify-content: space-between; align-items: center; }
-.header-left { display: flex; align-items: center; }
-.header-actions { display: flex; gap: 10px; }
+.policy-rule-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+}
+
+.table-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .unit-text { margin-left: 10px; color: #606266; }
 .form-help { font-size: 12px; color: #909399; margin-top: 5px; }
 .qos-runtime-cell { display: flex; flex-direction: column; gap: 4px; line-height: 1.25; }
