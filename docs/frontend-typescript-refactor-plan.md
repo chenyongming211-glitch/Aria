@@ -721,6 +721,8 @@ git commit -m "refactor: type monitoring API composable"
 
 ### Task 5: Migrate Agent Command API to TypeScript
 
+Status: completed in `codex/frontend-agent-api-b12`.
+
 **Files:**
 - Rename: `frontend/src/composables/useAgentProxyApi.js` -> `frontend/src/composables/useAgentProxyApi.ts`
 - Test: `frontend/tests/unit/useAgentProxyApi.test.js`

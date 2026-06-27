@@ -12,10 +12,13 @@ export type AgentCommandStatus =
 export type AgentCommandType = 'sync' | 'health_check' | 'apply_policy' | 'reload' | string
 
 export interface AgentCommandPayload {
+  command?: AgentCommandType
   type?: AgentCommandType
   action?: string
   payload?: Record<string, unknown>
   reason?: string
+  timeout?: number
+  priority?: number
 }
 
 export interface AgentCommandRecord {
@@ -23,9 +26,11 @@ export interface AgentCommandRecord {
   command_id?: CommandId
   tenant_id?: TenantId
   node_id?: NodeId
+  command?: AgentCommandType
   type?: AgentCommandType
   action?: string
   status?: AgentCommandStatus | string
+  message?: string
   last_error?: string
   created_at?: ISODateTimeString
   updated_at?: ISODateTimeString
@@ -43,4 +48,3 @@ export interface AgentStatus {
   last_sync_at?: ISODateTimeString
   last_sync_error?: string
 }
-
