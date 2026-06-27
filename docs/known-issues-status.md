@@ -1,6 +1,6 @@
 # 已知问题状态追踪
 
-**复核日期**: 2026-05-29
+**复核日期**: 2026-06-27
 **复核方式**: 重新对照当前代码，而不是沿用历史修复结论
 
 ---
@@ -66,16 +66,17 @@
 - 前端下载改为通过鉴权 API 客户端拉取 blob，不再使用裸 `window.location.assign`
 - 仍未完成的是恢复前 dry-run、选择性恢复、二次确认强约束等恢复安全增强；其他系统设置项继续隐藏，不展示 placeholder
 
-### 运维闭环仍未完全打通
+### 运维闭环非 AI 链路已完成第一阶段验收
 
-**状态**: 🟡 进行中，Nodes 工作台第一阶段已收口
+**状态**: ✅ v0.1.0 非 AI 闭环已完成；Hermes / IM / 自动化留到后续阶段
 
-- 监控、策略投递、命令历史、AI 入口都已经存在
-- Nodes 详情已能集中展示在线状态、desired/applied version、最近同步、最近命令、最近策略投递、活跃告警和证书状态
-- Nodes 详情已支持 `sync` / `health_check` 快速命令下发，并在后端刷新前先显示 queued/pending 状态
-- Nodes 详情、Monitoring 详情和 Policy Center 已能通过 node/policy/command/focus 上下文互相跳转
-- 但“发现问题 -> 确认动作 -> 执行 -> 审计回看”的全局统一体验还没完全收口，尤其是 AI/IM 主动确认链路仍待推进
-- 这仍然应该是后续实现计划里的高优先级项
+- Monitoring 已能展示 active alert，并从 alert 跳转到 Node Detail / Policy Center。
+- Nodes 详情已能集中展示在线状态、desired/applied version、最近同步、最近命令、最近策略投递、活跃告警和证书状态。
+- Monitoring 和 Node Detail 已支持用户确认执行 `sync` / `health_check`，并能携带 `alert_id`、`event_type`、`policy_ref`、`policy_domain`、`command_id` 等上下文。
+- Controller 已能创建 `agent_commands`、记录 `command.queued` audit，Agent 回写后在 command/event/audit 里留下执行结果。
+- Resolve Alert 已支持 `reason/source/command_id` 处理证据，并保留 `alert_resolved` 事件。
+- 2026-06-27 线上已完成代表性非 AI 告警处置链路验收：active `policy_failed` / `sync_failed` alert 触发 `sync`，Agent 回写 `completed` / `sync completed`，最终 active alerts 为 `0`。
+- 不再把旧 Ask AI 链路作为 v0.1.0 验收项；AI 建议、IM 卡片确认、无人值守自愈、多步骤 ActionPlan 等后续由 Hermes Agent 阶段重新设计。
 
 ---
 
@@ -86,3 +87,4 @@
 - `v2-only`、运行期鉴权、状态版本化这些底层结构项已经落地
 - `菜单/领域对齐` 与 `策略概念收拢` 只完成了基础层，不应继续表述为“完全闭环”
 - `Settings / Backup` 已具备最小真实能力；后续重点是恢复安全增强，而不是补齐基础 upload/restore
+- `运维闭环` 的 v0.1.0 非 AI 链路已经完成线上验收；剩余工作是 Hermes/IM/自动化增强，不再作为当前阻塞项
