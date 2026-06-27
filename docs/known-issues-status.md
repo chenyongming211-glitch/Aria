@@ -11,7 +11,7 @@
 
 **状态**: ✅ 已完成
 
-- 前端 API 配置已统一到 `/v2/...` 路径，见 `frontend/src/config/api.js`
+- 前端 API 配置已统一到 `/v2/...` 路径，见 `frontend/src/config/api.ts`
 - 后端已删除 `internal/api/v1`，当前北向入口为 `/api/v2/...`
 - 当前文档把 `v2-only` 作为基线是成立的
 

@@ -26,19 +26,21 @@
 - `frontend/package.json` 已安装 `typescript` 和 `vue-tsc`。
 - `frontend/tsconfig.json`、`frontend/tsconfig.node.json`、`frontend/src/env.d.ts` 已建立 JS/Vue 与 TS 共存的类型检查基线。
 - GitHub Actions `frontend-build` job 已在单测后执行 `npm run type-check`。
-- 当前还没有业务 `.ts` / `.tsx` 源码文件；后续从共享类型和 API composables 开始迁移。
-- 当前前端源码约为 `45` 个 `.js`、`20` 个 `.vue`。
-- 业务高风险区集中在：
-  - `frontend/src/composables/useApi.js`
-  - `frontend/src/composables/useMonitorApi.js`
-  - `frontend/src/composables/useAgentProxyApi.js`
-  - `frontend/src/composables/usePolicyApi.js`
-  - `frontend/src/composables/useAclApi.js`
-  - `frontend/src/composables/useQosApi.js`
-  - `frontend/src/stores/user.js`
-  - `frontend/src/stores/tenant.js`
-  - `frontend/src/stores/node.js`
-- 现有 CI 的 `frontend-build` job 已执行 `npm ci`、`npm run test:run`、`npm run build`，但还没有 `npm run type-check`。
+- 2026-06-27 状态：第一阶段迁移已完成并部署为 `0.2.80`。当前前端源码约为 `16` 个 `.js`、`22` 个 `.ts`、`26` 个 `.vue`。
+- 已类型化的高风险边界包括：
+  - `frontend/src/config/api.ts`
+  - `frontend/src/composables/apiResponse.ts`
+  - `frontend/src/composables/useMonitorApi.ts`
+  - `frontend/src/composables/useAgentProxyApi.ts`
+  - `frontend/src/composables/usePolicyApi.ts`
+  - `frontend/src/composables/useAclApi.ts`
+  - `frontend/src/composables/useQosApi.ts`
+  - `frontend/src/stores/user.ts`
+  - `frontend/src/stores/tenant.ts`
+  - `frontend/src/stores/node.ts`
+  - `frontend/src/utils/session.ts`
+  - `frontend/src/utils/topologyLayout.ts`
+- 保留的 `.js` 文件主要是低风险 composables、router、UI helpers 和 AI/Hermes 后续会重做的页面，不属于本阶段阻塞项。
 
 ## Scope
 

@@ -1021,6 +1021,34 @@ Purpose:
 | API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Policies returned 11 items; tenant Monitoring health returned `ok`; tenant Monitoring events returned 5 items. Node-scoped ACL and QoS list APIs for node `d5c7723c-3d86-48ce-a9fc-4695cd170b1c` both returned HTTP 200. |
 | Frontend smoke | Deployed frontend assets contain the ACL/QoS rule page foundation markers `ui-page-header`, `ui-filter-bar`, and `ui-data-panel`; assets also contain `ACL 规则管理` and `带宽控制`. |
 
+### 2026-06-27 Frontend TypeScript First-Stage Deployment
+
+Status: deployed and server-side smoke validated.
+
+Purpose:
+
+- Complete the first-stage frontend TypeScript migration for shared API
+  response helpers, monitoring/agent/policy/ACL/QoS composables, core stores,
+  low-risk config/utilities, and selected high-risk Vue page scripts.
+- Keep this as a behavior-preserving Controller/frontend deployment; Rust Agent
+  artifacts were validated by CI but not redeployed.
+- Publish the already-validated frontend TypeScript migration under a unique
+  release version instead of reusing `0.2.79`.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-27T23:08+08:00 master deployment; 2026-06-27T23:16+08:00 smoke validation |
+| Git commit | `896272b8305caee6d882a98fa54136e071bf2e6a` |
+| Branch CI runs | `28292425865` for `codex/frontend-utils-b15`; `28292846921` for `codex/release-0.2.80` |
+| Master CI runs | `28292651167` for the TypeScript migration merge; `28293000439` for the `0.2.80` release commit |
+| Version | `0.2.80` |
+| Controller image | Local runtime image `aria-controller:local` built from uploaded linux/amd64 Controller binary. |
+| Master backup | `/root/aria-controller/deploy-backups/20260627231554` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch and master Actions. |
+| Verification | Local `go test ./...` passed, local linux/amd64 Controller/ariactl build passed, local frontend unit tests passed (`173` tests), and local frontend build passed. Master Actions run `28293000439` passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` returned `0.2.80`; `aria-controller` and `aria-frontend` were healthy; frontend entry returned HTTP 200 and referenced `assets/index-c80505ff.js`. |
+| API smoke | Login succeeded as `sysadmin`; tenant listing returned a valid tenant `e779e1f9-1e74-4fc1-915d-f8b432abd421`; tenant Nodes, Monitoring stats, Monitoring events, and Monitoring health all returned HTTP 200. |
+| Deployment note | This was a Controller/frontend-only low-bandwidth deployment. `/api/v2/health` is not a valid smoke endpoint in this deployment path and returned 404; tenant-scoped Monitoring health is the validated health API. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
