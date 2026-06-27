@@ -934,6 +934,34 @@ Purpose:
 | API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring health returned `ok`; tenant Monitoring alerts returned 0 items; tenant Policies returned 11 items. |
 | Frontend smoke | Deployed frontend assets contain the new Nodes workbench foundation classes `ui-page-header` and `ui-metric-strip`. |
 
+### 2026-06-27 Frontend Monitoring Workflow Foundation Deployment
+
+Status: deployed and server-side smoke validated.
+
+Purpose:
+
+- Wire the shared UI foundation components into the Monitoring operations shell:
+  page header, metric strip, filter bar, data panels, and status badges.
+- Preserve the existing Monitoring -> Node Detail / Policy Center action
+  context, including Run Sync, Health Check, Resolve, and event filtering.
+- Keep this as a Controller/frontend-only deployment; Rust Agent artifacts were
+  validated by CI but not redeployed.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-27T18:32+08:00 gray deployment; 2026-06-27T18:40+08:00 master deployment; 2026-06-27T18:41+08:00 smoke validation |
+| Git commit | `3c21a4c7b5f22bfaa0a98b1ff312cbb0ad230162` |
+| Branch CI run | `28286460178` |
+| Master CI run | `28286672665` |
+| Version | `0.2.77` |
+| Controller image | Local runtime image `aria-controller:local@sha256:203957898310a6204672cfe3d31b8c5883124ebb1605e7fb959db2c5e46373b0`. |
+| Gray backup | `/root/aria-controller/deploy-backups/20260627T103228Z-0.2.77-28286460178-3c21a4c7b5f2` |
+| Master backup | `/root/aria-controller/deploy-backups/20260627T104036Z-0.2.77-28286672665-3c21a4c7b5f2` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch and master Actions. |
+| Verification | Local frontend unit tests passed (`164` tests), including focused Monitoring workflow tests (`20` tests). Local linux/amd64 Controller/ariactl build and frontend build passed. Branch Actions run `28286460178` and master Actions run `28286672665` both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.77`; `aria-controller` and `aria-frontend` were healthy; frontend entry returned HTTP 200. |
+| API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring health returned `ok`; tenant Monitoring alerts returned 0 items; tenant Monitoring events returned 5 items; tenant Policies returned 11 items. |
+| Frontend smoke | Deployed frontend assets contain the Monitoring workflow foundation markers `ui-page-header`, `ui-metric-strip`, and `Monitoring Center`. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
