@@ -16,6 +16,7 @@ export interface NodeRecord {
   id: NodeId
   tenant_id?: TenantId
   hostname?: string
+  public_key?: string
   assigned_ip?: string
   private_ip?: string
   public_ip?: string
@@ -38,4 +39,3 @@ export interface NodeRecord {
   state_convergence?: StateConvergence | string
   convergence_status?: StateConvergence | string
 }
-

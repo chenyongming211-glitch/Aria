@@ -1,5 +1,16 @@
 import api from './useApi'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
+import type { NodeRecord, Tenant } from '@/types'
+
+interface TenantPayload extends Partial<Tenant> {
+  resource_quota?: Record<string, unknown>
+}
+
+interface TenantScopedACLRule extends Record<string, unknown> {
+  id?: string | number
+  node_id?: string
+  node_name?: string
+}
 
 /**
  * 租户管理API接口
@@ -45,7 +56,7 @@ export const useTenantApi = {
    *    resource_quota?: object                   // 资源配额（可选）
    *  }
    */
-  createTenant: async (tenant) => {
+  createTenant: async (tenant: TenantPayload) => {
     try {
       const response = await api.post(API_ENDPOINTS.TENANT.LIST, tenant)
       return response.data?.data || response.data
@@ -81,10 +92,10 @@ export const useTenantApi = {
       const nodes = nodesResponse.data?.data || nodesResponse.data || []
 
       const ruleResponses = await Promise.all(
-        nodes.map(async (node) => {
+        (nodes as NodeRecord[]).map(async (node) => {
           const aclResponse = await api.get(API_ENDPOINTS.TENANT.NODE_ACLS(tenantId, node.id))
-          const rules = aclResponse.data?.data || aclResponse.data || []
-          return rules.map((rule) => ({
+          const rules = (aclResponse.data?.data || aclResponse.data || []) as TenantScopedACLRule[]
+          return rules.map((rule: TenantScopedACLRule) => ({
             ...rule,
             node_id: node.id,
             node_name: node.hostname || node.public_key || node.id

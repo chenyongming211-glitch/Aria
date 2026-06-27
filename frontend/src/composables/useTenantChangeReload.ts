@@ -1,8 +1,11 @@
 import { onMounted, onUnmounted } from 'vue'
 
-export function useTenantChangeReload(handler) {
-  const listener = (event) => {
-    Promise.resolve(handler(event?.detail)).catch((error) => {
+type TenantChangeHandler = (detail: unknown) => unknown | Promise<unknown>
+
+export function useTenantChangeReload(handler: TenantChangeHandler) {
+  const listener = (event: Event) => {
+    const detail = event instanceof CustomEvent ? event.detail : undefined
+    Promise.resolve(handler(detail)).catch((error: unknown) => {
       console.error('Failed to reload tenant-scoped view:', error)
     })
   }
