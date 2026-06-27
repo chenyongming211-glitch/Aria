@@ -466,9 +466,10 @@ const handleDelete = async (row) => {
       type: 'warning'
     })
     
-    await useAclApi.deleteACLRule(row.id, row.node_id)
-    ElMessage.success('删除成功')
-    loadRules()
+    const result = await useAclApi.deleteACLRule(row.id, row.node_id)
+    ElMessage.success('删除指令已下发')
+    await loadRules()
+    openCommandTrace(row, result)
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('删除失败: ' + (error.message || '未知错误'))
@@ -480,7 +481,7 @@ const canRetryPolicy = (row) => {
   return isRetryablePolicyStatus(row?.policy_status || row?.policyStatus)
 }
 
-const commandIdForRetryResult = (result) => {
+const commandIdForMutationResult = (result) => {
   return result?.last_delivery_command_id ||
     result?.lastDeliveryCommandId ||
     result?.last_delivery?.command_id ||
@@ -497,7 +498,7 @@ const policyRefForRule = (row, result) => {
 }
 
 const openCommandTrace = (row, result) => {
-  const commandId = commandIdForRetryResult(result)
+  const commandId = commandIdForMutationResult(result)
   if (!commandId) {
     return
   }
@@ -538,8 +539,10 @@ const handleRetry = async (row) => {
 
 const handleToggleEnabled = async (row) => {
   try {
-    await useAclApi.updateACLRule(row.id, { ...row, enabled: row.enabled, node_id: row.node_id })
+    const result = await useAclApi.updateACLRule(row.id, { ...row, enabled: row.enabled, node_id: row.node_id })
     ElMessage.success(row.enabled ? '已启用' : '已禁用')
+    await loadRules()
+    openCommandTrace(row, result)
   } catch (error) {
     row.enabled = !row.enabled
     ElMessage.error('操作失败: ' + (error.message || '未知错误'))
@@ -560,16 +563,18 @@ const handleSubmit = async () => {
       return
     }
     
+    let result
     if (form.id) {
-      await useAclApi.updateACLRule(form.id, data)
+      result = await useAclApi.updateACLRule(form.id, data)
       ElMessage.success('更新成功')
     } else {
-      await useAclApi.createACLRule(data)
+      result = await useAclApi.createACLRule(data)
       ElMessage.success('创建成功')
     }
     
     dialogVisible.value = false
-    loadRules()
+    await loadRules()
+    openCommandTrace(data, result)
   } catch (error) {
     if (error !== false) {
       ElMessage.error('操作失败: ' + (error.message || '未知错误'))

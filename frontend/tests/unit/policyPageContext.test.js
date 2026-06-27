@@ -26,6 +26,27 @@ const {
   },
   aclApiMock: {
     getACLRulesByNode: vi.fn(async () => []),
+    createACLRule: vi.fn(async () => ({
+      id: 'acl-created',
+      node_id: 'node-2',
+      policy_ref: 'acl-created',
+      policy_status: 'pending',
+      last_delivery_command_id: 'cmd-acl-create'
+    })),
+    updateACLRule: vi.fn(async () => ({
+      id: 'acl-special',
+      node_id: 'node-2',
+      policy_ref: 'acl-special',
+      policy_status: 'pending',
+      last_delivery_command_id: 'cmd-acl-update'
+    })),
+    deleteACLRule: vi.fn(async () => ({
+      id: 'acl-special',
+      node_id: 'node-2',
+      policy_ref: 'acl-special',
+      policy_status: 'pending',
+      last_delivery_command_id: 'cmd-acl-delete'
+    })),
     retryACLPolicySync: vi.fn(async () => ({
       policy_ref: 'acl-special',
       policy_status: 'pending',
@@ -34,6 +55,27 @@ const {
   },
   qosApiMock: {
     getQoSRulesByNode: vi.fn(async () => []),
+    createQoSRule: vi.fn(async () => ({
+      id: 'qos-created',
+      node_id: 'node-2',
+      policy_ref: 'qos-created',
+      policyStatus: 'pending',
+      last_delivery_command_id: 'cmd-qos-create'
+    })),
+    updateQoSRule: vi.fn(async () => ({
+      id: 'qos-special',
+      node_id: 'node-2',
+      policy_ref: 'qos-special',
+      policyStatus: 'pending',
+      last_delivery_command_id: 'cmd-qos-update'
+    })),
+    deleteQoSRule: vi.fn(async () => ({
+      id: 'qos-special',
+      node_id: 'node-2',
+      policy_ref: 'qos-special',
+      policyStatus: 'pending',
+      last_delivery_command_id: 'cmd-qos-delete'
+    })),
     retryQoSPolicySync: vi.fn(async () => ({
       policy_ref: 'qos-special',
       policyStatus: 'pending',
@@ -187,7 +229,13 @@ const elementStubs = {
   'el-dialog': { template: '<div><slot /><slot name="footer" /></div>' },
   'el-descriptions': { template: '<div><slot /></div>' },
   'el-descriptions-item': { template: '<div><slot /></div>' },
-  'el-form': { template: '<form><slot /></form>' },
+  'el-form': {
+    template: '<form><slot /></form>',
+    methods: {
+      validate: () => Promise.resolve(true),
+      resetFields: () => {}
+    }
+  },
   'el-form-item': { template: '<div><slot /></div>' },
   'el-switch': { template: '<input type="checkbox" />' },
   'el-table': { template: '<div><slot /></div>' },
@@ -225,8 +273,14 @@ describe('policy page context handoff', () => {
     routerPush.mockReset()
     tenantApiMock.getTenantNodes.mockClear()
     aclApiMock.getACLRulesByNode.mockClear()
+    aclApiMock.createACLRule.mockClear()
+    aclApiMock.updateACLRule.mockClear()
+    aclApiMock.deleteACLRule.mockClear()
     aclApiMock.retryACLPolicySync.mockClear()
     qosApiMock.getQoSRulesByNode.mockClear()
+    qosApiMock.createQoSRule.mockClear()
+    qosApiMock.updateQoSRule.mockClear()
+    qosApiMock.deleteQoSRule.mockClear()
     qosApiMock.retryQoSPolicySync.mockClear()
     routeApiMock.getRoutes.mockClear()
     ipGroupApiMock.listIPGroups.mockClear()
@@ -361,6 +415,78 @@ describe('policy page context handoff', () => {
     })
   })
 
+  it('routes ACL create to the node command trace', async () => {
+    routeState.query = {
+      nodeId: 'node-2',
+      policyRef: 'acl-special'
+    }
+    routeState.fullPath = '/acl?nodeId=node-2&policyRef=acl-special'
+
+    const wrapper = mountWithStubs(ACLRules)
+    await flushPromises()
+    routerPush.mockReset()
+
+    Object.assign(wrapper.vm.form, {
+      node_id: 'node-2',
+      name: 'ACL create',
+      action: 'allow',
+      protocol: 1,
+      dst_port: 0,
+      direction: 'egress',
+      priority: 100,
+      enabled: true
+    })
+
+    await wrapper.vm.handleSubmit()
+    await flushPromises()
+
+    expect(aclApiMock.createACLRule).toHaveBeenCalledWith(expect.objectContaining({
+      node_id: 'node-2',
+      name: 'ACL create'
+    }))
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-2' },
+      query: {
+        commandId: 'cmd-acl-create',
+        focus: 'commands',
+        policyRef: 'acl-created',
+        policyDomain: 'acl'
+      }
+    })
+  })
+
+  it('routes ACL delete to the node command trace', async () => {
+    routeState.query = {
+      nodeId: 'node-2',
+      policyRef: 'acl-special'
+    }
+    routeState.fullPath = '/acl?nodeId=node-2&policyRef=acl-special'
+
+    const wrapper = mountWithStubs(ACLRules)
+    await flushPromises()
+    routerPush.mockReset()
+
+    await wrapper.vm.handleDelete({
+      id: 'acl-special',
+      node_id: 'node-2',
+      name: 'ACL special'
+    })
+    await flushPromises()
+
+    expect(aclApiMock.deleteACLRule).toHaveBeenCalledWith('acl-special', 'node-2')
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-2' },
+      query: {
+        commandId: 'cmd-acl-delete',
+        focus: 'commands',
+        policyRef: 'acl-special',
+        policyDomain: 'acl'
+      }
+    })
+  })
+
   it('loads the QoS page against the node from route context', async () => {
     routeState.query = {
       nodeId: 'node-2',
@@ -404,6 +530,77 @@ describe('policy page context handoff', () => {
       params: { nodeId: 'node-2' },
       query: {
         commandId: 'cmd-qos-retry',
+        focus: 'commands',
+        policyRef: 'qos-special',
+        policyDomain: 'qos'
+      }
+    })
+  })
+
+  it('routes QoS create to the node command trace', async () => {
+    routeState.query = {
+      nodeId: 'node-2',
+      policyRef: 'qos-special'
+    }
+    routeState.fullPath = '/qos?nodeId=node-2&policyRef=qos-special'
+
+    const wrapper = mountWithStubs(BandwidthControl)
+    await flushPromises()
+    routerPush.mockReset()
+
+    Object.assign(wrapper.vm.form, {
+      description: 'QoS create',
+      bandwidth_mbps: 2,
+      group_id: 'group-1',
+      direction: 'egress',
+      mode: 'auto',
+      priority: 100,
+      enabled: true
+    })
+
+    await wrapper.vm.handleSave()
+    await flushPromises()
+
+    expect(qosApiMock.createQoSRule).toHaveBeenCalledWith('node-2', expect.objectContaining({
+      description: 'QoS create',
+      bandwidth_mbps: 2
+    }))
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-2' },
+      query: {
+        commandId: 'cmd-qos-create',
+        focus: 'commands',
+        policyRef: 'qos-created',
+        policyDomain: 'qos'
+      }
+    })
+  })
+
+  it('routes QoS delete to the node command trace', async () => {
+    routeState.query = {
+      nodeId: 'node-2',
+      policyRef: 'qos-special'
+    }
+    routeState.fullPath = '/qos?nodeId=node-2&policyRef=qos-special'
+
+    const wrapper = mountWithStubs(BandwidthControl)
+    await flushPromises()
+    routerPush.mockReset()
+
+    await wrapper.vm.handleDelete({
+      id: 'qos-special',
+      node_id: 'node-2',
+      description: 'QoS special'
+    })
+    await flushPromises()
+
+    expect(qosApiMock.deleteQoSRule).toHaveBeenCalledWith('node-2', 'qos-special')
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'NodeMonitorDetail',
+      params: { nodeId: 'node-2' },
+      query: {
+        commandId: 'cmd-qos-delete',
         focus: 'commands',
         policyRef: 'qos-special',
         policyDomain: 'qos'

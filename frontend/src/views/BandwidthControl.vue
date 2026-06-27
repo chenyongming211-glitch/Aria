@@ -451,16 +451,20 @@ const handleSave = async () => {
     await formRef.value.validate()
     submitting.value = true
 
+    const nodeId = selectedNodeId.value
     const payload = buildSavePayload()
-    if (form.id) {
-      await useQosApi.updateQoSRule(selectedNodeId.value, form.id, payload)
+    const ruleId = form.id
+    let result
+    if (ruleId) {
+      result = await useQosApi.updateQoSRule(nodeId, ruleId, payload)
       ElMessage.success('规则已更新并排队下发')
     } else {
-      await useQosApi.createQoSRule(selectedNodeId.value, payload)
+      result = await useQosApi.createQoSRule(nodeId, payload)
       ElMessage.success('规则已创建并排队下发')
     }
     dialogVisible.value = false
-    refreshData()
+    await refreshData()
+    openCommandTrace(nodeId, { ...payload, id: ruleId || result?.id, node_id: nodeId }, result)
   } catch (error) {
     if (error !== false) {
       const action = form.id ? '更新失败' : '创建失败'
@@ -484,9 +488,11 @@ const handleDelete = async (row) => {
       cancelButtonText: '取消'
     })
 
-    await useQosApi.deleteQoSRule(selectedNodeId.value, row.id)
+    const nodeId = selectedNodeId.value || row.node_id
+    const result = await useQosApi.deleteQoSRule(nodeId, row.id)
     ElMessage.success('删除指令已下发')
-    refreshData()
+    await refreshData()
+    openCommandTrace(nodeId, row, result)
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('删除失败')
@@ -498,7 +504,7 @@ const canRetryPolicy = (row) => {
   return isRetryablePolicyStatus(row?.policyStatus || row?.policy_status)
 }
 
-const commandIdForRetryResult = (result) => {
+const commandIdForMutationResult = (result) => {
   return result?.last_delivery_command_id ||
     result?.lastDeliveryCommandId ||
     result?.last_delivery?.command_id ||
@@ -515,7 +521,7 @@ const policyRefForRule = (row, result) => {
 }
 
 const openCommandTrace = (nodeId, row, result) => {
-  const commandId = commandIdForRetryResult(result)
+  const commandId = commandIdForMutationResult(result)
   if (!commandId || !nodeId) {
     return
   }
