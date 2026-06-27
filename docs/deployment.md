@@ -552,6 +552,33 @@ Purpose:
 | Control-loop validation | ACL egress ICMP allow on `100.64.0.2/32` applied and ping succeeded; updating the same ACL to deny applied, ping was blocked, and stats reported `dropped_packets=4`, `dropped_bytes=336`; deleting the ACL restored ping. QoS egress `100.64.0.27/32` create at `1 Mbps` applied and stats reported `passed_bytes=20560`; update to `2 Mbps` applied and stats reported `passed_bytes=19532`; delete removed the rule. Route create `10.255.240.40/32` applied and appeared in the peer WireGuard allowed ips for `100.64.0.40`; update to `10.255.240.41/32` updated the peer allowed ips; delete removed it. |
 | Command-loop validation | `health_check` completed with `agent healthy`. A controlled failure test stopped `aria-agent`, queued short-timeout `health_check`, and confirmed command status `failed` with message `command timed out waiting for agent result`; restarting Agent restored `online/applied/converged`, and a follow-up `health_check` completed. |
 
+### 2026-06-27 Confirmed Bugfix Closure Deployment
+
+Status: deployed and server-side smoke validated.
+
+Purpose:
+
+- Deploy the BUG-25 to BUG-35 closure branch with a patch-version bump.
+- Keep the deployment on the low-bandwidth Controller/frontend artifact path
+  because this patch does not change Rust Agent runtime code.
+- Preserve rollback state before replacing the Controller runtime image and
+  frontend bundle.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-27T02:48Z deployment; 2026-06-27T02:49Z to 2026-06-27T02:51Z smoke validation |
+| Git commit | `b3c0fb60d94b` |
+| Branch CI run | `28276174524` |
+| Version | `0.2.64` |
+| Controller image | Local runtime image `aria-controller:local@sha256:33509d6fd855f04152ffc4de137e999049233c805914e8fc8a57557a8f5de212`. |
+| Frontend backup | `/root/aria-controller/deploy-backups/20260627T024846Z-0.2.64-28276174524-b3c0fb60d94b/frontend-dist` |
+| Config backup | `/root/aria-controller/deploy-backups/20260627T024846Z-0.2.64-28276174524-b3c0fb60d94b/config` |
+| DB backup | `/root/aria-controller/deploy-backups/20260627T024846Z-0.2.64-28276174524-b3c0fb60d94b/postgres.sql` |
+| Release payload | `/root/aria-controller/aria-0.2.64-28276174524-b3c0fb60d94b-payload.tgz`; unpacked release path `/root/aria-controller/releases/0.2.64-28276174524-b3c0fb60d94b` |
+| Agent artifact | Not changed; Rust Agent CI still passed in branch Actions run `28276174524`. |
+| Verification | Local focused Go tests, frontend unit tests, frontend build, linux/amd64 Controller build, and `git diff --check` passed before deployment. Branch Actions run `28276174524` passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` returned `0.2.64`, `https://aria.yun/` returned HTTP 200, Controller info returned version `0.2.64`, and `aria-controller` plus `aria-frontend` were healthy. |
+| Local network note | The local macOS environment could open TCP to `8.152.163.101:443`, but TLS was reset before reaching the frontend container. The environment also had proxy variables pointing to `127.0.0.1:7897`. Nginx logs did not receive those failed local TLS attempts, while server-side public-domain smoke succeeded. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors

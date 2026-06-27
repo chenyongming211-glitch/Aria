@@ -373,7 +373,7 @@ Hermes implementation requirements remain:
 
   Baseline:
   ```bash
-  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd64 ./cmd/controller
+  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd64 ./cmd
   cd frontend && npm run build
   ```
 
