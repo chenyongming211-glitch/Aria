@@ -905,6 +905,35 @@ Purpose:
 | API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring health returned `ok`; tenant Monitoring alerts returned 0 items; tenant Policies returned 11 items. |
 | Deployment note | An intermediate master local-artifact deploy used the wrong manual ldflags package path and `/api/version` returned `dev`. The Controller was rebuilt with the documented `aria/internal/cli.Version` ldflags and redeployed under the final master backup above. |
 
+### 2026-06-27 Frontend Nodes Workbench Foundation Deployment
+
+Status: deployed and server-side smoke validated.
+
+Purpose:
+
+- Wire the shared UI foundation components into the Nodes workbench list shell:
+  page header, metric strip, filter bar, data panel, status badges, and icon
+  action buttons.
+- Keep this pass low risk by preserving existing Nodes business logic, backend
+  APIs, onboarding flow, node detail dialog, and command/policy behavior.
+- Keep this as a Controller/frontend-only deployment; Rust Agent artifacts were
+  validated by CI but not redeployed.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-27T18:01+08:00 gray deployment; 2026-06-27T18:09+08:00 master deployment; 2026-06-27T18:10+08:00 smoke validation |
+| Git commit | `b8381bbf318add4bc0ee92422387b8c32decdc25` |
+| Branch CI run | `28285807895` |
+| Master CI run | `28285970922` |
+| Version | `0.2.76` |
+| Controller image | Local runtime image `aria-controller:local@sha256:3865aec2e9be869806f12178b7fbb33fbd0192860c8dfbc97d893dc26f785495`. |
+| Gray backup | `/root/aria-controller/deploy-backups/20260627T100132Z-0.2.76-28285807895-b8381bbf318a` |
+| Master backup | `/root/aria-controller/deploy-backups/20260627T100917Z-0.2.76-28285970922-b8381bbf318a` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch and master Actions. |
+| Verification | Local frontend unit tests passed (`162` tests), including focused Nodes workbench tests (`6` tests). Local linux/amd64 Controller/ariactl build and frontend build passed. Branch Actions run `28285807895` and master Actions run `28285970922` both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.76`; `aria-controller` and `aria-frontend` were healthy; frontend entry returned HTTP 200. |
+| API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring health returned `ok`; tenant Monitoring alerts returned 0 items; tenant Policies returned 11 items. |
+| Frontend smoke | Deployed frontend assets contain the new Nodes workbench foundation classes `ui-page-header` and `ui-metric-strip`. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
