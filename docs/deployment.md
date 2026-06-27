@@ -674,6 +674,33 @@ Purpose:
 | API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring stats returned `ok`; tenant Policies returned 11 items. |
 | Deployment note | During gray validation, `/api/version` returned `0.2.67` while `/api/v2/controller-info` initially returned the old `.env` value. The server `.env` was updated with `ARIA_VERSION=0.2.67` and `ARIA_CONTROLLER_VERSION=0.2.67` per this document before final master deployment. |
 
+### 2026-06-27 Frontend Policy Retry Trace Deployment
+
+Status: deployed and server-side smoke validated.
+
+Purpose:
+
+- Close the Policy Center retry handoff gap: after an operator retries a
+  failed policy delivery, the console now opens the node detail command section
+  with the newly queued retry command id.
+- Keep this as a Controller/frontend-only deployment; Rust Agent artifacts were
+  validated by CI but not redeployed.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-27T13:33+08:00 gray deployment; 2026-06-27T13:42+08:00 master deployment; 2026-06-27T13:43+08:00 smoke validation |
+| Git commit | `1096282cb27f635de58f051f25b87e5f80a2079e` |
+| Branch CI run | `28279869486` |
+| Master CI run | `28280050514` |
+| Version | `0.2.68` |
+| Controller image | Local runtime image `aria-controller:local@sha256:7cbcda418a160cedbe735c2710e132bf804de98b21b4c4f12e50709c7c805f3e`. |
+| Gray backup | `/root/aria-controller/deploy-backups/20260627T053324Z-0.2.68-28279869486-1096282cb27f` |
+| Master backup | `/root/aria-controller/deploy-backups/20260627T054225Z-0.2.68-28280050514-1096282cb27f` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch and master Actions. |
+| Verification | Local frontend unit tests passed (`142` tests), plus focused Monitoring/Nodes/Policy/ACL/QoS tests (`58` tests). Local linux/amd64 Controller/ariactl build and frontend build passed. Branch Actions run `28279869486` and master Actions run `28280050514` both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.68`; `aria-controller` and `aria-frontend` were healthy; frontend `index.html` returned `Cache-Control: no-store`. |
+| API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring stats returned `ok`; tenant Policies returned 11 items. |
+| Deployment note | The first master upload attempt hit a transient SSH timeout before replacement. A fresh deploy id was used for the final master deployment, and the final smoke validated the replacement. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
