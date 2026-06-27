@@ -1049,6 +1049,35 @@ Purpose:
 | API smoke | Login succeeded as `sysadmin`; tenant listing returned a valid tenant `e779e1f9-1e74-4fc1-915d-f8b432abd421`; tenant Nodes, Monitoring stats, Monitoring events, and Monitoring health all returned HTTP 200. |
 | Deployment note | This was a Controller/frontend-only low-bandwidth deployment. `/api/v2/health` is not a valid smoke endpoint in this deployment path and returned 404; tenant-scoped Monitoring health is the validated health API. |
 
+### 2026-06-28 Frontend Workflow Context Gray Deployment
+
+Status: gray deployed and server-side smoke validated. Not merged to `master` yet.
+
+Purpose:
+
+- Validate the `codex/frontend-workflow-closure` branch after the cross-page
+  context fixes for Nodes, Monitoring, Policy Center, ACL, QoS, Route, and IP
+  Group pages.
+- Preserve command, policy, alert, and node context across page jumps, including
+  Node Detail focus for command and policy evidence.
+- Keep this as a Controller/frontend-only low-bandwidth deployment; Rust Agent
+  artifacts were validated by CI but not redeployed.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-28T03:01+08:00 gray deployment; 2026-06-28T03:03+08:00 smoke validation |
+| Git commit | `15637299f8a30c82a8e762268b5f196a6d60d4cb` |
+| Branch | `codex/frontend-workflow-closure` |
+| Branch CI run | `28298596624` |
+| Version | `0.2.81` |
+| Controller image | Local runtime image `aria-controller:local@sha256:f5abace5404d161f3babb7211681fb4823e4d5518ae14fe943566fdf8a085be1`. |
+| Gray backup | `/root/aria-controller/deploy-backups/20260627T190103Z-0.2.81-28298596624-1563729` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch Actions. |
+| Verification | Branch Actions run `28298596624` passed Go Build, Frontend Build, and Rust Agent Build. Local `go test ./...` passed, local linux/amd64 Controller/ariactl build passed, local frontend unit tests passed (`192` tests), and local frontend build passed. Server-side `https://aria.yun/api/version` returned `0.2.81`; `aria-controller` and `aria-frontend` were healthy; frontend entry returned HTTP 200 and referenced `assets/index-4b9858c3.js`. |
+| API smoke | Login succeeded as `sysadmin`; tenant listing returned active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes, Policies, Monitoring health, Monitoring events, and Node Detail for `d5c7723c-3d86-48ce-a9fc-4695cd170b1c` all returned HTTP 200. |
+| Frontend smoke | Deployed frontend assets contain `PolicyContextBanner` and command-focus markers for the cross-page context workflow. |
+| Deployment note | This is the gray deployment for the feature branch only. Do not treat it as a `master` deployment until the branch is explicitly merged, `master` Actions pass, and `master` artifacts are redeployed. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
