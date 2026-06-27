@@ -557,6 +557,8 @@ git commit -m "chore: add frontend domain types"
 
 ### Task 3: Add Typed API Response Helpers
 
+Status: completed in `codex/frontend-api-response-b10`.
+
 **Files:**
 - Create: `frontend/src/composables/apiResponse.ts`
 - Test: `frontend/tests/unit/apiResponse.test.ts`
