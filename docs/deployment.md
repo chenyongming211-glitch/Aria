@@ -620,6 +620,33 @@ Purpose:
 | Verification | Branch Actions run `28277591501` and master Actions run `28277723272` passed Go Build, Frontend Build, and Rust Agent Build. Local linux/amd64 Controller/ariactl build and frontend build passed before deployment. Server-side `https://aria.yun/` returned HTTP 200. `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.65`; `aria-controller` and `aria-frontend` were healthy. |
 | Operations smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants. Smoke selected tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db` and online node `node-82-156-137-42` (`d5c7723c-3d86-48ce-a9fc-4695cd170b1c`). Node detail, Monitoring stats, Monitoring alerts, and Monitoring topology all returned HTTP 200. A `health_check` command with `source=master-smoke` and `run_id=28277723272` queued as `2b67f001-9ddb-4ffe-9446-1a0a5f6d9f13`, then reached `completed`; Agent status returned `last_command_status=completed` and `configuration_status=applied`. |
 
+### 2026-06-27 Frontend Workflow Context Deployment
+
+Status: deployed and server-side smoke validated.
+
+Purpose:
+
+- Preserve node, policy, and command context when moving from Monitoring or
+  Nodes into Policy Center and then into ACL, QoS, or Route pages.
+- Keep this as a Controller/frontend-only deployment; Rust Agent artifacts were
+  validated by CI but not redeployed.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-27T12:23+08:00 gray deployment; 2026-06-27T12:33+08:00 master deployment; 2026-06-27T12:35+08:00 smoke validation |
+| Git commit | `1860acf5ad99ce29d44cd6c846accd8f47300ebc` |
+| Branch CI run | `28278318460` |
+| Master CI run | `28278563853` |
+| Version | `0.2.66` |
+| Controller image | Local runtime image `aria-controller:local@sha256:8907411cc170902597455d5f708a338a59e55275efb5042c3be2ccbe504ddfd3`. |
+| Frontend backup | `/root/aria-controller/deploy-backups/20260627T043354Z-0.2.66-28278563853-1860acf5ad99/frontend-dist` |
+| Runtime binary backup | `/root/aria-controller/deploy-backups/20260627T043354Z-0.2.66-28278563853-1860acf5ad99/runtime-bin` |
+| Config backup | `/root/aria-controller/deploy-backups/20260627T043354Z-0.2.66-28278563853-1860acf5ad99/.env`, `docker-compose.yml`, and `config` |
+| DB backup | `/root/aria-controller/deploy-backups/20260627T043354Z-0.2.66-28278563853-1860acf5ad99/postgres.sql` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch and master Actions. |
+| Verification | Local frontend unit tests passed (`142` tests), plus focused policy-context tests. Local linux/amd64 Controller/ariactl build and frontend build passed. Branch Actions run `28278318460` and master Actions run `28278563853` both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` returned `0.2.66`; `aria-controller` and `aria-frontend` were healthy; frontend `index.html` returned `Cache-Control: no-store`; deployed bundles included `Policies-110ed234.js`, `ACLRules-933b5618.js`, `BandwidthControl-4fe5effa.js`, and `Routing-fa19cc25.js`. |
+| API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected tenant `Aria Default`; tenant Nodes returned 4 items; tenant Monitoring stats returned HTTP 200; tenant Policies returned 11 items. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
