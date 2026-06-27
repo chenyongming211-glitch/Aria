@@ -1051,7 +1051,7 @@ Purpose:
 
 ### 2026-06-28 Frontend Workflow Context and TypeScript Gray Deployment
 
-Status: gray deployed and server-side smoke validated. Not merged to `master` yet.
+Status: deployed from `master` and server-side smoke validated.
 
 Purpose:
 
@@ -1070,18 +1070,20 @@ Purpose:
 
 | Field | Value |
 | --- | --- |
-| Date | 2026-06-28T03:01+08:00 initial gray deployment; 2026-06-28T04:32+08:00 frontend-only gray update; 2026-06-28T04:35+08:00 smoke validation |
-| Git commit | `e84c9a18d5bb26f523585e882aa0720bda3d47ab` |
+| Date | 2026-06-28T03:01+08:00 initial gray deployment; 2026-06-28T04:32+08:00 frontend-only gray update; 2026-06-28T04:35+08:00 gray smoke validation; 2026-06-28T04:51+08:00 master deployment; 2026-06-28T04:53+08:00 master smoke validation |
+| Git commit | Runtime deployed from `60e48c7c65691a2344330eb3e9b4828b7c431c70`; this deployment record was committed afterward as a docs-only follow-up. |
 | Branch | `codex/frontend-workflow-closure` |
 | Branch CI runs | `28298596624`, `28299146597`, `28299393566`, `28299643997`, `28299834095`, `28300149077`, `28300475309`, `28300620823`, `28300816666` |
+| Master CI run | `28301243315` |
 | Version | `0.2.81` |
-| Controller image | Unchanged from the initial gray deployment: local runtime image `aria-controller:local@sha256:f5abace5404d161f3babb7211681fb4823e4d5518ae14fe943566fdf8a085be1`. |
+| Controller image | Master runtime image `aria-controller:local@sha256:7c32188e5c754d0020bacb59a7ac3721091bb193b679140f6956be6cc1bfe43c`. |
 | Gray backup | Initial gray backup: `/root/aria-controller/deploy-backups/20260627T190103Z-0.2.81-28298596624-1563729`; latest frontend-only backup: `/root/aria-controller/deploy-backups/frontend-dist-before-e84c9a1-20260628043253.tar.gz` |
+| Master backup | `/root/aria-controller/deploy-backups/20260627T205119Z-0.2.81-28301243315-60e48c7` |
 | Agent artifact | Not changed on servers; Rust Agent Build passed in branch Actions. |
-| Verification | Branch Actions runs through `28300816666` passed Go Build, Frontend Build, and Rust Agent Build. For the latest frontend-only update, local `npm run type-check`, focused router/session tests, full frontend unit tests (`192` tests), `npm run build`, and `git diff --check` passed. Server-side `https://aria.yun/` returned HTTP 200 with `Cache-Control: no-store`; the deployed entry referenced `assets/index-bc990307.js`, that asset returned HTTP 200 with 99,909 bytes; `https://aria.yun/api/version` returned `0.2.81`; `/health` and `/api/v2/controller-info` returned HTTP 200; `aria-controller` and `aria-frontend` were healthy. Browser automation from the local workstation timed out on `https://aria.yun`, consistent with the known local 443/proxy path issue; server-side HTTPS validation remained healthy. |
+| Verification | Branch Actions runs through `28300816666` passed Go Build, Frontend Build, and Rust Agent Build. Master Actions run `28301243315` passed Go Build, Frontend Build, and Rust Agent Build. For the latest frontend-only update, local `npm run type-check`, focused router/session tests, full frontend unit tests (`192` tests), `npm run build`, and `git diff --check` passed. For the master deployment, local linux/amd64 Controller/ariactl build and frontend build passed. Server-side `https://aria.yun/` returned HTTP 200 with `Cache-Control: no-store`; the deployed entry referenced `assets/index-bc990307.js`, that asset returned HTTP 200 with 99,909 bytes; `https://aria.yun/api/version` returned `0.2.81`; `/health` and `/api/v2/controller-info` returned HTTP 200; `aria-controller` and `aria-frontend` were healthy; Controller logs showed HTTP and gRPC TLS listeners ready. Browser automation from the local workstation timed out on `https://aria.yun`, consistent with the known local 443/proxy path issue; server-side HTTPS validation remained healthy. |
 | API smoke | Login succeeded as `sysadmin`; tenant listing returned active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes, Policies, Monitoring health, Monitoring events, and Node Detail for `d5c7723c-3d86-48ce-a9fc-4695cd170b1c` all returned HTTP 200. |
 | Frontend smoke | Deployed frontend assets contain `PolicyContextBanner` and command-focus markers for the cross-page context workflow. |
-| Deployment note | This is the gray deployment for the feature branch only. Do not treat it as a `master` deployment until the branch is explicitly merged, `master` Actions pass, and `master` artifacts are redeployed. |
+| Deployment note | The feature branch was fast-forwarded into `master`, master CI passed, and master Controller/frontend artifacts were deployed through the low-bandwidth runtime image path. Rust Agent artifacts were validated by CI but not redeployed. This docs-only deployment record commit does not require a runtime redeploy. |
 
 ## Notes
 
