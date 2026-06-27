@@ -56,18 +56,19 @@ Useful commands:
 ```bash
 VERSION=$(cat VERSION)
 COMMIT=$(git rev-parse --short HEAD)
+BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+LDFLAGS="-X aria/internal/cli.Version=${VERSION} -X main.buildTime=${BUILD_TIME} -X main.commit=${COMMIT}"
 
 mkdir -p dist/controller dist/frontend
 
 go test ./...
 
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-  -ldflags="-X aria/internal/cli.Version=${VERSION} -X aria/internal/cli.commit=${COMMIT}" \
+  -ldflags="${LDFLAGS}" \
   -o dist/controller/aria \
   ./cmd
 
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-  -ldflags="-X main.version=${VERSION}" \
   -o dist/controller/ariactl \
   ./cmd/ariactl
 
@@ -755,6 +756,35 @@ Purpose:
 | Agent artifact | Not changed on servers; Rust Agent Build passed in branch and master Actions. |
 | Verification | Local frontend unit tests passed (`145` tests), including focused `policyPageContext`, `useAclApi`, and `useQosApi` tests. Local linux/amd64 Controller/ariactl build and frontend build passed. Branch Actions run `28281076556` and master Actions run `28281268428` both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.70`; `aria-controller` and `aria-frontend` were healthy; frontend `index.html` returned `Cache-Control: no-store`. |
 | API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring health returned `ok`; tenant Policies returned 11 items. |
+
+### 2026-06-27 Frontend Rule Mutation Trace Deployment
+
+Status: deployed and server-side smoke validated.
+
+Purpose:
+
+- Close the ACL and QoS mutation handoff gap: after an operator creates,
+  updates, toggles, or deletes a dedicated ACL or QoS rule, the console opens
+  the node detail command section with the newly queued mutation command id.
+- Keep this aligned with the Policy Center and retry handoff behavior introduced
+  in `0.2.68` through `0.2.70`.
+- Keep this as a Controller/frontend-only deployment; Rust Agent artifacts were
+  validated by CI but not redeployed.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-27T14:58+08:00 gray deployment; 2026-06-27T15:10+08:00 master deployment; 2026-06-27T15:11+08:00 smoke validation |
+| Git commit | `99f788944096917bab6a5fc010a8112a1edcb804` |
+| Branch CI run | `28281728879` |
+| Master CI run | `28281925156` |
+| Version | `0.2.71` |
+| Controller image | Local runtime image `aria-controller:local@sha256:cd3093fba02691b81371729bd9acfdfce390395e79faeab9f1715fe6e2acb274`. |
+| Gray backup | `/root/aria-controller/deploy-backups/20260627T065824Z-0.2.71-28281728879-99f788944096` |
+| Master backup | `/root/aria-controller/deploy-backups/20260627T071025Z-0.2.71-28281925156-99f788944096-ldflags` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch and master Actions. |
+| Verification | Local frontend unit tests passed (`149` tests), including focused `policyPageContext`, `useAclApi`, and `useQosApi` tests (`36` tests). Local linux/amd64 Controller/ariactl build and frontend build passed. Branch Actions run `28281728879` and master Actions run `28281925156` both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.71`; `aria-controller` and `aria-frontend` were healthy; frontend `index.html` returned `Cache-Control: no-store`. |
+| API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring health returned `ok`; tenant Policies returned 11 items. |
+| Deployment note | The first master local-artifact deploy built the Controller without the same `aria/internal/cli.Version` ldflags used by GitHub Actions, so `/api/version` returned `dev` while `/api/v2/controller-info` returned `0.2.71` from the environment. The Controller was rebuilt with the documented ldflags and redeployed under the final master backup above. |
 
 ## Notes
 
