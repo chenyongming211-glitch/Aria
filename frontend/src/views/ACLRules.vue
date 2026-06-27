@@ -264,7 +264,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 import { useAclApi } from '@/composables/useAclApi'
@@ -279,6 +280,7 @@ import {
 } from '@/utils/controlLoopStatus'
 
 const { hasPermission } = usePermission()
+const route = useRoute() || { query: {}, fullPath: '' }
 
 const loading = ref(false)
 const rules = ref([])
@@ -346,6 +348,13 @@ const formRules = {
 
 const dialogTitle = computed(() => form.id ? '编辑规则' : '新建规则')
 
+const routeQuery = computed(() => route.query || {})
+const routeContext = computed(() => ({
+  nodeId: typeof routeQuery.value.nodeId === 'string' ? routeQuery.value.nodeId : '',
+  policyRef: typeof routeQuery.value.policyRef === 'string' ? routeQuery.value.policyRef : '',
+  commandId: typeof routeQuery.value.commandId === 'string' ? routeQuery.value.commandId : ''
+}))
+
 const selectableGroups = computed(() => ipGroups.value.filter((group) => group.kind !== 'inline'))
 
 const groupById = computed(() => {
@@ -362,7 +371,14 @@ const paginatedRules = computed(() => {
 const loadNodes = async () => {
   try {
     tenantNodes.value = await useTenantApi.getTenantNodes()
-    if (!filters.node_id && tenantNodes.value.length > 0) {
+    const contextNode = tenantNodes.value.find((node) => node.id === routeContext.value.nodeId)
+    if (routeContext.value.policyRef) {
+      filters.name = routeContext.value.policyRef
+    }
+    if (contextNode) {
+      filters.node_id = contextNode.id
+      await loadRules()
+    } else if (!filters.node_id && tenantNodes.value.length > 0) {
       filters.node_id = tenantNodes.value[0].id
       await loadRules()
     } else if (tenantNodes.value.length === 0) {
@@ -523,7 +539,7 @@ const handleSubmit = async () => {
 
 const resetForm = () => {
   Object.assign(form, {
-    node_id: tenantNodes.value[0]?.id || '',
+    node_id: filters.node_id || tenantNodes.value[0]?.id || '',
     node_name: '',
     id: null, name: '', src_group_id: '', dst_group_id: '', src_cidr: '', dst_cidr: '',
     protocol: 6, dst_port: 0, direction: 'ingress', ports: '',
@@ -594,6 +610,7 @@ const reloadTenantScopedData = async () => {
   tenantNodes.value = []
   ipGroups.value = []
   filters.node_id = ''
+  filters.name = routeContext.value.policyRef || ''
   pagination.page = 1
   pagination.total = 0
   await Promise.all([loadIPGroups(), loadNodes()])
@@ -604,6 +621,15 @@ onMounted(() => {
 })
 
 useTenantChangeReload(reloadTenantScopedData)
+
+watch(() => route.fullPath || '', async () => {
+  filters.name = routeContext.value.policyRef || ''
+  pagination.page = 1
+  if (routeContext.value.nodeId) {
+    filters.node_id = routeContext.value.nodeId
+  }
+  await loadRules()
+})
 </script>
 
 <style scoped>

@@ -218,7 +218,7 @@
             <el-button size="small" @click="openNodeDetail(row)">
               节点详情
             </el-button>
-            <el-button size="small" type="primary" @click="goToKind(row.kind)">
+            <el-button size="small" type="primary" @click="goToKind(row.kind, row)">
               前往专页
             </el-button>
           </template>
@@ -274,7 +274,7 @@
         <div class="drawer-actions">
           <el-button @click="openNodeDetail(selectedPolicy)">打开节点监控</el-button>
           <el-button v-if="canRetryPolicy(selectedPolicy)" type="warning" @click="retryPolicyDelivery(selectedPolicy)">重试下发</el-button>
-          <el-button type="primary" @click="goToKind(selectedPolicy.kind)">前往专页</el-button>
+          <el-button type="primary" @click="goToKind(selectedPolicy.kind, selectedPolicy)">前往专页</el-button>
         </div>
       </template>
     </el-drawer>
@@ -529,16 +529,37 @@ const focusPolicyFromRoute = () => {
   }
 }
 
-const goToKind = (kind) => {
+const policyPageQuery = (policy) => {
+  const query = {}
+  const nodeId = policy?.nodeId || routeContext.value.nodeId
+  const policyRef = policy?.policyRef || routeContext.value.policyRef
+  const commandId = policy?.lastDeliveryCommandId ||
+    policy?.deliveryHistory?.find((item) => item.command_id)?.command_id ||
+    routeContext.value.commandId
+
+  if (nodeId) {
+    query.nodeId = nodeId
+  }
+  if (policyRef) {
+    query.policyRef = policyRef
+  }
+  if (commandId) {
+    query.commandId = commandId
+  }
+  return query
+}
+
+const goToKind = (kind, policy = selectedPolicy.value) => {
+  const query = policyPageQuery(policy)
   switch (kind) {
     case 'acl':
-      router.push({ name: 'ACLRules' })
+      router.push({ name: 'ACLRules', query })
       break
     case 'qos':
-      router.push({ name: 'BandwidthControl' })
+      router.push({ name: 'BandwidthControl', query })
       break
     case 'route':
-      router.push({ name: 'Routing' })
+      router.push({ name: 'Routing', query })
       break
     default:
       break

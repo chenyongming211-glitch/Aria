@@ -204,7 +204,8 @@
 </template>
 
 <script setup>
-import { computed, ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useQosApi } from '@/composables/useQosApi'
@@ -219,6 +220,7 @@ import {
 } from '@/utils/controlLoopStatus'
 
 const { hasPermission } = usePermission()
+const route = useRoute() || { query: {}, fullPath: '' }
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -238,6 +240,12 @@ const qosEmptyText = computed(() => {
   if (!selectedNodeId.value) return '请选择节点'
   return `${selectedNodeName.value || '当前节点'} 暂无 QoS 规则`
 })
+const routeQuery = computed(() => route.query || {})
+const routeContext = computed(() => ({
+  nodeId: typeof routeQuery.value.nodeId === 'string' ? routeQuery.value.nodeId : '',
+  policyRef: typeof routeQuery.value.policyRef === 'string' ? routeQuery.value.policyRef : '',
+  commandId: typeof routeQuery.value.commandId === 'string' ? routeQuery.value.commandId : ''
+}))
 
 const form = reactive({
   id: null,
@@ -270,7 +278,8 @@ const loadNodes = async () => {
   try {
     tenantNodes.value = await useTenantApi.getTenantNodes()
     if (tenantNodes.value.length > 0) {
-      selectedNodeId.value = tenantNodes.value[0].id
+      const contextNode = tenantNodes.value.find((node) => node.id === routeContext.value.nodeId)
+      selectedNodeId.value = contextNode?.id || selectedNodeId.value || tenantNodes.value[0].id
       refreshData()
     } else {
       selectedNodeId.value = ''
@@ -516,6 +525,18 @@ onMounted(() => {
 })
 
 useTenantChangeReload(reloadTenantScopedData)
+
+watch(() => route.fullPath || '', async () => {
+  if (!routeContext.value.nodeId || routeContext.value.nodeId === selectedNodeId.value) {
+    return
+  }
+  const contextNode = tenantNodes.value.find((node) => node.id === routeContext.value.nodeId)
+  if (!contextNode) {
+    return
+  }
+  selectedNodeId.value = contextNode.id
+  await refreshData()
+})
 </script>
 
 <style scoped>

@@ -132,7 +132,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { Refresh, Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRouteApi } from '@/composables/useRouteApi'
@@ -145,6 +146,7 @@ import {
 } from '@/utils/controlLoopStatus'
 
 const { hasPermission } = usePermission()
+const route = useRoute() || { query: {}, fullPath: '' }
 
 const loading = ref(false)
 const searchQuery = ref('')
@@ -165,18 +167,27 @@ const currentRoute = ref({
 
 const currentDeleteRoute = ref(null)
 
-const filteredRoutes = computed(() => {
-  if (!searchQuery.value) {
-    return allRoutes.value
-  }
+const routeQuery = computed(() => route.query || {})
+const routeContext = computed(() => ({
+  nodeId: typeof routeQuery.value.nodeId === 'string' ? routeQuery.value.nodeId : '',
+  policyRef: typeof routeQuery.value.policyRef === 'string' ? routeQuery.value.policyRef : '',
+  commandId: typeof routeQuery.value.commandId === 'string' ? routeQuery.value.commandId : ''
+}))
 
+const filteredRoutes = computed(() => {
   const keyword = searchQuery.value.toLowerCase()
-  return allRoutes.value.filter((route) =>
-    String(route.nodeName || '').toLowerCase().includes(keyword) ||
-    String(route.publicIp || '').toLowerCase().includes(keyword) ||
-    String(route.region || '').toLowerCase().includes(keyword) ||
-    String(route.cidr || '').toLowerCase().includes(keyword)
-  )
+  return allRoutes.value.filter((item) => {
+    if (routeContext.value.nodeId && item.nodeId !== routeContext.value.nodeId) {
+      return false
+    }
+    if (!keyword) {
+      return true
+    }
+    return String(item.nodeName || '').toLowerCase().includes(keyword) ||
+      String(item.publicIp || '').toLowerCase().includes(keyword) ||
+      String(item.region || '').toLowerCase().includes(keyword) ||
+      String(item.cidr || '').toLowerCase().includes(keyword)
+  })
 })
 
 const paginatedRoutes = computed(() => {
@@ -193,7 +204,13 @@ const loadRoutes = async () => {
     ])
     allRoutes.value = routes
     tenantNodes.value = nodes
-    if (!currentRoute.value.nodeId && nodes.length > 0) {
+    if (routeContext.value.policyRef) {
+      searchQuery.value = routeContext.value.policyRef
+    }
+    const contextNode = nodes.find((node) => node.id === routeContext.value.nodeId)
+    if (contextNode) {
+      currentRoute.value.nodeId = contextNode.id
+    } else if (!currentRoute.value.nodeId && nodes.length > 0) {
       currentRoute.value.nodeId = nodes[0].id
     }
   } catch (error) {
@@ -208,7 +225,7 @@ const loadRoutes = async () => {
 const showAddRouteDialog = () => {
   dialogMode.value = 'add'
   currentRoute.value = {
-    nodeId: tenantNodes.value[0]?.id || '',
+    nodeId: currentRoute.value.nodeId || tenantNodes.value[0]?.id || '',
     cidr: '',
     originalCidr: ''
   }
@@ -291,7 +308,7 @@ const confirmDeleteRoute = async () => {
 const closeRouteDialog = () => {
   routeDialogVisible.value = false
   currentRoute.value = {
-    nodeId: tenantNodes.value[0]?.id || '',
+    nodeId: currentRoute.value.nodeId || tenantNodes.value[0]?.id || '',
     cidr: '',
     originalCidr: ''
   }
@@ -333,6 +350,17 @@ onMounted(() => {
 })
 
 useTenantChangeReload(reloadTenantScopedData)
+
+watch(() => route.fullPath || '', async () => {
+  currentPage.value = 1
+  if (routeContext.value.policyRef) {
+    searchQuery.value = routeContext.value.policyRef
+  }
+  if (routeContext.value.nodeId) {
+    currentRoute.value.nodeId = routeContext.value.nodeId
+  }
+  await loadRoutes()
+})
 </script>
 
 <style scoped>
