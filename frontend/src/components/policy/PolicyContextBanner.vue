@@ -20,7 +20,7 @@
         查看节点详情
       </el-button>
       <el-button
-        v-if="nodeId || policyRef || commandId"
+        v-if="domain || nodeId || policyRef || commandId"
         size="small"
         text
         data-testid="open-context-policy-center"
@@ -52,7 +52,7 @@ defineEmits<{
   'open-policy-center': []
 }>()
 
-const hasContext = computed(() => Boolean(props.nodeId || props.policyRef || props.commandId))
+const hasContext = computed(() => Boolean(props.domain || props.nodeId || props.policyRef || props.commandId))
 const nodeLabel = computed(() => props.nodeName || props.nodeId || '')
 const shortCommandId = computed(() => {
   if (!props.commandId) return ''

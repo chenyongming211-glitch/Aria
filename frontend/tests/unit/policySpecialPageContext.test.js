@@ -318,6 +318,25 @@ describe('policy special page context filters', () => {
     })
   })
 
+  it('keeps kind-only IP Group context visible and returns to the filtered Policy Center', async () => {
+    routeState.query = { kind: 'acl' }
+    routeState.fullPath = '/ip-groups?kind=acl'
+
+    const wrapper = mountPage(IPGroups)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="policy-context-banner"]').exists()).toBe(true)
+
+    await wrapper.find('[data-testid="open-context-policy-center"]').trigger('click')
+
+    expect(routerPushMock).toHaveBeenCalledWith({
+      name: 'Policies',
+      query: {
+        kind: 'acl'
+      }
+    })
+  })
+
   it('opens node detail from IP Group context without losing policy trace', async () => {
     routeState.query = { nodeId: 'node-1', policyRef: 'acl-1', kind: 'acl', commandId: 'cmd-1' }
     routeState.fullPath = '/ip-groups?nodeId=node-1&policyRef=acl-1&kind=acl&commandId=cmd-1'
