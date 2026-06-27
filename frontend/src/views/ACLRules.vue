@@ -479,14 +479,22 @@ const clearRouteContext = () => {
   router.push({ name: 'ACLRules' })
 }
 
+const nodeDetailFocus = () => {
+  if (routeContext.value.commandId) return 'commands'
+  if (routeContext.value.policyRef) return 'policies'
+  return ''
+}
+
 const openContextNodeDetail = () => {
   if (!contextNodeId.value) {
     return
   }
+  const focus = nodeDetailFocus()
   router.push({
     name: 'NodeMonitorDetail',
     params: { nodeId: contextNodeId.value },
     query: {
+      ...(focus ? { focus } : {}),
       ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {}),
       ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
       policyDomain: 'acl'

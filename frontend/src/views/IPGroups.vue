@@ -203,14 +203,22 @@ const openPolicyCenterContext = () => {
   router.push({ name: 'Policies', query: contextQuery.value })
 }
 
+const nodeDetailFocus = () => {
+  if (routeContext.value.commandId) return 'commands'
+  if (routeContext.value.policyRef || routeContext.value.policyDomain) return 'policies'
+  return ''
+}
+
 const openContextNodeDetail = () => {
   if (!routeContext.value.nodeId) {
     return
   }
+  const focus = nodeDetailFocus()
   router.push({
     name: 'NodeMonitorDetail',
     params: { nodeId: routeContext.value.nodeId },
     query: {
+      ...(focus ? { focus } : {}),
       ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
       ...(routeContext.value.policyDomain ? { policyDomain: routeContext.value.policyDomain } : {}),
       ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {})

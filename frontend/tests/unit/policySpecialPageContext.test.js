@@ -251,6 +251,7 @@ describe('policy special page context filters', () => {
       name: 'NodeMonitorDetail',
       params: { nodeId: 'node-1' },
       query: {
+        focus: 'commands',
         commandId: 'cmd-1',
         policyRef: '10.0.1.0/24',
         policyDomain: 'route'
@@ -350,6 +351,7 @@ describe('policy special page context filters', () => {
       name: 'NodeMonitorDetail',
       params: { nodeId: 'node-1' },
       query: {
+        focus: 'commands',
         policyRef: 'acl-1',
         policyDomain: 'acl',
         commandId: 'cmd-1'
