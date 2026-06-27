@@ -845,6 +845,37 @@ Purpose:
 | Frontend smoke | Deployed bundle no longer contains `AI Copilot`, `智能副驾`, `System Online`, or `Node Monitor Detail` fixed strings. |
 | Deployment note | After the gray deploy, `/api/version` returned `0.2.73` but `/api/v2/controller-info` still returned `0.2.72` because production `.env` had stale `ARIA_VERSION` and `ARIA_CONTROLLER_VERSION` values. The master deploy updated both environment variables to `0.2.73` before rebuilding the runtime image and restarting `aria-controller`. |
 
+### 2026-06-27 Frontend Design Token Cleanup Deployment
+
+Status: deployed and server-side smoke validated.
+
+Purpose:
+
+- Remove the unused Plus Jakarta webfont dependency and use a single system font
+  stack that supports Chinese well.
+- Reduce operational surface decoration by removing default card shadows, glow
+  tokens, stat-card gradient bars, button gradients, and default pulsing status
+  dots from the shared frontend foundation.
+- Align Element Plus card, button, input, and table radius/shadow treatment with
+  the 6px/8px operational token rules.
+- Keep this as a Controller/frontend-only deployment; Rust Agent artifacts were
+  validated by CI but not redeployed.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-27T16:52+08:00 gray deployment; 2026-06-27T17:01+08:00 master deployment; 2026-06-27T17:02+08:00 smoke validation |
+| Git commit | `966b3ce2ebd3a0ca4bd44b50b15567d4920dacfa` |
+| Branch CI run | `28284209602` |
+| Master CI run | `28284433543` |
+| Version | `0.2.74` |
+| Controller image | Local runtime image `aria-controller:local@sha256:64bbd2e63ef12c46efb72725c2f8d5bb7d6023bc012921f8632b4c76b5dd86c4`. |
+| Gray backup | `/root/aria-controller/deploy-backups/20260627T085239Z-0.2.74-28284209602-966b3ce2ebd3` |
+| Master backup | `/root/aria-controller/deploy-backups/20260627T090134Z-0.2.74-28284433543-966b3ce2ebd3` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch and master Actions. |
+| Verification | Local frontend unit tests passed (`155` tests) and local frontend build passed. Local linux/amd64 Controller/ariactl build passed. Branch Actions run `28284209602` and master Actions run `28284433543` both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.74`; `aria-controller` and `aria-frontend` were healthy; frontend entry returned HTTP 200. |
+| API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring health returned `ok`; tenant Policies returned 11 items. |
+| Frontend smoke | Deployed bundle no longer contains Plus Jakarta font assets or `Avenir` references. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
