@@ -23,8 +23,10 @@
 
 ## Current Baseline
 
-- `frontend/package.json` 已安装 `typescript`，但未安装 `vue-tsc`。
-- 当前没有 `frontend/tsconfig.json`，没有 `.ts` / `.tsx` 源码文件。
+- `frontend/package.json` 已安装 `typescript` 和 `vue-tsc`。
+- `frontend/tsconfig.json`、`frontend/tsconfig.node.json`、`frontend/src/env.d.ts` 已建立 JS/Vue 与 TS 共存的类型检查基线。
+- GitHub Actions `frontend-build` job 已在单测后执行 `npm run type-check`。
+- 当前还没有业务 `.ts` / `.tsx` 源码文件；后续从共享类型和 API composables 开始迁移。
 - 当前前端源码约为 `45` 个 `.js`、`20` 个 `.vue`。
 - 业务高风险区集中在：
   - `frontend/src/composables/useApi.js`
@@ -269,6 +271,8 @@ export interface MonitoringNodeDetail {
 ## Implementation Tasks
 
 ### Task 1: Add TypeScript Tooling Baseline
+
+Status: completed in `codex/frontend-ts-baseline-b8`.
 
 **Files:**
 - Modify: `frontend/package.json`
