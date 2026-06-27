@@ -300,6 +300,38 @@ describe('monitoring workflow routing', () => {
     globalThis.localStorage = localStorageMock
   })
 
+  it('uses shared UI foundation components for the monitoring operations shell', async () => {
+    const wrapper = mountWithStubs(Monitoring)
+    await flushPromises()
+
+    expect(wrapper.find('.ui-page-header').exists()).toBe(true)
+    expect(wrapper.find('.ui-filter-bar').exists()).toBe(true)
+    expect(wrapper.find('.ui-metric-strip').exists()).toBe(true)
+    expect(wrapper.findAll('.ui-data-panel')).toHaveLength(2)
+    expect(wrapper.find('.ui-status-badge').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Run Sync')
+    expect(wrapper.text()).toContain('Health Check')
+    expect(wrapper.text()).toContain('Resolve')
+  })
+
+  it('keeps failed-command metric shortcuts wired through the shared metric strip', async () => {
+    const wrapper = mountWithStubs(Monitoring)
+    await flushPromises()
+
+    const failedMetric = wrapper.findAll('.ui-metric-strip__item--clickable')
+      .find((item) => item.text().includes('Failed Cmds'))
+    expect(failedMetric).toBeTruthy()
+
+    await failedMetric.trigger('click')
+
+    expect(wrapper.vm.filterEventType).toBe('command_failed')
+    expect(monitorApiMock.getEvents).toHaveBeenLastCalledWith({
+      limit: 50,
+      offset: 0,
+      event_type: 'command_failed'
+    })
+  })
+
   it('routes from an alert to node detail with command and policy context', async () => {
     const wrapper = mountWithStubs(Monitoring)
     await flushPromises()

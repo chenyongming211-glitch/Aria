@@ -4,8 +4,12 @@
       v-for="metric in metrics"
       :key="metric.key || metric.label"
       class="ui-metric-strip__item"
-      :class="statusClass(metric.status)"
-      role="listitem"
+      :class="[statusClass(metric.status), { 'ui-metric-strip__item--clickable': isClickable(metric) }]"
+      :role="isClickable(metric) ? 'button' : 'listitem'"
+      :tabindex="isClickable(metric) ? 0 : undefined"
+      @click="handleSelect(metric)"
+      @keydown.enter.prevent="handleSelect(metric)"
+      @keydown.space.prevent="handleSelect(metric)"
     >
       <div class="ui-metric-strip__label-row">
         <span v-if="metric.status" class="ui-metric-strip__dot" aria-hidden="true" />
@@ -25,12 +29,21 @@ defineProps({
   }
 })
 
+const emit = defineEmits(['select'])
+
 const allowedStatuses = new Set(['success', 'warning', 'danger', 'info', 'muted'])
 
 const statusClass = (status) => {
   const normalized = String(status || 'muted').toLowerCase()
   const safeStatus = allowedStatuses.has(normalized) ? normalized : 'muted'
   return `ui-metric-strip__item--${safeStatus}`
+}
+
+const isClickable = (metric) => Boolean(metric?.clickable)
+
+const handleSelect = (metric) => {
+  if (!isClickable(metric)) return
+  emit('select', metric)
 }
 </script>
 
@@ -48,6 +61,21 @@ const statusClass = (status) => {
   background: var(--aria-content-bg-secondary);
   border: 1px solid var(--aria-border-primary);
   border-radius: var(--aria-radius);
+}
+
+.ui-metric-strip__item--clickable {
+  cursor: pointer;
+  transition: border-color var(--aria-transition-base), box-shadow var(--aria-transition-base);
+}
+
+.ui-metric-strip__item--clickable:hover {
+  border-color: rgba(37, 99, 235, 0.28);
+  box-shadow: var(--aria-shadow-sm);
+}
+
+.ui-metric-strip__item--clickable:focus-visible {
+  outline: 2px solid var(--aria-primary);
+  outline-offset: 2px;
 }
 
 .ui-metric-strip__label-row {
