@@ -19,10 +19,9 @@
     "vue-router": "^4.2.0"
   },
   "devDependencies": {
-    "@fontsource-variable/plus-jakarta-sans": "^5.2.8",
     "@types/node": "^20.0.0",
-    "@vue/test-utils": "^2.4.6",
     "@vitejs/plugin-vue": "^4.5.0",
+    "@vue/test-utils": "^2.4.6",
     "jsdom": "^27.0.1",
     "terser": "^5.46.0",
     "typescript": "^5.0.0",

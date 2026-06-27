@@ -31,10 +31,16 @@
   --el-border-color-lighter: #edf2f7;
 
   /* 阴影 */
-  --el-box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
-  --el-box-shadow-light: 0 1px 2px rgba(15, 23, 42, 0.04);
-  --el-box-shadow-lighter: 0 1px 2px rgba(15, 23, 42, 0.04);
-  --el-box-shadow-dark: 0 10px 22px rgba(15, 23, 42, 0.1);
+  --el-box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --el-box-shadow-light: none;
+  --el-box-shadow-lighter: none;
+  --el-box-shadow-dark: 0 6px 14px rgba(15, 23, 42, 0.1);
+
+  /* 圆角 */
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 4px;
+  --el-border-radius-round: 9999px;
+  --el-border-radius-circle: 100%;
 
   /* 菜单背景 */
   --el-menu-bg-color: #1d222a;
@@ -49,8 +55,9 @@
 }
 
 .el-card {
-  border-radius: 8px;
+  border-radius: var(--aria-radius, 8px);
   border: 1px solid var(--el-border-color-light);
+  box-shadow: none;
 }
 
 .el-table th {
@@ -86,12 +93,13 @@
 
 /* 定制输入框样式 */
 .el-input__wrapper {
-  border-radius: 6px;
+  border-radius: var(--el-border-radius-base);
+  box-shadow: 0 0 0 1px var(--el-border-color) inset;
 }
 
 /* 定制按钮样式 */
 .el-button {
-  border-radius: 6px;
+  border-radius: var(--el-border-radius-base);
 }
 
 .el-button--primary {

@@ -9,9 +9,6 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import './styles/global.css'
 import './styles/element-variables.css'
 
-// 引入字体
-import '@fontsource-variable/plus-jakarta-sans'
-
 import App from './App.vue'
 import router from './router'
 import useAppStore from './stores/app'
@@ -46,9 +43,9 @@ style.textContent = `
   .el-card {
     background: var(--aria-content-bg-secondary);
     border: 1px solid var(--aria-border-primary);
-    border-radius: var(--aria-radius-lg);
-    box-shadow: var(--aria-shadow-sm);
-    transition: border-color var(--aria-transition-base), box-shadow var(--aria-transition-base);
+    border-radius: var(--aria-radius);
+    box-shadow: none;
+    transition: border-color var(--aria-transition-base), background-color var(--aria-transition-base);
   }
 
   .el-card__header {
@@ -147,7 +144,7 @@ style.textContent = `
   .el-button {
     border-radius: var(--aria-radius);
     font-weight: 500;
-    transition: background-color var(--aria-transition-base), border-color var(--aria-transition-base), color var(--aria-transition-base), box-shadow var(--aria-transition-base);
+    transition: background-color var(--aria-transition-base), border-color var(--aria-transition-base), color var(--aria-transition-base);
   }
 
   .el-button--primary {
@@ -160,7 +157,7 @@ style.textContent = `
   .el-button--primary:focus {
     background: var(--aria-primary-dark);
     border-color: var(--aria-primary-dark);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    box-shadow: none;
   }
 
   .el-button--primary:active {
@@ -179,7 +176,7 @@ style.textContent = `
     color: #fff;
     background: var(--aria-danger-dark);
     border-color: var(--aria-danger-dark);
-    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+    box-shadow: none;
   }
 
   .el-button--danger:active {
@@ -211,7 +208,7 @@ style.textContent = `
   .el-table .el-button.is-link:focus {
     background: var(--aria-content-bg-secondary);
     border-color: var(--aria-border-hover);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+    box-shadow: none;
   }
 
   .el-table .el-button.is-link.el-button--primary {
@@ -238,7 +235,7 @@ style.textContent = `
     color: var(--aria-danger-dark);
     background: rgba(239, 68, 68, 0.12);
     border-color: rgba(239, 68, 68, 0.28);
-    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.08);
+    box-shadow: none;
   }
 
   /* 输入框样式 */
@@ -289,7 +286,7 @@ style.textContent = `
 
   .el-textarea__inner:focus {
     border-color: var(--aria-primary);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+    box-shadow: 0 0 0 1px var(--aria-primary);
   }
 
   /* 下拉菜单 */

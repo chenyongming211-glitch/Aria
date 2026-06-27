@@ -10,8 +10,8 @@
   --aria-primary: #2563EB;
   --aria-primary-light: #3B82F6;
   --aria-primary-dark: #1D4ED8;
-  --aria-primary-grad-start: #2563EB;
-  --aria-primary-grad-end: #0F766E;
+  --aria-primary-grad-start: var(--aria-primary);
+  --aria-primary-grad-end: var(--aria-primary);
 
   /* === Accent Colors === */
   --aria-success: #22C55E;
@@ -35,7 +35,7 @@
   --aria-content-bg: #F8FAFC;
   --aria-content-bg-secondary: #FFFFFF;
   --aria-content-bg-tertiary: #F1F5F9;
-  --aria-content-bg-elevated: rgba(255, 255, 255, 0.95);
+  --aria-content-bg-elevated: #FFFFFF;
   --aria-bg-primary: var(--aria-content-bg);
   --aria-bg-secondary: var(--aria-content-bg-secondary);
   --aria-bg-tertiary: var(--aria-content-bg-tertiary);
@@ -69,13 +69,13 @@
   --aria-dark-border-hover: rgba(59, 130, 246, 0.3);
 
   /* === Shadows === */
-  --aria-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
-  --aria-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
-  --aria-shadow-md: 0 6px 14px rgba(15, 23, 42, 0.08);
-  --aria-shadow-lg: 0 10px 22px rgba(15, 23, 42, 0.1);
-  --aria-shadow-xl: 0 18px 38px rgba(15, 23, 42, 0.12);
-  --aria-shadow-glow: 0 0 20px rgba(37, 99, 235, 0.14);
-  --aria-shadow-glow-success: 0 0 20px rgba(34, 197, 94, 0.15);
+  --aria-shadow-sm: none;
+  --aria-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --aria-shadow-md: 0 2px 6px rgba(15, 23, 42, 0.08);
+  --aria-shadow-lg: 0 6px 14px rgba(15, 23, 42, 0.1);
+  --aria-shadow-xl: 0 10px 22px rgba(15, 23, 42, 0.12);
+  --aria-shadow-glow: none;
+  --aria-shadow-glow-success: none;
 
   /* === Spacing === */
   --aria-spacing-xs: 4px;
@@ -89,11 +89,14 @@
   --aria-radius-sm: 6px;
   --aria-radius: 8px;
   --aria-radius-md: 8px;
-  --aria-radius-lg: 10px;
-  --aria-radius-xl: 12px;
-  --aria-radius-2xl: 14px;
+  --aria-radius-lg: 8px;
+  --aria-radius-xl: 8px;
+  --aria-radius-2xl: 8px;
   --aria-radius-full: 9999px;
   --radius-full: var(--aria-radius-full);
+
+  /* === Typography === */
+  --aria-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
 
   /* === Transitions === */
   --aria-transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -117,7 +120,7 @@ body {
 }
 
 body {
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--aria-font-sans);
   font-size: 14px;
   line-height: 1.6;
   color: var(--aria-text-primary);
@@ -141,8 +144,8 @@ h1, h2, h3, h4, h5, h6 {
   margin-bottom: var(--aria-spacing-md);
 }
 
-h1 { font-size: 28px; }
-h2 { font-size: 24px; }
+h1 { font-size: 22px; }
+h2 { font-size: 20px; }
 h3 { font-size: 20px; }
 h4 { font-size: 18px; }
 h5 { font-size: 16px; }
@@ -169,38 +172,38 @@ a:hover {
 .light-card {
   background: var(--aria-content-bg-secondary);
   border: 1px solid var(--aria-border-primary);
-  border-radius: var(--aria-radius-lg);
-  box-shadow: var(--aria-shadow-sm);
-  transition: all var(--aria-transition-base);
+  border-radius: var(--aria-radius);
+  box-shadow: none;
+  transition: border-color var(--aria-transition-base), background-color var(--aria-transition-base);
 }
 
 .light-card:hover {
   border-color: var(--aria-border-hover);
-  box-shadow: var(--aria-shadow);
+  box-shadow: none;
 }
 
 /* ============================================
    Gradient Button
    ============================================ */
 .aria-btn-primary {
-  background: linear-gradient(135deg, var(--aria-primary-grad-start) 0%, var(--aria-primary-grad-end) 100%);
+  background: var(--aria-primary);
   border: none;
   color: white;
   border-radius: var(--aria-radius);
   padding: 12px 24px;
   font-weight: 500;
   cursor: pointer;
-  transition: all var(--aria-transition-base);
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25);
+  transition: background-color var(--aria-transition-base), border-color var(--aria-transition-base);
+  box-shadow: none;
 }
 
 .aria-btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35);
+  background: var(--aria-primary-dark);
+  box-shadow: none;
 }
 
 .aria-btn-primary:active {
-  transform: translateY(0);
+  background: var(--aria-primary-dark);
 }
 
 .aria-btn-primary:disabled {
@@ -230,7 +233,6 @@ a:hover {
   height: 8px;
   border-radius: 50%;
   background: currentColor;
-  animation: pulse-dot 2s ease-in-out infinite;
 }
 
 .status-badge.online {
@@ -263,40 +265,32 @@ a:hover {
   position: relative;
   overflow: hidden;
   padding: var(--aria-spacing-lg);
-  border-radius: var(--aria-radius-lg);
+  border-radius: var(--aria-radius);
   background: var(--aria-content-bg-secondary);
   border: 1px solid var(--aria-border-primary);
-  transition: all var(--aria-transition-base);
-  box-shadow: var(--aria-shadow-sm);
+  transition: border-color var(--aria-transition-base), background-color var(--aria-transition-base);
+  box-shadow: none;
 }
 
 .stat-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 3px;
-  background: linear-gradient(90deg, var(--aria-primary) 0%, var(--aria-primary-light) 100%);
-  opacity: 0;
-  transition: opacity var(--aria-transition-base);
+  display: none;
 }
 
 .stat-card:hover {
-  box-shadow: var(--aria-shadow);
   border-color: var(--aria-border-hover);
+  box-shadow: none;
 }
 
 .stat-card:hover::before {
-  opacity: 1;
+  opacity: 0;
 }
 
 .stat-card .stat-value {
-  font-size: 32px;
+  font-size: 28px;
   font-weight: 700;
   color: var(--aria-text-primary);
   margin-bottom: 4px;
-  letter-spacing: -0.5px;
+  letter-spacing: 0;
 }
 
 .stat-card .stat-label {
@@ -484,13 +478,13 @@ textarea:focus-visible {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .page-heading {
   margin: 0;
   color: var(--aria-text-primary);
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
   line-height: 1.2;
   letter-spacing: 0;
@@ -524,15 +518,15 @@ textarea:focus-visible {
   padding: 14px 16px;
   background: var(--aria-content-bg-secondary);
   border: 1px solid var(--aria-border-primary);
-  border-radius: var(--aria-radius-lg);
-  box-shadow: var(--aria-shadow-sm);
-  transition: border-color var(--aria-transition-base), box-shadow var(--aria-transition-base);
+  border-radius: var(--aria-radius);
+  box-shadow: none;
+  transition: border-color var(--aria-transition-base), background-color var(--aria-transition-base);
 }
 
 .kpi-card:hover,
 .kpi-card.is-clickable:hover {
   border-color: var(--aria-border-hover);
-  box-shadow: var(--aria-shadow);
+  box-shadow: none;
 }
 
 .kpi-card.is-clickable {
@@ -563,15 +557,15 @@ textarea:focus-visible {
 .table-card {
   background: var(--aria-content-bg-secondary);
   border: 1px solid var(--aria-border-primary);
-  border-radius: var(--aria-radius-lg);
-  box-shadow: var(--aria-shadow-sm);
+  border-radius: var(--aria-radius);
+  box-shadow: none;
 }
 
 .toolbar-panel {
   background: var(--aria-content-bg-secondary);
   border: 1px solid var(--aria-border-primary);
-  border-radius: var(--aria-radius-lg);
-  box-shadow: var(--aria-shadow-sm);
+  border-radius: var(--aria-radius);
+  box-shadow: none;
 }
 
 .panel-header {
@@ -603,7 +597,7 @@ textarea:focus-visible {
   padding: 14px 16px;
   background: var(--aria-content-bg-secondary);
   border: 1px solid var(--aria-border-primary);
-  border-radius: var(--aria-radius-lg);
+  border-radius: var(--aria-radius);
 }
 
 .filter-group {

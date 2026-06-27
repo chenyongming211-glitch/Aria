@@ -22,13 +22,13 @@ const locale = computed(() => {
 })
 
 const componentSize = computed(() => {
-  return 'default' // You can make this configurable as well
+  return 'default'
 })
 </script>
 
 <style>
 #app {
-  font-family: Avenir, Helvetica, Arial, sans-serif;
+  font-family: var(--aria-font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   height: 100vh;
