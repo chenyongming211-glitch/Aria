@@ -786,6 +786,34 @@ Purpose:
 | API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring health returned `ok`; tenant Policies returned 11 items. |
 | Deployment note | The first master local-artifact deploy built the Controller without the same `aria/internal/cli.Version` ldflags used by GitHub Actions, so `/api/version` returned `dev` while `/api/v2/controller-info` returned `0.2.71` from the environment. The Controller was rebuilt with the documented ldflags and redeployed under the final master backup above. |
 
+### 2026-06-27 Frontend Route Mutation Trace Deployment
+
+Status: deployed and server-side smoke validated.
+
+Purpose:
+
+- Close the Route mutation handoff gap: after an operator creates, updates, or
+  deletes a route from the Routing page, the console opens the node detail
+  command section with the newly queued route command id.
+- Keep Route behavior aligned with the ACL/QoS mutation trace behavior
+  introduced in `0.2.71`.
+- Keep this as a Controller/frontend-only deployment; Rust Agent artifacts were
+  validated by CI but not redeployed.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-27T15:30+08:00 gray deployment; 2026-06-27T15:38+08:00 master deployment; 2026-06-27T15:39+08:00 smoke validation |
+| Git commit | `461daa981fdb6fc75fdd53156824aec91c48d8af` |
+| Branch CI run | `28282433907` |
+| Master CI run | `28282606252` |
+| Version | `0.2.72` |
+| Controller image | Local runtime image `aria-controller:local@sha256:918fa49e27db95f7e57981888b8f017ec7d96b2be79f28bab37203d8e2bd7791`. |
+| Gray backup | `/root/aria-controller/deploy-backups/20260627T073019Z-0.2.72-28282433907-461daa981fdb` |
+| Master backup | `/root/aria-controller/deploy-backups/20260627T073832Z-0.2.72-28282606252-461daa981fdb` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch and master Actions. |
+| Verification | Local frontend unit tests passed (`152` tests), including focused `policyPageContext` tests (`15` tests). Local linux/amd64 Controller/ariactl build and frontend build passed. Branch Actions run `28282433907` and master Actions run `28282606252` both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.72`; `aria-controller` and `aria-frontend` were healthy; frontend `index.html` returned `Cache-Control: no-store`. |
+| API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring health returned `ok`; tenant Policies returned 11 items. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
