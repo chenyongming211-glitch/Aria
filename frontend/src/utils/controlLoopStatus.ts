@@ -1,4 +1,8 @@
-const pendingCommandStatuses = new Set([
+type StatusInput = string | number | boolean | null | undefined
+type StatusTranslator = (key: string) => string
+type StatusTagType = 'success' | 'warning' | 'info' | 'danger'
+
+const pendingCommandStatuses = new Set<string>([
   'queued',
   'pending',
   'sent',
@@ -7,9 +11,9 @@ const pendingCommandStatuses = new Set([
   'running'
 ])
 
-const failedCommandStatuses = new Set(['failed', 'error', 'timeout', 'timed_out'])
+const failedCommandStatuses = new Set<string>(['failed', 'error', 'timeout', 'timed_out'])
 
-const terminalCommandStatuses = new Set([
+const terminalCommandStatuses = new Set<string>([
   'completed',
   'applied',
   'stale',
@@ -19,11 +23,11 @@ const terminalCommandStatuses = new Set([
   ...failedCommandStatuses
 ])
 
-const retryablePolicyStatuses = new Set(['error', 'failed', 'stale', 'timeout', 'timed_out'])
+const retryablePolicyStatuses = new Set<string>(['error', 'failed', 'stale', 'timeout', 'timed_out'])
 
-const normalizeStatus = (status) => String(status || '').trim().toLowerCase()
+const normalizeStatus = (status: StatusInput) => String(status || '').trim().toLowerCase()
 
-const policyLabelKeys = {
+const policyLabelKeys: Record<string, string> = {
   accepted: 'status.policy.accepted',
   applied: 'status.policy.applied',
   canceled: 'status.policy.canceled',
@@ -37,7 +41,7 @@ const policyLabelKeys = {
   stale: 'status.policy.stale'
 }
 
-const commandLabelKeys = {
+const commandLabelKeys: Record<string, string> = {
   acknowledged: 'status.command.acknowledged',
   applied: 'status.command.applied',
   canceled: 'status.command.canceled',
@@ -56,13 +60,17 @@ const commandLabelKeys = {
   timed_out: 'status.command.timed_out'
 }
 
-const translateLabel = (key, fallback, translate) => {
+const translateLabel = (
+  key: string,
+  fallback: string,
+  translate?: StatusTranslator
+): string => {
   if (typeof translate !== 'function') return fallback
   const translated = translate(key)
   return translated && translated !== key ? translated : fallback
 }
 
-export function mapCommandStatusToPolicyStatus(status) {
+export function mapCommandStatusToPolicyStatus(status: StatusInput): string {
   const normalized = normalizeStatus(status)
   if (['queued', 'pending'].includes(normalized)) return 'pending'
   if (['sent', 'acknowledged', 'in_progress', 'running'].includes(normalized)) return 'in_progress'
@@ -74,28 +82,28 @@ export function mapCommandStatusToPolicyStatus(status) {
   return normalized ? '' : ''
 }
 
-export function isPendingCommandStatus(status) {
+export function isPendingCommandStatus(status: StatusInput): boolean {
   return pendingCommandStatuses.has(normalizeStatus(status))
 }
 
-export function isFailedCommandStatus(status) {
+export function isFailedCommandStatus(status: StatusInput): boolean {
   return failedCommandStatuses.has(normalizeStatus(status))
 }
 
-export function isTerminalCommandStatus(status) {
+export function isTerminalCommandStatus(status: StatusInput): boolean {
   return terminalCommandStatuses.has(normalizeStatus(status))
 }
 
-export function pendingCountForCommandStatus(status) {
+export function pendingCountForCommandStatus(status: StatusInput): number {
   return isPendingCommandStatus(status) ? 1 : 0
 }
 
-export function isRetryablePolicyStatus(status) {
+export function isRetryablePolicyStatus(status: StatusInput): boolean {
   return retryablePolicyStatuses.has(normalizeStatus(status))
 }
 
-export function policyStatusLabel(status, translate) {
-  const labels = {
+export function policyStatusLabel(status: StatusInput, translate?: StatusTranslator): string {
+  const labels: Record<string, string> = {
     accepted: '已接受',
     applied: '已应用',
     canceled: '已取消',
@@ -109,11 +117,11 @@ export function policyStatusLabel(status, translate) {
     stale: '已过期'
   }
   const normalized = normalizeStatus(status)
-  const fallback = labels[normalized] || status || '未知'
+  const fallback = labels[normalized] || (status ? String(status) : '未知')
   return translateLabel(policyLabelKeys[normalized] || 'status.unknown', fallback, translate)
 }
 
-export function policyStatusTagType(status) {
+export function policyStatusTagType(status: StatusInput): StatusTagType {
   switch (normalizeStatus(status)) {
     case 'applied':
     case 'healthy':
@@ -134,8 +142,8 @@ export function policyStatusTagType(status) {
   }
 }
 
-export function commandStatusLabel(status, translate) {
-  const labels = {
+export function commandStatusLabel(status: StatusInput, translate?: StatusTranslator): string {
+  const labels: Record<string, string> = {
     acknowledged: '执行中',
     applied: '已应用',
     canceled: '已取消',
@@ -154,11 +162,11 @@ export function commandStatusLabel(status, translate) {
     timed_out: '超时'
   }
   const normalized = normalizeStatus(status)
-  const fallback = labels[normalized] || status || '未知'
+  const fallback = labels[normalized] || (status ? String(status) : '未知')
   return translateLabel(commandLabelKeys[normalized] || 'status.unknown', fallback, translate)
 }
 
-export function commandStatusTagType(status) {
+export function commandStatusTagType(status: StatusInput): StatusTagType {
   const normalized = normalizeStatus(status)
   if (['completed', 'applied'].includes(normalized)) return 'success'
   if (pendingCommandStatuses.has(normalized)) return 'warning'
