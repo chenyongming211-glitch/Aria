@@ -1022,9 +1022,11 @@ Preserve localStorage keys:
 - `aria_token`
 - `aria_token_expire_time`
 - `aria-current-tenant`
-- `aria_last_activity_at`
+- `aria_last_activity`
 
 Do not rename keys during TypeScript migration.
+
+Status: completed in `codex/frontend-utils-b15`.
 
 - [ ] **Step 3: Type topology layout**
 

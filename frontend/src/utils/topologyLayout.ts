@@ -3,17 +3,45 @@ const MIN_HEIGHT = 520
 const MIN_PADDING_X = 140
 const MIN_PADDING_Y = 110
 
-const normalizeSize = (size = {}) => ({
+export interface TopologyChartSize {
+  width: number
+  height: number
+}
+
+export interface TopologyNode {
+  id: string
+  x?: number
+  y?: number
+  [key: string]: unknown
+}
+
+export interface TopologyLink {
+  source: string
+  target: string
+  [key: string]: unknown
+}
+
+export type PositionedTopologyNode<T extends TopologyNode = TopologyNode> = T & {
+  x: number
+  y: number
+}
+
+const normalizeSize = (size: Partial<TopologyChartSize> = {}): TopologyChartSize => ({
   width: Math.max(Number(size.width) || 0, MIN_WIDTH),
   height: Math.max(Number(size.height) || 0, MIN_HEIGHT)
 })
 
-export const getTopologyChartSize = (element) => normalizeSize({
+export const getTopologyChartSize = (
+  element: { clientWidth?: number; clientHeight?: number } | null | undefined
+): TopologyChartSize => normalizeSize({
   width: element?.clientWidth,
   height: element?.clientHeight
 })
 
-export const computeTopologyNodePositions = (nodes = [], size = {}) => {
+export const computeTopologyNodePositions = <T extends TopologyNode>(
+  nodes: readonly T[] | null | undefined = [],
+  size: Partial<TopologyChartSize> = {}
+): Array<PositionedTopologyNode<T>> => {
   const normalizedNodes = Array.isArray(nodes) ? nodes : []
   if (normalizedNodes.length === 0) return []
 
@@ -30,7 +58,7 @@ export const computeTopologyNodePositions = (nodes = [], size = {}) => {
       ...normalizedNodes[0],
       x: Math.round(centerX),
       y: Math.round(centerY)
-    }]
+    } as PositionedTopologyNode<T>]
   }
 
   if (normalizedNodes.length === 2) {
@@ -38,7 +66,7 @@ export const computeTopologyNodePositions = (nodes = [], size = {}) => {
       ...node,
       x: Math.round(centerX + (index === 0 ? -radiusX : radiusX)),
       y: Math.round(centerY)
-    }))
+    }) as PositionedTopologyNode<T>)
   }
 
   return normalizedNodes.map((node, index) => {
@@ -47,6 +75,6 @@ export const computeTopologyNodePositions = (nodes = [], size = {}) => {
       ...node,
       x: Math.round(centerX + Math.cos(angle) * radiusX),
       y: Math.round(centerY + Math.sin(angle) * radiusY)
-    }
+    } as PositionedTopologyNode<T>
   })
 }

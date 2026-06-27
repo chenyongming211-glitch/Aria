@@ -1,7 +1,9 @@
 export const SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000
 export const SESSION_IDLE_CHECK_INTERVAL_MS = 60 * 1000
 
-const SESSION_STORAGE_KEYS = [
+type SessionExpirationHandler = () => void
+
+const SESSION_STORAGE_KEYS: readonly string[] = [
   'aria_token',
   'aria_token_expire_time',
   'aria_user',
@@ -11,14 +13,14 @@ const SESSION_STORAGE_KEYS = [
   'aria_must_change_password'
 ]
 
-export function clearSession() {
+export function clearSession(): void {
   SESSION_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key))
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('aria-session-cleared'))
   }
 }
 
-export function readLastActivity() {
+export function readLastActivity(): number | null {
   const raw = localStorage.getItem('aria_last_activity')
   if (!raw) return null
 
@@ -28,11 +30,11 @@ export function readLastActivity() {
   return value
 }
 
-export function hasActiveSession() {
+export function hasActiveSession(): boolean {
   return Boolean(localStorage.getItem('aria_token'))
 }
 
-export function isIdleSessionExpired(now = Date.now()) {
+export function isIdleSessionExpired(now = Date.now()): boolean {
   if (!hasActiveSession()) return false
 
   const lastActivity = readLastActivity()
@@ -41,12 +43,15 @@ export function isIdleSessionExpired(now = Date.now()) {
   return now - lastActivity >= SESSION_IDLE_TIMEOUT_MS
 }
 
-export function recordUserActivity(now = Date.now()) {
+export function recordUserActivity(now = Date.now()): void {
   if (!hasActiveSession()) return
   localStorage.setItem('aria_last_activity', now.toString())
 }
 
-export function startIdleSessionMonitor(onExpired, intervalMs = SESSION_IDLE_CHECK_INTERVAL_MS) {
+export function startIdleSessionMonitor(
+  onExpired: SessionExpirationHandler,
+  intervalMs = SESSION_IDLE_CHECK_INTERVAL_MS
+): number | null {
   if (typeof window === 'undefined') return null
 
   const timer = window.setInterval(() => {
@@ -55,8 +60,9 @@ export function startIdleSessionMonitor(onExpired, intervalMs = SESSION_IDLE_CHE
     }
   }, intervalMs)
 
-  if (typeof timer?.unref === 'function') {
-    timer.unref()
+  const nodeTimer = timer as unknown as { unref?: () => void }
+  if (typeof nodeTimer.unref === 'function') {
+    nodeTimer.unref()
   }
 
   return timer
