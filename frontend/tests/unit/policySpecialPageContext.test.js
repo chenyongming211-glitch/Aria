@@ -278,6 +278,24 @@ describe('policy special page context filters', () => {
     })
   })
 
+  it('returns node-only special page context to Policy Center', async () => {
+    routeState.query = { nodeId: 'node-1' }
+    routeState.fullPath = '/acl-rules?nodeId=node-1'
+
+    const wrapper = mountPage(ACLRules)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="open-context-policy-center"]').trigger('click')
+
+    expect(routerPushMock).toHaveBeenCalledWith({
+      name: 'Policies',
+      query: {
+        nodeId: 'node-1',
+        kind: 'acl'
+      }
+    })
+  })
+
   it('keeps policy context visible on IP Group management and returns to Policy Center', async () => {
     routeState.query = { node_id: 'node-1', policy_ref: 'acl-1', policy_domain: 'acl', command_id: 'cmd-1' }
     routeState.fullPath = '/ip-groups?node_id=node-1&policy_ref=acl-1&policy_domain=acl&command_id=cmd-1'

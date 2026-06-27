@@ -20,7 +20,7 @@
         查看节点详情
       </el-button>
       <el-button
-        v-if="policyRef || commandId"
+        v-if="nodeId || policyRef || commandId"
         size="small"
         text
         data-testid="open-context-policy-center"
