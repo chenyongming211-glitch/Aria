@@ -1049,7 +1049,7 @@ Purpose:
 | API smoke | Login succeeded as `sysadmin`; tenant listing returned a valid tenant `e779e1f9-1e74-4fc1-915d-f8b432abd421`; tenant Nodes, Monitoring stats, Monitoring events, and Monitoring health all returned HTTP 200. |
 | Deployment note | This was a Controller/frontend-only low-bandwidth deployment. `/api/v2/health` is not a valid smoke endpoint in this deployment path and returned 404; tenant-scoped Monitoring health is the validated health API. |
 
-### 2026-06-28 Frontend Workflow Context Gray Deployment
+### 2026-06-28 Frontend Workflow Context and TypeScript Gray Deployment
 
 Status: gray deployed and server-side smoke validated. Not merged to `master` yet.
 
@@ -1057,23 +1057,28 @@ Purpose:
 
 - Validate the `codex/frontend-workflow-closure` branch after the cross-page
   context fixes for Nodes, Monitoring, Policy Center, ACL, QoS, Route, and IP
-  Group pages.
+  Group pages, then keep validating the same branch as the non-AI frontend
+  TypeScript migration continues.
 - Preserve command, policy, alert, and node context across page jumps, including
   Node Detail focus for command and policy evidence.
+- Confirm the non-AI router, API client, app bootstrap, i18n, store, permission,
+  tenant, settings, token, and policy/monitoring composable migrations still
+  build and serve correctly. `useAiApi.js` intentionally remains JavaScript
+  because AI/Hermes work is deferred.
 - Keep this as a Controller/frontend-only low-bandwidth deployment; Rust Agent
   artifacts were validated by CI but not redeployed.
 
 | Field | Value |
 | --- | --- |
-| Date | 2026-06-28T03:01+08:00 gray deployment; 2026-06-28T03:03+08:00 smoke validation |
-| Git commit | `15637299f8a30c82a8e762268b5f196a6d60d4cb` |
+| Date | 2026-06-28T03:01+08:00 initial gray deployment; 2026-06-28T04:32+08:00 frontend-only gray update; 2026-06-28T04:35+08:00 smoke validation |
+| Git commit | `e84c9a18d5bb26f523585e882aa0720bda3d47ab` |
 | Branch | `codex/frontend-workflow-closure` |
-| Branch CI run | `28298596624` |
+| Branch CI runs | `28298596624`, `28299146597`, `28299393566`, `28299643997`, `28299834095`, `28300149077`, `28300475309`, `28300620823`, `28300816666` |
 | Version | `0.2.81` |
-| Controller image | Local runtime image `aria-controller:local@sha256:f5abace5404d161f3babb7211681fb4823e4d5518ae14fe943566fdf8a085be1`. |
-| Gray backup | `/root/aria-controller/deploy-backups/20260627T190103Z-0.2.81-28298596624-1563729` |
+| Controller image | Unchanged from the initial gray deployment: local runtime image `aria-controller:local@sha256:f5abace5404d161f3babb7211681fb4823e4d5518ae14fe943566fdf8a085be1`. |
+| Gray backup | Initial gray backup: `/root/aria-controller/deploy-backups/20260627T190103Z-0.2.81-28298596624-1563729`; latest frontend-only backup: `/root/aria-controller/deploy-backups/frontend-dist-before-e84c9a1-20260628043253.tar.gz` |
 | Agent artifact | Not changed on servers; Rust Agent Build passed in branch Actions. |
-| Verification | Branch Actions run `28298596624` passed Go Build, Frontend Build, and Rust Agent Build. Local `go test ./...` passed, local linux/amd64 Controller/ariactl build passed, local frontend unit tests passed (`192` tests), and local frontend build passed. Server-side `https://aria.yun/api/version` returned `0.2.81`; `aria-controller` and `aria-frontend` were healthy; frontend entry returned HTTP 200 and referenced `assets/index-4b9858c3.js`. |
+| Verification | Branch Actions runs through `28300816666` passed Go Build, Frontend Build, and Rust Agent Build. For the latest frontend-only update, local `npm run type-check`, focused router/session tests, full frontend unit tests (`192` tests), `npm run build`, and `git diff --check` passed. Server-side `https://aria.yun/` returned HTTP 200 with `Cache-Control: no-store`; the deployed entry referenced `assets/index-bc990307.js`, that asset returned HTTP 200 with 99,909 bytes; `https://aria.yun/api/version` returned `0.2.81`; `/health` and `/api/v2/controller-info` returned HTTP 200; `aria-controller` and `aria-frontend` were healthy. Browser automation from the local workstation timed out on `https://aria.yun`, consistent with the known local 443/proxy path issue; server-side HTTPS validation remained healthy. |
 | API smoke | Login succeeded as `sysadmin`; tenant listing returned active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes, Policies, Monitoring health, Monitoring events, and Node Detail for `d5c7723c-3d86-48ce-a9fc-4695cd170b1c` all returned HTTP 200. |
 | Frontend smoke | Deployed frontend assets contain `PolicyContextBanner` and command-focus markers for the cross-page context workflow. |
 | Deployment note | This is the gray deployment for the feature branch only. Do not treat it as a `master` deployment until the branch is explicitly merged, `master` Actions pass, and `master` artifacts are redeployed. |
