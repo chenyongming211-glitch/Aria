@@ -37,10 +37,14 @@
 
 ### 4. 前端菜单与后端领域模型对齐
 
-**状态**: ⚠️ 基础对齐已完成，产品闭环未完全收口
+**状态**: ⚠️ 基础对齐已完成，跨页面上下文第一阶段已收口
 
 - 路由、菜单和权限模型已经基本对齐 v0.1.0 领域划分
-- 但 `Nodes`、`Monitoring`、`Policy Center` 仍是分散页面，不是单一运维工作台
+- `Nodes`、`Monitoring`、`Policy Center`、ACL、QoS、Route 页面已经支持携带 `nodeId`、`policyRef`、`policyDomain/kind`、`commandId` 上下文跳转
+- 策略专页会显示当前上下文，并可带上下文返回节点详情或 `Policy Center`
+- `Policy Center` 已纳入 `IP Group`、ACL、QoS、Route 的统一入口，避免 IP Group 脱离策略工作流
+- `IP Group` 页面也会保留来自 Policy Center / Monitoring 的节点、策略、命令上下文，并可回跳到节点详情或 `Policy Center`
+- 但这些页面仍是多入口工作流，不是单一运维工作台
 - 因此这里应表述为“基础对齐完成”，不应再写成“已完全修复”
 
 ### 5. ACL / Policies / Bandwidth 概念重叠
@@ -85,6 +89,6 @@
 当前代码支持以下更准确的判断：
 
 - `v2-only`、运行期鉴权、状态版本化这些底层结构项已经落地
-- `菜单/领域对齐` 与 `策略概念收拢` 只完成了基础层，不应继续表述为“完全闭环”
+- `菜单/领域对齐` 与 `策略概念收拢` 已完成基础层和跨页面上下文第一阶段，但不应继续表述为“完全闭环”
 - `Settings / Backup` 已具备最小真实能力；后续重点是恢复安全增强，而不是补齐基础 upload/restore
 - `运维闭环` 的 v0.1.0 非 AI 链路已经完成线上验收；剩余工作是 Hermes/IM/自动化增强，不再作为当前阻塞项

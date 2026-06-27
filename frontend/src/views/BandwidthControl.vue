@@ -50,8 +50,26 @@
       show-icon
     />
 
+    <PolicyContextBanner
+      v-if="hasRouteContext"
+      :domain="'QoS'"
+      :node-id="contextNodeId"
+      :node-name="contextNodeName"
+      :policy-ref="routeContext.policyRef"
+      :command-id="routeContext.commandId"
+      @clear="clearRouteContext"
+      @open-node-detail="openContextNodeDetail"
+      @open-policy-center="openPolicyCenterContext"
+    />
+
     <DataPanel title="QoS 规则" :subtitle="qosPanelSubtitle">
-      <el-table :data="rules" stripe v-loading="loading" :empty-text="qosEmptyText">
+      <el-table
+        :data="visibleRules"
+        :row-class-name="ruleRowClassName"
+        stripe
+        v-loading="loading"
+        :empty-text="qosEmptyText"
+      >
         <el-table-column prop="description" label="描述" min-width="160" />
         <el-table-column label="Group" min-width="180">
           <template #default="{ row }">
@@ -222,6 +240,7 @@ import ActionIconButton from '@/components/ui/ActionIconButton.vue'
 import DataPanel from '@/components/ui/DataPanel.vue'
 import FilterBar from '@/components/ui/FilterBar.vue'
 import PageHeader from '@/components/ui/PageHeader.vue'
+import PolicyContextBanner from '@/components/policy/PolicyContextBanner.vue'
 import { useQosApi } from '@/composables/useQosApi'
 import { useIpGroupApi } from '@/composables/useIpGroupApi'
 import { useTenantApi } from '@/composables/useTenantApi'
@@ -297,23 +316,74 @@ const selectedNodeName = computed(() => {
   const node = tenantNodes.value.find(item => item.id === selectedNodeId.value)
   return node?.hostname || node?.id || ''
 })
+const contextNodeId = computed(() => routeContext.value.nodeId || selectedNodeId.value)
+const contextNodeName = computed(() => {
+  const node = tenantNodes.value.find(item => item.id === contextNodeId.value)
+  return node?.hostname || node?.id || contextNodeId.value
+})
 const dialogTitle = computed(() => form.id ? '编辑 QoS 规则' : '添加 QoS 规则')
 const qosEmptyText = computed(() => {
   if (!selectedNodeId.value) return '请选择节点'
+  if (routeContext.value.policyRef && visibleRules.value.length === 0) {
+    return '当前上下文没有匹配的 QoS 规则'
+  }
   return `${selectedNodeName.value || '当前节点'} 暂无 QoS 规则`
 })
 const qosPanelSubtitle = computed(() => {
   if (!selectedNodeId.value) {
     return '选择节点后查看带宽控制规则和下发结果。'
   }
-  return `${selectedNodeName.value || '当前节点'} · ${rules.value.length} 条规则`
+  return `${selectedNodeName.value || '当前节点'} · ${visibleRules.value.length} 条规则`
 })
 const routeQuery = computed(() => route.query || {})
+const queryString = (...keys: string[]) => {
+  for (const key of keys) {
+    const value = routeQuery.value[key]
+    if (typeof value === 'string' && value.trim()) {
+      return value
+    }
+  }
+  return ''
+}
 const routeContext = computed(() => ({
-  nodeId: typeof routeQuery.value.nodeId === 'string' ? routeQuery.value.nodeId : '',
-  policyRef: typeof routeQuery.value.policyRef === 'string' ? routeQuery.value.policyRef : '',
-  commandId: typeof routeQuery.value.commandId === 'string' ? routeQuery.value.commandId : ''
+  nodeId: queryString('nodeId', 'node_id'),
+  policyRef: queryString('policyRef', 'policy_ref'),
+  commandId: queryString('commandId', 'command_id')
 }))
+const hasRouteContext = computed(() => Boolean(
+  routeContext.value.nodeId || routeContext.value.policyRef || routeContext.value.commandId
+))
+
+const clearRouteContext = () => {
+  router.push({ name: 'BandwidthControl' })
+}
+
+const openContextNodeDetail = () => {
+  if (!contextNodeId.value) {
+    return
+  }
+  router.push({
+    name: 'NodeMonitorDetail',
+    params: { nodeId: contextNodeId.value },
+    query: {
+      ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {}),
+      ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
+      policyDomain: 'qos'
+    }
+  })
+}
+
+const openPolicyCenterContext = () => {
+  router.push({
+    name: 'Policies',
+    query: {
+      ...(contextNodeId.value ? { nodeId: contextNodeId.value } : {}),
+      ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {}),
+      ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
+      kind: 'qos'
+    }
+  })
+}
 
 const form = reactive<QoSFormState>({
   id: null,
@@ -341,6 +411,38 @@ const groupById = computed(() => {
   ipGroups.value.forEach((group) => result.set(group.id, group))
   return result
 })
+
+const normalizeContextValue = (value: unknown) => String(value || '').trim().toLowerCase()
+
+const ruleMatchesPolicyContext = (row?: QoSRuleRow) => {
+  const policyRef = normalizeContextValue(routeContext.value.policyRef)
+  const commandId = normalizeContextValue(routeContext.value.commandId)
+  if (!policyRef && !commandId) {
+    return true
+  }
+
+  const policyHaystack = [
+    row?.policy_ref,
+    row?.id,
+    row?.description,
+    row?.group_id,
+    row?.group_cidr,
+    row?.runtime_group
+  ].map(normalizeContextValue).filter(Boolean)
+  const commandHaystack = [
+    row?.last_delivery_command_id,
+    row?.lastDeliveryCommandId,
+    row?.last_delivery?.command_id,
+    row?.lastDelivery?.command_id
+  ].map(normalizeContextValue).filter(Boolean)
+
+  if (policyRef) {
+    return policyHaystack.includes(policyRef)
+  }
+  return commandId ? commandHaystack.includes(commandId) : true
+}
+
+const visibleRules = computed(() => rules.value.filter(ruleMatchesPolicyContext))
 
 const loadNodes = async () => {
   try {
@@ -413,6 +515,10 @@ const shortCommandId = (commandId?: string) => {
   if (!commandId) return '-'
   return String(commandId).slice(0, 8)
 }
+
+const ruleRowClassName = ({ row }: { row?: QoSRuleRow }) => (
+  row && !ruleMatchesPolicyContext(row) ? '' : routeContext.value.policyRef || routeContext.value.commandId ? 'context-match-row' : ''
+)
 
 const formatGroupOption = (group: IPGroupOption) => {
   const cidrs = Array.isArray(group.members) ? group.members.map((member) => member.cidr).join(', ') : ''
@@ -671,5 +777,8 @@ watch(() => route.fullPath || '', async () => {
 .qos-runtime-cell { display: flex; flex-direction: column; gap: 4px; line-height: 1.25; }
 .qos-runtime-cell small { color: var(--aria-text-muted, #8a93a6); }
 .stats-error { color: var(--aria-danger, #f56c6c); }
+.policy-rule-page :deep(.context-match-row) {
+  background: var(--aria-info-soft, #ecf5ff);
+}
 code { background: #f4f4f5; padding: 2px 4px; border-radius: 4px; color: #cf9236; font-family: monospace; }
 </style>

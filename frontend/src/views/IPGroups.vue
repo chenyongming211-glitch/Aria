@@ -17,6 +17,17 @@
       </div>
     </div>
 
+    <PolicyContextBanner
+      v-if="hasRouteContext"
+      :domain="'IP Group'"
+      :node-id="routeContext.nodeId"
+      :policy-ref="routeContext.policyRef"
+      :command-id="routeContext.commandId"
+      @clear="clearRouteContext"
+      @open-node-detail="openContextNodeDetail"
+      @open-policy-center="openPolicyCenterContext"
+    />
+
     <el-table :data="groups" v-loading="loading" style="width: 100%" empty-text="暂无 IP Group">
       <el-table-column prop="name" label="名称" min-width="180">
         <template #default="{ row }">
@@ -113,13 +124,17 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Plus, Refresh } from '@element-plus/icons-vue'
+import PolicyContextBanner from '@/components/policy/PolicyContextBanner.vue'
 import { useIpGroupApi } from '@/composables/useIpGroupApi'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
 
 const { hasPermission } = usePermission()
+const route = useRoute() || { query: {} }
+const router = useRouter()
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -153,6 +168,52 @@ const formRules = {
 }
 
 const dialogTitle = computed(() => form.id ? '编辑 IP Group' : '新建 IP Group')
+const routeQuery = computed(() => route.query || {})
+const queryString = (...keys) => {
+  for (const key of keys) {
+    const value = routeQuery.value[key]
+    if (typeof value === 'string' && value.trim()) {
+      return value
+    }
+  }
+  return ''
+}
+const routeContext = computed(() => ({
+  nodeId: queryString('nodeId', 'node_id'),
+  policyRef: queryString('policyRef', 'policy_ref'),
+  commandId: queryString('commandId', 'command_id')
+}))
+const hasRouteContext = computed(() => Boolean(
+  routeContext.value.nodeId || routeContext.value.policyRef || routeContext.value.commandId
+))
+
+const contextQuery = computed(() => ({
+  ...(routeContext.value.nodeId ? { nodeId: routeContext.value.nodeId } : {}),
+  ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
+  ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {})
+}))
+
+const clearRouteContext = () => {
+  router.push({ name: 'IPGroups' })
+}
+
+const openPolicyCenterContext = () => {
+  router.push({ name: 'Policies', query: contextQuery.value })
+}
+
+const openContextNodeDetail = () => {
+  if (!routeContext.value.nodeId) {
+    return
+  }
+  router.push({
+    name: 'NodeMonitorDetail',
+    params: { nodeId: routeContext.value.nodeId },
+    query: {
+      ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
+      ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {})
+    }
+  })
+}
 
 const loadGroups = async () => {
   loading.value = true
@@ -266,6 +327,7 @@ useTenantChangeReload(loadGroups)
 <style scoped>
 .ip-groups-container { padding: 20px; }
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 20px; }
+.policy-context-banner { margin-bottom: 14px; }
 .page-header h2 { margin: 0 0 6px; font-size: 20px; }
 .page-header p { margin: 0; color: var(--aria-text-muted, #8a93a6); }
 .header-actions { display: flex; gap: 10px; }

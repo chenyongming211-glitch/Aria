@@ -52,8 +52,25 @@
       </template>
     </FilterBar>
 
+    <PolicyContextBanner
+      v-if="hasRouteContext"
+      :domain="'ACL'"
+      :node-id="contextNodeId"
+      :node-name="contextNodeName"
+      :policy-ref="routeContext.policyRef"
+      :command-id="routeContext.commandId"
+      @clear="clearRouteContext"
+      @open-node-detail="openContextNodeDetail"
+      @open-policy-center="openPolicyCenterContext"
+    />
+
     <DataPanel title="ACL 规则" :subtitle="aclPanelSubtitle">
-      <el-table :data="paginatedRules" v-loading="loading" style="width: 100%">
+      <el-table
+        :data="paginatedRules"
+        :row-class-name="ruleRowClassName"
+        v-loading="loading"
+        style="width: 100%"
+      >
       <el-table-column prop="node_name" label="节点" width="160" />
       <el-table-column prop="priority" label="优先级" width="80" sortable />
       <el-table-column prop="name" label="名称" width="150" />
@@ -152,7 +169,7 @@
           v-model:current-page="pagination.page"
           v-model:page-size="pagination.pageSize"
           :page-sizes="[10, 20, 50, 100]"
-          :total="pagination.total"
+          :total="visibleRules.length"
           layout="total, sizes, prev, pager, next, jumper"
           @size-change="loadRules"
           @current-change="loadRules"
@@ -285,6 +302,7 @@ import ActionIconButton from '@/components/ui/ActionIconButton.vue'
 import DataPanel from '@/components/ui/DataPanel.vue'
 import FilterBar from '@/components/ui/FilterBar.vue'
 import PageHeader from '@/components/ui/PageHeader.vue'
+import PolicyContextBanner from '@/components/policy/PolicyContextBanner.vue'
 import { useAclApi } from '@/composables/useAclApi'
 import { useIpGroupApi } from '@/composables/useIpGroupApi'
 import { useTenantApi } from '@/composables/useTenantApi'
@@ -426,19 +444,67 @@ const selectedNodeName = computed(() => {
   const node = tenantNodes.value.find((item) => item.id === filters.node_id)
   return node?.hostname || node?.public_key || node?.id || ''
 })
+const contextNodeId = computed(() => routeContext.value.nodeId || filters.node_id)
+const contextNodeName = computed(() => {
+  const node = tenantNodes.value.find((item) => item.id === contextNodeId.value)
+  return node?.hostname || node?.public_key || node?.id || contextNodeId.value
+})
 const aclPanelSubtitle = computed(() => {
   if (!filters.node_id) {
     return '选择节点后查看访问控制规则和下发结果。'
   }
-  return `${selectedNodeName.value || '当前节点'} · ${pagination.total} 条规则`
+  return `${selectedNodeName.value || '当前节点'} · ${visibleRules.value.length} 条规则`
 })
 
 const routeQuery = computed(() => route.query || {})
+const queryString = (...keys: string[]) => {
+  for (const key of keys) {
+    const value = routeQuery.value[key]
+    if (typeof value === 'string' && value.trim()) {
+      return value
+    }
+  }
+  return ''
+}
 const routeContext = computed(() => ({
-  nodeId: typeof routeQuery.value.nodeId === 'string' ? routeQuery.value.nodeId : '',
-  policyRef: typeof routeQuery.value.policyRef === 'string' ? routeQuery.value.policyRef : '',
-  commandId: typeof routeQuery.value.commandId === 'string' ? routeQuery.value.commandId : ''
+  nodeId: queryString('nodeId', 'node_id'),
+  policyRef: queryString('policyRef', 'policy_ref'),
+  commandId: queryString('commandId', 'command_id')
 }))
+const hasRouteContext = computed(() => Boolean(
+  routeContext.value.nodeId || routeContext.value.policyRef || routeContext.value.commandId
+))
+
+const clearRouteContext = () => {
+  router.push({ name: 'ACLRules' })
+}
+
+const openContextNodeDetail = () => {
+  if (!contextNodeId.value) {
+    return
+  }
+  router.push({
+    name: 'NodeMonitorDetail',
+    params: { nodeId: contextNodeId.value },
+    query: {
+      ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {}),
+      ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
+      policyDomain: 'acl'
+    }
+  })
+}
+
+const openPolicyCenterContext = () => {
+  router.push({
+    name: 'Policies',
+    query: {
+      ...(contextNodeId.value ? { nodeId: contextNodeId.value } : {}),
+      ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {}),
+      ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
+      kind: 'acl'
+    }
+  })
+}
 
 const selectableGroups = computed<IPGroupOption[]>(() => ipGroups.value.filter((group) => group.kind !== 'inline'))
 
@@ -448,18 +514,44 @@ const groupById = computed(() => {
   return result
 })
 
+const normalizeContextValue = (value: unknown) => String(value || '').trim().toLowerCase()
+
+const ruleMatchesPolicyContext = (row?: ACLRuleRow) => {
+  const policyRef = normalizeContextValue(routeContext.value.policyRef)
+  const commandId = normalizeContextValue(routeContext.value.commandId)
+  if (!policyRef && !commandId) {
+    return true
+  }
+
+  const policyHaystack = [
+    row?.policy_ref,
+    row?.id,
+    row?.name
+  ].map(normalizeContextValue).filter(Boolean)
+  const commandHaystack = [
+    row?.last_delivery_command_id,
+    row?.lastDeliveryCommandId,
+    row?.last_delivery?.command_id,
+    row?.lastDelivery?.command_id
+  ].map(normalizeContextValue).filter(Boolean)
+
+  if (policyRef) {
+    return policyHaystack.includes(policyRef)
+  }
+  return commandId ? commandHaystack.includes(commandId) : true
+}
+
+const visibleRules = computed(() => rules.value.filter(ruleMatchesPolicyContext))
+
 const paginatedRules = computed(() => {
   const start = (pagination.page - 1) * pagination.pageSize
-  return rules.value.slice(start, start + pagination.pageSize)
+  return visibleRules.value.slice(start, start + pagination.pageSize)
 })
 
 const loadNodes = async () => {
   try {
     tenantNodes.value = await useTenantApi.getTenantNodes()
     const contextNode = tenantNodes.value.find((node) => node.id === routeContext.value.nodeId)
-    if (routeContext.value.policyRef) {
-      filters.name = routeContext.value.policyRef
-    }
     if (contextNode) {
       filters.node_id = contextNode.id
       await loadRules()
@@ -503,7 +595,7 @@ const loadRules = async () => {
     
     const response = await useAclApi.getACLRulesByNode(nodeId, f)
     rules.value = response
-    pagination.total = rules.value.length
+    pagination.total = visibleRules.value.length
   } catch (error) {
     ElMessage.error('加载规则失败: ' + errorMessage(error))
   } finally {
@@ -726,6 +818,10 @@ const shortCommandId = (commandId?: string) => {
   return commandId.slice(0, 8)
 }
 
+const ruleRowClassName = ({ row }: { row?: ACLRuleRow }) => (
+  row && !ruleMatchesPolicyContext(row) ? '' : routeContext.value.policyRef || routeContext.value.commandId ? 'context-match-row' : ''
+)
+
 const formatNumber = (value: unknown) => {
   const number = Number(value || 0)
   if (number >= 1000000) return `${(number / 1000000).toFixed(1)}M`
@@ -746,7 +842,7 @@ const reloadTenantScopedData = async () => {
   tenantNodes.value = []
   ipGroups.value = []
   filters.node_id = ''
-  filters.name = routeContext.value.policyRef || ''
+  filters.name = ''
   pagination.page = 1
   pagination.total = 0
   await Promise.all([loadIPGroups(), loadNodes()])
@@ -759,7 +855,6 @@ onMounted(() => {
 useTenantChangeReload(reloadTenantScopedData)
 
 watch(() => route.fullPath || '', async () => {
-  filters.name = routeContext.value.policyRef || ''
   pagination.page = 1
   if (routeContext.value.nodeId) {
     filters.node_id = routeContext.value.nodeId
@@ -792,5 +887,8 @@ watch(() => route.fullPath || '', async () => {
 .form-help { font-size: 12px; color: #909399; margin-top: 5px; }
 .acl-runtime-cell { display: flex; flex-direction: column; gap: 4px; line-height: 1.25; }
 .acl-runtime-cell small { color: var(--aria-text-muted, #8a93a6); }
+.policy-rule-page :deep(.context-match-row) {
+  background: var(--aria-info-soft, #ecf5ff);
+}
 code { background: #f4f4f5; padding: 2px 4px; border-radius: 4px; color: #cf9236; font-family: monospace; }
 </style>

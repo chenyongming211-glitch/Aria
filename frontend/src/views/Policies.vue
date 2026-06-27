@@ -5,15 +5,19 @@
       subtitle="Review ACL, QoS, and Route policy inventory with delivery evidence before drilling into each policy domain."
     >
       <template #actions>
-        <el-button @click="goToKind('acl')">
+        <el-button v-if="hasPermission('ip-groups:read')" @click="goToIpGroups">
+          <el-icon><Collection /></el-icon>
+          IP Group
+        </el-button>
+        <el-button v-if="hasPermission('acls:read')" @click="goToKind('acl')">
           <el-icon><Lock /></el-icon>
           ACL 规则
         </el-button>
-        <el-button @click="goToKind('qos')">
+        <el-button v-if="hasPermission('qos:read')" @click="goToKind('qos')">
           <el-icon><Histogram /></el-icon>
           流量控制
         </el-button>
-        <el-button @click="goToKind('route')">
+        <el-button v-if="hasPermission('routes:read')" @click="goToKind('route')">
           <el-icon><Connection /></el-icon>
           路由管理
         </el-button>
@@ -244,7 +248,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Connection, Histogram, Lock, Refresh, View } from '@element-plus/icons-vue'
+import { Collection, Connection, Histogram, Lock, Refresh, View } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import DataPanel from '@/components/ui/DataPanel.vue'
 import FilterBar from '@/components/ui/FilterBar.vue'
@@ -377,11 +381,21 @@ const formatTimestamp = (value?: string | null) => {
   return date.toLocaleString()
 }
 
+const queryString = (...keys: string[]) => {
+  for (const key of keys) {
+    const value = route.query[key]
+    if (typeof value === 'string' && value.trim()) {
+      return value
+    }
+  }
+  return ''
+}
+
 const routeContext = computed<RouteContext>(() => ({
-  nodeId: typeof route.query.nodeId === 'string' ? route.query.nodeId : '',
-  policyRef: typeof route.query.policyRef === 'string' ? route.query.policyRef : '',
-  kind: typeof route.query.kind === 'string' ? route.query.kind : '',
-  commandId: typeof route.query.commandId === 'string' ? route.query.commandId : ''
+  nodeId: queryString('nodeId', 'node_id'),
+  policyRef: queryString('policyRef', 'policy_ref'),
+  kind: queryString('kind', 'policyDomain', 'policy_domain'),
+  commandId: queryString('commandId', 'command_id')
 }))
 
 const hasRouteContext = computed(() => Object.values(routeContext.value).some(Boolean))
@@ -468,7 +482,7 @@ const findContextPolicy = (): NormalizedPolicy | null => {
     if (routeContext.value.policyRef && policy.policyRef !== routeContext.value.policyRef) {
       return false
     }
-    if (routeContext.value.commandId && !policy.deliveryHistory.some((item) => item.command_id === routeContext.value.commandId)) {
+    if (!routeContext.value.policyRef && routeContext.value.commandId && !policy.deliveryHistory.some((item) => item.command_id === routeContext.value.commandId)) {
       return false
     }
     return true
@@ -586,9 +600,9 @@ const refreshData = async () => {
 }
 
 const syncFiltersFromRoute = () => {
-  filters.value.nodeId = typeof route.query.nodeId === 'string' ? route.query.nodeId : ''
-  filters.value.keyword = typeof route.query.policyRef === 'string' ? route.query.policyRef : ''
-  filters.value.kind = typeof route.query.kind === 'string' ? route.query.kind : ''
+  filters.value.nodeId = routeContext.value.nodeId
+  filters.value.keyword = routeContext.value.policyRef
+  filters.value.kind = routeContext.value.kind
 }
 
 const syncSelectedPolicy = () => {
@@ -652,6 +666,14 @@ const goToKind = (kind: PolicyKind | string, policy: NormalizedPolicy | null = s
     default:
       break
   }
+}
+
+const goToIpGroups = () => {
+  const query: Record<string, string> = {}
+  if (routeContext.value.nodeId) query.nodeId = routeContext.value.nodeId
+  if (routeContext.value.policyRef) query.policyRef = routeContext.value.policyRef
+  if (routeContext.value.commandId) query.commandId = routeContext.value.commandId
+  router.push({ name: 'IPGroups', query })
 }
 
 const showDetails = (policy: NormalizedPolicy) => {

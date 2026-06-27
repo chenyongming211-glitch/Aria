@@ -23,8 +23,22 @@
         </div>
       </template>
 
+      <PolicyContextBanner
+        v-if="hasRouteContext"
+        class="routing-context-banner"
+        :domain="'Route'"
+        :node-id="contextNodeId"
+        :node-name="contextNodeName"
+        :policy-ref="routeContext.policyRef"
+        :command-id="routeContext.commandId"
+        @clear="clearRouteContext"
+        @open-node-detail="openContextNodeDetail"
+        @open-policy-center="openPolicyCenterContext"
+      />
+
       <el-table
         :data="paginatedRoutes"
+        :row-class-name="routeRowClassName"
         stripe
         style="width: 100%"
         v-loading="loading"
@@ -136,6 +150,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Refresh, Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import PolicyContextBanner from '@/components/policy/PolicyContextBanner.vue'
 import { useRouteApi } from '@/composables/useRouteApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 import { usePermission } from '@/composables/usePermission'
@@ -170,16 +185,95 @@ const currentRoute = ref({
 const currentDeleteRoute = ref(null)
 
 const routeQuery = computed(() => route.query || {})
+const queryString = (...keys) => {
+  for (const key of keys) {
+    const value = routeQuery.value[key]
+    if (typeof value === 'string' && value.trim()) {
+      return value
+    }
+  }
+  return ''
+}
 const routeContext = computed(() => ({
-  nodeId: typeof routeQuery.value.nodeId === 'string' ? routeQuery.value.nodeId : '',
-  policyRef: typeof routeQuery.value.policyRef === 'string' ? routeQuery.value.policyRef : '',
-  commandId: typeof routeQuery.value.commandId === 'string' ? routeQuery.value.commandId : ''
+  nodeId: queryString('nodeId', 'node_id'),
+  policyRef: queryString('policyRef', 'policy_ref'),
+  commandId: queryString('commandId', 'command_id')
 }))
+const hasRouteContext = computed(() => Boolean(
+  routeContext.value.nodeId || routeContext.value.policyRef || routeContext.value.commandId
+))
+const contextNodeId = computed(() => routeContext.value.nodeId || currentRoute.value.nodeId)
+const contextNodeName = computed(() => {
+  const node = tenantNodes.value.find((item) => item.id === contextNodeId.value)
+  return node?.hostname || node?.public_key || node?.id || contextNodeId.value
+})
+
+const clearRouteContext = () => {
+  router.push({ name: 'Routing' })
+}
+
+const openContextNodeDetail = () => {
+  if (!contextNodeId.value) {
+    return
+  }
+  router.push({
+    name: 'NodeMonitorDetail',
+    params: { nodeId: contextNodeId.value },
+    query: {
+      ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {}),
+      ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
+      policyDomain: 'route'
+    }
+  })
+}
+
+const openPolicyCenterContext = () => {
+  router.push({
+    name: 'Policies',
+    query: {
+      ...(contextNodeId.value ? { nodeId: contextNodeId.value } : {}),
+      ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {}),
+      ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
+      kind: 'route'
+    }
+  })
+}
+
+const normalizeContextValue = (value) => String(value || '').trim().toLowerCase()
+
+const routeMatchesPolicyContext = (item = {}) => {
+  const policyRef = normalizeContextValue(routeContext.value.policyRef)
+  const commandId = normalizeContextValue(routeContext.value.commandId)
+  if (!policyRef && !commandId) {
+    return true
+  }
+
+  const policyHaystack = [
+    item.policyRef,
+    item.policy_ref,
+    item.id,
+    item.cidr
+  ].map(normalizeContextValue).filter(Boolean)
+  const commandHaystack = [
+    item.lastDeliveryCommandId,
+    item.last_delivery_command_id,
+    item.lastDelivery?.command_id,
+    item.last_delivery?.command_id
+  ].map(normalizeContextValue).filter(Boolean)
+
+  if (policyRef) {
+    return policyHaystack.includes(policyRef)
+  }
+  return commandId ? commandHaystack.includes(commandId) : true
+}
 
 const filteredRoutes = computed(() => {
   const keyword = searchQuery.value.toLowerCase()
   return allRoutes.value.filter((item) => {
     if (routeContext.value.nodeId && item.nodeId !== routeContext.value.nodeId) {
+      return false
+    }
+    if (!routeMatchesPolicyContext(item)) {
       return false
     }
     if (!keyword) {
@@ -206,9 +300,6 @@ const loadRoutes = async () => {
     ])
     allRoutes.value = routes
     tenantNodes.value = nodes
-    if (routeContext.value.policyRef) {
-      searchQuery.value = routeContext.value.policyRef
-    }
     const contextNode = nodes.find((node) => node.id === routeContext.value.nodeId)
     if (contextNode) {
       currentRoute.value.nodeId = contextNode.id
@@ -370,6 +461,10 @@ const policyRefForRoute = (row, result) => {
     ''
 }
 
+const routeRowClassName = ({ row }) => (
+  row && !routeMatchesPolicyContext(row) ? '' : routeContext.value.policyRef || routeContext.value.commandId ? 'context-match-row' : ''
+)
+
 const openCommandTrace = (row, result) => {
   const commandId = commandIdForMutationResult(result)
   if (!commandId) {
@@ -402,9 +497,6 @@ useTenantChangeReload(reloadTenantScopedData)
 
 watch(() => route.fullPath || '', async () => {
   currentPage.value = 1
-  if (routeContext.value.policyRef) {
-    searchQuery.value = routeContext.value.policyRef
-  }
   if (routeContext.value.nodeId) {
     currentRoute.value.nodeId = routeContext.value.nodeId
   }
@@ -429,6 +521,10 @@ watch(() => route.fullPath || '', async () => {
   align-items: center;
 }
 
+.routing-context-banner {
+  margin-bottom: 12px;
+}
+
 .pagination-container {
   margin-top: 20px;
   display: flex;
@@ -439,5 +535,9 @@ watch(() => route.fullPath || '', async () => {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.routing :deep(.context-match-row) {
+  background: var(--aria-info-soft, #ecf5ff);
 }
 </style>

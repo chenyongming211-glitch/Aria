@@ -86,19 +86,25 @@ const {
     getRoutes: vi.fn(async () => [
       {
         id: 'route-1',
+        policyRef: '10.1.0.0/24',
+        policy_ref: '10.1.0.0/24',
         nodeId: 'node-1',
         nodeName: 'node-1',
         publicIp: '1.1.1.1',
         region: 'hangzhou',
-        cidr: '10.1.0.0/24'
+        cidr: '10.1.0.0/24',
+        lastDeliveryCommandId: 'cmd-route-1'
       },
       {
         id: 'route-2',
+        policyRef: '10.2.0.0/24',
+        policy_ref: '10.2.0.0/24',
         nodeId: 'node-2',
         nodeName: 'node-2',
         publicIp: '2.2.2.2',
         region: 'shanghai',
-        cidr: '10.2.0.0/24'
+        cidr: '10.2.0.0/24',
+        lastDeliveryCommandId: 'cmd-route'
       }
     ]),
     addRoute: vi.fn(async () => ({
@@ -437,9 +443,9 @@ describe('policy page context handoff', () => {
     await flushPromises()
 
     expect(wrapper.vm.filters.node_id).toBe('node-2')
-    expect(wrapper.vm.filters.name).toBe('acl-special')
+    expect(wrapper.vm.filters.name).toBe('')
     expect(aclApiMock.getACLRulesByNode).toHaveBeenCalledWith('node-2', expect.objectContaining({
-      name: 'acl-special'
+      name: ''
     }))
   })
 
@@ -704,7 +710,7 @@ describe('policy page context handoff', () => {
     await flushPromises()
 
     expect(wrapper.vm.currentRoute.nodeId).toBe('node-2')
-    expect(wrapper.vm.searchQuery).toBe('10.2.0.0/24')
+    expect(wrapper.vm.searchQuery).toBe('')
     expect(wrapper.vm.filteredRoutes).toHaveLength(1)
     expect(wrapper.vm.filteredRoutes[0].nodeId).toBe('node-2')
   })

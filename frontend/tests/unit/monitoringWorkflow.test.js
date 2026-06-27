@@ -683,6 +683,25 @@ describe('policy center context handling', () => {
     expect(wrapper.vm.isDeliveryMatch({ command_id: 'cmd-1', policy_ref: 'acl-1' })).toBe(true)
   })
 
+  it('accepts snake_case context and keeps policyRef primary over a stale command id', async () => {
+    routeState.query = {
+      node_id: 'node-1',
+      policy_ref: 'acl-1',
+      policy_domain: 'acl',
+      command_id: 'stale-cmd'
+    }
+    routeState.fullPath = '/policy-center?node_id=node-1&policy_ref=acl-1&policy_domain=acl&command_id=stale-cmd'
+
+    const wrapper = mountWithStubs(Policies)
+    await flushPromises()
+
+    expect(wrapper.vm.filters.nodeId).toBe('node-1')
+    expect(wrapper.vm.filters.keyword).toBe('acl-1')
+    expect(wrapper.vm.filters.kind).toBe('acl')
+    expect(wrapper.vm.selectedPolicy.policyId).toBe('policy-1')
+    expect(wrapper.vm.detailVisible).toBe(true)
+  })
+
   it('routes back to node detail while preserving policy delivery context', async () => {
     const wrapper = mountWithStubs(Policies)
     await flushPromises()
@@ -701,6 +720,22 @@ describe('policy center context handling', () => {
         focus: 'policies',
         policyRef: 'acl-1',
         policyDomain: 'acl'
+      }
+    })
+  })
+
+  it('routes from Policy Center to IP Group management as part of the policy workspace', async () => {
+    const wrapper = mountWithStubs(Policies)
+    await flushPromises()
+
+    wrapper.vm.goToIpGroups()
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'IPGroups',
+      query: {
+        nodeId: 'node-1',
+        policyRef: 'acl-1',
+        commandId: 'cmd-1'
       }
     })
   })

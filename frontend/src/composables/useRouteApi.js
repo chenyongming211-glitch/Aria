@@ -26,6 +26,8 @@ function normalizeRoute(node, route) {
   return {
     id: route.id || route.cidr,
     cidr: route.cidr || route.id,
+    policyRef: route.policy_ref || route.cidr || route.id,
+    policy_ref: route.policy_ref || route.cidr || route.id,
     nodeId: node.id,
     nodeName: node.hostname || node.public_key || node.id,
     hostname: node.hostname || 'unknown',
