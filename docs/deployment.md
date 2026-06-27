@@ -593,6 +593,33 @@ Purpose:
 | Verification | Local focused Go tests, frontend unit tests, frontend build, linux/amd64 Controller build, and `git diff --check` passed before deployment. Branch Actions run `28276174524` passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` returned `0.2.64`, `https://aria.yun/` returned HTTP 200, Controller info returned version `0.2.64`, and `aria-controller` plus `aria-frontend` were healthy. |
 | Local network note | The local macOS environment could open TCP to `8.152.163.101:443`, but TLS was reset before reaching the frontend container. The environment also had proxy variables pointing to `127.0.0.1:7897`. Nginx logs did not receive those failed local TLS attempts, while server-side public-domain smoke succeeded. |
 
+### 2026-06-27 Non-AI Operations Loop Audit Deployment
+
+Status: deployed and server-side smoke validated.
+
+Purpose:
+
+- Deploy the non-AI operations-loop audit closure.
+- Record `command.queued` audit evidence for manual Agent commands and carry
+  `reason/source/command_id` into alert resolve audit details.
+- Keep Controller/frontend deployment on the low-bandwidth local artifact path;
+  Rust Agent artifacts were built by CI but not redeployed.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-27T11:56+08:00 deployment; 2026-06-27T11:57+08:00 smoke validation |
+| Git commit | `89ddb72724ea` |
+| Branch CI runs | `28277074037`, `28277430166`, `28277591501` |
+| Master CI run | `28277723272` |
+| Version | `0.2.65` |
+| Controller image | Local runtime image `aria-controller:local@sha256:6583c400158f735a0a2f69857ee87db95c0ad7a179fb7bdc95860d486dd8d74b`. |
+| Frontend backup | `/root/aria-controller/deploy-backups/20260627T035624Z-0.2.65-28277723272-89ddb72724ea/frontend-dist` |
+| Runtime binary backup | `/root/aria-controller/deploy-backups/20260627T035624Z-0.2.65-28277723272-89ddb72724ea/runtime-bin` |
+| Config backup | `/root/aria-controller/deploy-backups/20260627T035624Z-0.2.65-28277723272-89ddb72724ea/.env` and `docker-compose.yml` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch and master Actions. |
+| Verification | Branch Actions run `28277591501` and master Actions run `28277723272` passed Go Build, Frontend Build, and Rust Agent Build. Local linux/amd64 Controller/ariactl build and frontend build passed before deployment. Server-side `https://aria.yun/` returned HTTP 200. `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.65`; `aria-controller` and `aria-frontend` were healthy. |
+| Operations smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants. Smoke selected tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db` and online node `node-82-156-137-42` (`d5c7723c-3d86-48ce-a9fc-4695cd170b1c`). Node detail, Monitoring stats, Monitoring alerts, and Monitoring topology all returned HTTP 200. A `health_check` command with `source=master-smoke` and `run_id=28277723272` queued as `2b67f001-9ddb-4ffe-9446-1a0a5f6d9f13`, then reached `completed`; Agent status returned `last_command_status=completed` and `configuration_status=applied`. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
