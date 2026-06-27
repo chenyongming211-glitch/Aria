@@ -962,6 +962,36 @@ Purpose:
 | API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring health returned `ok`; tenant Monitoring alerts returned 0 items; tenant Monitoring events returned 5 items; tenant Policies returned 11 items. |
 | Frontend smoke | Deployed frontend assets contain the Monitoring workflow foundation markers `ui-page-header`, `ui-metric-strip`, and `Monitoring Center`. |
 
+### 2026-06-27 Frontend Policy Center Foundation Deployment
+
+Status: deployed and server-side smoke validated.
+
+Purpose:
+
+- Wire the shared UI foundation components into the Policy Center shell: page
+  header, metric strip, filter bar, and data panel.
+- Keep existing Policy Center context handoff behavior intact for ACL, QoS,
+  Route, node detail, retry delivery, and delivery history.
+- Add clickable policy metric shortcuts so operators can quickly focus failed,
+  pending, applied, or policy-domain-specific inventory.
+- Keep this as a Controller/frontend-only deployment; Rust Agent artifacts were
+  validated by CI but not redeployed.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-27T19:05+08:00 gray deployment; 2026-06-27T19:13+08:00 master deployment; 2026-06-27T19:14+08:00 smoke validation |
+| Git commit | `ca19e1c2c3aac52df1a5e184513239e021fe4532` |
+| Branch CI run | `28287186363` |
+| Master CI run | `28287377802` |
+| Version | `0.2.78` |
+| Controller image | Local runtime image `aria-controller:local@sha256:d7b1e327d06e2f09d9be6a25d7a4ff2dceda9b1711560dc1d3ce18c8bdb2844d`. |
+| Gray backup | `/root/aria-controller/deploy-backups/20260627T110504Z-0.2.78-28287186363-ca19e1c2c3aa` |
+| Master backup | `/root/aria-controller/deploy-backups/20260627T111301Z-0.2.78-28287377802-ca19e1c2c3aa` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch and master Actions. |
+| Verification | Local frontend unit tests passed (`166` tests), including focused Policy Center context tests (`17` tests). Local linux/amd64 Controller/ariactl build and frontend build passed. Branch Actions run `28287186363` and master Actions run `28287377802` both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.78`; `aria-controller` and `aria-frontend` were healthy; frontend entry returned HTTP 200. |
+| API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Policies returned 11 items; tenant Monitoring health returned `ok`; tenant Monitoring events returned 5 items. |
+| Frontend smoke | Deployed frontend assets contain the Policy Center foundation markers `ui-page-header`, `ui-metric-strip`, and `Policy Center`. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
