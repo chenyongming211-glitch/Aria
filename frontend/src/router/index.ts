@@ -1,11 +1,19 @@
-// src/router/index.js
-import { createRouter, createWebHashHistory } from 'vue-router'
+// src/router/index.ts
+import { createRouter, createWebHashHistory, type RouteLocationNormalized, type RouteRecordRaw } from 'vue-router'
 import { getActivePinia } from 'pinia'
 import useUserStore, { tokenRequiresPasswordChange } from '@/stores/user'
 import { clearSession, isIdleSessionExpired } from '@/utils/session'
 import Layout from '@/components/layout/Layout.vue'
+import type { Permission } from '@/types'
 
-const routes = [
+interface CachedRouteUser {
+  role?: string
+  tenant_id?: string
+}
+
+type RoutePermissionTarget = RouteLocationNormalized | RouteRecordRaw
+
+const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: Layout,
@@ -166,10 +174,15 @@ const router = createRouter({
   routes
 })
 
-const readPermissions = () => {
+const isCachedRouteUser = (value: unknown): value is CachedRouteUser => {
+  return typeof value === 'object' && value !== null
+}
+
+const readPermissions = (): Permission[] => {
   try {
     const raw = localStorage.getItem('aria_permissions')
-    return raw ? JSON.parse(raw) : []
+    const parsed: unknown = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed as Permission[] : []
   } catch (error) {
     console.warn('Failed to parse cached permissions:', error)
     return []
@@ -193,10 +206,11 @@ const clearCachedSession = () => {
   clearSession()
 }
 
-const readUser = () => {
+const readUser = (): CachedRouteUser | null => {
   try {
     const raw = localStorage.getItem('aria_user')
-    return raw ? JSON.parse(raw) : null
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    return isCachedRouteUser(parsed) ? parsed : null
   } catch (error) {
     console.warn('Failed to parse cached user:', error)
     return null
@@ -208,7 +222,7 @@ const hasValidCachedUser = () => {
   return Boolean(user?.role)
 }
 
-const loadRoutePermissions = async (user) => {
+const loadRoutePermissions = async (user: CachedRouteUser | null): Promise<Permission[]> => {
   if (user?.role === 'super_admin') return ['*']
 
   const store = activeUserStore()
@@ -231,7 +245,7 @@ const loadRoutePermissions = async (user) => {
   return readPermissions()
 }
 
-const hasRoutePermission = async (to) => {
+const hasRoutePermission = async (to: RoutePermissionTarget): Promise<boolean> => {
   const requiredRole = to.meta?.role
   if (requiredRole) {
     const user = readUser()
@@ -252,16 +266,16 @@ const hasRoutePermission = async (to) => {
   return permissions.includes(required)
 }
 
-const requiresPasswordChange = (token) => {
+const requiresPasswordChange = (token: string): boolean => {
   return localStorage.getItem('aria_must_change_password') === 'true' || tokenRequiresPasswordChange(token)
 }
 
-const routePathForChild = (child) => {
+const routePathForChild = (child: RouteRecordRaw): string | null => {
   if (!child?.path || child.path.includes(':')) return null
   return child.path.startsWith('/') ? child.path : `/${child.path}`
 }
 
-const findAccessibleFallbackPath = async (blockedPath) => {
+const findAccessibleFallbackPath = async (blockedPath: string): Promise<string> => {
   const root = routes.find((route) => route.path === '/')
   for (const child of root?.children || []) {
     if (child.redirect || !child.meta?.requiresAuth) continue
