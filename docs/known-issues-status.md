@@ -45,6 +45,7 @@
 - `Policy Center` 已纳入 `IP Group`、ACL、QoS、Route 的统一入口，避免 IP Group 脱离策略工作流
 - `IP Group` 页面也会保留来自 Policy Center / Monitoring 的节点、策略、命令上下文，并可回跳到节点详情或 `Policy Center`
 - Node Detail 与策略页面都兼容 camelCase 和 snake_case 上下文参数，Monitoring、Policy Center、IP Group 之间不会再丢失 `commandId` 或 `policyDomain/kind`
+- `Policy Center` 对仅包含 `nodeId` 或 `kind` 的列表上下文只做筛选，不再自动打开任意第一条策略，避免把列表筛选误导成具体策略定位
 - 但这些页面仍是多入口工作流，不是单一运维工作台
 - 因此这里应表述为“基础对齐完成”，不应再写成“已完全修复”
 
