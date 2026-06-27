@@ -1,5 +1,6 @@
-// src/composables/useApi.js
-import axios from 'axios'
+// src/composables/useApi.ts
+import axios, { AxiosHeaders } from 'axios'
+import type { InternalAxiosRequestConfig } from 'axios'
 import { API_BASE_URL, API_ENDPOINTS } from '@/config/api'
 import {
   clearSession,
@@ -19,15 +20,41 @@ const api = axios.create({
 
 // Token 刷新状态，防止多个请求同时刷新
 let isRefreshing = false
-let refreshSubscribers = []
+let refreshSubscribers: Array<(newToken: string | null) => void> = []
+
+type HeaderMap = Record<string, string>
+
+function setHeader(config: InternalAxiosRequestConfig, name: string, value: string) {
+  if (!config.headers) {
+    config.headers = new AxiosHeaders()
+  }
+
+  if (typeof config.headers.set === 'function') {
+    config.headers.set(name, value)
+    return
+  }
+
+  ;(config.headers as unknown as HeaderMap)[name] = value
+}
+
+function deleteHeader(config: InternalAxiosRequestConfig, name: string) {
+  if (!config.headers) return
+
+  if (typeof config.headers.delete === 'function') {
+    config.headers.delete(name)
+    return
+  }
+
+  delete (config.headers as unknown as HeaderMap)[name]
+}
 
 // 订阅 token 刷新
-function subscribeTokenRefresh(callback) {
+function subscribeTokenRefresh(callback: (newToken: string | null) => void) {
   refreshSubscribers.push(callback)
 }
 
 // 通知所有订阅者 token 已刷新
-function onTokenRefreshed(newToken) {
+function onTokenRefreshed(newToken: string) {
   refreshSubscribers.forEach(callback => callback(newToken))
   refreshSubscribers = []
 }
@@ -51,30 +78,26 @@ function isTokenExpiringSoon() {
   return expireTime - now < tenMinutes
 }
 
-function applyAuthHeaders(config, tokenOverride = null) {
-  if (!config.headers) {
-    config.headers = {}
-  }
-
+function applyAuthHeaders(config: InternalAxiosRequestConfig, tokenOverride: string | null = null): InternalAxiosRequestConfig {
   const token = tokenOverride || localStorage.getItem('aria_token')
   if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+    setHeader(config, 'Authorization', `Bearer ${token}`)
   }
 
   const currentTenant = localStorage.getItem('aria-current-tenant')
   if (currentTenant) {
     try {
-      const tenant = JSON.parse(currentTenant)
-      if (tenant?.id) {
-        config.headers['X-Tenant-ID'] = tenant.id
+      const tenant = JSON.parse(currentTenant) as { id?: unknown }
+      if (tenant?.id && typeof tenant.id === 'string') {
+        setHeader(config, 'X-Tenant-ID', tenant.id)
       } else {
         localStorage.removeItem('aria-current-tenant')
-        delete config.headers['X-Tenant-ID']
+        deleteHeader(config, 'X-Tenant-ID')
       }
     } catch (error) {
       console.warn('Invalid aria-current-tenant in localStorage, clearing it:', error)
       localStorage.removeItem('aria-current-tenant')
-      delete config.headers['X-Tenant-ID']
+      deleteHeader(config, 'X-Tenant-ID')
     }
   }
 

@@ -26,7 +26,7 @@
 - `frontend/package.json` 已安装 `typescript` 和 `vue-tsc`。
 - `frontend/tsconfig.json`、`frontend/tsconfig.node.json`、`frontend/src/env.d.ts` 已建立 JS/Vue 与 TS 共存的类型检查基线。
 - GitHub Actions `frontend-build` job 已在单测后执行 `npm run type-check`。
-- 2026-06-28 状态：第一阶段迁移已完成并部署；工作流上下文收口后继续迁移 Route / IP Group / Controller Info composables、控制闭环状态工具、权限判断、Settings API、租户上下文工具、Token API、app store 入口、i18n 和 app bootstrap。当前前端源码约为 `3` 个 `.js`、`35` 个 `.ts`、`27` 个 `.vue`。
+- 2026-06-28 状态：第一阶段迁移已完成并部署；工作流上下文收口后继续迁移 Route / IP Group / Controller Info composables、控制闭环状态工具、权限判断、Settings API、租户上下文工具、Token API、app store 入口、i18n、app bootstrap 和认证 API client。当前前端源码约为 `2` 个 `.js`、`36` 个 `.ts`、`27` 个 `.vue`。
 - 已类型化的高风险边界包括：
   - `frontend/src/config/api.ts`
   - `frontend/src/composables/apiResponse.ts`
@@ -38,6 +38,7 @@
   - `frontend/src/composables/useRouteApi.ts`
   - `frontend/src/composables/useIpGroupApi.ts`
   - `frontend/src/composables/useControllerInfo.ts`
+  - `frontend/src/composables/useApi.ts`
   - `frontend/src/composables/usePermission.ts`
   - `frontend/src/composables/useSettingsApi.ts`
   - `frontend/src/composables/useTenantApi.ts`
