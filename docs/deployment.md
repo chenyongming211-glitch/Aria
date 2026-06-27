@@ -814,6 +814,37 @@ Purpose:
 | Verification | Local frontend unit tests passed (`152` tests), including focused `policyPageContext` tests (`15` tests). Local linux/amd64 Controller/ariactl build and frontend build passed. Branch Actions run `28282433907` and master Actions run `28282606252` both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.72`; `aria-controller` and `aria-frontend` were healthy; frontend `index.html` returned `Cache-Control: no-store`. |
 | API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring health returned `ok`; tenant Policies returned 11 items. |
 
+### 2026-06-27 Frontend I18n Foundation Deployment
+
+Status: deployed and server-side smoke validated.
+
+Purpose:
+
+- Replace fixed route titles with `titleKey` metadata so the page header follows
+  the active UI language instead of hardcoded Chinese labels.
+- Add shared translation support for command and policy delivery status labels
+  while preserving existing Chinese fallbacks for non-UI callers.
+- Remove stale visible AI/product wording from the shell for this foundation
+  pass; broader AI/Hermes work remains deferred.
+- Keep this as a Controller/frontend-only deployment; Rust Agent artifacts were
+  validated by CI but not redeployed.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-27T16:16+08:00 gray deployment; 2026-06-27T16:28+08:00 master deployment; 2026-06-27T16:30+08:00 smoke validation |
+| Git commit | `39409fd655c219af3e092ed2aa46155cd0ba16d0` |
+| Branch CI run | `28283473397` |
+| Master CI run | `28283739150` |
+| Version | `0.2.73` |
+| Controller image | Local runtime image `aria-controller:local@sha256:d95a25972840bd3be5bba30c00e2982beb35c0018be8db0303191862a4329117`. |
+| Gray backup | `/root/aria-controller/deploy-backups/20260627T081644Z-0.2.73-28283473397-39409fd655c2` |
+| Master backup | `/root/aria-controller/deploy-backups/20260627T082848Z-0.2.73-28283739150-39409fd655c2` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch and master Actions. |
+| Verification | Local frontend unit tests passed (`155` tests), including focused router permission, page permission visibility, and control-loop status tests. Local linux/amd64 Controller/ariactl build and frontend build passed. Branch Actions run `28283473397` and master Actions run `28283739150` both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.73`; `aria-controller` and `aria-frontend` were healthy; frontend entry returned HTTP 200. |
+| API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; tenant Monitoring health returned `ok`; tenant Monitoring alerts returned 0 items; tenant Monitoring events returned 5 items; tenant Policies returned 11 items. |
+| Frontend smoke | Deployed bundle no longer contains `AI Copilot`, `智能副驾`, `System Online`, or `Node Monitor Detail` fixed strings. |
+| Deployment note | After the gray deploy, `/api/version` returned `0.2.73` but `/api/v2/controller-info` still returned `0.2.72` because production `.env` had stale `ARIA_VERSION` and `ARIA_CONTROLLER_VERSION` values. The master deploy updated both environment variables to `0.2.73` before rebuilding the runtime image and restarting `aria-controller`. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
