@@ -16,7 +16,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 
 	"aria/internal/api/apibase"
 	"aria/internal/api/handlers"
@@ -919,12 +918,12 @@ func (r *Router) updateTenantNode(w http.ResponseWriter, req *http.Request, tena
 		return
 	}
 
-	// 合并并去重路由
-	routes := body.AdvertisedRoutes
-	if routes == nil {
-		routes = node.AdvertisedRoutes
+	if body.AdvertisedRoutes != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Use the node route API to update advertised routes", nil)
+		return
 	}
-	normalizedRoutes, err := normalizeRoutes(routes)
+
+	normalizedRoutes, err := normalizeRoutes(node.AdvertisedRoutes)
 	if err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
 		return
@@ -935,7 +934,7 @@ func (r *Router) updateTenantNode(w http.ResponseWriter, req *http.Request, tena
 		role = node.Role
 	}
 	targetRegion := firstNonEmpty(body.Region, node.Region)
-	if (body.AdvertisedRoutes != nil || strings.TrimSpace(body.Region) != "") && !r.validateTenantAdvertisedRouteConflicts(w, tenantID, node, targetRegion, normalizedRoutes) {
+	if strings.TrimSpace(body.Region) != "" && !r.validateTenantAdvertisedRouteConflicts(w, tenantID, node, targetRegion, normalizedRoutes) {
 		return
 	}
 
@@ -947,9 +946,8 @@ func (r *Router) updateTenantNode(w http.ResponseWriter, req *http.Request, tena
 		region = COALESCE(NULLIF($5, ''), region),
 		vpc_id = COALESCE(NULLIF($6, ''), vpc_id),
 		role = $7,
-		advertised_routes = $8,
 		updated_at = NOW()
-		WHERE id = $9 AND tenant_id = $10`
+		WHERE id = $8 AND tenant_id = $9`
 
 	if _, err := r.store.DB().Exec(query,
 		body.Hostname,
@@ -959,7 +957,6 @@ func (r *Router) updateTenantNode(w http.ResponseWriter, req *http.Request, tena
 		body.Region,
 		body.VPCID,
 		role,
-		pq.Array(normalizedRoutes),
 		node.ID,
 		tenantID,
 	); err != nil {

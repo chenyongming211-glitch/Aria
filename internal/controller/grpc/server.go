@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -604,7 +605,27 @@ func (s *ControllerServer) resolveRuntimeNodeForRequest(ctx context.Context, nod
 	if err := bindRuntimeTokenToNode(ctx, node); err != nil {
 		return nil, err
 	}
+	if err := s.ensureRuntimeTenantActive(node); err != nil {
+		return nil, err
+	}
 	return node, nil
+}
+
+func (s *ControllerServer) ensureRuntimeTenantActive(node *controllerstorage.Node) error {
+	if s.store == nil || node == nil {
+		return nil
+	}
+	statusValue, err := s.store.GetTenantStatus(node.TenantID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return status.Error(codes.PermissionDenied, "tenant is not active")
+		}
+		return status.Errorf(codes.Internal, "failed to verify tenant status: %v", err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(statusValue), "active") {
+		return status.Errorf(codes.PermissionDenied, "tenant is not active: status '%s'", statusValue)
+	}
+	return nil
 }
 
 func bindRuntimeTokenToNode(ctx context.Context, node *controllerstorage.Node) error {
@@ -686,6 +707,9 @@ func (s *ControllerServer) resolveCommandStreamNodeForRequest(ctx context.Contex
 	if err := bindRuntimeTokenToNode(ctx, node); err != nil {
 		return nil, err
 	}
+	if err := s.ensureRuntimeTenantActive(node); err != nil {
+		return nil, err
+	}
 	return node, nil
 }
 
@@ -746,6 +770,9 @@ func (s *ControllerServer) resolveMetricsNodeForRequest(ctx context.Context, req
 		return nil, err
 	}
 	if err := bindRuntimeTokenToNode(ctx, node); err != nil {
+		return nil, err
+	}
+	if err := s.ensureRuntimeTenantActive(node); err != nil {
 		return nil, err
 	}
 	return node, nil

@@ -67,6 +67,7 @@ func TestCommandStreamPollsForCommandsAfterIdleInit(t *testing.T) {
 	now := time.Now()
 
 	expectCommandStreamNodeLookup(mock, publicKey, tenantID, nodeID, now)
+	expectRuntimeTenantStatus(mock, tenantID, "active")
 	expectCommandStreamActiveNodeLookup(mock, publicKey, tenantID, nodeID, now, "online")
 	expectNoPendingAgentCommand(mock, publicKey)
 	expectCommandStreamActiveNodeLookup(mock, publicKey, tenantID, nodeID, now, "online")

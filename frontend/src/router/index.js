@@ -1,7 +1,7 @@
 // src/router/index.js
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { getActivePinia } from 'pinia'
-import useUserStore, { permissionsForRole, tokenRequiresPasswordChange } from '@/stores/user'
+import useUserStore, { tokenRequiresPasswordChange } from '@/stores/user'
 import { clearSession, isIdleSessionExpired } from '@/utils/session'
 import Layout from '@/components/layout/Layout.vue'
 
@@ -212,14 +212,8 @@ const loadRoutePermissions = async (user) => {
   if (user?.role === 'super_admin') return ['*']
 
   const store = activeUserStore()
-  const fallbackPermissions = permissionsForRole(user?.role)
   if (!store || !user?.tenant_id) {
-    const cachedPermissions = readPermissions()
-    const permissions = cachedPermissions.length > 0 ? cachedPermissions : fallbackPermissions
-    if (cachedPermissions.length === 0 && fallbackPermissions.length > 0) {
-      localStorage.setItem('aria_permissions', JSON.stringify(fallbackPermissions))
-    }
-    return permissions
+    return readPermissions()
   }
 
   const key = `${user.tenant_id}:${user.role}`
@@ -234,12 +228,7 @@ const loadRoutePermissions = async (user) => {
 
   if (store.permissions?.length > 0) return store.permissions
 
-  const cachedPermissions = readPermissions()
-  const permissions = cachedPermissions.length > 0 ? cachedPermissions : fallbackPermissions
-  if (cachedPermissions.length === 0 && fallbackPermissions.length > 0) {
-    localStorage.setItem('aria_permissions', JSON.stringify(fallbackPermissions))
-  }
-  return permissions
+  return readPermissions()
 }
 
 const hasRoutePermission = async (to) => {

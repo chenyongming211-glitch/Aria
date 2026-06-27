@@ -77,6 +77,46 @@ func TestHandleUnregisterRejectsRuntimeTokenForDifferentNode(t *testing.T) {
 	}
 }
 
+func TestHandleUnregisterRejectsInactiveRuntimeNode(t *testing.T) {
+	auth.SetRuntimeSecret("southbound-runtime-secret")
+	t.Cleanup(func() { auth.SetRuntimeSecret("") })
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	publicKey := "inactive-node-public-key"
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, nodeID, "suspended", now)
+
+	runtimeToken, _, err := auth.GenerateRuntimeToken(nodeID.String(), tenantID.String())
+	if err != nil {
+		t.Fatalf("GenerateRuntimeToken failed: %v", err)
+	}
+
+	controller := &Controller{
+		store:  controllerstorage.NewStorageWithDB(db),
+		logger: logging.GetLogger(),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/agents/unregister", strings.NewReader(`{"public_key":"`+publicKey+`"}`))
+	req.Header.Set("Authorization", "Bearer "+runtimeToken)
+	rr := httptest.NewRecorder()
+	controller.HandleUnregister(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for inactive runtime node, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestHandleNetworkManageRequiresJWT(t *testing.T) {
 	db, _, err := sqlmock.New()
 	if err != nil {
@@ -209,6 +249,8 @@ func TestHandleNetworkManagePreservesOfflineNodeStatus(t *testing.T) {
 
 	tenantID := uuid.New()
 	nodeID := uuid.New()
+	commandID := uuid.New().String()
+	deliveryID := uuid.New()
 	now := time.Now()
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -234,9 +276,51 @@ func TestHandleNetworkManagePreservesOfflineNodeStatus(t *testing.T) {
 			nodeID, "offline-key", "machine-1", tenantID, "1.1.1.1:51820", "", "1.1.1.1", "sh", "vpc-1", "offline-host", "100.64.0.2", 2,
 			now.Add(-time.Hour).Unix(), now.Add(-24*time.Hour).Unix(), "member", "kernel", "6.0", true, "offline", int64(now.Add(-time.Hour).Unix()), "{}", "", now, now,
 		))
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE nodes SET advertised_routes = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3 AND status NOT IN ('deleted', 'suspended', 'banned')`)).
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE nodes SET advertised_routes = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`)).
 		WithArgs(sqlmock.AnyArg(), nodeID, tenantID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO node_control_states")).
+		WithArgs(tenantID, nodeID, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"tenant_id", "node_id", "desired_state_version", "desired_state_metadata", "desired_state_updated_at",
+			"applied_state_version", "applied_state_updated_at", "observed_state",
+			"observed_message", "observed_at", "last_sync_at", "last_sync_error",
+			"created_at", "updated_at",
+		}).AddRow(
+			tenantID, nodeID, "dsv-network", []byte(`{}`), now,
+			"", nil, "",
+			"", nil, nil, "",
+			now, now,
+		))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE agent_commands ac")).
+		WithArgs("offline-key", controllerstorage.AgentCommandStatusStale, sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged, tenantID, nodeID).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE policy_deliveries")).
+		WithArgs(tenantID, nodeID, controllerstorage.AgentCommandStatusStale, sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO agent_commands")).
+		WithArgs("offline-key", "sync", sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, 1, 60).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow(commandID, now, now))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO policy_deliveries")).
+		WithArgs(tenantID, nodeID, "route", "10.10.0.0/24", "10.10.0.0/24", "create", commandID, controllerstorage.AgentCommandStatusPending, "", sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "policy_domain", "policy_ref", "policy_name",
+			"action", "command_id", "command_status", "last_error", "metadata", "created_at", "updated_at", "completed_at",
+		}).AddRow(
+			deliveryID, tenantID, nodeID, "route", "10.10.0.0/24", "10.10.0.0/24",
+			"create", commandID, controllerstorage.AgentCommandStatusPending, "", []byte(`{}`), now, now, nil,
+		))
+	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+			INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			RETURNING id, tenant_id, node_id, event_type, actor, summary, detail, created_at
+		`)).
+		WithArgs(tenantID, nodeID, controllerstorage.AuditCommandQueued, "controller", "Command queued: sync", sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at",
+		}).AddRow(uuid.New(), tenantID, nodeID, controllerstorage.AuditCommandQueued, "controller", "Command queued: sync", []byte(`{}`), now))
 
 	token, err := auth.GenerateToken("user-1", "admin", controllerstorage.SystemRoleAdmin, tenantID.String())
 	if err != nil {

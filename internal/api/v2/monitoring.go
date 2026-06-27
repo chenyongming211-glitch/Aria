@@ -209,6 +209,9 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 		if tn.ID == node.ID {
 			continue // 跳过自己
 		}
+		if !monitoringRuntimeEligibleNode(tn) {
+			continue
+		}
 		for _, route := range tn.AdvertisedRoutes {
 			learnedRoutes = append(learnedRoutes, map[string]interface{}{
 				"cidr":          route,
@@ -541,7 +544,8 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load tenant nodes: "+err.Error(), nil)
 		return
 	}
-	if len(nodes) == 0 {
+	eligibleNodes := filterMonitoringRuntimeEligibleNodes(nodes)
+	if len(eligibleNodes) == 0 {
 		apibase.WriteSuccess(w, map[string]interface{}{
 			"timestamps":          []int64{},
 			"upload_bytes":        []float64{},
@@ -552,7 +556,7 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 	}
 
 	// 构建 instance 过滤列表
-	instanceFilter := promQLInstanceFilterForNodes(nodes)
+	instanceFilter := promQLInstanceFilterForNodes(eligibleNodes)
 	if instanceFilter == "" {
 		apibase.WriteSuccess(w, map[string]interface{}{
 			"timestamps":          []int64{},
@@ -770,6 +774,7 @@ func (r *Router) handleMonitoringTopology(w http.ResponseWriter, req *http.Reque
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to get nodes", nil)
 		return
 	}
+	nodes = filterMonitoringRuntimeEligibleNodes(nodes)
 
 	topoNodes := make([]map[string]interface{}, 0, len(nodes))
 	for _, n := range nodes {

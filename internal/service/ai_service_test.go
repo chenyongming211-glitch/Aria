@@ -109,3 +109,60 @@ func TestScopedAIToolOverridesCallerTenantID(t *testing.T) {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
+
+func TestAIChatToolScopeExcludesLegacyWriteTools(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	tenantID := uuid.New()
+	service := NewAIService(controllerstorage.NewStorageWithDB(db)).(*aiServiceImpl)
+
+	toolNames := map[string]bool{}
+	for _, tool := range service.scopedReadOnlyTools(withAIToolContext(controllerstorage.SystemRoleAdmin, tenantID)) {
+		toolNames[tool.Name] = true
+		if strings.HasSuffix(tool.RequiredPermission, ":write") {
+			t.Fatalf("chat tool scope exposed write tool %s with permission %s", tool.Name, tool.RequiredPermission)
+		}
+	}
+
+	for _, name := range []string{"create_token", "add_route", "remove_route"} {
+		if toolNames[name] {
+			t.Fatalf("chat tool scope exposed legacy write tool %s", name)
+		}
+	}
+	for _, name := range []string{"list_nodes", "get_node_routes", "list_all_routes"} {
+		if !toolNames[name] {
+			t.Fatalf("expected read tool %s to remain available", name)
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestAIExecuteToolRejectsLegacyWriteToolsEvenWhenConfirmed(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	defer db.Close()
+
+	tenantID := uuid.New()
+	service := NewAIService(controllerstorage.NewStorageWithDB(db))
+	_, err = service.ExecuteTool(
+		withAIToolContext(controllerstorage.SystemRoleAdmin, tenantID),
+		"session-1",
+		"add_route",
+		map[string]any{"hostname": "edge-1", "cidr": "10.10.0.0/16"},
+		true,
+	)
+	if err == nil || !strings.Contains(err.Error(), "AI write tools are disabled") {
+		t.Fatalf("expected legacy AI write tool rejection, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}

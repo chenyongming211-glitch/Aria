@@ -105,11 +105,11 @@ func resolveTokenTenantID(db *sql.DB, requestedTenantID string) (string, error) 
 	requestedTenantID = strings.TrimSpace(requestedTenantID)
 	if requestedTenantID != "" {
 		var exists bool
-		if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM tenants WHERE id = $1 AND COALESCE(status, 'active') != 'deleted')`, requestedTenantID).Scan(&exists); err != nil {
+		if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM tenants WHERE id = $1 AND COALESCE(status, 'active') = 'active')`, requestedTenantID).Scan(&exists); err != nil {
 			return "", fmt.Errorf("failed to validate tenant: %w", err)
 		}
 		if !exists {
-			return "", fmt.Errorf("tenant %s not found or deleted", requestedTenantID)
+			return "", fmt.Errorf("tenant %s not found or inactive", requestedTenantID)
 		}
 		return requestedTenantID, nil
 	}

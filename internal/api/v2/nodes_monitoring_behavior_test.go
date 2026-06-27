@@ -284,16 +284,15 @@ func TestNodesAPI_UpdateReturnsInternalErrorWhenExecFails(t *testing.T) {
 	expectNodeLookup(mock, tenantID, nodeID, "{}")
 	expectNodeLookup(mock, tenantID, nodeID, "{}")
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE nodes SET 
-		hostname = COALESCE(NULLIF($1, ''), hostname),
-		endpoint = COALESCE(NULLIF($2, ''), endpoint),
-		private_ip = COALESCE(NULLIF($3, ''), private_ip),
-		public_ip = COALESCE(NULLIF($4, ''), public_ip),
-		region = COALESCE(NULLIF($5, ''), region),
-		vpc_id = COALESCE(NULLIF($6, ''), vpc_id),
-		role = $7,
-		advertised_routes = $8,
-		updated_at = NOW()
-		WHERE id = $9 AND tenant_id = $10`)).
+			hostname = COALESCE(NULLIF($1, ''), hostname),
+			endpoint = COALESCE(NULLIF($2, ''), endpoint),
+			private_ip = COALESCE(NULLIF($3, ''), private_ip),
+			public_ip = COALESCE(NULLIF($4, ''), public_ip),
+			region = COALESCE(NULLIF($5, ''), region),
+			vpc_id = COALESCE(NULLIF($6, ''), vpc_id),
+			role = $7,
+			updated_at = NOW()
+			WHERE id = $8 AND tenant_id = $9`)).
 		WillReturnError(errors.New("update failed"))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
@@ -312,6 +311,40 @@ func TestNodesAPI_UpdateReturnsInternalErrorWhenExecFails(t *testing.T) {
 	}
 	if resp.Code != apibase.CodeUpdateNodeFailed {
 		t.Fatalf("expected code %s, got %s", apibase.CodeUpdateNodeFailed, resp.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestNodesAPI_UpdateRejectsAdvertisedRoutesOnGenericNodeEdit(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookup(mock, tenantID, nodeID, "{10.1.0.0/24}")
+	expectNodeLookup(mock, tenantID, nodeID, "{10.1.0.0/24}")
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(
+		http.MethodPut,
+		"/api/v2/tenants/"+tenantID.String()+"/nodes/"+nodeID.String(),
+		strings.NewReader(`{"hostname":"edge-1","advertised_routes":["10.10.0.0/16"]}`),
+	), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for advertised_routes on generic node edit, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if resp.Code != apibase.CodeInvalidRequest {
+		t.Fatalf("expected code %s, got %s", apibase.CodeInvalidRequest, resp.Code)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
@@ -482,25 +515,23 @@ func TestNodesAPI_UpdateSuccessReturnsContractFields(t *testing.T) {
 
 	expectNodeLookup(mock, tenantID, nodeID, "{10.1.0.0/24}")
 	expectNodeLookup(mock, tenantID, nodeID, "{10.1.0.0/24}")
-	expectTenantNodesQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE nodes SET 
-		hostname = COALESCE(NULLIF($1, ''), hostname),
-		endpoint = COALESCE(NULLIF($2, ''), endpoint),
-		private_ip = COALESCE(NULLIF($3, ''), private_ip),
-		public_ip = COALESCE(NULLIF($4, ''), public_ip),
-		region = COALESCE(NULLIF($5, ''), region),
-		vpc_id = COALESCE(NULLIF($6, ''), vpc_id),
-		role = $7,
-		advertised_routes = $8,
-		updated_at = NOW()
-		WHERE id = $9 AND tenant_id = $10`)).
+			hostname = COALESCE(NULLIF($1, ''), hostname),
+			endpoint = COALESCE(NULLIF($2, ''), endpoint),
+			private_ip = COALESCE(NULLIF($3, ''), private_ip),
+			public_ip = COALESCE(NULLIF($4, ''), public_ip),
+			region = COALESCE(NULLIF($5, ''), region),
+			vpc_id = COALESCE(NULLIF($6, ''), vpc_id),
+			role = $7,
+			updated_at = NOW()
+			WHERE id = $8 AND tenant_id = $9`)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSuperAdmin(httptest.NewRequest(
 		http.MethodPut,
 		"/api/v2/tenants/"+tenantID.String()+"/nodes/"+nodeID.String(),
-		strings.NewReader(`{"hostname":"edge-1","role":"gateway","advertised_routes":["10.10.0.0/16"]}`),
+		strings.NewReader(`{"hostname":"edge-1","role":"gateway"}`),
 	), tenantID)
 	rr := httptest.NewRecorder()
 
@@ -1234,6 +1265,16 @@ func TestMonitoringAPI_NodeDetailInvalidNodeIDReturnsBadRequest(t *testing.T) {
 	}
 }
 
+func TestNodeAvailabilityStatusReturnsLifecycleInactiveStatusBeforeLastSeen(t *testing.T) {
+	recent := time.Now().Unix()
+	for _, status := range []string{"suspended", "banned"} {
+		node := &controllerstorage.Node{Status: status, LastSeen: recent}
+		if got := nodeAvailabilityStatus(node); got != status {
+			t.Fatalf("expected %s node to remain %s despite recent last_seen, got %s", status, status, got)
+		}
+	}
+}
+
 func TestMonitoringAPI_StatsSuccessReturnsContractFields(t *testing.T) {
 	tenantID := uuid.New()
 	db, mock, err := sqlmock.New()
@@ -1243,13 +1284,20 @@ func TestMonitoringAPI_StatsSuccessReturnsContractFields(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT
-			COUNT(*) AS total,
-			COUNT(*) FILTER (WHERE last_seen >= EXTRACT(EPOCH FROM NOW()) - 60) AS online,
-			COUNT(*) FILTER (WHERE last_seen < EXTRACT(EPOCH FROM NOW()) - 60 OR last_seen IS NULL) AS offline
-		FROM nodes
-		WHERE tenant_id = $1 AND COALESCE(status, 'online') != 'deleted'
-	`)).
+			SELECT
+				COUNT(*) AS total,
+				COUNT(*) FILTER (
+					WHERE COALESCE(status, 'online') NOT IN ('deleted', 'suspended', 'banned')
+					  AND last_seen >= EXTRACT(EPOCH FROM NOW()) - 60
+				) AS online,
+				COUNT(*) FILTER (
+					WHERE COALESCE(status, 'online') IN ('suspended', 'banned')
+					   OR last_seen < EXTRACT(EPOCH FROM NOW()) - 60
+					   OR last_seen IS NULL
+				) AS offline
+			FROM nodes
+			WHERE tenant_id = $1 AND COALESCE(status, 'online') != 'deleted'
+		`)).
 		WithArgs(tenantID).
 		WillReturnRows(sqlmock.NewRows([]string{"total", "online", "offline"}).AddRow(10, 7, 3))
 	mock.ExpectQuery(regexp.QuoteMeta(`
@@ -1321,8 +1369,15 @@ func TestMonitoringAPI_HealthSuccessReturnsContractFields(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT
 			COUNT(*) AS total,
-			COUNT(*) FILTER (WHERE last_seen >= EXTRACT(EPOCH FROM NOW()) - 60) AS online,
-			COUNT(*) FILTER (WHERE last_seen < EXTRACT(EPOCH FROM NOW()) - 60 OR last_seen IS NULL) AS offline
+			COUNT(*) FILTER (
+					WHERE COALESCE(status, 'online') NOT IN ('deleted', 'suspended', 'banned')
+					  AND last_seen >= EXTRACT(EPOCH FROM NOW()) - 60
+				) AS online,
+				COUNT(*) FILTER (
+					WHERE COALESCE(status, 'online') IN ('suspended', 'banned')
+					   OR last_seen < EXTRACT(EPOCH FROM NOW()) - 60
+					   OR last_seen IS NULL
+				) AS offline
 		FROM nodes
 		WHERE tenant_id = $1 AND COALESCE(status, 'online') != 'deleted'
 	`)).
@@ -1391,8 +1446,15 @@ func TestMonitoringAPI_HealthNodeCountFailureReturnsInternalError(t *testing.T) 
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT
 			COUNT(*) AS total,
-			COUNT(*) FILTER (WHERE last_seen >= EXTRACT(EPOCH FROM NOW()) - 60) AS online,
-			COUNT(*) FILTER (WHERE last_seen < EXTRACT(EPOCH FROM NOW()) - 60 OR last_seen IS NULL) AS offline
+			COUNT(*) FILTER (
+					WHERE COALESCE(status, 'online') NOT IN ('deleted', 'suspended', 'banned')
+					  AND last_seen >= EXTRACT(EPOCH FROM NOW()) - 60
+				) AS online,
+				COUNT(*) FILTER (
+					WHERE COALESCE(status, 'online') IN ('suspended', 'banned')
+					   OR last_seen < EXTRACT(EPOCH FROM NOW()) - 60
+					   OR last_seen IS NULL
+				) AS offline
 		FROM nodes
 		WHERE tenant_id = $1 AND COALESCE(status, 'online') != 'deleted'
 	`)).
@@ -1964,6 +2026,57 @@ func TestMonitoringAPI_TopologyOneNodeReturnsNodeWithoutLinks(t *testing.T) {
 	}
 	if firstNode["assigned_ip"] != "10.0.0.10" || firstNode["vpn_ip"] != "10.0.0.10" {
 		t.Fatalf("expected topology node to expose assigned_ip and vpn_ip, got %#v", firstNode)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestMonitoringAPI_TopologyExcludesSuspendedNodes(t *testing.T) {
+	tenantID := uuid.New()
+	activeNodeID := uuid.New()
+	suspendedNodeID := uuid.New()
+	now := time.Now()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectTenantNodesQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows([]string{
+		"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+		"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+		"created_at", "updated_at",
+	}).AddRow(
+		activeNodeID, "pub-key-active", "machine-a", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "active-node", "10.0.0.10", 10,
+		time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "online", int64(0), "{}", "", now, now,
+	).AddRow(
+		suspendedNodeID, "pub-key-suspended", "machine-b", tenantID, "2.2.2.2:51820", "10.0.0.2", "2.2.2.2", "bj", "vpc-2", "suspended-node", "10.0.0.11", 11,
+		time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "suspended", int64(0), "{}", "", now, now,
+	))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/topology", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+	nodes := responseDataSlice(t, data["nodes"])
+	links := responseDataSlice(t, data["links"])
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(nodes) != 1 || len(links) != 0 {
+		t.Fatalf("expected suspended node to be excluded from topology, got nodes=%d links=%d", len(nodes), len(links))
+	}
+	firstNode, ok := nodes[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected topology node as map, got %#v", nodes[0])
+	}
+	if firstNode["id"] != activeNodeID.String() {
+		t.Fatalf("expected only active node in topology, got %#v", firstNode)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
@@ -2635,6 +2748,44 @@ func TestMonitoringAPI_TrafficVMUnavailableReturnsServiceUnavailable(t *testing.
 	}
 }
 
+func TestMonitoringAPI_TrafficReturnsEmptySeriesWhenOnlySuspendedNodesHaveInstances(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectTenantNodesQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows([]string{
+		"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+		"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+		"created_at", "updated_at",
+	}).AddRow(
+		nodeID, "pub-key-1", "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "suspended-node", "10.0.0.10", 10,
+		time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "suspended", int64(0), "{}", "", now, now,
+	))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/traffic?range=24h", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 with empty traffic for suspended-only tenant, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(responseDataSlice(t, data["timestamps"])) != 0 {
+		t.Fatalf("expected empty timestamps for suspended-only tenant, got %#v", data["timestamps"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestMonitoringAPI_TrafficNodeQueryFailureReturnsInternalError(t *testing.T) {
 	tenantID := uuid.New()
 	db, mock, err := sqlmock.New()
@@ -2715,8 +2866,15 @@ func TestMonitoringAPI_StatsReturnsInternalErrorWhenNodeCountFails(t *testing.T)
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT
 			COUNT(*) AS total,
-			COUNT(*) FILTER (WHERE last_seen >= EXTRACT(EPOCH FROM NOW()) - 60) AS online,
-			COUNT(*) FILTER (WHERE last_seen < EXTRACT(EPOCH FROM NOW()) - 60 OR last_seen IS NULL) AS offline
+			COUNT(*) FILTER (
+					WHERE COALESCE(status, 'online') NOT IN ('deleted', 'suspended', 'banned')
+					  AND last_seen >= EXTRACT(EPOCH FROM NOW()) - 60
+				) AS online,
+				COUNT(*) FILTER (
+					WHERE COALESCE(status, 'online') IN ('suspended', 'banned')
+					   OR last_seen < EXTRACT(EPOCH FROM NOW()) - 60
+					   OR last_seen IS NULL
+				) AS offline
 		FROM nodes
 		WHERE tenant_id = $1 AND COALESCE(status, 'online') != 'deleted'
 	`)).

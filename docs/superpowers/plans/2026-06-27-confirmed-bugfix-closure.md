@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close the currently scheduled non-AI bugs in `docs/confirmed-bugs.md` without mixing unrelated UI, dependency, AI Agent, or architecture refactors.
+**Goal:** Close BUG-25 through BUG-35 in `docs/confirmed-bugs.md` without mixing unrelated UI, dependency, or architecture refactors.
 
-**Architecture:** Treat the product loops as the repair boundary: onboarding fail-closed first, control-plane write consistency second, command-state consistency third, monitoring semantics last. Legacy AI write behavior is deferred because the AI Agent will be replaced by Hermes Agent; Hermes must get a fresh confirmation and policy-delivery design instead of extending the old AI path.
+**Architecture:** Treat the product loops as the repair boundary: onboarding fail-closed first, control-plane write consistency second, command-state consistency third, monitoring semantics fourth, and legacy AI write entrypoints fail-closed last. Hermes Agent will get a fresh confirmation and policy-delivery design later; the old AI path must not execute write tools while Hermes is not ready.
 
 **Tech Stack:** Go Controller, PostgreSQL storage, gRPC Agent API, Rust Agent protocol consumer, Vue 3 + Pinia + Vue Router + Element Plus frontend, Vitest.
 
@@ -18,7 +18,7 @@
 | B2 | BUG-27, BUG-32 | Non-AI route writes must enter policy delivery | Any non-AI route mutation creates/updates desired state, queues an Agent command, records policy delivery, and requires `routes:write`. |
 | B3 | BUG-35 | Agent command status state machine | Unknown command status is rejected, terminal status cannot be downgraded, timeout cleanup still catches all non-terminal supported states. |
 | B4 | BUG-31 | Monitoring inactive node semantics | Suspended/banned nodes never appear as online/eligible traffic participants even if `last_seen` is recent. |
-| Deferred | BUG-25, BUG-26 | Hermes Agent phase | Old AI write and AI route tools are not extended in this plan; Hermes must reintroduce them through backend confirmation and policy delivery. |
+| B5 | BUG-25, BUG-26 | Legacy AI write entrypoints fail-closed | Chat only exposes read tools, and `ExecuteTool` rejects legacy write tools even when confirmed. Hermes must reintroduce writes through backend confirmation and policy delivery. |
 
 ## File Responsibility Map
 
@@ -35,10 +35,11 @@
 - `frontend/src/stores/user.js`, `frontend/src/router/index.js`: frontend permission refresh and fail-closed routing behavior.
 - `frontend/src/views/Nodes.vue`, `frontend/src/stores/node.js`, `frontend/src/composables/useRouteApi.js`: node edit form and route mutation path.
 - `frontend/src/utils/controlLoopStatus.js`: frontend command/policy status normalization.
+- `internal/service/ai_service.go`: legacy AI tool exposure and confirmed tool execution guard.
+- `internal/service/ai_service_test.go`: legacy AI write tool fail-closed regression tests.
 
-Deferred Hermes files, not modified by this plan:
+Hermes design input files, not extended by this plan:
 - `internal/agent/brain/agent.go`
-- `internal/service/ai_service.go`
 - `internal/agent/tools/route_management.go`
 - `frontend/src/views/AIAssistant.vue`
 
@@ -165,7 +166,7 @@ Deferred Hermes files, not modified by this plan:
   Implement:
   - generic node update ignores/rejects `advertised_routes` unless it delegates to the standard route mutation service;
   - frontend node edit no longer submits `advertised_routes` through the generic node update API;
-  - any future AI/Hermes route write must call the same route mutation service, but old AI route tools are not changed in this batch.
+  - any future AI/Hermes route write must call the same route mutation service; old AI write entrypoints are blocked in B5.
 
   Run:
   ```bash
@@ -303,6 +304,46 @@ Deferred Hermes files, not modified by this plan:
   git commit -m "fix: exclude inactive nodes from online monitoring"
   ```
 
+## Batch B5: Legacy AI Write Entrypoints Fail-Closed
+
+**Bugs:** BUG-25, BUG-26
+
+**Files:**
+- Modify: `internal/service/ai_service.go`
+- Test: `internal/service/ai_service_test.go`
+
+- [x] **Step 1: Add failing AI write exposure tests**
+
+  Cover:
+  - chat tool scope does not expose tools whose required permission ends with `:write`;
+  - legacy write tools such as `create_token`, `add_route`, and `remove_route` are absent from chat scope;
+  - `ExecuteTool(..., confirmed=true)` still rejects old write tools.
+
+  Run:
+  ```bash
+  go test ./internal/service -run 'AIChatToolScope|AIExecuteTool|ScopedAITool' -count=1
+  ```
+  Expected before implementation: test fails because `scopedReadOnlyTools` does not exist and the old service would expose write tools.
+
+- [x] **Step 2: Keep legacy AI chat read-only and reject old writes**
+
+  Implement:
+  - `Chat` and `ChatWithContext` pass only read-only scoped tools to the agent;
+  - `ExecuteTool` rejects legacy write tools before argument marshaling and execution;
+  - existing `runScopedTool` authorization and tenant injection behavior remains unchanged for direct unit coverage.
+
+  Run:
+  ```bash
+  go test ./internal/service -count=1
+  ```
+  Expected: old AI service cannot execute `add_route`, `remove_route`, or `create_token` through chat/tool confirmation paths.
+
+Hermes implementation requirements remain:
+- chat phase must not execute write tools directly;
+- write requests must become backend-owned pending actions with confirm/cancel;
+- route writes must reuse the same route mutation and policy delivery service as UI/API writes;
+- audit records must show who requested, confirmed, executed, and observed the write.
+
 ## Final Verification
 
 - [ ] **Step 1: Run backend focused tests**
@@ -322,7 +363,7 @@ Deferred Hermes files, not modified by this plan:
 - [ ] **Step 3: Update bug statuses**
 
   For each closed bug in `docs/confirmed-bugs.md`:
-  - move it from `当前仍未闭合的 Bug` to `已重新验证为已修复的 Bug`;
+  - record it under `BUG-25 到 BUG-35 闭合总览` and `BUG-25 到 BUG-35 本轮修复详情`;
   - include the exact verification command that passed;
   - keep any not-yet-fixed bug OPEN.
 
@@ -344,16 +385,3 @@ Deferred Hermes files, not modified by this plan:
   - route update creates policy delivery and command;
   - Agent command completion updates delivery;
   - monitoring does not show suspended/banned as online.
-
-## Deferred Hermes Agent Scope
-
-The following issues remain real, but they are not part of the current implementation plan because the old AI Agent will be replaced by Hermes Agent:
-
-- BUG-25: old AI chat can execute write tools without a backend confirmation gate.
-- BUG-26: old AI route write tools bypass route policy delivery.
-
-Hermes implementation requirements:
-- chat phase must not execute write tools directly;
-- write requests must become backend-owned pending actions with confirm/cancel;
-- route writes must reuse the same route mutation and policy delivery service as UI/API writes;
-- audit records must show who requested, confirmed, executed, and observed the write.

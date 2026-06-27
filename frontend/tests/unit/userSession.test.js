@@ -321,37 +321,27 @@ describe('user session persistence', () => {
     expect(JSON.parse(localStorage.getItem('aria_permissions'))).toEqual(userStore.permissions)
   })
 
-  it('matches fallback custom roles case-insensitively when auth permission lookup fails', async () => {
+  it('clears permissions instead of falling back to built-in role permissions when auth lookup fails', async () => {
+    localStorage.setItem('aria_permissions', JSON.stringify(['nodes:write', 'routes:write']))
     api.get.mockImplementation((url) => {
       if (url === '/v2/auth/permissions') {
         return Promise.reject(new Error('permission lookup unavailable'))
-      }
-      if (url === '/v2/tenants/tenant-1/roles') {
-        return Promise.resolve({
-          data: {
-            data: [
-              {
-                name: 'OpsRole',
-                permissions: ['nodes:read', 'qos:read']
-              }
-            ]
-          }
-        })
       }
       return Promise.reject(new Error(`unexpected URL: ${url}`))
     })
 
     const userStore = useUserStore()
 
-    await userStore.loadPermissions('tenant-1', 'opsrole')
+    const loaded = await userStore.loadPermissions('tenant-1', 'admin')
 
     expect(api.get).toHaveBeenCalledWith('/v2/auth/permissions')
-    expect(api.get).toHaveBeenCalledWith('/v2/tenants/tenant-1/roles')
-    expect(userStore.permissions).toEqual(['nodes:read', 'qos:read'])
-    expect(JSON.parse(localStorage.getItem('aria_permissions'))).toEqual(['nodes:read', 'qos:read'])
+    expect(api.get).not.toHaveBeenCalledWith('/v2/tenants/tenant-1/roles')
+    expect(loaded).toEqual([])
+    expect(userStore.permissions).toEqual([])
+    expect(JSON.parse(localStorage.getItem('aria_permissions'))).toEqual([])
   })
 
-  it('restores role permissions immediately and refreshes them from the server', async () => {
+  it('waits for backend permissions during session restore instead of writing role defaults', async () => {
     api.get.mockResolvedValue({
       data: {
         data: {
@@ -372,13 +362,8 @@ describe('user session persistence', () => {
     const userStore = useUserStore()
 
     expect(userStore.loadSession()).toBe(true)
-    expect(userStore.permissions).toEqual(expect.arrayContaining([
-      'nodes:read',
-      'routes:read',
-      'acls:read',
-      'monitoring:read'
-    ]))
-    expect(JSON.parse(localStorage.getItem('aria_permissions'))).toEqual(userStore.permissions)
+    expect(userStore.permissions).toEqual([])
+    expect(localStorage.getItem('aria_permissions')).toBeNull()
 
     await flushPromises()
 

@@ -832,12 +832,17 @@ func (s *Storage) ReuseHostnameIP(hostname string, tenantID uuid.UUID) (assigned
 
 	var pubKey string
 	var nodeID uuid.UUID
+	var status string
 	err = tx.QueryRow(
-		`SELECT id, public_key, assigned_ip, ip_offset FROM nodes WHERE hostname = $1 AND tenant_id = $2 AND status != 'deleted' FOR UPDATE LIMIT 1`,
+		`SELECT id, public_key, assigned_ip, ip_offset, COALESCE(status, 'online') FROM nodes WHERE hostname = $1 AND tenant_id = $2 AND status != 'deleted' FOR UPDATE LIMIT 1`,
 		hostname, tenantID,
-	).Scan(&nodeID, &pubKey, &assignedIP, &ipOffset)
+	).Scan(&nodeID, &pubKey, &assignedIP, &ipOffset, &status)
 	if err != nil {
 		return "", 0, err
+	}
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "suspended", "banned":
+		return "", 0, fmt.Errorf("inactive hostname %q cannot be reused: node status %s", hostname, status)
 	}
 
 	_, err = tx.Exec(`UPDATE nodes SET status = 'deleted', updated_at = NOW() WHERE public_key = $1`, pubKey)

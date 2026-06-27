@@ -520,6 +520,43 @@ func TestHandleRegister_ReRegistrationRequiresNodeProof(t *testing.T) {
 	}
 }
 
+func TestValidateEnrollmentTokenTenantRejectsInactiveTenant(t *testing.T) {
+	for _, status := range []string{"suspended", "deleted"} {
+		t.Run(status, func(t *testing.T) {
+			tenantID := uuid.New()
+			enrollToken := "tk_register_inactive_" + status
+			now := time.Now()
+
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New failed: %v", err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+
+			expectEnrollmentTokenValidate(mock, enrollToken, tenantID, now)
+			expectTenantIDByTokenLookup(mock, enrollToken, tenantID)
+			expectTenantStatusLookup(mock, tenantID, status)
+
+			controller := &Controller{
+				store:          controllerstorage.NewStorageWithDB(db),
+				tokenValidator: token.NewValidator(token.NewStore(db)),
+				logger:         logging.GetLogger(),
+			}
+
+			_, authErr := controller.validateEnrollmentTokenTenant(enrollToken)
+			if authErr == nil {
+				t.Fatalf("expected inactive tenant %q to reject enrollment token", status)
+			}
+			if authErr.status != http.StatusForbidden {
+				t.Fatalf("expected 403 for inactive tenant %q, got %d", status, authErr.status)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("unmet sql expectations: %v", err)
+			}
+		})
+	}
+}
+
 func TestHandleRegister_ReRegistrationRejectsEnrollmentMachineMismatch(t *testing.T) {
 	tenantID := uuid.New()
 	persistedNodeID := uuid.New()
@@ -536,6 +573,7 @@ func TestHandleRegister_ReRegistrationRejectsEnrollmentMachineMismatch(t *testin
 	expectNodeLookupByPublicKeyWithStatusMachineAndID(mock, publicKey, tenantID, persistedNodeID, "online", "machine-existing", now)
 	expectEnrollmentTokenValidate(mock, enrollToken, tenantID, now)
 	expectTenantIDByTokenLookup(mock, enrollToken, tenantID)
+	expectTenantStatusLookup(mock, tenantID, "active")
 
 	controller := &Controller{
 		store:          controllerstorage.NewStorageWithDB(db),
@@ -663,6 +701,7 @@ func TestHandleRegister_CSRFailureRollsBackFreshEnrollment(t *testing.T) {
 	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, persistedNodeID, "deleted", now)
 	expectEnrollmentTokenValidate(mock, enrollToken, tenantID, now)
 	expectTenantIDByTokenLookup(mock, enrollToken, tenantID)
+	expectTenantStatusLookup(mock, tenantID, "active")
 	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, persistedNodeID, "deleted", now)
 	expectSaveNodeSuccess(mock, publicKey, tenantID, persistedNodeID)
 	expectEnrollmentTokenConsume(mock, enrollToken, publicKey)
@@ -706,6 +745,7 @@ func TestHandleRegisterDoesNotConsumeEnrollmentTokenWhenSaveFails(t *testing.T) 
 	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, persistedNodeID, "deleted", now)
 	expectEnrollmentTokenValidate(mock, enrollToken, tenantID, now)
 	expectTenantIDByTokenLookup(mock, enrollToken, tenantID)
+	expectTenantStatusLookup(mock, tenantID, "active")
 	expectNodeLookupByPublicKeyWithStatusAndID(mock, publicKey, tenantID, persistedNodeID, "deleted", now)
 	mock.ExpectQuery(`INSERT INTO nodes \(`).
 		WithArgs(
@@ -1273,6 +1313,12 @@ func expectTenantIDByTokenLookup(mock sqlmock.Sqlmock, tokenValue string, tenant
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT tenant_id FROM tokens WHERE token = $1`)).
 		WithArgs(tokenValue).
 		WillReturnRows(sqlmock.NewRows([]string{"tenant_id"}).AddRow(tenantID))
+}
+
+func expectTenantStatusLookup(mock sqlmock.Sqlmock, tenantID uuid.UUID, status string) {
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT status FROM tenants WHERE id = $1`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow(status))
 }
 
 func expectEnrollmentTokenConsume(mock sqlmock.Sqlmock, tokenValue, publicKey string) {

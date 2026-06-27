@@ -38,6 +38,7 @@ func TestHandleRefreshReloadsUserRoleAndTenantFromDatabase(t *testing.T) {
 		WithArgs(userID.String()).
 		WillReturnRows(sqlmock.NewRows([]string{"username", "role", "tenant_id", "must_change_password"}).
 			AddRow("alice", "viewer", newTenantID.String(), false))
+	expectAuthTenantStatus(mock, newTenantID, "active")
 
 	api := NewAuthAPI(controllerstorage.NewStorageWithDB(db))
 	req := httptest.NewRequest(http.MethodPost, "/api/v2/auth/refresh", nil)
@@ -98,6 +99,80 @@ func TestHandleRefreshRejectsDeletedUser(t *testing.T) {
 
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestHandleRefreshRejectsInactiveTenantUser(t *testing.T) {
+	auth.SetSecret("test-jwt-secret")
+	t.Cleanup(func() { auth.SetSecret("") })
+
+	userID := uuid.New()
+	tenantID := uuid.New()
+	token, err := auth.GenerateToken(userID.String(), "alice", "admin", tenantID.String())
+	if err != nil {
+		t.Fatalf("GenerateToken failed: %v", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT username, role, tenant_id, COALESCE(must_change_password, FALSE) FROM users WHERE id = $1`)).
+		WithArgs(userID.String()).
+		WillReturnRows(sqlmock.NewRows([]string{"username", "role", "tenant_id", "must_change_password"}).
+			AddRow("alice", "viewer", tenantID.String(), false))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT status FROM tenants WHERE id = $1`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("suspended"))
+
+	api := NewAuthAPI(controllerstorage.NewStorageWithDB(db))
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/auth/refresh", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	api.HandleRefresh(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for inactive tenant refresh, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestHandleRefreshRejectsTenantUserWithoutTenantID(t *testing.T) {
+	auth.SetSecret("test-jwt-secret")
+	t.Cleanup(func() { auth.SetSecret("") })
+
+	userID := uuid.New()
+	token, err := auth.GenerateToken(userID.String(), "alice", "admin", uuid.New().String())
+	if err != nil {
+		t.Fatalf("GenerateToken failed: %v", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT username, role, tenant_id, COALESCE(must_change_password, FALSE) FROM users WHERE id = $1`)).
+		WithArgs(userID.String()).
+		WillReturnRows(sqlmock.NewRows([]string{"username", "role", "tenant_id", "must_change_password"}).
+			AddRow("alice", "viewer", nil, false))
+
+	api := NewAuthAPI(controllerstorage.NewStorageWithDB(db))
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/auth/refresh", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	api.HandleRefresh(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for tenant user without tenant_id, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

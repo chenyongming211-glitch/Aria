@@ -66,7 +66,7 @@ func NewAIService(store *controllerstorage.Storage) AIService {
 }
 
 func (s *aiServiceImpl) Chat(ctx context.Context, sessionID, prompt string) (string, error) {
-	return s.agent.ThinkWithTools(ctx, prompt, s.scopedTools(ctx))
+	return s.agent.ThinkWithTools(ctx, prompt, s.scopedReadOnlyTools(ctx))
 }
 
 // ChatWithContext 带上下文的聊天（用于飞书等需要会话的场景）
@@ -78,7 +78,7 @@ func (s *aiServiceImpl) ChatWithContext(ctx context.Context, chatID, prompt stri
 	}
 
 	// 执行对话
-	answer, err := s.agent.ThinkWithHistoryTools(ctx, prompt, history, s.scopedTools(ctx))
+	answer, err := s.agent.ThinkWithHistoryTools(ctx, prompt, history, s.scopedReadOnlyTools(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -124,6 +124,9 @@ func (s *aiServiceImpl) ExecuteTool(ctx context.Context, sessionID, toolName str
 	if selectedTool.Name == "" {
 		return nil, fmt.Errorf("tool not found: %s", toolName)
 	}
+	if legacyAIWriteTool(selectedTool) {
+		return nil, errors.New("AI write tools are disabled until Hermes confirmation and policy delivery workflow is available")
+	}
 
 	// 序列化参数
 	paramsJSON, err := json.Marshal(params)
@@ -158,6 +161,22 @@ func (s *aiServiceImpl) scopedTools(ctx context.Context) []tools.Tool {
 		scoped = append(scoped, toolCopy)
 	}
 	return scoped
+}
+
+func (s *aiServiceImpl) scopedReadOnlyTools(ctx context.Context) []tools.Tool {
+	rawTools := s.scopedTools(ctx)
+	readOnly := make([]tools.Tool, 0, len(rawTools))
+	for _, tool := range rawTools {
+		if legacyAIWriteTool(tool) {
+			continue
+		}
+		readOnly = append(readOnly, tool)
+	}
+	return readOnly
+}
+
+func legacyAIWriteTool(tool tools.Tool) bool {
+	return strings.HasSuffix(strings.TrimSpace(tool.RequiredPermission), ":write")
 }
 
 func (s *aiServiceImpl) runScopedTool(ctx context.Context, tool tools.Tool, run tools.ToolFunc, args string) (string, error) {

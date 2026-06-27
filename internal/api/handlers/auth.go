@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
 	"aria/internal/api/apibase"
@@ -35,6 +36,8 @@ type PermissionsResponse struct {
 	Permissions []string `json:"permissions"`
 }
 
+var errTenantInactive = errors.New("tenant is not active")
+
 func normalizeAuthRole(role string) string {
 	return controllerstorage.NormalizeRoleName(role)
 }
@@ -58,6 +61,37 @@ func sanitizeTenantPermissions(permissions []string) []string {
 		sanitized = append(sanitized, permission)
 	}
 	return sanitized
+}
+
+func (a *AuthAPI) verifyTenantActive(tenantID string) error {
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" {
+		return errTenantInactive
+	}
+	parsedTenantID, err := uuid.Parse(tenantID)
+	if err != nil {
+		return err
+	}
+	status, err := a.store.GetTenantStatus(parsedTenantID)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(status), "active") {
+		return errTenantInactive
+	}
+	return nil
+}
+
+func writeTenantInactiveAuthError(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errTenantInactive) || errors.Is(err, sql.ErrNoRows) {
+		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Tenant is not active", nil)
+		return true
+	}
+	apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to verify tenant status", nil)
+	return true
 }
 
 func (a *AuthAPI) HandleLogin(w http.ResponseWriter, r *http.Request) {
@@ -100,6 +134,11 @@ func (a *AuthAPI) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	tID := ""
 	if tenantID.Valid {
 		tID = tenantID.String
+	}
+	if normalizeAuthRole(role) != "super_admin" {
+		if writeTenantInactiveAuthError(w, a.verifyTenantActive(tID)) {
+			return
+		}
 	}
 
 	token, err := auth.GenerateToken(userID, req.Username, role, tID, mustChangePassword)
@@ -168,6 +207,11 @@ func (a *AuthAPI) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 	if tenantID.Valid {
 		tID = tenantID.String
 	}
+	if normalizeAuthRole(role) != "super_admin" {
+		if writeTenantInactiveAuthError(w, a.verifyTenantActive(tID)) {
+			return
+		}
+	}
 
 	newToken, err := auth.GenerateToken(claims.UserID, username, role, tID, mustChangePassword)
 	if err != nil {
@@ -228,6 +272,9 @@ func (a *AuthAPI) HandlePermissions(w http.ResponseWriter, r *http.Request) {
 	tenantID, exists := middleware.GetTenantID(r.Context())
 	if !exists {
 		apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeTenantContextNotFound, "Tenant context missing", nil)
+		return
+	}
+	if writeTenantInactiveAuthError(w, a.verifyTenantActive(tenantID.String())) {
 		return
 	}
 

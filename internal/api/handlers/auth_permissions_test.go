@@ -34,6 +34,7 @@ func TestHandlePermissionsReturnsTenantRolePermissions(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	expectAuthTenantStatus(mock, tenantID, "active")
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT permissions FROM roles
 		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
@@ -91,6 +92,46 @@ func TestHandlePermissionsReturnsTenantRolePermissions(t *testing.T) {
 	}
 }
 
+func expectAuthTenantStatus(mock sqlmock.Sqlmock, tenantID uuid.UUID, status string) {
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT status FROM tenants WHERE id = $1`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow(status))
+}
+
+func TestHandlePermissionsRejectsInactiveTenant(t *testing.T) {
+	auth.SetSecret("test-jwt-secret")
+	t.Cleanup(func() { auth.SetSecret("") })
+
+	tenantID := uuid.New()
+	userID := uuid.New()
+	token, err := auth.GenerateToken(userID.String(), "operator", "operator", tenantID.String())
+	if err != nil {
+		t.Fatalf("GenerateToken failed: %v", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectAuthTenantStatus(mock, tenantID, "suspended")
+
+	api := NewAuthAPI(controllerstorage.NewStorageWithDB(db))
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/auth/permissions", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+
+	middleware.JWTAuthMiddleware(api.HandlePermissions)(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusForbidden, rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestHandlePermissionsStripsWildcardForTenantRole(t *testing.T) {
 	auth.SetSecret("test-jwt-secret")
 	t.Cleanup(func() { auth.SetSecret("") })
@@ -108,6 +149,7 @@ func TestHandlePermissionsStripsWildcardForTenantRole(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	expectAuthTenantStatus(mock, tenantID, "active")
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT permissions FROM roles
 		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
@@ -173,6 +215,7 @@ func TestHandlePermissionsMatchesCustomRoleCaseInsensitively(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	expectAuthTenantStatus(mock, tenantID, "active")
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT permissions FROM roles
 		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
@@ -224,6 +267,7 @@ func TestHandlePermissionsMapsOwnerToAdmin(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	expectAuthTenantStatus(mock, tenantID, "active")
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT permissions FROM roles
 		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)
@@ -273,6 +317,7 @@ func TestHandlePermissionsReturnsInternalServerErrorOnPermissionLookupFailure(t 
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	expectAuthTenantStatus(mock, tenantID, "active")
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT permissions FROM roles
 		WHERE tenant_id = $1 AND LOWER(name) = LOWER($2)

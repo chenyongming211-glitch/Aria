@@ -13,13 +13,20 @@ import (
 // Online = last_seen within 60 seconds of now. Offline = last_seen older than 60 seconds.
 func (s *Storage) CountNodesByTenantAndStatus(tenantID uuid.UUID) (total, online, offline int, err error) {
 	err = s.db.QueryRow(`
-		SELECT
-			COUNT(*) AS total,
-			COUNT(*) FILTER (WHERE last_seen >= EXTRACT(EPOCH FROM NOW()) - 60) AS online,
-			COUNT(*) FILTER (WHERE last_seen < EXTRACT(EPOCH FROM NOW()) - 60 OR last_seen IS NULL) AS offline
-		FROM nodes
-		WHERE tenant_id = $1 AND COALESCE(status, 'online') != 'deleted'
-	`, tenantID).Scan(&total, &online, &offline)
+			SELECT
+				COUNT(*) AS total,
+				COUNT(*) FILTER (
+					WHERE COALESCE(status, 'online') NOT IN ('deleted', 'suspended', 'banned')
+					  AND last_seen >= EXTRACT(EPOCH FROM NOW()) - 60
+				) AS online,
+				COUNT(*) FILTER (
+					WHERE COALESCE(status, 'online') IN ('suspended', 'banned')
+					   OR last_seen < EXTRACT(EPOCH FROM NOW()) - 60
+					   OR last_seen IS NULL
+				) AS offline
+			FROM nodes
+			WHERE tenant_id = $1 AND COALESCE(status, 'online') != 'deleted'
+		`, tenantID).Scan(&total, &online, &offline)
 	return
 }
 
@@ -125,10 +132,10 @@ type EventFeedFilter struct {
 type EventFeedItem struct {
 	ID        string                 `json:"id"`
 	Source    string                 `json:"source"`
-	EventType string                `json:"event_type"`
-	Severity  string                `json:"severity"`
-	NodeID    string                `json:"node_id"`
-	Title     string                `json:"title"`
+	EventType string                 `json:"event_type"`
+	Severity  string                 `json:"severity"`
+	NodeID    string                 `json:"node_id"`
+	Title     string                 `json:"title"`
 	Detail    map[string]interface{} `json:"detail"`
 	CreatedAt time.Time              `json:"created_at"`
 }

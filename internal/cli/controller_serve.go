@@ -1127,7 +1127,24 @@ func (c *Controller) validateEnrollmentTokenTenant(tokenValue string) (uuid.UUID
 	if err != nil {
 		return uuid.Nil, newRegistrationAuthError(http.StatusInternalServerError, "Failed to get tenant ID from token", err)
 	}
+	if err := c.ensureTenantActive(tenantID); err != nil {
+		return uuid.Nil, err
+	}
 	return tenantID, nil
+}
+
+func (c *Controller) ensureTenantActive(tenantID uuid.UUID) *registrationAuthError {
+	status, err := c.store.GetTenantStatus(tenantID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return newRegistrationAuthError(http.StatusForbidden, "Tenant is not active", err)
+		}
+		return newRegistrationAuthError(http.StatusInternalServerError, "Failed to verify tenant status", err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(status), "active") {
+		return newRegistrationAuthError(http.StatusForbidden, "Tenant is not active", fmt.Errorf("tenant %s status is %s", tenantID, status))
+	}
+	return nil
 }
 
 func (c *Controller) authorizeRuntimeNodeByPublicKey(w http.ResponseWriter, runtimeToken, publicKey string) (*controllerstorage.Node, bool) {
@@ -1168,6 +1185,10 @@ func (c *Controller) authorizeRuntimeNodeByPublicKey(w http.ResponseWriter, runt
 	}
 	if tokenTenantID != node.TenantID {
 		http.Error(w, "Runtime token tenant mismatch", http.StatusForbidden)
+		return nil, false
+	}
+	if nodeCertificateRequestForbidden(node) {
+		http.Error(w, fmt.Sprintf("Node access denied: current status is '%s'", strings.ToLower(strings.TrimSpace(node.Status))), http.StatusForbidden)
 		return nil, false
 	}
 
@@ -1561,12 +1582,17 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 		c.logger.Info("Removed route %s from node %s", req.CIDR, req.Hostname)
 	}
 
-	if err := c.store.UpdateTenantNodeAdvertisedRoutes(targetNode.ID, targetNode.TenantID, targetNode.AdvertisedRoutes); err != nil {
+	policyAction := "create"
+	if req.Action == "remove" {
+		policyAction = "delete"
+	}
+	syncResult, err := c.queueNetworkRoutePolicySync(targetNode, policyAction, req.CIDR, targetNode.AdvertisedRoutes)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Error(w, fmt.Sprintf("node %s is not active", req.Hostname), http.StatusConflict)
 			return
 		}
-		c.logger.Error("Failed to update node advertised routes: %v", err)
+		c.logger.Error("Failed to queue node route policy sync: %v", err)
 		http.Error(w, "Failed to update node routes", http.StatusInternalServerError)
 		return
 	}
@@ -1584,12 +1610,64 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":   "success",
-		"hostname": req.Hostname,
-		"cidr":     req.CIDR,
-		"action":   req.Action,
+	response := map[string]string{
+		"status":                "success",
+		"hostname":              req.Hostname,
+		"cidr":                  req.CIDR,
+		"action":                req.Action,
+		"desired_state_version": syncResult.DesiredStateVersion,
+	}
+	if syncResult.Command != nil {
+		response["command_id"] = syncResult.Command.ID
+		response["command_status"] = syncResult.Command.Status
+	}
+	if syncResult.Delivery != nil {
+		response["delivery_id"] = syncResult.Delivery.ID.String()
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
+func (c *Controller) queueNetworkRoutePolicySync(node *controllerstorage.Node, action, cidr string, routes []string) (*controllerstorage.PolicySyncResult, error) {
+	desiredVersion := controllerstorage.NewDesiredStateVersion()
+	metadata := map[string]interface{}{
+		"domain":                "route",
+		"action":                action,
+		"node_id":               node.ID.String(),
+		"hostname":              node.Hostname,
+		"route":                 cidr,
+		"policy_ref":            cidr,
+		"policy_name":           cidr,
+		"desired_state_version": desiredVersion,
+	}
+
+	return c.store.MutatePolicyAndQueueSync(func(tx *controllerstorage.PolicyMutationTx) (controllerstorage.PolicySyncRequest, error) {
+		if err := tx.UpdateTenantNodeRoutes(node.ID, node.TenantID, routes); err != nil {
+			return controllerstorage.PolicySyncRequest{}, err
+		}
+		return controllerstorage.PolicySyncRequest{
+			TenantID:            node.TenantID,
+			NodeID:              node.ID,
+			NodePublicKey:       node.PublicKey,
+			Domain:              "route",
+			Action:              action,
+			PolicyRef:           cidr,
+			PolicyName:          cidr,
+			DesiredStateVersion: desiredVersion,
+			DesiredMetadata:     cloneStringInterfaceMap(metadata),
+			CommandParams:       cloneStringInterfaceMap(metadata),
+			DeliveryMetadata:    cloneStringInterfaceMap(metadata),
+			Priority:            1,
+			TimeoutSeconds:      60,
+		}, nil
 	})
+}
+
+func cloneStringInterfaceMap(in map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 func networkManageInactiveNodeStatus(status string) bool {

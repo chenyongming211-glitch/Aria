@@ -320,8 +320,12 @@ func (s *Storage) updateAgentCommandStatus(commandID, nodePublicKey, status, mes
 	if commandID == "" {
 		return errors.New("command id is required")
 	}
+	status = strings.TrimSpace(status)
 	if status == "" {
 		return errors.New("status is required")
+	}
+	if !isAgentCommandReportStatus(status) {
+		return fmt.Errorf("unsupported agent command status: %s", status)
 	}
 
 	if result == nil {
@@ -375,6 +379,23 @@ func (s *Storage) updateAgentCommandStatus(commandID, nodePublicKey, status, mes
 		return err
 	}
 	defer tx.Rollback()
+
+	currentStatus, err := lockAgentCommandStatusTx(tx, commandID, nodePublicKey)
+	if err != nil {
+		if nodePublicKey != "" {
+			return fmt.Errorf("agent command %s does not belong to node %s", commandID, nodePublicKey)
+		}
+		return err
+	}
+	if currentStatus == AgentCommandStatusStale {
+		return nil
+	}
+	if currentStatus == status {
+		return nil
+	}
+	if err := validateAgentCommandStatusTransition(currentStatus, status); err != nil {
+		return err
+	}
 
 	commandResult, err := tx.Exec(query, args...)
 	if err != nil {
@@ -430,6 +451,58 @@ func (s *Storage) updateAgentCommandStatus(commandID, nodePublicKey, status, mes
 	}
 
 	return nil
+}
+
+func isAgentCommandReportStatus(status string) bool {
+	switch status {
+	case AgentCommandStatusSent, AgentCommandStatusAcknowledged, AgentCommandStatusCompleted, AgentCommandStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+func validateAgentCommandStatusTransition(currentStatus, nextStatus string) error {
+	if currentStatus == AgentCommandStatusCompleted || currentStatus == AgentCommandStatusFailed {
+		return fmt.Errorf("terminal agent command status %s cannot transition to %s", currentStatus, nextStatus)
+	}
+
+	switch currentStatus {
+	case AgentCommandStatusPending:
+		if nextStatus == AgentCommandStatusSent || nextStatus == AgentCommandStatusFailed {
+			return nil
+		}
+	case AgentCommandStatusSent:
+		if nextStatus == AgentCommandStatusAcknowledged || nextStatus == AgentCommandStatusCompleted || nextStatus == AgentCommandStatusFailed {
+			return nil
+		}
+	case AgentCommandStatusAcknowledged:
+		if nextStatus == AgentCommandStatusCompleted || nextStatus == AgentCommandStatusFailed {
+			return nil
+		}
+	case AgentCommandStatusStale:
+		return nil
+	default:
+		return fmt.Errorf("unsupported current agent command status: %s", currentStatus)
+	}
+
+	return fmt.Errorf("invalid agent command status transition: %s -> %s", currentStatus, nextStatus)
+}
+
+func lockAgentCommandStatusTx(tx *sql.Tx, commandID, nodePublicKey string) (string, error) {
+	query := `SELECT status FROM agent_commands WHERE id = $1`
+	args := []interface{}{commandID}
+	if nodePublicKey != "" {
+		query += ` AND node_public_key = $2`
+		args = append(args, nodePublicKey)
+	}
+	query += ` FOR UPDATE`
+
+	var status string
+	if err := tx.QueryRow(query, args...).Scan(&status); err != nil {
+		return "", err
+	}
+	return status, nil
 }
 
 func currentAgentCommandStatusTx(tx *sql.Tx, commandID, nodePublicKey string) (string, error) {

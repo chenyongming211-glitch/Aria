@@ -2,6 +2,7 @@ package controllerstorage
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -67,10 +68,10 @@ func TestReuseHostnameIPRevokesCertificatesAndFailsCommands(t *testing.T) {
 	publicKey := "old-node-key"
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, assigned_ip, ip_offset FROM nodes WHERE hostname = $1 AND tenant_id = $2 AND status != 'deleted' FOR UPDATE LIMIT 1`)).
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, assigned_ip, ip_offset, COALESCE(status, 'online') FROM nodes WHERE hostname = $1 AND tenant_id = $2 AND status != 'deleted' FOR UPDATE LIMIT 1`)).
 		WithArgs("edge-1", tenantID).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "public_key", "assigned_ip", "ip_offset"}).
-			AddRow(nodeID, publicKey, "100.64.0.2", 2))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "public_key", "assigned_ip", "ip_offset", "status"}).
+			AddRow(nodeID, publicKey, "100.64.0.2", 2, "online"))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE nodes SET status = 'deleted', updated_at = NOW() WHERE public_key = $1`)).
 		WithArgs(publicKey).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -86,5 +87,41 @@ func TestReuseHostnameIPRevokesCertificatesAndFailsCommands(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestReuseHostnameIPRejectsSuspendedOrBannedNode(t *testing.T) {
+	for _, status := range []string{"suspended", "banned"} {
+		t.Run(status, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New failed: %v", err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+
+			tenantID := uuid.New()
+			nodeID := uuid.New()
+
+			mock.ExpectBegin()
+			mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, assigned_ip, ip_offset, COALESCE(status, 'online') FROM nodes WHERE hostname = $1 AND tenant_id = $2 AND status != 'deleted' FOR UPDATE LIMIT 1`)).
+				WithArgs("edge-1", tenantID).
+				WillReturnRows(sqlmock.NewRows([]string{"id", "public_key", "assigned_ip", "ip_offset", "status"}).
+					AddRow(nodeID, "old-node-key", "100.64.0.2", 2, status))
+			mock.ExpectRollback()
+
+			assignedIP, ipOffset, err := NewStorageWithDB(db).ReuseHostnameIP("edge-1", tenantID)
+			if err == nil {
+				t.Fatalf("expected %s hostname reuse to fail", status)
+			}
+			if assignedIP != "" || ipOffset != 0 {
+				t.Fatalf("expected no reused address, got %s/%d", assignedIP, ipOffset)
+			}
+			if !strings.Contains(err.Error(), "inactive hostname") {
+				t.Fatalf("expected inactive hostname error, got %v", err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("unmet sql expectations: %v", err)
+			}
+		})
 	}
 }

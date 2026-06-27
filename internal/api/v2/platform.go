@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -569,6 +570,19 @@ func (r *Router) createTenantToken(w http.ResponseWriter, req *http.Request, ten
 	ttl, err := parseTenantTokenTTL(body.TTL)
 	if err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
+		return
+	}
+	status, err := r.store.GetTenantStatus(tenantID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			apibase.WriteError(w, http.StatusNotFound, apibase.CodeTenantNotFound, "Tenant not found", nil)
+			return
+		}
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to verify tenant status", nil)
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(status), "active") {
+		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Tenant is not active", nil)
 		return
 	}
 

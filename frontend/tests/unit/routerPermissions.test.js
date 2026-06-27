@@ -191,7 +191,7 @@ describe('router RBAC metadata', () => {
     expect(router.currentRoute.value.path).toBe('/nodes')
   })
 
-  it('allows built-in operator navigation when cached permissions are missing', async () => {
+  it('does not fall back to built-in operator permissions when cached permissions are missing', async () => {
     await router.replace('/login')
     await router.isReady()
 
@@ -202,7 +202,8 @@ describe('router RBAC metadata', () => {
 
     await router.push('/nodes')
 
-    expect(router.currentRoute.value.path).toBe('/nodes')
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(localStorage.getItem('aria_permissions')).toBeNull()
   })
 
   it('blocks permission routes for non-super_admin users with stale wildcard permissions', async () => {

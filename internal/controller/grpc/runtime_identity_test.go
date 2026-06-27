@@ -134,6 +134,36 @@ func TestResolveCommandStreamNodeForRequestRejectsRuntimeTokenNodeMismatch(t *te
 	}
 }
 
+func TestResolveRuntimeNodeForRequestRejectsInactiveTenant(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.MatchExpectationsInOrder(false)
+
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	now := time.Now()
+
+	expectNodeByID(mock, nodeID, "inactive-tenant-node-key", tenantID, now)
+	expectNodeByPublicKey(mock, "inactive-tenant-node-key", nodeID, tenantID, now)
+	expectRuntimeTenantStatus(mock, tenantID, "suspended")
+
+	ctx := context.WithValue(context.Background(), RuntimeNodeIDKey, nodeID.String())
+	ctx = context.WithValue(ctx, RuntimeTenantIDKey, tenantID.String())
+
+	server := NewControllerServer(nil, nil, controllerstorage.NewStorageWithDB(db))
+	_, err = server.resolveRuntimeNodeForRequest(ctx, nodeID.String(), "inactive-tenant-node-key")
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("expected PermissionDenied for inactive runtime tenant, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestResolveLegacyAgentIdentityRejectsInactiveNode(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -160,6 +190,12 @@ func TestResolveLegacyAgentIdentityRejectsInactiveNode(t *testing.T) {
 
 func expectNodeByID(mock sqlmock.Sqlmock, nodeID uuid.UUID, publicKey string, tenantID uuid.UUID, now time.Time) {
 	expectNodeByIDWithStatus(mock, nodeID, publicKey, tenantID, now, "online")
+}
+
+func expectRuntimeTenantStatus(mock sqlmock.Sqlmock, tenantID uuid.UUID, tenantStatus string) {
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT status FROM tenants WHERE id = $1`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow(tenantStatus))
 }
 
 func expectNodeByIDWithStatus(mock sqlmock.Sqlmock, nodeID uuid.UUID, publicKey string, tenantID uuid.UUID, now time.Time, nodeStatus string) {

@@ -226,10 +226,7 @@ export default defineStore('user', () => {
         } else if (user.value?.tenant_id) {
           await loadPermissions(user.value.tenant_id, user.value.role)
         } else {
-          const defaults = permissionsForRole(user.value?.role)
-          if (defaults.length > 0) {
-            setPermissions(defaults)
-          }
+          setPermissions([])
         }
 
         return { success: true, token, requirePasswordChange }
@@ -324,13 +321,6 @@ export default defineStore('user', () => {
     const cached = readCachedPermissions()
     if (Array.isArray(cached)) {
       permissions.value = cached
-    } else if (cached === undefined) {
-      const defaults = permissionsForRole(user.value?.role)
-      if (defaults.length > 0) {
-        setPermissions(defaults)
-      } else {
-        permissions.value = []
-      }
     } else {
       permissions.value = []
     }
@@ -365,49 +355,10 @@ export default defineStore('user', () => {
     if (Array.isArray(data.permissions)) {
       return setPermissions(data.permissions)
     }
-    return permissions.value
+    return setPermissions([])
   }
 
-  const loadFallbackPermissions = async (tenantId, roleName) => {
-    const defaultPermissions = permissionsForRole(roleName)
-    if (defaultPermissions.length > 0 && !defaultPermissions.includes('roles:read')) {
-      return setPermissions(defaultPermissions)
-    }
-
-    try {
-      const roleId = tenantId || JSON.parse(localStorage.getItem('aria-current-tenant'))?.id
-      if (!roleId) {
-        if (defaultPermissions.length > 0) {
-          return setPermissions(defaultPermissions)
-        }
-        return permissions.value
-      }
-      const response = await api.get(API_ENDPOINTS.TENANT.ROLES(roleId))
-      const roles = response.data?.data || []
-      const normalizedTargetRole = String(roleName || '').trim().toLowerCase()
-      const matchedRole = roles.find(r => String(r.name || '').trim().toLowerCase() === normalizedTargetRole)
-      if (matchedRole) {
-        return setPermissions(matchedRole.permissions || [])
-      }
-      if (defaultPermissions.length > 0) {
-        return setPermissions(defaultPermissions)
-      }
-    } catch (error) {
-      console.error('Load permissions error:', error)
-      // 尝试从缓存加载
-      const cached = readCachedPermissions()
-      if (Array.isArray(cached)) {
-        permissions.value = cached
-        return permissions.value
-      }
-      if (defaultPermissions.length > 0) {
-        return setPermissions(defaultPermissions)
-      }
-    }
-    return permissions.value
-  }
-
-  // 加载用户权限：优先使用当前 JWT 上下文对应的后端权限，失败时回退到本地内置权限。
+  // 加载用户权限：普通租户用户只接受后端当前上下文返回的权限，失败时按空权限处理。
   const loadPermissions = async (tenantId, role) => {
     const roleName = normalizeRoleName(role)
     if (roleName === 'super_admin') {
@@ -418,7 +369,7 @@ export default defineStore('user', () => {
       return await loadCurrentPermissions()
     } catch (error) {
       console.error('Load permissions error:', error)
-      return loadFallbackPermissions(tenantId, roleName)
+      return setPermissions([])
     }
   }
 

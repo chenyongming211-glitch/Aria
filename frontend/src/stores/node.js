@@ -278,7 +278,9 @@ export default defineStore('node', () => {
     loading.value = true
     try {
       const tenantId = requireCurrentTenantId()
-      const response = await api.put(API_ENDPOINTS.TENANT.NODE_DETAIL(tenantId, id), data)
+      const nodePatch = { ...(data || {}) }
+      delete nodePatch.advertised_routes
+      const response = await api.put(API_ENDPOINTS.TENANT.NODE_DETAIL(tenantId, id), nodePatch)
       const updatedData = response.data?.data || response.data
       
       const index = nodes.value.findIndex(node => node.id === id)

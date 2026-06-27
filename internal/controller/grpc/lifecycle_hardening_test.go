@@ -159,6 +159,7 @@ func TestSyncResponseIncludesSnapshotMetadata(t *testing.T) {
 
 	expectNodeByID(mock, nodeID, publicKey, tenantID, now)
 	expectNodeByPublicKey(mock, publicKey, nodeID, tenantID, now)
+	expectRuntimeTenantStatus(mock, tenantID, "active")
 	expectReportNodeControlState(mock, tenantID, nodeID, "applied-1", "applied", "", now)
 	expectUpdateNodePublicIdentity(mock, nodeID, "82.156.48.111", "82.156.48.111:51820")
 	expectEmptyACLRules(mock, tenantID, nodeID)
@@ -220,6 +221,7 @@ func TestReportMetricsUsesHeartbeatOnlyUpdate(t *testing.T) {
 
 	expectNodeByID(mock, nodeID, publicKey, tenantID, now)
 	expectNodeByPublicKey(mock, publicKey, nodeID, tenantID, now)
+	expectRuntimeTenantStatus(mock, tenantID, "active")
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE nodes
 		SET last_seen = $2,
 		    status = 'online',

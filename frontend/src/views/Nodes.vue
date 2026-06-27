@@ -1336,8 +1336,7 @@ const saveNodeChanges = async () => {
   try {
     await nodeStore.updateNodeRemote(editForm.id, {
       hostname: editForm.hostname,
-      region: editForm.region,
-      advertised_routes: editForm.advertised_routes
+      region: editForm.region
     })
     ElMessage.success('Node settings updated successfully')
     editDialogVisible.value = false

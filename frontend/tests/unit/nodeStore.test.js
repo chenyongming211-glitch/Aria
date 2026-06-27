@@ -61,7 +61,7 @@ describe('node store', () => {
     expect(store.nodes).toEqual([{ id: 'node-2' }])
   })
 
-  it('updates cached nodes from the server response instead of submitted form data', async () => {
+  it('updates cached nodes from the server response and omits advertised routes from generic updates', async () => {
     api.put.mockResolvedValue({
       data: {
         success: true,
@@ -94,8 +94,7 @@ describe('node store', () => {
 
     expect(api.put).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1', {
       hostname: 'submitted-hostname',
-      region: 'submitted-region',
-      advertised_routes: ['10.30.0.0/16']
+      region: 'submitted-region'
     })
     expect(store.nodes[0].hostname).toBe('server-hostname')
     expect(store.nodes[0].region).toBe('server-region')

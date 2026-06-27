@@ -8,8 +8,8 @@
 - `docs/api-v2-whitepaper.md`：API v2 当前基线 + 目标接口白皮书，定义域边界、端点清单与统一响应格式。
 - `docs/api-version-audit.md`：API 版本收敛审计，当前基线为 v2-only。
 - `docs/known-issues-status.md`：按当前代码复核后的结构问题状态，区分“底层已收敛”和“产品闭环未完成”的部分。
-- `docs/confirmed-bugs.md`：当前仍开放的真实 bug，以及本轮已重新验证关闭的历史问题。
-- `docs/superpowers/plans/2026-06-27-confirmed-bugfix-closure.md`：当前非 AI OPEN bug 的分批修复计划，覆盖租户/节点生命周期、路由下发、Agent 命令状态和监控口径；旧 AI 写操作已暂缓到 Hermes Agent 阶段。
+- `docs/confirmed-bugs.md`：当前真实 bug 的闭合记录，以及本轮已重新验证关闭的历史问题。
+- `docs/superpowers/plans/2026-06-27-confirmed-bugfix-closure.md`：BUG-25 到 BUG-35 的分批修复计划，覆盖旧 AI 写入口封禁、租户/节点生命周期、路由下发、Agent 命令状态和监控口径。
 - `docs/test-coverage-status.md`：测试覆盖现状与 CI 接入状态。
 - `docs/cert-auto-issuance-design.md`：自动证书签发方案（第一阶段设计）。
 - `docs/v0.1.0-product-blueprint.md`：v0.1.0 产品蓝图与后续 6 周实施基线，定义前端导航、后端分层、节点接入、策略与运维闭环。

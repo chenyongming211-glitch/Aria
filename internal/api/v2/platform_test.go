@@ -422,6 +422,7 @@ func TestCreateTenantTokenDefaultsMaxUsesToOneWhenOmitted(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	expectTenantStatusActive(mock, tenantID)
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO tokens (token, tag, tenant_id, max_uses, used_count, expires_at, created_by, status)
 		         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		         RETURNING id`)).
@@ -441,6 +442,31 @@ func TestCreateTenantTokenDefaultsMaxUsesToOneWhenOmitted(t *testing.T) {
 	}
 }
 
+func TestCreateTenantTokenRejectsInactiveTenant(t *testing.T) {
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT status FROM tenants WHERE id = $1`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("suspended"))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db), tokenStore: token.NewStore(db)}
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/tokens", strings.NewReader(`{"tag":"edge"}`))
+	rr := httptest.NewRecorder()
+	router.createTenantToken(rr, req, tenantID)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestCreateTenantTokenHonorsRequestedTTL(t *testing.T) {
 	tenantID := uuid.New()
 	tokenID := uuid.New()
@@ -450,6 +476,7 @@ func TestCreateTenantTokenHonorsRequestedTTL(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	expectTenantStatusActive(mock, tenantID)
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO tokens (token, tag, tenant_id, max_uses, used_count, expires_at, created_by, status)
 		         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		         RETURNING id`)).

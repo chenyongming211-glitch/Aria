@@ -43,6 +43,7 @@ func TestCommandStreamSendsHeaderAfterInitWithoutPendingCommand(t *testing.T) {
 			"online", int64(0), pq.StringArray{},
 			"", now, now,
 		))
+	expectRuntimeTenantStatus(mock, tenantID, "active")
 	mock.ExpectQuery("SELECT id, public_key, machine_id, tenant_id").
 		WithArgs(publicKey).
 		WillReturnRows(sqlmock.NewRows(nodeRowColumns()).AddRow(
@@ -119,6 +120,7 @@ func TestCommandStreamRequeuesCommandWhenSendFails(t *testing.T) {
 			"online", int64(0), pq.StringArray{},
 			"", now, now,
 		))
+	expectRuntimeTenantStatus(mock, tenantID, "active")
 	mock.ExpectQuery("SELECT id, public_key, machine_id, tenant_id").
 		WithArgs(publicKey).
 		WillReturnRows(sqlmock.NewRows(nodeRowColumns()).AddRow(
@@ -193,6 +195,7 @@ func TestCommandStreamStopsWhenNodeSuspendedMidStream(t *testing.T) {
 			"online", int64(0), pq.StringArray{},
 			"", now, now,
 		))
+	expectRuntimeTenantStatus(mock, tenantID, "active")
 	mock.ExpectQuery("SELECT id, public_key, machine_id, tenant_id").
 		WithArgs(publicKey).
 		WillReturnRows(sqlmock.NewRows(nodeRowColumns()).AddRow(

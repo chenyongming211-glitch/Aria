@@ -5,6 +5,14 @@ All notable changes to the Aria project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.64] - 2026-06-27
+
+### Fixed
+
+- Closed BUG-25 through BUG-35 across legacy AI write guards, tenant/node lifecycle fail-closed behavior, route policy delivery consistency, Agent command status transitions, and inactive-node monitoring semantics.
+- Blocked legacy AI write tools from chat/tool execution until Hermes Agent reintroduces backend-owned confirmation and policy delivery.
+- Ensured controller/frontend local artifact builds pass for the low-bandwidth deployment flow.
+
 ## [0.4.0-RC1] - 2026-04-18
 
 ### 🚀 Milestone: Convergence & Observability

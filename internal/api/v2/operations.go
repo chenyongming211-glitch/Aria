@@ -347,8 +347,13 @@ func (r *Router) handleTenantMonitoring(w http.ResponseWriter, req *http.Request
 }
 
 func nodeAvailabilityStatus(node *controllerstorage.Node) string {
-	if node.Status == "deleted" {
+	switch strings.ToLower(strings.TrimSpace(node.Status)) {
+	case "deleted":
 		return "deleted"
+	case "suspended":
+		return "suspended"
+	case "banned":
+		return "banned"
 	}
 	if node.LastSeen <= 0 {
 		return "unknown"
@@ -357,6 +362,28 @@ func nodeAvailabilityStatus(node *controllerstorage.Node) string {
 		return "online"
 	}
 	return "offline"
+}
+
+func monitoringRuntimeEligibleNode(node *controllerstorage.Node) bool {
+	if node == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(node.Status)) {
+	case "deleted", "suspended", "banned":
+		return false
+	default:
+		return true
+	}
+}
+
+func filterMonitoringRuntimeEligibleNodes(nodes []*controllerstorage.Node) []*controllerstorage.Node {
+	eligible := make([]*controllerstorage.Node, 0, len(nodes))
+	for _, node := range nodes {
+		if monitoringRuntimeEligibleNode(node) {
+			eligible = append(eligible, node)
+		}
+	}
+	return eligible
 }
 
 func nodeUptimeSeconds(node *controllerstorage.Node) int64 {
