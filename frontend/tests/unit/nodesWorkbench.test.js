@@ -262,6 +262,18 @@ describe('Nodes workbench detail', () => {
     vi.useRealTimers()
   })
 
+  it('uses shared UI foundation components for the node list workbench shell', () => {
+    const wrapper = mountNodes()
+
+    expect(wrapper.find('.ui-page-header').exists()).toBe(true)
+    expect(wrapper.find('.ui-filter-bar').exists()).toBe(true)
+    expect(wrapper.find('.ui-metric-strip').exists()).toBe(true)
+    expect(wrapper.find('.ui-data-panel').exists()).toBe(true)
+    expect(wrapper.find('.ui-status-badge').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="View node details"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="Edit node"]').exists()).toBe(true)
+  })
+
   it('renders certificate and operations context in the node detail dialog', async () => {
     const wrapper = mountNodes()
     await wrapper.vm.viewNodeDetails(mockNodeStore.nodes[0])

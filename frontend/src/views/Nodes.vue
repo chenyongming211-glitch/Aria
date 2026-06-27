@@ -1,24 +1,11 @@
 <!-- src/views/Nodes.vue - 现代化节点管理页面 -->
 <template>
   <div class="nodes-page page-shell">
-    <!-- 页面头部 -->
-    <section class="page-hero">
-      <div class="page-hero-main">
-        <div class="page-eyebrow">Fleet Inventory</div>
-        <h1 class="page-heading">Node Management</h1>
-        <p class="page-description">Monitor registration, runtime health, desired state convergence, and node-level operations.</p>
-      </div>
-      <div class="page-actions">
-        <el-input
-          v-model="searchQuery"
-          placeholder="Search nodes..."
-          class="search-input"
-          clearable
-        >
-          <template #prefix>
-            <el-icon><Search /></el-icon>
-          </template>
-        </el-input>
+    <PageHeader
+      title="Node Management"
+      subtitle="Monitor registration, runtime health, desired state convergence, and node-level operations."
+    >
+      <template #actions>
         <el-button
           :icon="Refresh"
           @click="refreshNodes"
@@ -29,51 +16,31 @@
         <el-button v-if="hasPermission('nodes:write')" type="primary" :icon="Plus" @click="addNode">
           Add Node
         </el-button>
-      </div>
-    </section>
+      </template>
+    </PageHeader>
 
-    <!-- 统计卡片 -->
-    <div class="stats-cards kpi-grid">
-      <div class="stat-item kpi-card">
-        <div class="stat-icon blue">
-          <el-icon><Monitor /></el-icon>
-        </div>
-        <div class="stat-content">
-          <div class="stat-value">{{ nodes.length }}</div>
-          <div class="stat-label">Total Nodes</div>
-        </div>
-      </div>
-      <div class="stat-item kpi-card">
-        <div class="stat-icon green">
-          <el-icon><CircleCheck /></el-icon>
-        </div>
-        <div class="stat-content">
-          <div class="stat-value">{{ onlineCount }}</div>
-          <div class="stat-label">Online</div>
-        </div>
-      </div>
-      <div class="stat-item kpi-card">
-        <div class="stat-icon orange">
-          <el-icon><CircleClose /></el-icon>
-        </div>
-        <div class="stat-content">
-          <div class="stat-value">{{ offlineCount }}</div>
-          <div class="stat-label">Offline</div>
-        </div>
-      </div>
-      <div class="stat-item kpi-card">
-        <div class="stat-icon purple">
-          <el-icon><Setting /></el-icon>
-        </div>
-        <div class="stat-content">
-          <div class="stat-value">{{ maintenanceCount }}</div>
-          <div class="stat-label">Maintenance</div>
-        </div>
-      </div>
-    </div>
+    <MetricStrip :metrics="nodeMetricItems" />
 
-    <!-- 节点列表卡片 -->
-    <el-card class="nodes-card table-card" shadow="never">
+    <FilterBar>
+      <template #filters>
+        <el-input
+          v-model="searchQuery"
+          placeholder="Search nodes..."
+          class="search-input"
+          clearable
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+      </template>
+    </FilterBar>
+
+    <DataPanel
+      class="nodes-card"
+      title="Node Fleet"
+      subtitle="Inventory, control convergence, and node-level actions."
+    >
       <el-table
         :data="paginatedNodes"
         stripe
@@ -106,9 +73,7 @@
         </el-table-column>
         <el-table-column label="Status" width="100">
           <template #default="{ row }">
-            <span class="status-badge" :class="row.status">
-              {{ row.status }}
-            </span>
+            <StatusBadge :status="row.status" :label="row.status" />
           </template>
         </el-table-column>
         <el-table-column label="Onboarding" width="130">
@@ -164,35 +129,26 @@
         <el-table-column label="Actions" width="180" fixed="right">
           <template #default="{ row }">
             <div class="action-buttons">
-              <el-button
-                size="small"
-                link
-                @click="viewNodeDetails(row)"
-              >
+              <ActionIconButton label="View node details" @click="viewNodeDetails(row)">
                 <el-icon><View /></el-icon>
-              </el-button>
-              <el-button
+              </ActionIconButton>
+              <ActionIconButton
                 v-if="hasPermission('nodes:write')"
-                size="small"
-                link
-                type="primary"
+                label="Edit node"
+                tone="primary"
                 @click="handleEditNode(row)"
               >
                 <el-icon><Edit /></el-icon>
-              </el-button>
+              </ActionIconButton>
               <el-popconfirm
                 v-if="hasPermission('nodes:write')"
                 title="Are you sure to delete this node?"
                 @confirm="handleDeleteNode(row.id)"
               >
                 <template #reference>
-                  <el-button
-                    size="small"
-                    link
-                    type="danger"
-                  >
+                  <ActionIconButton label="Delete node" tone="danger">
                     <el-icon><Delete /></el-icon>
-                  </el-button>
+                  </ActionIconButton>
                 </template>
               </el-popconfirm>
             </div>
@@ -211,7 +167,7 @@
           @current-change="handleCurrentChange"
         />
       </div>
-    </el-card>
+    </DataPanel>
 
     <!-- 节点详情对话框 -->
     <el-dialog
@@ -855,10 +811,6 @@ import {
   Search,
   Refresh,
   Plus,
-  Monitor,
-  CircleCheck,
-  CircleClose,
-  Setting,
   View,
   Edit,
   Delete,
@@ -883,6 +835,12 @@ import { fetchControllerInfo } from '../composables/useControllerInfo'
 import { usePermission } from '../composables/usePermission'
 import { useTenantChangeReload } from '../composables/useTenantChangeReload'
 import { t } from '../i18n'
+import ActionIconButton from '../components/ui/ActionIconButton.vue'
+import DataPanel from '../components/ui/DataPanel.vue'
+import FilterBar from '../components/ui/FilterBar.vue'
+import MetricStrip from '../components/ui/MetricStrip.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
 import {
   commandStatusLabel,
   commandStatusTagType,
@@ -973,6 +931,36 @@ const InputRef = ref(null)
 const onlineCount = computed(() => nodes.value.filter(n => n.status === 'online').length)
 const offlineCount = computed(() => nodes.value.filter(n => n.status === 'offline').length)
 const maintenanceCount = computed(() => nodes.value.filter(n => n.status === 'maintenance').length)
+const nodeMetricItems = computed(() => [
+  {
+    key: 'total',
+    label: 'Total Nodes',
+    value: nodes.value.length,
+    status: 'info',
+    meta: 'Registered assets'
+  },
+  {
+    key: 'online',
+    label: 'Online',
+    value: onlineCount.value,
+    status: 'success',
+    meta: 'Heartbeat active'
+  },
+  {
+    key: 'offline',
+    label: 'Offline',
+    value: offlineCount.value,
+    status: offlineCount.value > 0 ? 'danger' : 'muted',
+    meta: 'Needs attention'
+  },
+  {
+    key: 'maintenance',
+    label: 'Maintenance',
+    value: maintenanceCount.value,
+    status: maintenanceCount.value > 0 ? 'warning' : 'muted',
+    meta: 'Operator controlled'
+  }
+])
 const recentCommandCount = computed(() => selectedNode.value?.recentCommands?.length || 0)
 const recentDeliveryCount = computed(() => selectedNode.value?.recentPolicyDeliveries?.length || 0)
 const activeAlertCount = computed(() => selectedNode.value?.activeAlerts?.length || 0)
@@ -1628,18 +1616,7 @@ useTenantChangeReload(reloadTenantScopedData)
 
 .search-input { width: 280px; }
 
-.stats-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
-.stat-item { display: flex; align-items: center; gap: 16px; padding: 16px; background: var(--aria-bg-secondary); border: 1px solid var(--aria-border-primary); border-radius: var(--aria-radius-lg); transition: border-color var(--aria-transition-base), box-shadow var(--aria-transition-base); }
-.stat-item:hover { border-color: var(--aria-border-hover); box-shadow: var(--aria-shadow); }
-.stat-icon { width: 48px; height: 48px; border-radius: var(--aria-radius-md); display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0; }
-.stat-icon.blue { background: rgba(59, 130, 246, 0.15); color: #3B82F6; }
-.stat-icon.green { background: rgba(34, 197, 94, 0.15); color: #22C55E; }
-.stat-icon.orange { background: rgba(245, 158, 11, 0.15); color: #F59E0B; }
-.stat-icon.purple { background: rgba(139, 92, 246, 0.15); color: #8B5CF6; }
-.stat-value { font-size: 28px; font-weight: 700; color: var(--aria-text-primary); line-height: 1; }
-.stat-label { font-size: 13px; font-weight: 500; color: var(--aria-text-secondary); }
-
-.nodes-card { background: var(--aria-bg-secondary); border: 1px solid var(--aria-border-primary); border-radius: var(--aria-radius-lg); }
+.nodes-card { background: var(--aria-bg-secondary); }
 .region-badge { display: inline-block; padding: 4px 10px; background: rgba(59, 130, 246, 0.1); color: #3B82F6; border-radius: var(--radius-full); font-size: 12px; font-weight: 600; }
 .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: var(--radius-full); font-size: 12px; font-weight: 500; }
 .status-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
@@ -1700,6 +1677,6 @@ useTenantChangeReload(reloadTenantScopedData)
 
 @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 @media (max-width: 960px) { .workbench-summary-grid, .control-state-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 768px) { .stats-cards { grid-template-columns: repeat(2, 1fr); } .stats-grid { grid-template-columns: 1fr; } .detail-toolbar { flex-wrap: wrap; } }
+@media (max-width: 768px) { .search-input { width: 100%; } .stats-grid { grid-template-columns: 1fr; } .detail-toolbar { flex-wrap: wrap; } }
 @media (max-width: 520px) { .workbench-summary-grid, .control-state-grid { grid-template-columns: 1fr; } }
 </style>
