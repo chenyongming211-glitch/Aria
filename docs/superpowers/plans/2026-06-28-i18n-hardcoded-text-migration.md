@@ -59,16 +59,16 @@ Vue 组件:   ❌ 27 个文件全部硬编码中文，0 次 $t()
 
 包含大量状态映射、条件渲染、Element Plus 表格/表单配置。
 
-- [ ] `Nodes.vue`（1495 个中文字符，最大）
-- [ ] `NodeMonitorDetail.vue`
-- [ ] `Monitoring.vue`
-- [ ] `Routing.vue`
-- [ ] `IPGroups.vue`
-- [ ] `ACLRules.vue`
-- [ ] `BandwidthControl.vue`
-- [ ] `Policies.vue`
-- [ ] `VpnTopology.vue`
-- [ ] `App.vue`
+- [x] `Nodes.vue`（1495 个中文字符，最大）
+- [x] `NodeMonitorDetail.vue`
+- [x] `Monitoring.vue`
+- [x] `Routing.vue`
+- [x] `IPGroups.vue`
+- [x] `ACLRules.vue`
+- [x] `BandwidthControl.vue`
+- [x] `Policies.vue`
+- [x] `VpnTopology.vue`
+- [x] `App.vue`（无用户可见硬编码文本）
 
 ### B4: 跳过
 

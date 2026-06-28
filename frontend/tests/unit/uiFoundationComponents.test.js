@@ -10,6 +10,15 @@ import FilterBar from '@/components/ui/FilterBar.vue'
 
 describe('UI foundation components', () => {
   beforeEach(() => {
+    if (!globalThis.localStorage || typeof globalThis.localStorage.setItem !== 'function') {
+      const storage = new Map()
+      globalThis.localStorage = {
+        getItem: (key) => (storage.has(key) ? storage.get(key) : null),
+        setItem: (key, value) => storage.set(key, String(value)),
+        removeItem: (key) => storage.delete(key),
+        clear: () => storage.clear()
+      }
+    }
     localStorage.setItem('aria-lang', 'en')
   })
 

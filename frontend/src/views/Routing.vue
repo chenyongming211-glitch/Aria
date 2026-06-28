@@ -3,21 +3,21 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <h3>路由管理</h3>
+          <h3>{{ t('routing.title') }}</h3>
           <div class="header-actions">
             <el-input
               v-model="searchQuery"
-              placeholder="搜索节点、区域或 CIDR"
+              :placeholder="t('routing.searchPlaceholder')"
               style="width: 240px"
               clearable
             />
             <el-button type="primary" @click="loadRoutes">
               <el-icon><Refresh /></el-icon>
-              刷新
+              {{ t('common.refresh') }}
             </el-button>
             <el-button v-if="hasPermission('routes:write')" type="primary" @click="showAddRouteDialog">
               <el-icon><Plus /></el-icon>
-              添加路由
+              {{ t('routing.addRoute') }}
             </el-button>
           </div>
         </div>
@@ -43,19 +43,19 @@
         style="width: 100%"
         v-loading="loading"
       >
-        <el-table-column prop="nodeName" label="节点名称" width="180" />
-        <el-table-column prop="publicIp" label="公网IP" width="160" />
-        <el-table-column prop="region" label="区域" width="120" />
-        <el-table-column prop="cidr" label="路由网段" min-width="220" />
-        <el-table-column label="下发状态" width="120">
+        <el-table-column prop="nodeName" :label="t('routing.nodeName')" width="180" />
+        <el-table-column prop="publicIp" :label="t('policyTerms.publicIp')" width="160" />
+        <el-table-column prop="region" :label="t('policyTerms.region')" width="120" />
+        <el-table-column prop="cidr" :label="t('routing.cidr')" min-width="220" />
+        <el-table-column :label="t('policyTerms.deliveryStatus')" width="120">
           <template #default="{ row }">
             <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">
               {{ formatPolicyStatus(row.policyStatus, t) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="pendingCmds" label="待执行" width="90" />
-        <el-table-column label="最近命令" width="150">
+        <el-table-column prop="pendingCmds" :label="t('policyTerms.pendingCommands')" width="90" />
+        <el-table-column :label="t('policyTerms.lastCommand')" width="150">
           <template #default="{ row }">
             <el-tooltip
               v-if="row.lastDeliveryCommandId"
@@ -67,11 +67,11 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="lastCommandError" label="失败原因" min-width="220" show-overflow-tooltip />
-        <el-table-column v-if="hasPermission('routes:write')" label="操作" width="180" fixed="right">
+        <el-table-column prop="lastCommandError" :label="t('policyTerms.failureReason')" min-width="220" show-overflow-tooltip />
+        <el-table-column v-if="hasPermission('routes:write')" :label="t('common.actions')" width="180" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" type="primary" @click="showEditRouteDialog(row)">编辑</el-button>
-            <el-button size="small" type="danger" @click="showDeleteRouteDialog(row)">删除</el-button>
+            <el-button size="small" type="primary" @click="showEditRouteDialog(row)">{{ t('common.edit') }}</el-button>
+            <el-button size="small" type="danger" @click="showDeleteRouteDialog(row)">{{ t('common.delete') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -91,33 +91,33 @@
 
     <el-dialog
       v-model="routeDialogVisible"
-      :title="dialogMode === 'add' ? '添加路由' : '编辑路由'"
+      :title="dialogMode === 'add' ? t('routing.addRoute') : t('routing.editRoute')"
       width="520px"
       :before-close="closeRouteDialog"
     >
       <el-form :model="currentRoute" label-width="100px">
-        <el-form-item label="目标节点">
-          <el-select v-model="currentRoute.nodeId" placeholder="请选择节点" style="width: 100%" :disabled="dialogMode === 'edit'">
+        <el-form-item :label="t('policyTerms.targetNode')">
+          <el-select v-model="currentRoute.nodeId" :placeholder="t('routing.selectNodePlaceholder')" style="width: 100%" :disabled="dialogMode === 'edit'">
             <el-option
               v-for="node in tenantNodes"
               :key="node.id"
-              :label="`${node.hostname || node.public_key || node.id} (${node.region || 'unknown'})`"
+              :label="`${node.hostname || node.public_key || node.id} (${node.region || t('status.unknown')})`"
               :value="node.id"
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="路由网段">
+        <el-form-item :label="t('routing.cidr')">
           <el-input
             v-model="currentRoute.cidr"
-            placeholder="请输入 CIDR 格式，如 192.168.1.0/24"
+            :placeholder="t('routing.cidrPlaceholder')"
           />
         </el-form-item>
       </el-form>
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="closeRouteDialog">取消</el-button>
+          <el-button @click="closeRouteDialog">{{ t('common.cancel') }}</el-button>
           <el-button v-if="hasPermission('routes:write')" type="primary" @click="confirmRouteAction">
-            {{ dialogMode === 'add' ? '添加' : '更新' }}
+            {{ dialogMode === 'add' ? t('common.add') : t('common.update') }}
           </el-button>
         </span>
       </template>
@@ -125,20 +125,20 @@
 
     <el-dialog
       v-model="deleteDialogVisible"
-      title="删除路由"
+      :title="t('routing.deleteRoute')"
       width="420px"
     >
       <p>
-        确定要从节点
+        {{ t('routing.deleteConfirmBefore') }}
         <strong>{{ currentDeleteRoute?.nodeName }}</strong>
-        删除路由
+        {{ t('routing.deleteConfirmMiddle') }}
         <strong>{{ currentDeleteRoute?.cidr }}</strong>
-        吗？
+        {{ t('routing.deleteConfirmAfter') }}
       </p>
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="deleteDialogVisible = false">取消</el-button>
-          <el-button v-if="hasPermission('routes:write')" type="primary" @click="confirmDeleteRoute">确定</el-button>
+          <el-button @click="deleteDialogVisible = false">{{ t('common.cancel') }}</el-button>
+          <el-button v-if="hasPermission('routes:write')" type="primary" @click="confirmDeleteRoute">{{ t('common.confirm') }}</el-button>
         </span>
       </template>
     </el-dialog>
@@ -315,8 +315,8 @@ const loadRoutes = async () => {
       currentRoute.value.nodeId = nodes[0].id
     }
   } catch (error) {
-    console.error('[Routing] 加载路由失败:', error)
-    ElMessage.error('加载路由失败: ' + (error.message || '未知错误'))
+    console.error('[Routing] Failed to load routes:', error)
+    ElMessage.error(`${t('routing.loadFailed')}: ${error.message || t('policyTerms.unknownError')}`)
     allRoutes.value = []
   } finally {
     loading.value = false
@@ -350,18 +350,18 @@ const showDeleteRouteDialog = (route) => {
 
 const confirmRouteAction = async () => {
   if (!hasPermission('routes:write')) {
-    ElMessage.error('缺少路由管理权限')
+    ElMessage.error(t('routing.missingPermission'))
     return
   }
 
   if (!currentRoute.value.nodeId || !currentRoute.value.cidr) {
-    ElMessage.error('请填写完整的路由信息')
+    ElMessage.error(t('routing.incomplete'))
     return
   }
 
   const cidrPattern = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/
   if (!cidrPattern.test(currentRoute.value.cidr)) {
-    ElMessage.error('请输入有效的 CIDR 格式，如 192.168.1.0/24')
+    ElMessage.error(t('routing.invalidCidr'))
     return
   }
 
@@ -369,14 +369,14 @@ const confirmRouteAction = async () => {
     let result
     if (dialogMode.value === 'add') {
       result = await useRouteApi.addRoute(currentRoute.value.nodeId, currentRoute.value.cidr)
-      ElMessage.success('路由添加成功')
+      ElMessage.success(t('routing.addSuccess'))
     } else {
       result = await useRouteApi.updateRoute(
         currentRoute.value.nodeId,
         currentRoute.value.originalCidr,
         currentRoute.value.cidr
       )
-      ElMessage.success('路由更新成功')
+      ElMessage.success(t('routing.updateSuccess'))
     }
 
     const traceRoute = { ...currentRoute.value }
@@ -384,29 +384,29 @@ const confirmRouteAction = async () => {
     closeRouteDialog()
     openCommandTrace(traceRoute, result)
   } catch (error) {
-    console.error('[Routing] 路由操作失败:', error)
-    const errorMsg = error.response?.data?.message || error.message || '路由操作失败'
+    console.error('[Routing] Route operation failed:', error)
+    const errorMsg = error.response?.data?.message || error.message || t('routing.operationFailed')
     ElMessage.error(errorMsg)
   }
 }
 
 const confirmDeleteRoute = async () => {
   if (!hasPermission('routes:write')) {
-    ElMessage.error('缺少路由管理权限')
+    ElMessage.error(t('routing.missingPermission'))
     return
   }
 
   try {
     const routeToDelete = currentDeleteRoute.value
     const result = await useRouteApi.deleteRoute(routeToDelete.nodeId, routeToDelete.id)
-    ElMessage.success('路由删除成功')
+    ElMessage.success(t('routing.deleteSuccess'))
     await loadRoutes()
     deleteDialogVisible.value = false
     currentDeleteRoute.value = null
     openCommandTrace(routeToDelete, result)
   } catch (error) {
-    console.error('[Routing] 删除路由失败:', error)
-    const errorMsg = error.response?.data?.message || error.message || '删除路由失败'
+    console.error('[Routing] Failed to delete route:', error)
+    const errorMsg = error.response?.data?.message || error.message || t('routing.deleteFailed')
     ElMessage.error(errorMsg)
   }
 }

@@ -249,6 +249,13 @@ const mountNodes = () => mount(Nodes, {
 
 describe('Nodes workbench detail', () => {
   beforeEach(() => {
+    const storage = new Map([['aria-lang', 'en']])
+    globalThis.localStorage = {
+      getItem: (key) => (storage.has(key) ? storage.get(key) : null),
+      setItem: (key, value) => storage.set(key, String(value)),
+      removeItem: (key) => storage.delete(key),
+      clear: () => storage.clear()
+    }
     routerPush.mockReset()
     sendAgentCommandMock.mockClear()
     getNodeMetricsMock.mockClear()
@@ -288,8 +295,8 @@ describe('Nodes workbench detail', () => {
     expect(wrapper.text()).toContain('serial-1')
     expect(wrapper.text()).toContain('certificate_expiring')
     expect(wrapper.text()).toContain('allow-office')
-    expect(wrapper.text()).toContain('超时')
-    expect(wrapper.text()).toContain('失败')
+    expect(wrapper.text()).toContain('Timed out')
+    expect(wrapper.text()).toContain('Failed')
   })
 
   it('prepends queued quick commands before the next backend refresh catches up', async () => {

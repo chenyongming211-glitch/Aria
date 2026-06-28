@@ -320,6 +320,13 @@ const mountWithStubs = (component) =>
 
 describe('policy page context handoff', () => {
   beforeEach(() => {
+    const storage = new Map([['aria-lang', 'en']])
+    globalThis.localStorage = {
+      getItem: (key) => (storage.has(key) ? storage.get(key) : null),
+      setItem: (key, value) => storage.set(key, String(value)),
+      removeItem: (key) => storage.delete(key),
+      clear: () => storage.clear()
+    }
     setActivePinia(createPinia())
     routerPush.mockReset()
     tenantApiMock.getTenantNodes.mockClear()

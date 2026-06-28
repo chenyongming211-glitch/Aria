@@ -27,7 +27,7 @@
 
       <!-- 空状态 -->
       <div v-if="!loading && !errorMsg && isEmpty" class="topology-placeholder">
-        <el-empty description="暂无节点数据" />
+        <el-empty :description="t('vpnTopology.noNodeData')" />
       </div>
 
       <!-- 拓扑图 -->
@@ -98,8 +98,8 @@ const fetchTopology = async () => {
     chartInstance?.resize()
     renderChart(nodes, links)
   } catch (error) {
-    console.error('获取拓扑数据失败:', error)
-    errorMsg.value = 'Failed to load topology data'
+    console.error('Failed to load topology data:', error)
+    errorMsg.value = t('vpnTopology.loadFailed')
     isEmpty.value = true
   } finally {
     loading.value = false
@@ -162,9 +162,9 @@ const renderChart = (nodes, links) => {
           const statusColor = raw.status === 'online' ? '#22C55E' : '#EF4444'
           return `
             <div style="font-weight:600;margin-bottom:4px">${raw.hostname || raw.id}</div>
-            <div>Region: ${raw.region || 'N/A'}</div>
-            <div>IP: ${raw.assigned_ip || 'N/A'}</div>
-            <div>Status: <span style="color:${statusColor};font-weight:600">${raw.status}</span></div>
+            <div>${t('vpnTopology.region')}: ${raw.region || 'N/A'}</div>
+            <div>${t('vpnTopology.ip')}: ${raw.assigned_ip || 'N/A'}</div>
+            <div>${t('vpnTopology.status')}: <span style="color:${statusColor};font-weight:600">${raw.status}</span></div>
           `
         }
         if (params.dataType === 'edge') {
@@ -184,11 +184,11 @@ const renderChart = (nodes, links) => {
           }
 
           return `
-            <div style="font-weight:600;margin-bottom:4px">Connection</div>
-            <div>Source: ${src?.hostname || params.data.source}</div>
-            <div>Target: ${tgt?.hostname || params.data.target}</div>
-            <div>Status: <span style="color:${statusColor};font-weight:600">${status}</span></div>
-            <div>Traffic: <span style="font-weight:600;color:#3B82F6">${trafficDisplay}</span></div>
+            <div style="font-weight:600;margin-bottom:4px">${t('vpnTopology.connection')}</div>
+            <div>${t('vpnTopology.source')}: ${src?.hostname || params.data.source}</div>
+            <div>${t('vpnTopology.target')}: ${tgt?.hostname || params.data.target}</div>
+            <div>${t('vpnTopology.status')}: <span style="color:${statusColor};font-weight:600">${status}</span></div>
+            <div>${t('vpnTopology.traffic')}: <span style="font-weight:600;color:#3B82F6">${trafficDisplay}</span></div>
           `
         }
         return ''

@@ -2,8 +2,8 @@
 <template>
   <div class="policy-rule-page">
     <PageHeader
-      title="带宽控制 (QoS)"
-      subtitle="按节点管理带宽策略，查看下发状态、最近命令和运行时统计。"
+      :title="t('qos.title')"
+      :subtitle="t('qos.subtitle')"
     >
       <template #actions>
         <el-button
@@ -13,7 +13,7 @@
           :disabled="!selectedNodeId"
         >
           <el-icon><Plus /></el-icon>
-          添加规则
+          {{ t('qos.addRule') }}
         </el-button>
       </template>
     </PageHeader>
@@ -22,7 +22,7 @@
       <template #filters>
         <el-select
           v-model="selectedNodeId"
-          placeholder="选择节点 (必选)"
+          :placeholder="t('policyTerms.selectNodeRequired')"
           style="width: 240px;"
           @change="onNodeChange"
         >
@@ -37,15 +37,15 @@
       <template #actions>
         <el-button @click="refreshData">
           <el-icon><Refresh /></el-icon>
-          刷新
+          {{ t('common.refresh') }}
         </el-button>
       </template>
     </FilterBar>
 
     <el-alert
-      title="Agent QoS 运行模型"
+      :title="t('qos.modelTitle')"
       type="warning"
-      description="每条 QoS 规则直接下发为 group + direction + rate_bps + burst_bytes + mode。默认 auto 会在 egress 优先使用 shaping；内核/qdisc 不支持时降级为 policing。"
+      :description="t('qos.modelDescription')"
       :closable="false"
       show-icon
     />
@@ -62,7 +62,7 @@
       @open-policy-center="openPolicyCenterContext"
     />
 
-    <DataPanel title="QoS 规则" :subtitle="qosPanelSubtitle">
+    <DataPanel :title="t('qos.rules')" :subtitle="qosPanelSubtitle">
       <el-table
         :data="visibleRules"
         :row-class-name="ruleRowClassName"
@@ -70,18 +70,18 @@
         v-loading="loading"
         :empty-text="qosEmptyText"
       >
-        <el-table-column prop="description" label="描述" min-width="160" />
-        <el-table-column label="Group" min-width="180">
+        <el-table-column prop="description" :label="t('common.description')" min-width="160" />
+        <el-table-column :label="t('qos.group')" min-width="180">
           <template #default="{ row }">
             <code>{{ formatGroupRef(row.group_id, row.runtime_group || row.group_cidr) }}</code>
           </template>
         </el-table-column>
-        <el-table-column label="带宽限制" width="150">
+        <el-table-column :label="t('qos.bandwidthLimit')" width="150">
           <template #default="{ row }">
             <el-tag type="danger" effect="plain">{{ row.bandwidth_mbps }} Mbps</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="方向/模式" width="150">
+        <el-table-column :label="t('qos.directionMode')" width="150">
           <template #default="{ row }">
             <div class="qos-runtime-cell">
               <el-tag size="small" effect="plain">{{ formatDirection(row.direction) }}</el-tag>
@@ -89,33 +89,33 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="Runtime" width="170">
+        <el-table-column :label="t('policyTerms.runtime')" width="170">
           <template #default="{ row }">
             <div class="qos-runtime-cell">
               <span>{{ formatRate(row.rate_bps) }}</span>
-              <small>burst {{ formatBytes(row.burst_bytes) }}</small>
+              <small>{{ t('qos.burstBytes') }} {{ formatBytes(row.burst_bytes) }}</small>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="Stats" width="180">
+        <el-table-column :label="t('policyTerms.stats')" width="180">
           <template #default="{ row }">
             <div v-if="row.stats?.load_error" class="qos-runtime-cell">
-              <span class="stats-error">读取失败</span>
+              <span class="stats-error">{{ t('qos.statsReadFailed') }}</span>
               <small>{{ row.stats.load_error }}</small>
             </div>
             <div v-else class="qos-runtime-cell">
-              <span>pass {{ formatBytes(row.stats?.passed_bytes) }}</span>
-              <small>drop {{ formatBytes(row.stats?.dropped_bytes) }}</small>
-              <small>shape {{ formatBytes(row.stats?.shaped_bytes) }}</small>
+              <span>{{ t('policyTerms.pass') }} {{ formatBytes(row.stats?.passed_bytes) }}</span>
+              <small>{{ t('policyTerms.drop') }} {{ formatBytes(row.stats?.dropped_bytes) }}</small>
+              <small>{{ t('policyTerms.shape') }} {{ formatBytes(row.stats?.shaped_bytes) }}</small>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="同步状态" width="120">
+        <el-table-column :label="t('policyTerms.deliveryStatus')" width="120">
           <template #default="{ row }">
             <el-tag size="small" :type="getPolicyTagType(row.policyStatus)">{{ formatPolicyStatus(row.policyStatus, t) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="最近命令" width="150">
+        <el-table-column :label="t('policyTerms.lastCommand')" width="150">
           <template #default="{ row }">
             <el-tooltip
               v-if="row.last_delivery_command_id"
@@ -127,22 +127,22 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="last_command_error" label="失败原因" min-width="180" show-overflow-tooltip />
-        <el-table-column v-if="hasPermission('qos:write')" label="操作" width="210" fixed="right">
+        <el-table-column prop="last_command_error" :label="t('policyTerms.failureReason')" min-width="180" show-overflow-tooltip />
+        <el-table-column v-if="hasPermission('qos:write')" :label="t('common.actions')" width="210" fixed="right">
           <template #default="{ row }">
             <div class="table-actions">
               <ActionIconButton
                 v-if="canRetryPolicy(row)"
-                label="重试"
+                :label="t('policyTerms.retry')"
                 tone="primary"
                 @click="handleRetry(row)"
               >
                 <el-icon><Refresh /></el-icon>
               </ActionIconButton>
-              <ActionIconButton label="编辑" tone="primary" @click="handleEdit(row)">
+              <ActionIconButton :label="t('common.edit')" tone="primary" @click="handleEdit(row)">
                 <el-icon><Edit /></el-icon>
               </ActionIconButton>
-              <ActionIconButton label="删除" tone="danger" @click="handleDelete(row)">
+              <ActionIconButton :label="t('common.delete')" tone="danger" @click="handleDelete(row)">
                 <el-icon><Delete /></el-icon>
               </ActionIconButton>
             </div>
@@ -158,12 +158,12 @@
       @closed="resetForm"
     >
       <el-form :model="form" label-width="120px" ref="formRef" :rules="formRules">
-        <el-form-item label="描述" prop="description">
-          <el-input v-model="form.description" placeholder="例如: 限制某个网段出站带宽" />
+        <el-form-item :label="t('common.description')" prop="description">
+          <el-input v-model="form.description" :placeholder="t('qos.descriptionPlaceholder')" />
         </el-form-item>
 
-        <el-form-item label="IP Group">
-          <el-select v-model="form.group_id" clearable filterable placeholder="any / 选择 Group" style="width: 100%">
+        <el-form-item :label="t('qos.ipGroup')">
+          <el-select v-model="form.group_id" clearable filterable :placeholder="t('qos.groupPlaceholder')" style="width: 100%">
             <el-option
               v-for="group in selectableGroups"
               :key="group.id"
@@ -173,59 +173,59 @@
           </el-select>
         </el-form-item>
 
-        <el-form-item label="CIDR 快捷输入" prop="group_cidr">
-          <el-input v-model="form.group_cidr" :disabled="Boolean(form.group_id)" placeholder="留空为 any；例如 10.0.0.0/24" />
-          <div class="form-help">未选择 Group 时，CIDR 会保存为 inline IP Group。</div>
+        <el-form-item :label="t('qos.cidrShortcut')" prop="group_cidr">
+          <el-input v-model="form.group_cidr" :disabled="Boolean(form.group_id)" :placeholder="t('qos.cidrPlaceholder')" />
+          <div class="form-help">{{ t('qos.inlineGroupHelp') }}</div>
         </el-form-item>
 
-        <el-form-item label="带宽限制" prop="bandwidth_mbps">
+        <el-form-item :label="t('qos.bandwidthLimit')" prop="bandwidth_mbps">
           <el-input-number v-model="form.bandwidth_mbps" :min="1" :max="10000" style="width: 100%" />
           <span class="unit-text">Mbps</span>
         </el-form-item>
 
         <el-row :gutter="16">
           <el-col :span="12">
-            <el-form-item label="方向" prop="direction">
+            <el-form-item :label="t('policyTerms.direction')" prop="direction">
               <el-select v-model="form.direction" style="width: 100%">
-                <el-option label="入站 ingress" value="ingress" />
-                <el-option label="出站 egress" value="egress" />
-                <el-option label="双向 both" value="both" />
+                <el-option :label="`${t('policyTerms.ingress')} ingress`" value="ingress" />
+                <el-option :label="`${t('policyTerms.egress')} egress`" value="egress" />
+                <el-option :label="`${t('policyTerms.both')} both`" value="both" />
               </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="模式" prop="mode">
+            <el-form-item :label="t('qos.mode')" prop="mode">
               <el-select v-model="form.mode" style="width: 100%">
-                <el-option label="自动 auto（优先 Shaping）" value="auto" />
-                <el-option label="Shaping" value="shaping" />
-                <el-option label="Policing" value="policing" />
+                <el-option :label="t('qos.modeAuto')" value="auto" />
+                <el-option :label="t('qos.modeShaping')" value="shaping" />
+                <el-option :label="t('qos.modePolicing')" value="policing" />
               </el-select>
-              <div class="form-help">auto 会在 egress 使用 shaping；ingress 或不支持 fq/EDT 时使用 policing。</div>
+              <div class="form-help">{{ t('qos.modeHelp') }}</div>
             </el-form-item>
           </el-col>
         </el-row>
 
         <el-row :gutter="16">
           <el-col :span="12">
-            <el-form-item label="Rate bps">
+            <el-form-item :label="t('qos.rateBps')">
               <el-input-number v-model="form.rate_bps" :min="0" :step="1000000" style="width: 100%" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="Burst bytes">
+            <el-form-item :label="t('qos.burstBytes')">
               <el-input-number v-model="form.burst_bytes" :min="0" :step="1500" style="width: 100%" />
             </el-form-item>
           </el-col>
         </el-row>
 
-        <el-form-item label="优先级" prop="priority">
+        <el-form-item :label="t('policyTerms.priority')" prop="priority">
           <el-input-number v-model="form.priority" :min="0" :max="255" style="width: 100%" />
-          <div class="form-help">数字越小优先级越高；同优先级冲突由 Controller 拒绝。</div>
+          <div class="form-help">{{ t('qos.priorityHelp') }}</div>
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button v-if="hasPermission('qos:write')" type="primary" @click="handleSave" :loading="submitting">保存并应用</el-button>
+        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button v-if="hasPermission('qos:write')" type="primary" @click="handleSave" :loading="submitting">{{ t('common.save') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -300,7 +300,7 @@ interface EditingOriginal {
   burst_bytes: number
 }
 
-const errorMessage = (error: unknown, fallback = '未知错误'): string =>
+const errorMessage = (error: unknown, fallback = t('policyTerms.unknownError')): string =>
   error instanceof Error ? error.message : (typeof error === 'string' ? error : fallback)
 
 const loading = ref(false)
@@ -321,19 +321,19 @@ const contextNodeName = computed(() => {
   const node = tenantNodes.value.find(item => item.id === contextNodeId.value)
   return node?.hostname || node?.id || contextNodeId.value
 })
-const dialogTitle = computed(() => form.id ? '编辑 QoS 规则' : '添加 QoS 规则')
+const dialogTitle = computed(() => form.id ? t('qos.editTitle') : t('qos.createTitle'))
 const qosEmptyText = computed(() => {
-  if (!selectedNodeId.value) return '请选择节点'
+  if (!selectedNodeId.value) return t('policyTerms.selectNodeFirst')
   if (routeContext.value.policyRef && visibleRules.value.length === 0) {
-    return '当前上下文没有匹配的 QoS 规则'
+    return t('qos.emptyForContext')
   }
-  return `${selectedNodeName.value || '当前节点'} 暂无 QoS 规则`
+  return t('qos.emptyForNode').replace('{node}', selectedNodeName.value || t('policyTerms.currentNode'))
 })
 const qosPanelSubtitle = computed(() => {
   if (!selectedNodeId.value) {
-    return '选择节点后查看带宽控制规则和下发结果。'
+    return t('qos.panelSelectNode')
   }
-  return `${selectedNodeName.value || '当前节点'} · ${visibleRules.value.length} 条规则`
+  return `${selectedNodeName.value || t('policyTerms.currentNode')} · ${t('policyTerms.rulesCount').replace('{count}', String(visibleRules.value.length))}`
 })
 const routeQuery = computed(() => route.query || {})
 const queryString = (...keys: string[]) => {
@@ -408,8 +408,8 @@ const form = reactive<QoSFormState>({
 })
 
 const formRules = {
-  description: [{ required: true, message: '请输入描述', trigger: 'blur' }],
-  bandwidth_mbps: [{ required: true, message: '请设置带宽限制', trigger: 'blur' }]
+  description: [{ required: true, message: t('qos.descriptionRequired'), trigger: 'blur' }],
+  bandwidth_mbps: [{ required: true, message: t('qos.bandwidthRequired'), trigger: 'blur' }]
 }
 
 const selectableGroups = computed<IPGroupOption[]>(() => ipGroups.value.filter((group) => group.kind !== 'inline'))
@@ -464,7 +464,7 @@ const loadNodes = async () => {
       rules.value = []
     }
   } catch (error) {
-    console.error('加载节点失败:', error)
+    console.error('Failed to load nodes:', error)
   }
 }
 
@@ -472,7 +472,7 @@ const loadIPGroups = async () => {
   try {
     ipGroups.value = await useIpGroupApi.listIPGroups()
   } catch (error) {
-    console.error('加载 IP Group 失败:', error)
+    console.error('Failed to load IP Groups:', error)
     ipGroups.value = []
   }
 }
@@ -484,7 +484,7 @@ const refreshData = async () => {
   try {
     rules.value = await useQosApi.getQoSRulesByNode(selectedNodeId.value)
   } catch (error) {
-    ElMessage.error('获取 QoS 规则失败')
+    ElMessage.error(t('qos.loadRulesFailed'))
   } finally {
     loading.value = false
   }
@@ -495,8 +495,8 @@ const onNodeChange = () => {
 }
 
 const formatDirection = (direction?: string) => {
-  const map: Record<string, string> = { ingress: '入站', egress: '出站', both: '双向' }
-  return map[direction || ''] || direction || '出站'
+  const map: Record<string, string> = { ingress: t('policyTerms.ingress'), egress: t('policyTerms.egress'), both: t('policyTerms.both') }
+  return map[direction || ''] || direction || t('policyTerms.egress')
 }
 
 const formatMode = (mode?: string) => {
@@ -538,7 +538,7 @@ const formatGroupRef = (groupId?: string, fallback?: string) => {
     const group = groupById.value.get(groupId)
     if (group) return group.name
     if (fallback && fallback !== groupId) return fallback
-    return '未知 IP Group'
+    return t('policyTerms.unknownIpGroup')
   }
   return fallback || 'any'
 }
@@ -623,7 +623,7 @@ const buildSavePayload = (): QoSRuleRow => {
 
 const handleSave = async () => {
   if (!hasPermission('qos:write')) {
-    ElMessage.error('缺少 QoS 管理权限')
+    ElMessage.error(t('qos.missingPermission'))
     return
   }
   if (!formRef.value) return
@@ -638,17 +638,17 @@ const handleSave = async () => {
     let result
     if (ruleId) {
       result = await useQosApi.updateQoSRule(nodeId, ruleId, payload as Parameters<typeof useQosApi.updateQoSRule>[2])
-      ElMessage.success('规则已更新并排队下发')
+      ElMessage.success(t('qos.updateQueued'))
     } else {
       result = await useQosApi.createQoSRule(nodeId, payload as Parameters<typeof useQosApi.createQoSRule>[1])
-      ElMessage.success('规则已创建并排队下发')
+      ElMessage.success(t('qos.createQueued'))
     }
     dialogVisible.value = false
     await refreshData()
     openCommandTrace(nodeId, { ...payload, id: ruleId || (result as QoSRuleRow | undefined)?.id, node_id: nodeId }, result as Record<string, any> | undefined)
   } catch (error) {
     if (error !== false) {
-      const action = form.id ? '更新失败' : '创建失败'
+      const action = form.id ? t('qos.updateFailed') : t('qos.createFailed')
       ElMessage.error(`${action}: ${errorMessage(error)}`)
     }
   } finally {
@@ -658,26 +658,26 @@ const handleSave = async () => {
 
 const handleDelete = async (row: QoSRuleRow) => {
   if (!hasPermission('qos:write')) {
-    ElMessage.error('缺少 QoS 管理权限')
+    ElMessage.error(t('qos.missingPermission'))
     return
   }
 
   try {
-    await ElMessageBox.confirm('确定要删除此带宽限速规则吗？', '确认删除', {
+    await ElMessageBox.confirm(t('qos.deleteConfirm'), t('qos.deleteTitle'), {
       type: 'warning',
-      confirmButtonText: '确定删除',
-      cancelButtonText: '取消'
+      confirmButtonText: t('qos.confirmDelete'),
+      cancelButtonText: t('common.cancel')
     })
 
     const nodeId = selectedNodeId.value || row.node_id
     if (!nodeId || !row.id) return
     const result = await useQosApi.deleteQoSRule(nodeId, row.id)
-    ElMessage.success('删除指令已下发')
+    ElMessage.success(t('qos.deleteQueued'))
     await refreshData()
     openCommandTrace(nodeId, row, result as Record<string, any>)
   } catch (error) {
     if (error !== 'cancel') {
-      ElMessage.error('删除失败')
+      ElMessage.error(t('qos.deleteFailed'))
     }
   }
 }
@@ -723,7 +723,7 @@ const openCommandTrace = (nodeId: string, row: QoSRuleRow, result?: Record<strin
 
 const handleRetry = async (row: QoSRuleRow) => {
   if (!hasPermission('qos:write')) {
-    ElMessage.error('缺少 QoS 管理权限')
+    ElMessage.error(t('qos.missingPermission'))
     return
   }
 
@@ -731,11 +731,11 @@ const handleRetry = async (row: QoSRuleRow) => {
     const nodeId = selectedNodeId.value || row.node_id
     if (!nodeId) return
     const result = await useQosApi.retryQoSPolicySync(nodeId, row)
-    ElMessage.success('重试下发已排队')
+    ElMessage.success(t('policyTerms.retryQueued'))
     await refreshData()
     openCommandTrace(nodeId, row, result as Record<string, any>)
   } catch (error) {
-    ElMessage.error(`重试失败: ${errorMessage(error)}`)
+    ElMessage.error(`${t('policyTerms.retryFailed')}: ${errorMessage(error)}`)
   }
 }
 

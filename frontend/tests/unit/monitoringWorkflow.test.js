@@ -288,6 +288,7 @@ describe('monitoring workflow routing', () => {
     routeState.params = { nodeId: 'node-1' }
     routeState.query = {}
     routeState.fullPath = '/monitoring/nodes/node-1'
+    localStorageMock.getItem.mockImplementation((key) => (key === 'aria-lang' ? 'en' : null))
     globalThis.localStorage = localStorageMock
   })
 

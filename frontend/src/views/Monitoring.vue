@@ -2,12 +2,12 @@
 <template>
   <div class="monitoring page-shell">
     <PageHeader
-      title="Monitoring Center"
-      subtitle="Track alerts, certificate risk, sync health, policy delivery, and command outcomes across the tenant."
+      :title="t('monitoringPage.title')"
+      :subtitle="t('monitoringPage.subtitle')"
     >
       <template #actions>
         <el-button type="primary" :icon="Refresh" :loading="refreshing" @click="refreshAll">
-          Refresh
+          {{ t('common.refresh') }}
         </el-button>
       </template>
     </PageHeader>
@@ -18,37 +18,37 @@
       <template #filters>
         <el-select
           v-model="filterEventType"
-          placeholder="Event Type"
+          :placeholder="t('monitoringPage.eventType')"
           clearable
           style="width: 180px"
           @change="loadEvents"
         >
-          <el-option label="All Types" value="" />
-          <el-option label="Node Offline" value="node_offline" />
-          <el-option label="Node Online" value="node_online" />
-          <el-option label="Certificate Expiring" value="certificate_expiring" />
-          <el-option label="Certificate Expired" value="certificate_expired" />
-          <el-option label="Certificate Renew Failed" value="certificate_renew_failed" />
-          <el-option label="Certificate Renewed" value="certificate_renewed" />
-          <el-option label="Sync Failed" value="sync_failed" />
-          <el-option label="Policy Failed" value="policy_failed" />
-          <el-option label="Command Completed" value="command_completed" />
-          <el-option label="Command Failed" value="command_failed" />
-          <el-option label="Policy Delivered" value="policy_delivered" />
-          <el-option label="Alert Created" value="alert_created" />
-          <el-option label="Alert Resolved" value="alert_resolved" />
+          <el-option :label="t('monitoringPage.allTypes')" value="" />
+          <el-option :label="t('monitoringPage.nodeOffline')" value="node_offline" />
+          <el-option :label="t('monitoringPage.nodeOnline')" value="node_online" />
+          <el-option :label="t('monitoringPage.certificateExpiring')" value="certificate_expiring" />
+          <el-option :label="t('monitoringPage.certificateExpired')" value="certificate_expired" />
+          <el-option :label="t('monitoringPage.certificateRenewFailed')" value="certificate_renew_failed" />
+          <el-option :label="t('monitoringPage.certificateRenewed')" value="certificate_renewed" />
+          <el-option :label="t('monitoringPage.syncFailed')" value="sync_failed" />
+          <el-option :label="t('monitoringPage.policyFailed')" value="policy_failed" />
+          <el-option :label="t('monitoringPage.commandCompleted')" value="command_completed" />
+          <el-option :label="t('monitoringPage.commandFailed')" value="command_failed" />
+          <el-option :label="t('monitoringPage.policyDelivered')" value="policy_delivered" />
+          <el-option :label="t('monitoringPage.alertCreated')" value="alert_created" />
+          <el-option :label="t('monitoringPage.alertResolved')" value="alert_resolved" />
         </el-select>
         <el-select
           v-model="filterSeverity"
-          placeholder="Severity"
+          :placeholder="t('monitoringPage.severity')"
           clearable
           style="width: 150px"
           @change="loadEvents"
         >
-          <el-option label="All Severities" value="" />
-          <el-option label="Critical" value="critical" />
-          <el-option label="Warning" value="warning" />
-          <el-option label="Info" value="info" />
+          <el-option :label="t('monitoringPage.allSeverities')" value="" />
+          <el-option :label="t('common.critical')" value="critical" />
+          <el-option :label="t('common.warning')" value="warning" />
+          <el-option :label="t('common.info')" value="info" />
         </el-select>
       </template>
     </FilterBar>
@@ -56,20 +56,20 @@
     <DataPanel
       ref="alertsSectionRef"
       class="alerts-card"
-      title="Active Alerts"
-      subtitle="Current tenant alerts that need operator attention or explicit resolution."
+      :title="t('monitoringPage.activeAlerts')"
+      :subtitle="t('monitoringPage.activeAlertsSubtitle')"
       v-loading="alertsLoading"
     >
       <template #actions>
-        <el-tag size="small" type="danger" v-if="filteredAlerts.length > 0">{{ filteredAlerts.length }} open</el-tag>
-        <el-tag size="small" type="warning" v-if="alertsFilterMode === 'certificate'">Certificate focus</el-tag>
-        <el-button size="small" text @click="setAlertsFilterMode('all')">All Alerts</el-button>
+        <el-tag size="small" type="danger" v-if="filteredAlerts.length > 0">{{ filteredAlerts.length }} {{ t('monitoringPage.open') }}</el-tag>
+        <el-tag size="small" type="warning" v-if="alertsFilterMode === 'certificate'">{{ t('monitoringPage.certificateFocus') }}</el-tag>
+        <el-button size="small" text @click="setAlertsFilterMode('all')">{{ t('monitoringPage.allAlerts') }}</el-button>
         <el-button size="small" text type="warning" @click="setAlertsFilterMode('certificate')">
-          Cert Alerts
+          {{ t('monitoringPage.certAlerts') }}
         </el-button>
       </template>
 
-      <el-empty v-if="filteredAlerts.length === 0 && !alertsLoading" description="No active alerts" />
+      <el-empty v-if="filteredAlerts.length === 0 && !alertsLoading" :description="t('monitoringPage.noActiveAlerts')" />
 
       <el-table
         v-else
@@ -77,21 +77,21 @@
         size="small"
         style="width: 100%"
       >
-        <el-table-column prop="severity" label="Severity" width="120">
+        <el-table-column prop="severity" :label="t('monitoringPage.severity')" width="120">
           <template #default="{ row }">
             <StatusBadge :status="row.severity || 'info'" :label="row.severity || 'info'" :tone="severityTone(row.severity)" />
           </template>
         </el-table-column>
-        <el-table-column prop="alert_type" label="Type" width="160" />
-        <el-table-column prop="title" label="Title" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="message" label="Message" min-width="220" show-overflow-tooltip />
-        <el-table-column label="Context" min-width="220">
+        <el-table-column prop="alert_type" :label="t('monitoringPage.type')" width="160" />
+        <el-table-column prop="title" :label="t('monitoringPage.titleColumn')" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="message" :label="t('monitoringPage.message')" min-width="220" show-overflow-tooltip />
+        <el-table-column :label="t('monitoringPage.context')" min-width="220">
           <template #default="{ row }">
             <div class="context-tags">
               <el-tag v-if="row.context?.policy_ref" size="small" effect="plain">{{ row.context.policy_ref }}</el-tag>
               <el-tag v-if="row.context?.command_id" size="small" effect="plain">{{ shortId(row.context.command_id) }}</el-tag>
               <el-tag v-if="row.context?.not_after" size="small" type="warning" effect="plain">
-                Exp: {{ formatTime(row.context.not_after) }}
+                {{ t('monitoringPage.exp') }}: {{ formatTime(row.context.not_after) }}
               </el-tag>
               <span
                 v-if="!row.context?.policy_ref && !row.context?.command_id && !row.context?.not_after"
@@ -102,14 +102,14 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="Actions" width="430">
+        <el-table-column :label="t('monitoringPage.actions')" width="430">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button v-if="row.node_id" size="small" @click="goToNodeFromAlert(row)">
-                View Node
+                {{ t('monitoringPage.viewNode') }}
               </el-button>
               <el-button v-if="row.context?.policy_ref" size="small" @click="goToPolicyFromContext(row.node_id, row.context)">
-                View Policy
+                {{ t('monitoringPage.viewPolicy') }}
               </el-button>
               <el-button
                 v-if="isActionableAlert(row) && hasPermission('commands:write')"
@@ -119,7 +119,7 @@
                 :loading="commandActionKey === alertCommandKey(row, 'sync')"
                 @click="handleAlertCommand(row, 'sync')"
               >
-                Run Sync
+                {{ t('monitoringPage.runSync') }}
               </el-button>
               <el-button
                 v-if="isActionableAlert(row) && hasPermission('commands:write')"
@@ -128,7 +128,7 @@
                 :loading="commandActionKey === alertCommandKey(row, 'health_check')"
                 @click="handleAlertCommand(row, 'health_check')"
               >
-                Health Check
+                {{ t('monitoringPage.healthCheck') }}
               </el-button>
               <el-button
                 v-if="isActionableAlert(row) && hasPermission('ai:use')"
@@ -137,7 +137,7 @@
                 plain
                 @click="askAIForAlert(row)"
               >
-                Ask AI
+                {{ t('monitoringPage.askAI') }}
               </el-button>
               <el-button
                 v-if="hasPermission('commands:write')"
@@ -147,7 +147,7 @@
                 :loading="resolvingId === row.id"
                 @click="handleResolve(row)"
               >
-                Resolve
+                {{ t('monitoringPage.resolve') }}
               </el-button>
             </div>
           </template>
@@ -159,16 +159,16 @@
     <DataPanel
       ref="eventsSectionRef"
       class="events-card"
-      title="Event Feed"
-      subtitle="Audit events and alert events merged into a single operations timeline."
+      :title="t('monitoringPage.eventFeed')"
+      :subtitle="t('monitoringPage.eventFeedSubtitle')"
       v-loading="eventsLoading"
     >
       <template #actions>
-        <el-tag size="small" type="info" v-if="eventsTotal > 0">{{ eventsTotal }} total</el-tag>
+        <el-tag size="small" type="info" v-if="eventsTotal > 0">{{ eventsTotal }} {{ t('monitoringPage.total') }}</el-tag>
       </template>
 
       <div v-if="events.length === 0 && !eventsLoading" class="empty-state">
-        <el-empty description="No events found" />
+        <el-empty :description="t('monitoringPage.noEvents')" />
       </div>
 
       <div class="event-timeline" v-else>
@@ -202,19 +202,19 @@
             <div class="event-title">{{ event.title }}</div>
             <div v-if="event.detail && Object.keys(event.detail).length > 0" class="event-context-row">
               <el-tag v-if="event.detail.policy_ref" size="small" effect="plain">
-                Policy: {{ event.detail.policy_ref }}
+                {{ t('monitoringPage.policy') }}: {{ event.detail.policy_ref }}
               </el-tag>
               <el-tag v-if="event.detail.command_id" size="small" effect="plain">
-                Command: {{ shortId(event.detail.command_id) }}
+                {{ t('monitoringPage.command') }}: {{ shortId(event.detail.command_id) }}
               </el-tag>
               <el-tag v-if="event.detail.policy_domain" size="small" effect="plain">
-                Domain: {{ event.detail.policy_domain }}
+                {{ t('monitoringPage.domain') }}: {{ event.detail.policy_domain }}
               </el-tag>
               <el-tag v-if="event.detail.not_after" size="small" type="warning" effect="plain">
-                Exp: {{ formatTime(event.detail.not_after) }}
+                {{ t('monitoringPage.exp') }}: {{ formatTime(event.detail.not_after) }}
               </el-tag>
               <el-tag v-if="event.detail.renewed_from" size="small" type="success" effect="plain">
-                Renewed
+                {{ t('monitoringPage.renewed') }}
               </el-tag>
             </div>
             <div class="event-actions-row">
@@ -223,28 +223,28 @@
                 class="event-node-link"
                 @click="goToNodeFromEvent(event)"
               >
-                Node: {{ event.node_id.substring(0, 8) }}…
+                {{ t('monitoringPage.node') }}: {{ event.node_id.substring(0, 8) }}…
               </span>
               <el-button
                 v-if="event.node_id"
                 size="small"
                 @click="goToNodeFromEvent(event)"
               >
-                View Node
+                {{ t('monitoringPage.viewNode') }}
               </el-button>
               <el-button
                 v-if="event.detail?.policy_ref"
                 size="small"
                 @click="goToPolicyFromContext(event.node_id, event.detail)"
               >
-                View Policy
+                {{ t('monitoringPage.viewPolicy') }}
               </el-button>
               <el-button
                 v-if="event.detail?.command_id && event.node_id"
                 size="small"
                 @click="goToNodeFromEvent(event, 'commands')"
               >
-                View Command
+                {{ t('monitoringPage.viewCommand') }}
               </el-button>
               <el-button
                 v-if="event.source === 'alert' && event.severity && hasPermission('commands:write')"
@@ -254,7 +254,7 @@
                 :loading="resolvingId === event.id"
                 @click="handleResolve(event.id)"
               >
-                Resolve
+                {{ t('monitoringPage.resolve') }}
               </el-button>
             </div>
           </div>
@@ -291,6 +291,7 @@ import MetricStrip from '@/components/ui/MetricStrip.vue'
 import FilterBar from '@/components/ui/FilterBar.vue'
 import DataPanel from '@/components/ui/DataPanel.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
+import { t } from '@/i18n'
 
 const router = useRouter()
 const { hasPermission } = usePermission()
@@ -317,7 +318,7 @@ interface EventParams {
   severity?: string
 }
 
-const errorMessage = (error: unknown, fallback = '未知错误'): string =>
+const errorMessage = (error: unknown, fallback = t('policyTerms.unknownError')): string =>
   error instanceof Error ? error.message : (typeof error === 'string' ? error : fallback)
 
 // --- State ---
@@ -358,61 +359,61 @@ const actionableAlertTypes = ['sync_failed', 'policy_failed', 'command_failed', 
 const monitorMetricItems = computed(() => [
   {
     key: 'nodes',
-    label: 'Nodes',
+    label: t('monitoringPage.nodes'),
     value: `${stats.value.online_nodes} / ${stats.value.total_nodes}`,
-    meta: 'Online / total',
+    meta: t('monitoringPage.nodesMeta'),
     status: stats.value.offline_nodes > 0 ? 'warning' : 'success',
     clickable: isStatCardClickable('nodes')
   },
   {
     key: 'sync',
-    label: 'Sync Rate',
+    label: t('monitoringPage.syncRate'),
     value: `${stats.value.sync_success_rate.toFixed(1)}%`,
-    meta: 'Recent sync success',
+    meta: t('monitoringPage.syncRateMeta'),
     status: stats.value.sync_success_rate >= 99 ? 'success' : 'warning'
   },
   {
     key: 'peers',
-    label: 'Peers',
+    label: t('monitoringPage.peers'),
     value: stats.value.total_peers,
-    meta: 'WireGuard peers',
+    meta: t('monitoringPage.peersMeta'),
     status: 'info'
   },
   {
     key: 'acl',
-    label: 'ACL Rules',
+    label: t('monitoringPage.aclRules'),
     value: stats.value.total_acl_rules,
-    meta: 'Tenant policies',
+    meta: t('monitoringPage.tenantPolicies'),
     status: 'info'
   },
   {
     key: 'qos',
-    label: 'QoS Rules',
+    label: t('monitoringPage.qosRules'),
     value: stats.value.total_qos_rules,
-    meta: 'Bandwidth policies',
+    meta: t('monitoringPage.bandwidthPolicies'),
     status: 'info'
   },
   {
     key: 'failed',
-    label: 'Failed Cmds',
+    label: t('monitoringPage.failedCmds'),
     value: stats.value.failed_commands_count,
-    meta: 'Click to filter events',
+    meta: t('monitoringPage.clickToFilterEvents'),
     status: stats.value.failed_commands_count > 0 ? 'danger' : 'success',
     clickable: isStatCardClickable('failed')
   },
   {
     key: 'alerts',
-    label: 'Active Alerts',
+    label: t('monitoringPage.activeAlerts'),
     value: stats.value.active_alerts_count,
-    meta: 'Open alert queue',
+    meta: t('monitoringPage.openAlertQueue'),
     status: stats.value.active_alerts_count > 0 ? 'danger' : 'success',
     clickable: isStatCardClickable('alerts')
   },
   {
     key: 'certificates',
-    label: 'Cert Alerts',
+    label: t('monitoringPage.certAlerts'),
     value: certificateAlertsCount.value,
-    meta: 'Certificate focus',
+    meta: t('monitoringPage.certificateFocusMeta'),
     status: certificateAlertsCount.value > 0 ? 'warning' : 'success',
     clickable: isStatCardClickable('certificates')
   }
@@ -521,22 +522,22 @@ const buildResolvePayload = (alert: AnyRecord = {}) => {
 
 const handleResolve = async (alert: AnyRecord | string) => {
   if (!hasPermission('commands:write')) {
-    ElMessage.error('Missing command permission')
+    ElMessage.error(t('monitoringPage.missingCommandPermission'))
     return
   }
   const alertId = typeof alert === 'string' ? alert : alert?.id
   if (!alertId) {
-    ElMessage.error('Alert context is missing')
+    ElMessage.error(t('monitoringPage.missingAlertContext'))
     return
   }
 
   try {
     resolvingId.value = alertId
     await useMonitorApi.resolveAlert(alertId, buildResolvePayload(typeof alert === 'string' ? {} : alert))
-    ElMessage.success('Alert resolved')
+    ElMessage.success(t('monitoringPage.alertResolvedSuccess'))
     await Promise.all([loadStats(), loadEvents(), loadAlerts()])
   } catch (e) {
-    ElMessage.error('Failed to resolve alert')
+    ElMessage.error(t('monitoringPage.alertResolveFailed'))
   } finally {
     resolvingId.value = null
   }
@@ -597,7 +598,7 @@ const buildAlertAIQuery = (alert: AnyRecord = {}) => {
 
 const askAIForAlert = (alert: AnyRecord = {}) => {
   if (!hasPermission('ai:use')) {
-    ElMessage.error('Missing AI permission')
+    ElMessage.error(t('monitoringPage.missingAiPermission'))
     return
   }
   router.push({
@@ -608,11 +609,11 @@ const askAIForAlert = (alert: AnyRecord = {}) => {
 
 const handleAlertCommand = async (alert: AnyRecord, command: string) => {
   if (!hasPermission('commands:write')) {
-    ElMessage.error('Missing command permission')
+    ElMessage.error(t('monitoringPage.missingCommandPermission'))
     return
   }
   if (!alert?.node_id) {
-    ElMessage.error('Alert does not reference a node')
+    ElMessage.error(t('monitoringPage.alertMissingNode'))
     return
   }
 
@@ -624,12 +625,12 @@ const handleAlertCommand = async (alert: AnyRecord, command: string) => {
       params: buildAlertCommandParams(alert),
       timeout: 30
     } as any)
-    ElMessage.success(`${command} queued`)
+    ElMessage.success(t('monitoringPage.commandQueued').replace('{command}', command))
     await Promise.all([loadStats(), loadEvents(), loadAlerts()])
     openQueuedCommandFromAlert(alert, commandIdFromResponse(response))
   } catch (e) {
     console.error(`Failed to queue ${command} from alert:`, e)
-    ElMessage.error(`Failed to queue ${command}`)
+    ElMessage.error(t('monitoringPage.commandQueueFailed').replace('{command}', command))
   } finally {
     if (commandActionKey.value === actionKey) {
       commandActionKey.value = ''
@@ -769,7 +770,22 @@ const formatTime = (iso?: string) => {
 
 const formatEventType = (type?: string) => {
   if (!type) return ''
-  return type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+  const labels: Record<string, string> = {
+    node_offline: t('monitoringPage.nodeOffline'),
+    node_online: t('monitoringPage.nodeOnline'),
+    certificate_expiring: t('monitoringPage.certificateExpiring'),
+    certificate_expired: t('monitoringPage.certificateExpired'),
+    certificate_renew_failed: t('monitoringPage.certificateRenewFailed'),
+    certificate_renewed: t('monitoringPage.certificateRenewed'),
+    sync_failed: t('monitoringPage.syncFailed'),
+    policy_failed: t('monitoringPage.policyFailed'),
+    command_completed: t('monitoringPage.commandCompleted'),
+    command_failed: t('monitoringPage.commandFailed'),
+    policy_delivered: t('monitoringPage.policyDelivered'),
+    alert_created: t('monitoringPage.alertCreated'),
+    alert_resolved: t('monitoringPage.alertResolved')
+  }
+  return labels[type] || type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
 const eventTypeTone = (type?: string) => {

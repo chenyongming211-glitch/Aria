@@ -2,17 +2,17 @@
   <div class="ip-groups-container">
     <div class="page-header">
       <div>
-        <h2>IP Group 管理</h2>
-        <p>ACL 和 QoS 规则优先引用 IP Group；直接 CIDR 输入会自动生成 inline group。</p>
+        <h2>{{ t('ipGroups.title') }}</h2>
+        <p>{{ t('ipGroups.subtitle') }}</p>
       </div>
       <div class="header-actions">
         <el-button @click="loadGroups">
           <el-icon><Refresh /></el-icon>
-          刷新
+          {{ t('common.refresh') }}
         </el-button>
         <el-button v-if="hasPermission('ip-groups:write')" type="primary" @click="handleCreate">
           <el-icon><Plus /></el-icon>
-          新建 Group
+          {{ t('ipGroups.newGroup') }}
         </el-button>
       </div>
     </div>
@@ -28,8 +28,8 @@
       @open-policy-center="openPolicyCenterContext"
     />
 
-    <el-table :data="groups" v-loading="loading" style="width: 100%" empty-text="暂无 IP Group">
-      <el-table-column prop="name" label="名称" min-width="180">
+    <el-table :data="groups" v-loading="loading" style="width: 100%" :empty-text="t('ipGroups.emptyText')">
+      <el-table-column prop="name" :label="t('common.name')" min-width="180">
         <template #default="{ row }">
           <div class="group-name-cell">
             <strong>{{ row.name }}</strong>
@@ -37,15 +37,15 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="类型" width="120">
+      <el-table-column :label="t('ipGroups.kind')" width="120">
         <template #default="{ row }">
           <el-tag :type="row.kind === 'inline' ? 'info' : 'primary'" effect="plain">
             {{ formatKind(row.kind) }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
-      <el-table-column label="CIDR 成员" min-width="260">
+      <el-table-column prop="description" :label="t('common.description')" min-width="180" show-overflow-tooltip />
+      <el-table-column :label="t('ipGroups.cidrMembers')" min-width="260">
         <template #default="{ row }">
           <div class="cidr-list">
             <el-tag
@@ -60,7 +60,7 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="重叠提示" min-width="220">
+      <el-table-column :label="t('ipGroups.overlapWarnings')" min-width="220">
         <template #default="{ row }">
           <div v-if="groupWarnings(row).length" class="warning-list">
             <el-tag
@@ -76,46 +76,46 @@
           <span v-else>-</span>
         </template>
       </el-table-column>
-      <el-table-column v-if="hasPermission('ip-groups:write')" label="操作" width="160" fixed="right">
+      <el-table-column v-if="hasPermission('ip-groups:write')" :label="t('common.actions')" width="160" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" :disabled="row.kind === 'inline'" @click="handleEdit(row)">编辑</el-button>
-          <el-button link type="danger" :disabled="row.kind === 'inline'" @click="handleDelete(row)">删除</el-button>
+          <el-button link type="primary" :disabled="row.kind === 'inline'" @click="handleEdit(row)">{{ t('common.edit') }}</el-button>
+          <el-button link type="danger" :disabled="row.kind === 'inline'" @click="handleDelete(row)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="640px" @closed="resetForm">
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="110px">
-        <el-form-item label="名称" prop="name">
-          <el-input v-model="form.name" placeholder="例如 office-networks" />
+        <el-form-item :label="t('common.name')" prop="name">
+          <el-input v-model="form.name" :placeholder="t('ipGroups.namePlaceholder')" />
         </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="form.description" type="textarea" :rows="2" placeholder="可选" />
+        <el-form-item :label="t('common.description')">
+          <el-input v-model="form.description" type="textarea" :rows="2" :placeholder="t('ipGroups.optionalPlaceholder')" />
         </el-form-item>
-        <el-form-item label="CIDR 成员" prop="members">
+        <el-form-item :label="t('ipGroups.cidrMembers')" prop="members">
           <div class="member-editor">
             <div v-for="(member, index) in form.members" :key="index" class="member-row">
-              <el-input v-model="member.cidr" placeholder="例如 10.10.0.0/16" />
-              <el-input v-model="member.note" placeholder="备注" />
+              <el-input v-model="member.cidr" :placeholder="t('ipGroups.cidrPlaceholder')" />
+              <el-input v-model="member.note" :placeholder="t('ipGroups.notePlaceholder')" />
               <el-button :icon="Delete" @click="removeMember(index)" />
             </div>
             <el-button @click="addMember">
               <el-icon><Plus /></el-icon>
-              添加 CIDR
+              {{ t('ipGroups.addCidr') }}
             </el-button>
           </div>
         </el-form-item>
       </el-form>
 
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button
           v-if="hasPermission('ip-groups:write')"
           type="primary"
           :loading="submitting"
           @click="handleSubmit"
         >
-          保存
+          {{ t('common.save') }}
         </el-button>
       </template>
     </el-dialog>
@@ -131,6 +131,7 @@ import PolicyContextBanner from '@/components/policy/PolicyContextBanner.vue'
 import { useIpGroupApi } from '@/composables/useIpGroupApi'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
+import { t } from '@/i18n'
 
 const { hasPermission } = usePermission()
 const route = useRoute() || { query: {} }
@@ -151,13 +152,13 @@ const form = reactive({
 })
 
 const formRules = {
-  name: [{ required: true, message: '请输入名称', trigger: 'blur' }],
+  name: [{ required: true, message: t('ipGroups.nameRequired'), trigger: 'blur' }],
   members: [
     {
       validator: (_rule, value, callback) => {
         const cidrs = Array.isArray(value) ? value.map((member) => String(member.cidr || '').trim()).filter(Boolean) : []
         if (cidrs.length === 0) {
-          callback(new Error('至少需要一个 CIDR 成员'))
+          callback(new Error(t('ipGroups.membersRequired')))
           return
         }
         callback()
@@ -167,7 +168,7 @@ const formRules = {
   ]
 }
 
-const dialogTitle = computed(() => form.id ? '编辑 IP Group' : '新建 IP Group')
+const dialogTitle = computed(() => form.id ? t('ipGroups.editTitle') : t('ipGroups.createTitle'))
 const routeQuery = computed(() => route.query || {})
 const queryString = (...keys) => {
   for (const key of keys) {
@@ -231,7 +232,7 @@ const loadGroups = async () => {
   try {
     groups.value = await useIpGroupApi.listIPGroups()
   } catch (error) {
-    ElMessage.error('加载 IP Group 失败: ' + (error.message || '未知错误'))
+    ElMessage.error(`${t('ipGroups.loadFailed')}: ${error.message || t('policyTerms.unknownError')}`)
   } finally {
     loading.value = false
   }
@@ -255,17 +256,17 @@ const handleEdit = (row) => {
 
 const handleDelete = async (row) => {
   try {
-    await ElMessageBox.confirm(`确定要删除 IP Group "${row.name}" 吗？`, '删除确认', {
+    await ElMessageBox.confirm(t('ipGroups.deleteConfirm').replace('{name}', row.name), t('ipGroups.deleteTitle'), {
       type: 'warning',
-      confirmButtonText: '确定',
-      cancelButtonText: '取消'
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel')
     })
     await useIpGroupApi.deleteIPGroup(row.id)
-    ElMessage.success('删除成功')
+    ElMessage.success(t('ipGroups.deleteSuccess'))
     await loadGroups()
   } catch (error) {
     if (error !== 'cancel') {
-      ElMessage.error('删除失败: ' + (error.message || '未知错误'))
+      ElMessage.error(`${t('ipGroups.deleteFailed')}: ${error.message || t('policyTerms.unknownError')}`)
     }
   }
 }
@@ -284,16 +285,16 @@ const handleSubmit = async () => {
     }
     if (form.id) {
       await useIpGroupApi.updateIPGroup(form.id, payload)
-      ElMessage.success('更新成功')
+      ElMessage.success(t('ipGroups.updateSuccess'))
     } else {
       await useIpGroupApi.createIPGroup(payload)
-      ElMessage.success('创建成功')
+      ElMessage.success(t('ipGroups.createSuccess'))
     }
     dialogVisible.value = false
     await loadGroups()
   } catch (error) {
     if (error !== false) {
-      ElMessage.error('保存失败: ' + (error.message || '未知错误'))
+      ElMessage.error(`${t('ipGroups.saveFailed')}: ${error.message || t('policyTerms.unknownError')}`)
     }
   } finally {
     submitting.value = false
@@ -323,7 +324,7 @@ const resetForm = () => {
 }
 
 const formatKind = (kind) => {
-  const map = { custom: '自定义', inline: '内联', system: '系统' }
+  const map = { custom: t('ipGroups.custom'), inline: t('ipGroups.inline'), system: t('ipGroups.system') }
   return map[kind] || kind
 }
 

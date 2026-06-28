@@ -1,20 +1,20 @@
 <template>
   <div class="policy-rule-page">
     <PageHeader
-      title="ACL 规则管理"
-      subtitle="按节点管理访问控制策略，查看下发状态、最近命令和运行时命中统计。"
+      :title="t('acl.title')"
+      :subtitle="t('acl.subtitle')"
     >
       <template #actions>
         <el-button v-if="hasPermission('acls:write')" type="primary" @click="handleCreate">
           <el-icon><Plus /></el-icon>
-          新建规则
+          {{ t('acl.newRule') }}
         </el-button>
       </template>
     </PageHeader>
 
     <FilterBar>
       <template #filters>
-        <el-select v-model="filters.node_id" placeholder="选择节点 (必选)" style="width: 220px" @change="handleNodeChange">
+        <el-select v-model="filters.node_id" :placeholder="t('policyTerms.selectNodeRequired')" style="width: 220px" @change="handleNodeChange">
           <el-option
             v-for="node in tenantNodes"
             :key="node.id"
@@ -25,7 +25,7 @@
 
         <el-input
           v-model="filters.name"
-          placeholder="搜索规则名称"
+          :placeholder="t('acl.searchRuleName')"
           style="width: 200px"
           @input="debouncedSearch"
         >
@@ -34,20 +34,20 @@
           </template>
         </el-input>
 
-        <el-select v-model="filters.action" placeholder="动作" clearable @change="loadRules">
-          <el-option label="允许" value="allow" />
-          <el-option label="拒绝" value="deny" />
+        <el-select v-model="filters.action" :placeholder="t('policyTerms.action')" clearable @change="loadRules">
+          <el-option :label="t('policyTerms.allow')" value="allow" />
+          <el-option :label="t('policyTerms.deny')" value="deny" />
         </el-select>
 
-        <el-select v-model="filters.enabled" placeholder="状态" clearable @change="loadRules">
-          <el-option label="启用" :value="true" />
-          <el-option label="禁用" :value="false" />
+        <el-select v-model="filters.enabled" :placeholder="t('common.status')" clearable @change="loadRules">
+          <el-option :label="t('policyTerms.enabled')" :value="true" />
+          <el-option :label="t('policyTerms.disabled')" :value="false" />
         </el-select>
       </template>
       <template #actions>
         <el-button @click="loadRules">
           <el-icon><Search /></el-icon>
-          搜索
+          {{ t('common.search') }}
         </el-button>
       </template>
     </FilterBar>
@@ -64,27 +64,27 @@
       @open-policy-center="openPolicyCenterContext"
     />
 
-    <DataPanel title="ACL 规则" :subtitle="aclPanelSubtitle">
+    <DataPanel :title="t('acl.rules')" :subtitle="aclPanelSubtitle">
       <el-table
         :data="paginatedRules"
         :row-class-name="ruleRowClassName"
         v-loading="loading"
         style="width: 100%"
       >
-      <el-table-column prop="node_name" label="节点" width="160" />
-      <el-table-column prop="priority" label="优先级" width="80" sortable />
-      <el-table-column prop="name" label="名称" width="150" />
-      <el-table-column label="源 Group/CIDR" min-width="170">
+      <el-table-column prop="node_name" :label="t('policyTerms.node')" width="160" />
+      <el-table-column prop="priority" :label="t('policyTerms.priority')" width="80" sortable />
+      <el-table-column prop="name" :label="t('common.name')" width="150" />
+      <el-table-column :label="t('acl.srcGroupCidr')" min-width="170">
         <template #default="{ row }">
           <code>{{ formatGroupRef(row.src_group_id, row.runtime_src_group || row.src_cidr) }}</code>
         </template>
       </el-table-column>
-      <el-table-column label="目标 Group/CIDR" min-width="170">
+      <el-table-column :label="t('acl.dstGroupCidr')" min-width="170">
         <template #default="{ row }">
           <code>{{ formatGroupRef(row.dst_group_id, row.runtime_dst_group || row.dst_cidr) }}</code>
         </template>
       </el-table-column>
-      <el-table-column label="方向/端口规则" min-width="160">
+      <el-table-column :label="t('acl.directionPorts')" min-width="160">
         <template #default="{ row }">
           <div class="acl-runtime-cell">
             <el-tag size="small" effect="plain">{{ formatDirection(row.direction) }}</el-tag>
@@ -92,19 +92,19 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="protocol" label="协议" width="80">
+      <el-table-column prop="protocol" :label="t('policyTerms.protocol')" width="80">
         <template #default="{ row }">
           {{ getProtocolName(row.protocol) }}
         </template>
       </el-table-column>
-      <el-table-column prop="action" label="动作" width="80">
+      <el-table-column prop="action" :label="t('policyTerms.action')" width="80">
         <template #default="{ row }">
           <el-tag :type="getActionType(row.action)">
             {{ getActionName(row.action) }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="enabled" label="状态" width="80">
+      <el-table-column prop="enabled" :label="t('common.status')" width="80">
         <template #default="{ row }">
           <el-switch
             v-model="row.enabled"
@@ -113,23 +113,23 @@
           />
         </template>
       </el-table-column>
-      <el-table-column label="下发状态" width="120">
+      <el-table-column :label="t('policyTerms.deliveryStatus')" width="120">
         <template #default="{ row }">
           <el-tag size="small" :type="getPolicyTagType(row.policy_status)">
             {{ formatPolicyStatus(row.policy_status, t) }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="pending_cmds" label="待执行" width="90" />
-      <el-table-column label="Stats" width="150">
+      <el-table-column prop="pending_cmds" :label="t('policyTerms.pendingCommands')" width="90" />
+      <el-table-column :label="t('policyTerms.stats')" width="150">
         <template #default="{ row }">
           <div class="acl-runtime-cell">
-            <span>{{ formatNumber(row.stats?.packets) }} pkts / {{ formatBytes(row.stats?.bytes) }}</span>
-            <small>drop {{ formatNumber(row.stats?.dropped_packets) }} / {{ formatBytes(row.stats?.dropped_bytes) }}</small>
+            <span>{{ formatNumber(row.stats?.packets) }} {{ t('policyTerms.packets') }} / {{ formatBytes(row.stats?.bytes) }}</span>
+            <small>{{ t('policyTerms.drop') }} {{ formatNumber(row.stats?.dropped_packets) }} / {{ formatBytes(row.stats?.dropped_bytes) }}</small>
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="最近命令" width="150">
+      <el-table-column :label="t('policyTerms.lastCommand')" width="150">
         <template #default="{ row }">
           <el-tooltip
             v-if="row.last_delivery_command_id"
@@ -141,22 +141,22 @@
           <span v-else>-</span>
         </template>
       </el-table-column>
-      <el-table-column prop="last_command_error" label="失败原因" min-width="180" show-overflow-tooltip />
-      <el-table-column label="操作" width="210" fixed="right">
+      <el-table-column prop="last_command_error" :label="t('policyTerms.failureReason')" min-width="180" show-overflow-tooltip />
+      <el-table-column :label="t('common.actions')" width="210" fixed="right">
         <template #default="{ row }">
           <div class="table-actions">
             <ActionIconButton
               v-if="hasPermission('acls:write') && canRetryPolicy(row)"
-              label="重试"
+              :label="t('policyTerms.retry')"
               tone="primary"
               @click="handleRetry(row)"
             >
               <el-icon><Refresh /></el-icon>
             </ActionIconButton>
-            <ActionIconButton v-if="hasPermission('acls:write')" label="编辑" tone="primary" @click="handleEdit(row)">
+            <ActionIconButton v-if="hasPermission('acls:write')" :label="t('common.edit')" tone="primary" @click="handleEdit(row)">
               <el-icon><Edit /></el-icon>
             </ActionIconButton>
-            <ActionIconButton v-if="hasPermission('acls:write')" label="删除" tone="danger" @click="handleDelete(row)">
+            <ActionIconButton v-if="hasPermission('acls:write')" :label="t('common.delete')" tone="danger" @click="handleDelete(row)">
               <el-icon><Delete /></el-icon>
             </ActionIconButton>
           </div>
@@ -179,8 +179,8 @@
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="600px" @closed="resetForm">
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="120px">
-        <el-form-item label="目标节点" prop="node_id">
-          <el-select v-model="form.node_id" placeholder="请选择节点" style="width: 100%">
+        <el-form-item :label="t('policyTerms.targetNode')" prop="node_id">
+          <el-select v-model="form.node_id" :placeholder="t('policyTerms.selectNode')" style="width: 100%">
             <el-option
               v-for="node in tenantNodes"
               :key="node.id"
@@ -190,12 +190,12 @@
           </el-select>
         </el-form-item>
 
-        <el-form-item label="规则名称" prop="name">
-          <el-input v-model="form.name" placeholder="请输入规则名称" />
+        <el-form-item :label="t('acl.ruleName')" prop="name">
+          <el-input v-model="form.name" :placeholder="t('acl.nameRequired')" />
         </el-form-item>
         
-        <el-form-item label="源 IP Group">
-          <el-select v-model="form.src_group_id" clearable filterable placeholder="any / 选择源 Group" style="width: 100%">
+        <el-form-item :label="t('acl.srcIpGroup')">
+          <el-select v-model="form.src_group_id" clearable filterable :placeholder="t('acl.srcGroupPlaceholder')" style="width: 100%">
             <el-option
               v-for="group in selectableGroups"
               :key="group.id"
@@ -205,13 +205,13 @@
           </el-select>
         </el-form-item>
 
-        <el-form-item label="源 CIDR" prop="src_cidr">
-          <el-input v-model="form.src_cidr" :disabled="Boolean(form.src_group_id)" placeholder="留空为 any；例如 192.168.1.0/24" />
-          <div class="form-help">未选择 Group 时，CIDR 会保存为 inline IP Group。</div>
+        <el-form-item :label="t('acl.srcCidr')" prop="src_cidr">
+          <el-input v-model="form.src_cidr" :disabled="Boolean(form.src_group_id)" :placeholder="t('acl.srcCidrPlaceholder')" />
+          <div class="form-help">{{ t('acl.inlineGroupHelp') }}</div>
         </el-form-item>
 
-        <el-form-item label="目标 IP Group">
-          <el-select v-model="form.dst_group_id" clearable filterable placeholder="any / 选择目标 Group" style="width: 100%">
+        <el-form-item :label="t('acl.dstIpGroup')">
+          <el-select v-model="form.dst_group_id" clearable filterable :placeholder="t('acl.dstGroupPlaceholder')" style="width: 100%">
             <el-option
               v-for="group in selectableGroups"
               :key="group.id"
@@ -221,14 +221,14 @@
           </el-select>
         </el-form-item>
 
-        <el-form-item label="目标 CIDR" prop="dst_cidr">
-          <el-input v-model="form.dst_cidr" :disabled="Boolean(form.dst_group_id)" placeholder="留空为 any；例如 10.0.0.0/24" />
-          <div class="form-help">未选择 Group 时，CIDR 会保存为 inline IP Group。</div>
+        <el-form-item :label="t('acl.dstCidr')" prop="dst_cidr">
+          <el-input v-model="form.dst_cidr" :disabled="Boolean(form.dst_group_id)" :placeholder="t('acl.dstCidrPlaceholder')" />
+          <div class="form-help">{{ t('acl.inlineGroupHelp') }}</div>
         </el-form-item>
         
-        <el-form-item label="协议" prop="protocol">
+        <el-form-item :label="t('policyTerms.protocol')" prop="protocol">
           <el-select v-model="form.protocol">
-            <el-option label="Any" :value="0" />
+            <el-option :label="t('policyTerms.any')" :value="0" />
             <el-option label="TCP" :value="6" />
             <el-option label="UDP" :value="17" />
             <el-option label="ICMP" :value="1" />
@@ -237,56 +237,56 @@
         
         <el-row :gutter="20">
           <el-col :span="12">
-            <el-form-item label="目标端口" prop="dst_port">
+            <el-form-item :label="t('acl.dstPort')" prop="dst_port">
               <el-input-number v-model="form.dst_port" :min="0" :max="65535" style="width: 100%" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="方向" prop="direction">
+            <el-form-item :label="t('policyTerms.direction')" prop="direction">
               <el-select v-model="form.direction" style="width: 100%">
-                <el-option label="入站 ingress" value="ingress" />
-                <el-option label="出站 egress" value="egress" />
-                <el-option label="双向 both" value="both" />
+                <el-option :label="`${t('policyTerms.ingress')} ingress`" value="ingress" />
+                <el-option :label="`${t('policyTerms.egress')} egress`" value="egress" />
+                <el-option :label="`${t('policyTerms.both')} both`" value="both" />
               </el-select>
             </el-form-item>
           </el-col>
         </el-row>
 
-        <el-form-item label="端口规则">
-          <el-input v-model="form.ports" placeholder="例如: 80-82,443；留空则使用目标端口" />
-          <div class="form-help">Any 协议带端口时，Controller 会下发为 TCP/UDP 两条运行时规则。</div>
+        <el-form-item :label="t('acl.ports')">
+          <el-input v-model="form.ports" :placeholder="t('acl.portsPlaceholder')" />
+          <div class="form-help">{{ t('acl.portsHelp') }}</div>
         </el-form-item>
         
-        <el-form-item label="动作" prop="action">
+        <el-form-item :label="t('policyTerms.action')" prop="action">
           <el-select v-model="form.action">
-            <el-option label="允许 (allow)" value="allow" />
-            <el-option label="拒绝 (deny)" value="deny" />
+            <el-option :label="`${t('policyTerms.allow')} (allow)`" value="allow" />
+            <el-option :label="`${t('policyTerms.deny')} (deny)`" value="deny" />
           </el-select>
         </el-form-item>
         
-        <el-form-item label="优先级" prop="priority">
+        <el-form-item :label="t('policyTerms.priority')" prop="priority">
           <el-input-number v-model="form.priority" :min="1" :max="10000" style="width: 100%" />
-          <div class="form-help">数字越小优先级越高</div>
+          <div class="form-help">{{ t('acl.priorityHelp') }}</div>
         </el-form-item>
         
-        <el-form-item label="是否启用">
+        <el-form-item :label="t('policyTerms.enabled')">
           <el-switch v-model="form.enabled" />
         </el-form-item>
         
-        <el-form-item label="描述">
-          <el-input v-model="form.description" type="textarea" :rows="3" placeholder="请输入规则描述（可选）" />
+        <el-form-item :label="t('common.description')">
+          <el-input v-model="form.description" type="textarea" :rows="3" :placeholder="t('acl.descriptionPlaceholder')" />
         </el-form-item>
       </el-form>
       
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button
           v-if="hasPermission('acls:write')"
           type="primary"
           :loading="submitting"
           @click="handleSubmit"
         >
-          确定
+          {{ t('common.confirm') }}
         </el-button>
       </template>
     </el-dialog>
@@ -372,7 +372,7 @@ interface ACLFormState extends Record<string, any> {
   description: string
 }
 
-const errorMessage = (error: unknown, fallback = '未知错误'): string =>
+const errorMessage = (error: unknown, fallback = t('policyTerms.unknownError')): string =>
   error instanceof Error ? error.message : (typeof error === 'string' ? error : fallback)
 
 const loading = ref(false)
@@ -417,29 +417,29 @@ const form = reactive<ACLFormState>({
 
 const formRules = {
   node_id: [
-    { required: true, message: '请选择目标节点', trigger: 'change' }
+    { required: true, message: t('acl.nodeRequired'), trigger: 'change' }
   ],
   name: [
-    { required: true, message: '请输入规则名称', trigger: 'blur' },
-    { min: 1, max: 50, message: '长度在 1 到 50 个字符', trigger: 'blur' }
+    { required: true, message: t('acl.nameRequired'), trigger: 'blur' },
+    { min: 1, max: 50, message: t('acl.nameLength'), trigger: 'blur' }
   ],
   src_cidr: [],
   dst_cidr: [],
   dst_port: [
-    { required: true, message: '请输入目标端口', trigger: 'blur' }
+    { required: true, message: t('acl.portRequired'), trigger: 'blur' }
   ],
   protocol: [
-    { required: true, message: '请选择协议', trigger: 'change' }
+    { required: true, message: t('acl.protocolRequired'), trigger: 'change' }
   ],
   action: [
-    { required: true, message: '请选择动作', trigger: 'change' }
+    { required: true, message: t('acl.actionRequired'), trigger: 'change' }
   ],
   priority: [
-    { required: true, message: '请输入优先级', trigger: 'blur' }
+    { required: true, message: t('acl.priorityRequired'), trigger: 'blur' }
   ]
 }
 
-const dialogTitle = computed(() => form.id ? '编辑规则' : '新建规则')
+const dialogTitle = computed(() => form.id ? t('acl.editTitle') : t('acl.createTitle'))
 const selectedNodeName = computed(() => {
   const node = tenantNodes.value.find((item) => item.id === filters.node_id)
   return node?.hostname || node?.public_key || node?.id || ''
@@ -451,9 +451,9 @@ const contextNodeName = computed(() => {
 })
 const aclPanelSubtitle = computed(() => {
   if (!filters.node_id) {
-    return '选择节点后查看访问控制规则和下发结果。'
+    return t('acl.panelSelectNode')
   }
-  return `${selectedNodeName.value || '当前节点'} · ${visibleRules.value.length} 条规则`
+  return `${selectedNodeName.value || t('policyTerms.currentNode')} · ${t('policyTerms.rulesCount').replace('{count}', String(visibleRules.value.length))}`
 })
 
 const routeQuery = computed(() => route.query || {})
@@ -572,7 +572,7 @@ const loadNodes = async () => {
       pagination.total = 0
     }
   } catch (error) {
-    console.error('加载节点失败:', error)
+    console.error('Failed to load nodes:', error)
   }
 }
 
@@ -580,7 +580,7 @@ const loadIPGroups = async () => {
   try {
     ipGroups.value = await useIpGroupApi.listIPGroups()
   } catch (error) {
-    console.error('加载 IP Group 失败:', error)
+    console.error('Failed to load IP Groups:', error)
     ipGroups.value = []
   }
 }
@@ -605,7 +605,7 @@ const loadRules = async () => {
     rules.value = response
     pagination.total = visibleRules.value.length
   } catch (error) {
-    ElMessage.error('加载规则失败: ' + errorMessage(error))
+    ElMessage.error(`${t('acl.loadFailed')}: ${errorMessage(error)}`)
   } finally {
     loading.value = false
   }
@@ -647,20 +647,20 @@ const handleEdit = (row: ACLRuleRow) => {
 
 const handleDelete = async (row: ACLRuleRow) => {
   try {
-    await ElMessageBox.confirm(`确定要删除规则 "${row.name}" 吗？`, '删除确认', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(t('acl.deleteConfirm').replace('{name}', row.name || ''), t('acl.deleteTitle'), {
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
       type: 'warning'
     })
     
     if (!row.id) return
     const result = await useAclApi.deleteACLRule(row.id, row.node_id)
-    ElMessage.success('删除指令已下发')
+    ElMessage.success(t('acl.deleteQueued'))
     await loadRules()
     openCommandTrace(row, result as Record<string, any>)
   } catch (error) {
     if (error !== 'cancel') {
-      ElMessage.error('删除失败: ' + errorMessage(error))
+      ElMessage.error(`${t('acl.deleteFailed')}: ${errorMessage(error)}`)
     }
   }
 }
@@ -711,17 +711,17 @@ const openCommandTrace = (row: ACLRuleRow, result?: Record<string, any>) => {
 
 const handleRetry = async (row: ACLRuleRow) => {
   if (!hasPermission('acls:write')) {
-    ElMessage.error('缺少 ACL 管理权限')
+    ElMessage.error(t('acl.missingPermission'))
     return
   }
 
   try {
     const result = await useAclApi.retryACLPolicySync(row)
-    ElMessage.success('重试下发已排队')
+    ElMessage.success(t('policyTerms.retryQueued'))
     await loadRules()
     openCommandTrace(row, result as Record<string, any>)
   } catch (error) {
-    ElMessage.error('重试失败: ' + errorMessage(error))
+    ElMessage.error(`${t('policyTerms.retryFailed')}: ${errorMessage(error)}`)
   }
 }
 
@@ -729,12 +729,12 @@ const handleToggleEnabled = async (row: ACLRuleRow) => {
   try {
     if (!row.id) return
     const result = await useAclApi.updateACLRule(row.id, { ...row, enabled: row.enabled, node_id: row.node_id })
-    ElMessage.success(row.enabled ? '已启用' : '已禁用')
+    ElMessage.success(row.enabled ? t('acl.enabledSuccess') : t('acl.disabledSuccess'))
     await loadRules()
     openCommandTrace(row, result as Record<string, any>)
   } catch (error) {
     row.enabled = !row.enabled
-    ElMessage.error('操作失败: ' + errorMessage(error))
+    ElMessage.error(`${t('acl.operationFailed')}: ${errorMessage(error)}`)
   }
 }
 
@@ -748,17 +748,17 @@ const handleSubmit = async () => {
     const data = { ...form } as ACLRuleRow
     
     if (data.dst_port < 0 || data.dst_port > 65535) {
-      ElMessage.error('目标端口必须在 0 到 65535 之间')
+      ElMessage.error(t('acl.invalidPort'))
       return
     }
     
     let result
     if (form.id) {
       result = await useAclApi.updateACLRule(form.id, data as Parameters<typeof useAclApi.updateACLRule>[1])
-      ElMessage.success('更新成功')
+      ElMessage.success(t('acl.updateSuccess'))
     } else {
       result = await useAclApi.createACLRule(data as Parameters<typeof useAclApi.createACLRule>[0])
-      ElMessage.success('创建成功')
+      ElMessage.success(t('acl.createSuccess'))
     }
     
     dialogVisible.value = false
@@ -766,7 +766,7 @@ const handleSubmit = async () => {
     openCommandTrace(data, result as Record<string, any>)
   } catch (error) {
     if (error !== false) {
-      ElMessage.error('操作失败: ' + errorMessage(error))
+      ElMessage.error(`${t('acl.operationFailed')}: ${errorMessage(error)}`)
     }
   } finally {
     submitting.value = false
@@ -790,7 +790,7 @@ const getProtocolName = (protocol: string | number) => {
 }
 
 const getActionName = (action?: string) => {
-  const map: Record<string, string> = { allow: '允许', deny: '拒绝' }
+  const map: Record<string, string> = { allow: t('policyTerms.allow'), deny: t('policyTerms.deny') }
   return map[action || ''] || action
 }
 
@@ -800,8 +800,8 @@ const getActionType = (action?: string) => {
 }
 
 const formatDirection = (direction?: string) => {
-  const map: Record<string, string> = { ingress: '入站', egress: '出站', both: '双向' }
-  return map[direction || ''] || direction || '入站'
+  const map: Record<string, string> = { ingress: t('policyTerms.ingress'), egress: t('policyTerms.egress'), both: t('policyTerms.both') }
+  return map[direction || ''] || direction || t('policyTerms.ingress')
 }
 
 const formatGroupOption = (group: IPGroupOption) => {
@@ -814,7 +814,7 @@ const formatGroupRef = (groupId?: string, fallback?: string) => {
     const group = groupById.value.get(groupId)
     if (group) return group.name
     if (fallback && fallback !== groupId) return fallback
-    return '未知 IP Group'
+    return t('policyTerms.unknownIpGroup')
   }
   return fallback || 'any'
 }

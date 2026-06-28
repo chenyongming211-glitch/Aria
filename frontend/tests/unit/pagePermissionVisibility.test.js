@@ -345,18 +345,18 @@ describe('page-level RBAC button visibility', () => {
     permissionSet.add('acls:write')
     const allowed = mountWithStubs(ACLRules)
     await flushPromises()
-    expect(allowed.text()).toContain('新建规则')
-    expect(allowed.text()).toContain('编辑')
-    expect(allowed.text()).toContain('删除')
-    expect(allowed.text()).toContain('重试')
+    expect(allowed.text()).toContain('acl.newRule')
+    expect(allowed.text()).toContain('common.edit')
+    expect(allowed.text()).toContain('common.delete')
+    expect(allowed.text()).toContain('policyTerms.retry')
 
     permissionSet.clear()
     const denied = mountWithStubs(ACLRules)
     await flushPromises()
-    expect(denied.text()).not.toContain('新建规则')
-    expect(denied.text()).not.toContain('编辑')
-    expect(denied.text()).not.toContain('删除')
-    expect(denied.text()).not.toContain('重试')
+    expect(denied.text()).not.toContain('acl.newRule')
+    expect(denied.text()).not.toContain('common.edit')
+    expect(denied.text()).not.toContain('common.delete')
+    expect(denied.text()).not.toContain('policyTerms.retry')
   })
 
   it('shows/hides Tokens create and revoke actions based on tokens:write', async () => {
@@ -391,14 +391,14 @@ describe('page-level RBAC button visibility', () => {
     permissionSet.add('nodes:write')
     const allowed = mountWithStubs(Nodes)
     await flushPromises()
-    expect(allowed.text()).toContain('Add Node')
-    expect(allowed.text()).toContain('Save Changes')
+    expect(allowed.text()).toContain('nodesPage.addNode')
+    expect(allowed.text()).toContain('nodesPage.saveChanges')
 
     permissionSet.clear()
     const denied = mountWithStubs(Nodes)
     await flushPromises()
-    expect(denied.text()).not.toContain('Add Node')
-    expect(denied.text()).not.toContain('Save Changes')
+    expect(denied.text()).not.toContain('nodesPage.addNode')
+    expect(denied.text()).not.toContain('nodesPage.saveChanges')
   })
 
   it('shows/hides Nodes command actions based on commands:write', async () => {
@@ -413,8 +413,8 @@ describe('page-level RBAC button visibility', () => {
       recentCommands: []
     }
     await allowed.vm.$nextTick()
-    expect(allowed.text()).toContain('Force Sync')
-    expect(allowed.text()).toContain('Health Check')
+    expect(allowed.text()).toContain('nodesPage.forceSync')
+    expect(allowed.text()).toContain('monitoringPage.healthCheck')
 
     permissionSet.clear()
     const denied = mountWithStubs(Nodes)
@@ -427,8 +427,8 @@ describe('page-level RBAC button visibility', () => {
       recentCommands: []
     }
     await denied.vm.$nextTick()
-    expect(denied.text()).not.toContain('Force Sync')
-    expect(denied.text()).not.toContain('Health Check')
+    expect(denied.text()).not.toContain('nodesPage.forceSync')
+    expect(denied.text()).not.toContain('monitoringPage.healthCheck')
   })
 
   it('renders the Nodes detail basic information heading once', async () => {
@@ -444,7 +444,7 @@ describe('page-level RBAC button visibility', () => {
     }
     await wrapper.vm.$nextTick()
 
-    const matches = wrapper.text().match(/Basic Information/g) || []
+    const matches = wrapper.text().match(/nodesPage\.basicInformation/g) || []
     expect(matches).toHaveLength(1)
   })
 
@@ -501,17 +501,17 @@ describe('page-level RBAC button visibility', () => {
     const allowed = mountWithStubs(Routing)
     await flushPromises()
     const allowedButtons = allowed.findAll('button').map((button) => button.text())
-    expect(allowedButtons).toContain('添加路由')
-    expect(allowedButtons).toContain('编辑')
-    expect(allowedButtons).toContain('删除')
+    expect(allowedButtons).toContain('routing.addRoute')
+    expect(allowedButtons).toContain('common.edit')
+    expect(allowedButtons).toContain('common.delete')
 
     permissionSet.clear()
     const denied = mountWithStubs(Routing)
     await flushPromises()
     const deniedButtons = denied.findAll('button').map((button) => button.text())
-    expect(deniedButtons).not.toContain('添加路由')
-    expect(deniedButtons).not.toContain('编辑')
-    expect(deniedButtons).not.toContain('删除')
+    expect(deniedButtons).not.toContain('routing.addRoute')
+    expect(deniedButtons).not.toContain('common.edit')
+    expect(deniedButtons).not.toContain('common.delete')
   })
 
   it('shows/hides Bandwidth write actions based on qos:write', async () => {
@@ -519,35 +519,35 @@ describe('page-level RBAC button visibility', () => {
     const allowed = mountWithStubs(BandwidthControl)
     await flushPromises()
     const allowedButtons = allowed.findAll('button').map((button) => button.text())
-    expect(allowedButtons).toContain('添加规则')
-    expect(allowedButtons).toContain('编辑')
-    expect(allowedButtons).toContain('删除')
-    expect(allowedButtons).toContain('重试')
-    expect(allowedButtons).toContain('保存并应用')
+    expect(allowedButtons).toContain('qos.addRule')
+    expect(allowedButtons).toContain('common.edit')
+    expect(allowedButtons).toContain('common.delete')
+    expect(allowedButtons).toContain('policyTerms.retry')
+    expect(allowedButtons).toContain('common.save')
 
     permissionSet.clear()
     const denied = mountWithStubs(BandwidthControl)
     await flushPromises()
     const deniedButtons = denied.findAll('button').map((button) => button.text())
-    expect(deniedButtons).not.toContain('添加规则')
-    expect(deniedButtons).not.toContain('编辑')
-    expect(deniedButtons).not.toContain('删除')
-    expect(deniedButtons).not.toContain('重试')
-    expect(deniedButtons).not.toContain('保存并应用')
+    expect(deniedButtons).not.toContain('qos.addRule')
+    expect(deniedButtons).not.toContain('common.edit')
+    expect(deniedButtons).not.toContain('common.delete')
+    expect(deniedButtons).not.toContain('policyTerms.retry')
+    expect(deniedButtons).not.toContain('common.save')
   })
 
   it('shows/hides IPGroups write actions based on ip-groups:write', async () => {
     permissionSet.add('ip-groups:write')
     const allowed = mountWithStubs(IPGroups)
     await flushPromises()
-    expect(allowed.text()).toContain('新建 Group')
-    expect(allowed.text()).toContain('保存')
+    expect(allowed.text()).toContain('ipGroups.newGroup')
+    expect(allowed.text()).toContain('common.save')
 
     permissionSet.clear()
     const denied = mountWithStubs(IPGroups)
     await flushPromises()
-    expect(denied.text()).not.toContain('新建 Group')
-    expect(denied.text()).not.toContain('保存')
+    expect(denied.text()).not.toContain('ipGroups.newGroup')
+    expect(denied.text()).not.toContain('common.save')
   })
 
   it('shows the IP Group menu only with ip-groups:read', () => {
@@ -566,11 +566,11 @@ describe('page-level RBAC button visibility', () => {
     permissionSet.add('commands:write')
     const allowed = mountWithStubs(Monitoring)
     await flushPromises()
-    expect(allowed.text()).toContain('Resolve')
+    expect(allowed.text()).toContain('monitoringPage.resolve')
 
     permissionSet.clear()
     const denied = mountWithStubs(Monitoring)
     await flushPromises()
-    expect(denied.text()).not.toContain('Resolve')
+    expect(denied.text()).not.toContain('monitoringPage.resolve')
   })
 })

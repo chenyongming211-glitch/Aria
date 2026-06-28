@@ -1,8 +1,8 @@
 <template>
   <div class="policy-center page-shell">
     <PageHeader
-      title="Policy Center"
-      subtitle="Review ACL, QoS, and Route policy inventory with delivery evidence before drilling into each policy domain."
+      :title="t('policies.title')"
+      :subtitle="t('policies.subtitle')"
     >
       <template #actions>
         <el-button v-if="hasPermission('ip-groups:read')" @click="goToIpGroups">
@@ -11,19 +11,19 @@
         </el-button>
         <el-button v-if="hasPermission('acls:read')" @click="goToKind('acl')">
           <el-icon><Lock /></el-icon>
-          ACL 规则
+          {{ t('policies.aclRules') }}
         </el-button>
         <el-button v-if="hasPermission('qos:read')" @click="goToKind('qos')">
           <el-icon><Histogram /></el-icon>
-          流量控制
+          {{ t('policies.bandwidthControl') }}
         </el-button>
         <el-button v-if="hasPermission('routes:read')" @click="goToKind('route')">
           <el-icon><Connection /></el-icon>
-          路由管理
+          {{ t('policies.routingManagement') }}
         </el-button>
         <el-button type="primary" @click="refreshData">
           <el-icon><Refresh /></el-icon>
-          刷新
+          {{ t('common.refresh') }}
         </el-button>
       </template>
     </PageHeader>
@@ -34,24 +34,24 @@
       <template #filters>
         <el-input
           v-model="filters.keyword"
-          placeholder="按名称、节点或 policy_ref 搜索"
+          :placeholder="t('policies.keywordPlaceholder')"
           clearable
           class="keyword-filter"
         />
-        <el-select v-model="filters.kind" clearable placeholder="策略类型" class="filter-item">
+        <el-select v-model="filters.kind" clearable :placeholder="t('policies.policyType')" class="filter-item">
           <el-option label="ACL" value="acl" />
           <el-option label="QoS" value="qos" />
-          <el-option label="Route" value="route" />
+          <el-option :label="t('policies.route')" value="route" />
         </el-select>
-        <el-select v-model="filters.status" clearable placeholder="交付状态" class="filter-item" @change="filters.statusGroup = ''">
-          <el-option label="已应用" value="applied" />
-          <el-option label="待下发" value="pending" />
-          <el-option label="下发中" value="in_progress" />
-          <el-option label="已过期" value="stale" />
-          <el-option label="失败" value="error" />
-          <el-option label="空闲" value="idle" />
+        <el-select v-model="filters.status" clearable :placeholder="t('policyTerms.deliveryStatus')" class="filter-item" @change="filters.statusGroup = ''">
+          <el-option :label="t('policies.applied')" value="applied" />
+          <el-option :label="t('policies.pending')" value="pending" />
+          <el-option :label="t('policies.inProgress')" value="in_progress" />
+          <el-option :label="t('policies.stale')" value="stale" />
+          <el-option :label="t('policies.failed')" value="error" />
+          <el-option :label="t('policies.idle')" value="idle" />
         </el-select>
-        <el-select v-model="filters.nodeId" clearable placeholder="目标节点" class="filter-item">
+        <el-select v-model="filters.nodeId" clearable :placeholder="t('policies.targetNode')" class="filter-item">
           <el-option
             v-for="node in nodeOptions"
             :key="node.id"
@@ -64,22 +64,22 @@
 
     <DataPanel
       class="policy-inventory-panel"
-      title="Unified policy inventory"
-      subtitle="Policy writes stay in ACL, QoS, and Route pages; this view keeps delivery state and failure evidence aligned."
+      :title="t('policies.panelTitle')"
+      :subtitle="t('policies.panelSubtitle')"
       v-loading="loading"
     >
       <div class="policy-panel-body">
         <el-alert
-          title="统一策略视图"
+          :title="t('policies.infoTitle')"
           type="info"
           :closable="false"
-          description="这一页不再把 ACL、QoS、Route 当成几套平行概念，而是统一成租户作用域下的策略资源。具体写操作仍然保留在各自专页。"
+          :description="t('policies.infoDescription')"
           style="margin-bottom: 20px;"
         />
 
         <el-alert
           v-if="hasRouteContext"
-          title="Monitoring Context"
+          :title="t('policies.monitoringContext')"
           type="warning"
           :closable="false"
           style="margin-bottom: 20px;"
@@ -88,10 +88,10 @@
             <span>{{ routeContextSummary }}</span>
             <div class="context-alert-actions">
               <el-button v-if="selectedPolicy" size="small" @click="openNodeDetail(selectedPolicy)">
-                打开节点详情
+                {{ t('policies.openNodeDetail') }}
               </el-button>
               <el-button v-if="selectedPolicy" size="small" type="primary" @click="showDetails(selectedPolicy)">
-                聚焦交付历史
+                {{ t('policies.focusDeliveryHistory') }}
               </el-button>
             </div>
           </div>
@@ -103,7 +103,7 @@
           stripe
           style="width: 100%"
         >
-          <el-table-column prop="kind" label="类型" width="110">
+          <el-table-column prop="kind" :label="t('common.type')" width="110">
             <template #default="{ row }">
               <el-tag :type="kindTagType(row.kind)">
                 {{ kindLabel(row.kind) }}
@@ -111,27 +111,27 @@
             </template>
           </el-table-column>
 
-          <el-table-column prop="name" label="名称" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="name" :label="t('common.name')" min-width="200" show-overflow-tooltip />
 
-          <el-table-column prop="nodeName" label="目标节点" width="180" show-overflow-tooltip />
+          <el-table-column prop="nodeName" :label="t('policies.targetNode')" width="180" show-overflow-tooltip />
 
-          <el-table-column label="摘要" min-width="320" show-overflow-tooltip>
+          <el-table-column :label="t('policies.summary')" min-width="320" show-overflow-tooltip>
             <template #default="{ row }">
               {{ summarizePolicy(row) }}
             </template>
           </el-table-column>
 
-          <el-table-column label="启用" width="90">
+          <el-table-column :label="t('policyTerms.enabled')" width="90">
             <template #default="{ row }">
               <el-tag size="small" :type="row.enabled ? 'success' : 'info'">
-                {{ row.enabled ? '启用' : '禁用' }}
+                {{ row.enabled ? t('policyTerms.enabled') : t('policyTerms.disabled') }}
               </el-tag>
             </template>
           </el-table-column>
 
-          <el-table-column prop="priority" label="优先级" width="90" />
+          <el-table-column prop="priority" :label="t('policyTerms.priority')" width="90" />
 
-          <el-table-column label="状态" width="110">
+          <el-table-column :label="t('common.status')" width="110">
             <template #default="{ row }">
               <el-tag size="small" :type="statusTagType(row.status)">
                 {{ statusLabel(row.status, t) }}
@@ -139,7 +139,7 @@
             </template>
           </el-table-column>
 
-          <el-table-column label="Convergence" width="120">
+          <el-table-column :label="t('policies.convergence')" width="120">
             <template #default="{ row }">
               <el-tag size="small" :type="convergenceTagType(row.stateConvergence)">
                 {{ convergenceLabel(row.stateConvergence) }}
@@ -147,9 +147,9 @@
             </template>
           </el-table-column>
 
-          <el-table-column prop="pendingCmds" label="待执行" width="90" />
+          <el-table-column prop="pendingCmds" :label="t('policyTerms.pendingCommands')" width="90" />
 
-          <el-table-column label="最近命令" width="150">
+          <el-table-column :label="t('policyTerms.lastCommand')" width="150">
             <template #default="{ row }">
               <el-tooltip
                 v-if="row.lastDeliveryCommandId"
@@ -162,9 +162,9 @@
             </template>
           </el-table-column>
 
-          <el-table-column prop="lastDeliveryError" label="失败原因" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="lastDeliveryError" :label="t('policyTerms.failureReason')" min-width="180" show-overflow-tooltip />
 
-          <el-table-column label="操作" width="260">
+          <el-table-column :label="t('common.actions')" width="260">
             <template #default="{ row }">
               <el-button
                 v-if="canRetryPolicy(row)"
@@ -172,17 +172,17 @@
                 type="warning"
                 @click="retryPolicyDelivery(row)"
               >
-                重试
+                {{ t('policyTerms.retry') }}
               </el-button>
               <el-button size="small" @click="showDetails(row)">
                 <el-icon><View /></el-icon>
-                详情
+                {{ t('policies.details') }}
               </el-button>
               <el-button size="small" @click="openNodeDetail(row)">
-                节点详情
+                {{ t('policies.openNodeDetail') }}
               </el-button>
               <el-button size="small" type="primary" @click="goToKind(row.kind, row)">
-                前往专页
+                {{ t('policies.goToDomain') }}
               </el-button>
             </template>
           </el-table-column>
@@ -190,29 +190,29 @@
       </div>
     </DataPanel>
 
-    <el-drawer v-model="detailVisible" title="策略详情" size="45%">
+    <el-drawer v-model="detailVisible" :title="t('policies.policyDetails')" size="45%">
       <template v-if="selectedPolicy">
         <el-descriptions :column="1" border>
-          <el-descriptions-item label="策略 ID">{{ selectedPolicy.policyId }}</el-descriptions-item>
-          <el-descriptions-item label="策略类型">{{ kindLabel(selectedPolicy.kind) }}</el-descriptions-item>
-          <el-descriptions-item label="目标节点">{{ selectedPolicy.nodeName }}</el-descriptions-item>
-          <el-descriptions-item label="交付状态">{{ statusLabel(selectedPolicy.status, t) }}</el-descriptions-item>
-          <el-descriptions-item label="最近命令 ID">{{ selectedPolicy.lastDeliveryCommandId || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="版本">{{ selectedPolicy.version || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="Desired Version">{{ selectedPolicy.desiredStateVersion || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="Applied Version">{{ selectedPolicy.appliedStateVersion || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="Observed State">{{ statusLabel(selectedPolicy.observedState, t) }}</el-descriptions-item>
-          <el-descriptions-item label="Convergence">{{ convergenceLabel(selectedPolicy.stateConvergence) }}</el-descriptions-item>
-          <el-descriptions-item label="Observed Message" :span="1">{{ selectedPolicy.observedMessage || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="Observed At">{{ formatTimestamp(selectedPolicy.observedAt) }}</el-descriptions-item>
+          <el-descriptions-item :label="t('policies.policyId')">{{ selectedPolicy.policyId }}</el-descriptions-item>
+          <el-descriptions-item :label="t('policies.policyKind')">{{ kindLabel(selectedPolicy.kind) }}</el-descriptions-item>
+          <el-descriptions-item :label="t('policies.targetNode')">{{ selectedPolicy.nodeName }}</el-descriptions-item>
+          <el-descriptions-item :label="t('policyTerms.deliveryStatus')">{{ statusLabel(selectedPolicy.status, t) }}</el-descriptions-item>
+          <el-descriptions-item :label="t('policies.commandId')">{{ selectedPolicy.lastDeliveryCommandId || '-' }}</el-descriptions-item>
+          <el-descriptions-item :label="t('policies.version')">{{ selectedPolicy.version || '-' }}</el-descriptions-item>
+          <el-descriptions-item :label="t('policies.desiredVersion')">{{ selectedPolicy.desiredStateVersion || '-' }}</el-descriptions-item>
+          <el-descriptions-item :label="t('policies.appliedVersion')">{{ selectedPolicy.appliedStateVersion || '-' }}</el-descriptions-item>
+          <el-descriptions-item :label="t('policies.observedState')">{{ statusLabel(selectedPolicy.observedState, t) }}</el-descriptions-item>
+          <el-descriptions-item :label="t('policies.convergence')">{{ convergenceLabel(selectedPolicy.stateConvergence) }}</el-descriptions-item>
+          <el-descriptions-item :label="t('policies.observedMessage')" :span="1">{{ selectedPolicy.observedMessage || '-' }}</el-descriptions-item>
+          <el-descriptions-item :label="t('policies.observedAt')">{{ formatTimestamp(selectedPolicy.observedAt) }}</el-descriptions-item>
         </el-descriptions>
 
-        <h4 class="section-title">Spec</h4>
+        <h4 class="section-title">{{ t('policies.spec') }}</h4>
         <pre class="spec-block">{{ prettySpec(selectedPolicy.spec) }}</pre>
 
-        <h4 class="section-title">交付历史</h4>
+        <h4 class="section-title">{{ t('policies.deliveryHistory') }}</h4>
         <div v-if="selectedPolicy.deliveryHistory.length === 0" class="empty-history">
-          暂无交付记录
+          {{ t('policies.noDeliveryHistory') }}
         </div>
         <div v-else class="delivery-history">
           <div
@@ -236,9 +236,9 @@
         </div>
 
         <div class="drawer-actions">
-          <el-button @click="openNodeDetail(selectedPolicy)">打开节点监控</el-button>
-          <el-button v-if="canRetryPolicy(selectedPolicy)" type="warning" @click="retryPolicyDelivery(selectedPolicy)">重试下发</el-button>
-          <el-button type="primary" @click="goToKind(selectedPolicy.kind, selectedPolicy)">前往专页</el-button>
+          <el-button @click="openNodeDetail(selectedPolicy)">{{ t('policies.openNodeMonitor') }}</el-button>
+          <el-button v-if="canRetryPolicy(selectedPolicy)" type="warning" @click="retryPolicyDelivery(selectedPolicy)">{{ t('policies.retryDelivery') }}</el-button>
+          <el-button type="primary" @click="goToKind(selectedPolicy.kind, selectedPolicy)">{{ t('policies.goToDomain') }}</el-button>
         </div>
       </template>
     </el-drawer>
@@ -345,8 +345,8 @@ const kindLabel = (kind?: string) => {
   switch (kind) {
     case 'acl': return 'ACL'
     case 'qos': return 'QoS'
-    case 'route': return 'Route'
-    default: return kind || 'Unknown'
+    case 'route': return t('policies.route')
+    default: return kind || t('policies.kindUnknown')
   }
 }
 
@@ -361,12 +361,12 @@ const kindTagType = (kind?: string) => {
 
 const convergenceLabel = (value?: string) => {
   const labels: Record<string, string> = {
-    converged: 'Converged',
-    pending: 'Pending',
-    diverged: 'Diverged',
-    idle: 'Idle'
+    converged: t('policies.converged'),
+    pending: t('policies.pending'),
+    diverged: t('policies.diverged'),
+    idle: t('policies.idle')
   }
-  return labels[value || ''] || value || 'Unknown'
+  return labels[value || ''] || value || t('policies.kindUnknown')
 }
 
 const convergenceTagType = (value?: string) => {
@@ -419,16 +419,16 @@ const hasRouteContext = computed(() => Object.values(routeContext.value).some(Bo
 const routeContextSummary = computed(() => {
   const parts = []
   if (routeContext.value.kind) {
-    parts.push(`Kind: ${routeContext.value.kind}`)
+    parts.push(`${t('policies.kind')}: ${routeContext.value.kind}`)
   }
   if (routeContext.value.policyRef) {
-    parts.push(`Policy: ${routeContext.value.policyRef}`)
+    parts.push(`${t('policies.policy')}: ${routeContext.value.policyRef}`)
   }
   if (routeContext.value.commandId) {
-    parts.push(`Command: ${routeContext.value.commandId}`)
+    parts.push(`${t('policies.command')}: ${routeContext.value.commandId}`)
   }
   if (routeContext.value.nodeId) {
-    parts.push(`Node: ${routeContext.value.nodeId}`)
+    parts.push(`${t('policies.node')}: ${routeContext.value.nodeId}`)
   }
   return parts.join(' | ')
 })
@@ -527,9 +527,9 @@ const stats = computed(() => {
 const policyMetricItems = computed<PolicyMetric[]>(() => [
   {
     key: 'total',
-    label: 'Total',
+    label: t('policies.total'),
     value: stats.value.total,
-    meta: 'filtered policies',
+    meta: t('policies.totalMeta'),
     status: 'info',
     clickable: true,
     filter: { kind: '', status: '' }
@@ -538,7 +538,7 @@ const policyMetricItems = computed<PolicyMetric[]>(() => [
     key: 'acl',
     label: 'ACL',
     value: stats.value.acl,
-    meta: 'access control',
+    meta: t('policies.aclMeta'),
     status: 'danger',
     clickable: true,
     filter: { kind: 'acl' }
@@ -547,7 +547,7 @@ const policyMetricItems = computed<PolicyMetric[]>(() => [
     key: 'qos',
     label: 'QoS',
     value: stats.value.qos,
-    meta: 'bandwidth rules',
+    meta: t('policies.qosMeta'),
     status: 'warning',
     clickable: true,
     filter: { kind: 'qos' }
@@ -556,34 +556,34 @@ const policyMetricItems = computed<PolicyMetric[]>(() => [
     key: 'route',
     label: 'Route',
     value: stats.value.route,
-    meta: 'advertised routes',
+    meta: t('policies.routeMeta'),
     status: 'success',
     clickable: true,
     filter: { kind: 'route' }
   },
   {
     key: 'applied',
-    label: 'Applied',
+    label: t('policies.applied'),
     value: stats.value.applied,
-    meta: 'agent applied',
+    meta: t('policies.appliedMeta'),
     status: 'success',
     clickable: true,
     filter: { status: 'applied' }
   },
   {
     key: 'pending',
-    label: 'Pending',
+    label: t('policies.pending'),
     value: stats.value.pending,
-    meta: 'awaiting agent',
+    meta: t('policies.pendingMeta'),
     status: 'warning',
     clickable: true,
     filter: { status: '', statusGroup: 'active' }
   },
   {
     key: 'failed',
-    label: 'Failed',
+    label: t('policies.failed'),
     value: stats.value.failed,
-    meta: 'needs retry',
+    meta: t('policies.failedMeta'),
     status: 'danger',
     clickable: true,
     filter: { status: '', statusGroup: 'failed' }
@@ -605,7 +605,7 @@ const handleMetricSelect = (metric?: PolicyMetric) => {
   }
 }
 
-const errorMessage = (error: unknown, fallback = '未知错误'): string =>
+const errorMessage = (error: unknown, fallback = t('policyTerms.unknownError')): string =>
   error instanceof Error ? error.message : (typeof error === 'string' ? error : fallback)
 
 const fetchPolicies = async () => {
@@ -616,7 +616,7 @@ const fetchPolicies = async () => {
     focusPolicyFromRoute()
   } catch (error) {
     console.error('Failed to fetch unified policies:', error)
-    ElMessage.error(`获取统一策略视图失败: ${errorMessage(error, String(error || '未知错误'))}`)
+    ElMessage.error(`${t('policies.fetchFailed')}: ${errorMessage(error, String(error || t('policyTerms.unknownError')))}`)
   } finally {
     loading.value = false
   }
@@ -725,7 +725,7 @@ const commandIdForPolicy = (policy?: NormalizedPolicy | null): string => {
 
 const openNodeDetail = (policy: NormalizedPolicy, options: NodeDetailOptions = {}) => {
   if (!policy?.nodeId) {
-    ElMessage.warning('该策略没有目标节点')
+    ElMessage.warning(t('policies.noTargetNode'))
     return
   }
   const commandId = options.commandId || routeContext.value.commandId
@@ -764,7 +764,7 @@ const canRetryPolicy = (policy?: NormalizedPolicy | null) => {
 
 const retryPolicyDelivery = async (policy: NormalizedPolicy) => {
   if (!canRetryPolicy(policy)) {
-    ElMessage.warning('当前策略状态或权限不允许重试')
+    ElMessage.warning(t('policies.retryNotAllowed'))
     return
   }
 
@@ -775,7 +775,7 @@ const retryPolicyDelivery = async (policy: NormalizedPolicy) => {
       policyRef: policy.policyRef,
       policyName: policy.name
     })
-    ElMessage.success('重试下发已排队')
+    ElMessage.success(t('policyTerms.retryQueued'))
     await fetchPolicies()
     const commandId = commandIdForPolicy(response)
     if (commandId) {
@@ -788,7 +788,7 @@ const retryPolicyDelivery = async (policy: NormalizedPolicy) => {
       }, { commandId, focus: 'commands' })
     }
   } catch (error) {
-    ElMessage.error(`重试失败: ${errorMessage(error)}`)
+    ElMessage.error(`${t('policyTerms.retryFailed')}: ${errorMessage(error)}`)
   }
 }
 

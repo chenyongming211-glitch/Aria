@@ -1,9 +1,9 @@
-<!-- src/views/Nodes.vue - 现代化节点管理页面 -->
+<!-- src/views/Nodes.vue -->
 <template>
   <div class="nodes-page page-shell">
     <PageHeader
-      title="Node Management"
-      subtitle="Monitor registration, runtime health, desired state convergence, and node-level operations."
+      :title="t('nodeManagement.title')"
+      :subtitle="t('nodesPage.subtitle')"
     >
       <template #actions>
         <el-button
@@ -11,10 +11,10 @@
           @click="refreshNodes"
           :loading="loading"
         >
-          Refresh
+          {{ t('common.refresh') }}
         </el-button>
         <el-button v-if="hasPermission('nodes:write')" type="primary" :icon="Plus" @click="addNode">
-          Add Node
+          {{ t('nodesPage.addNode') }}
         </el-button>
       </template>
     </PageHeader>
@@ -25,7 +25,7 @@
       <template #filters>
         <el-input
           v-model="searchQuery"
-          placeholder="Search nodes..."
+          :placeholder="t('nodesPage.searchPlaceholder')"
           class="search-input"
           clearable
         >
@@ -38,8 +38,8 @@
 
     <DataPanel
       class="nodes-card"
-      title="Node Fleet"
-      subtitle="Inventory, control convergence, and node-level actions."
+      :title="t('nodesPage.nodeFleet')"
+      :subtitle="t('nodesPage.nodeFleetSubtitle')"
     >
       <el-table
         :data="paginatedNodes"
@@ -47,16 +47,16 @@
         class="nodes-table"
         v-loading="loading"
       >
-        <el-table-column prop="hostname" label="Hostname" min-width="140" />
-        <el-table-column prop="publicIp" label="Public IP" width="130" />
-        <el-table-column prop="vpnIp" label="VPN IP" width="120" />
-        <el-table-column prop="region" label="Region" width="80">
+        <el-table-column prop="hostname" :label="t('nodeManagement.hostname')" min-width="140" />
+        <el-table-column prop="publicIp" :label="t('nodesPage.publicIp')" width="130" />
+        <el-table-column prop="vpnIp" :label="t('nodesPage.vpnIp')" width="120" />
+        <el-table-column prop="region" :label="t('nodeManagement.region')" width="80">
           <template #default="{ row }">
             <span class="region-badge">{{ row.region.toUpperCase() }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="version" label="Version" width="100" />
-        <el-table-column prop="mode" label="Mode" width="100">
+        <el-table-column prop="version" :label="t('nodeManagement.version')" width="100" />
+        <el-table-column prop="mode" :label="t('nodesPage.mode')" width="100">
           <template #default="{ row }">
             <div class="mode-badge">
               {{ row.mode }}
@@ -66,17 +66,17 @@
                 type="success"
                 effect="plain"
               >
-                Opt
+                {{ t('nodesPage.optimized') }}
               </el-tag>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="Status" width="100">
+        <el-table-column :label="t('nodeManagement.status')" width="100">
           <template #default="{ row }">
             <StatusBadge :status="row.status" :label="row.status" />
           </template>
         </el-table-column>
-        <el-table-column label="Onboarding" width="130">
+        <el-table-column :label="t('nodesPage.onboarding')" width="130">
           <template #default="{ row }">
             <el-tooltip
               v-if="row.onboarding?.lastError || row.onboarding?.nextAction"
@@ -92,7 +92,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="Sync" width="120">
+        <el-table-column :label="t('nodesPage.sync')" width="120">
           <template #default="{ row }">
             <el-tooltip
               v-if="row.observedMessage || row.lastCommandError"
@@ -108,33 +108,33 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="Desired / Applied" width="180">
+        <el-table-column :label="t('nodesPage.desiredApplied')" width="180">
           <template #default="{ row }">
             <div class="state-version-cell" :class="{ 'version-mismatch': row.desiredStateVersion !== row.appliedStateVersion }">
               <div class="version-line desired">
-                <el-tooltip content="Desired State Version" placement="left">
+                <el-tooltip :content="t('nodesPage.desiredStateVersion')" placement="left">
                   <span>{{ shortStateVersion(row.desiredStateVersion) }}</span>
                 </el-tooltip>
               </div>
               <div class="version-line applied muted-line">
-                <el-tooltip content="Applied State Version" placement="left">
+                <el-tooltip :content="t('nodesPage.appliedStateVersion')" placement="left">
                   <span>{{ shortStateVersion(row.appliedStateVersion) }}</span>
                 </el-tooltip>
               </div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="pendingCmds" label="Pending" width="90" />
-        <el-table-column prop="lastSeen" label="Last Seen" width="150" />
-        <el-table-column label="Actions" width="180" fixed="right">
+        <el-table-column prop="pendingCmds" :label="t('nodesPage.pending')" width="90" />
+        <el-table-column prop="lastSeen" :label="t('nodeManagement.lastSeen')" width="150" />
+        <el-table-column :label="t('nodeManagement.actions')" width="180" fixed="right">
           <template #default="{ row }">
             <div class="action-buttons">
-              <ActionIconButton label="View node details" @click="viewNodeDetails(row)">
+              <ActionIconButton :label="t('nodesPage.viewNodeDetails')" @click="viewNodeDetails(row)">
                 <el-icon><View /></el-icon>
               </ActionIconButton>
               <ActionIconButton
                 v-if="hasPermission('nodes:write')"
-                label="Edit node"
+                :label="t('nodesPage.editNode')"
                 tone="primary"
                 @click="handleEditNode(row)"
               >
@@ -142,11 +142,11 @@
               </ActionIconButton>
               <el-popconfirm
                 v-if="hasPermission('nodes:write')"
-                title="Are you sure to delete this node?"
+                :title="t('nodesPage.deleteConfirm')"
                 @confirm="handleDeleteNode(row.id)"
               >
                 <template #reference>
-                  <ActionIconButton label="Delete node" tone="danger">
+                  <ActionIconButton :label="t('nodesPage.deleteNode')" tone="danger">
                     <el-icon><Delete /></el-icon>
                   </ActionIconButton>
                 </template>
@@ -172,7 +172,7 @@
     <!-- 节点详情对话框 -->
     <el-dialog
       v-model="detailDialogVisible"
-      title="Node Details"
+      :title="t('nodesPage.nodeDetails')"
       width="800px"
       custom-class="node-detail-dialog"
       @closed="closeDetailDialog"
@@ -182,10 +182,10 @@
           <div class="section-header">
             <h4 class="section-title">
               <el-icon><Operation /></el-icon>
-              Operations Summary
+              {{ t('nodeMonitorDetail.operationsSummary') }}
             </h4>
             <el-button size="small" @click="openMonitoringDetail('commands')">
-              Monitoring Context
+              {{ t('nodeMonitorDetail.monitoringContext') }}
             </el-button>
           </div>
           <div class="workbench-summary-grid">
@@ -206,21 +206,21 @@
         <div class="detail-section">
           <h4 class="section-title">
             <el-icon><Connection /></el-icon>
-            Onboarding Evidence
+            {{ t('nodesPage.onboardingEvidence') }}
           </h4>
           <el-descriptions :column="2" border>
-            <el-descriptions-item label="Phase">
+            <el-descriptions-item :label="t('nodesPage.phase')">
               <el-tag size="small" :type="getOnboardingPhaseTagType(selectedNode.onboarding?.phase)">
                 {{ formatOnboardingPhase(selectedNode.onboarding?.phase) }}
               </el-tag>
             </el-descriptions-item>
-            <el-descriptions-item label="Token">
+            <el-descriptions-item :label="t('nodesPage.token')">
               {{ selectedNode.onboarding?.tokenPreview || 'N/A' }}
             </el-descriptions-item>
-            <el-descriptions-item label="First Seen">
+            <el-descriptions-item :label="t('nodesPage.firstSeen')">
               {{ selectedNode.onboarding?.firstSeenAt || 'N/A' }}
             </el-descriptions-item>
-            <el-descriptions-item label="Last Sync">
+            <el-descriptions-item :label="t('nodesPage.lastSync')">
               {{ selectedNode.onboarding?.lastSyncAt || selectedNode.lastSyncAt || 'N/A' }}
             </el-descriptions-item>
           </el-descriptions>
@@ -240,58 +240,58 @@
         <div class="detail-section">
           <h4 class="section-title">
             <el-icon><InfoFilled /></el-icon>
-            Basic Information
+            {{ t('nodesPage.basicInformation') }}
           </h4>
           <el-descriptions :column="2" border>
-            <el-descriptions-item label="Hostname">{{ selectedNode.hostname }}</el-descriptions-item>
-            <el-descriptions-item label="Region">
+            <el-descriptions-item :label="t('nodeManagement.hostname')">{{ selectedNode.hostname }}</el-descriptions-item>
+            <el-descriptions-item :label="t('nodeManagement.region')">
               <span class="region-badge">{{ selectedNode.region.toUpperCase() }}</span>
             </el-descriptions-item>
-            <el-descriptions-item label="Public IP">{{ selectedNode.publicIp }}</el-descriptions-item>
-            <el-descriptions-item label="VPN IP">{{ selectedNode.vpnIp }}</el-descriptions-item>
-            <el-descriptions-item label="Endpoint">{{ selectedNode.endpoint }}</el-descriptions-item>
-            <el-descriptions-item label="Status">
+            <el-descriptions-item :label="t('nodesPage.publicIp')">{{ selectedNode.publicIp }}</el-descriptions-item>
+            <el-descriptions-item :label="t('nodesPage.vpnIp')">{{ selectedNode.vpnIp }}</el-descriptions-item>
+            <el-descriptions-item :label="t('nodesPage.endpoint')">{{ selectedNode.endpoint }}</el-descriptions-item>
+            <el-descriptions-item :label="t('nodeManagement.status')">
               <span class="status-badge" :class="selectedNode.status">
                 {{ selectedNode.status }}
               </span>
             </el-descriptions-item>
-            <el-descriptions-item label="Uptime">{{ selectedNode.uptime }}</el-descriptions-item>
+            <el-descriptions-item :label="t('nodeManagement.uptime')">{{ selectedNode.uptime }}</el-descriptions-item>
           </el-descriptions>
         </div>
 
         <div class="detail-section">
           <h4 class="section-title">
             <el-icon><Connection /></el-icon>
-            Control State
+            {{ t('nodesPage.controlState') }}
           </h4>
           <div class="control-state-grid">
             <div class="control-state-item">
-              <div class="control-state-label">Desired Version</div>
+              <div class="control-state-label">{{ t('nodesPage.desiredVersion') }}</div>
               <div class="control-state-value" :class="{ danger: isStateDiverged }">
                 {{ selectedNode.desiredStateVersion || 'N/A' }}
               </div>
               <div class="control-state-time">{{ selectedNode.desiredStateUpdatedAt || 'N/A' }}</div>
             </div>
             <div class="control-state-item">
-              <div class="control-state-label">Applied Version</div>
+              <div class="control-state-label">{{ t('nodesPage.appliedVersion') }}</div>
               <div class="control-state-value" :class="{ danger: isStateDiverged }">
                 {{ selectedNode.appliedStateVersion || 'N/A' }}
               </div>
               <div class="control-state-time">{{ selectedNode.appliedStateUpdatedAt || 'N/A' }}</div>
             </div>
             <div class="control-state-item">
-              <div class="control-state-label">Observed State</div>
+              <div class="control-state-label">{{ t('nodesPage.observedState') }}</div>
               <div class="control-state-value">{{ selectedNode.observedState || 'idle' }}</div>
               <div class="control-state-time">{{ selectedNode.observedAt || 'N/A' }}</div>
             </div>
             <div class="control-state-item">
-              <div class="control-state-label">Convergence</div>
+              <div class="control-state-label">{{ t('nodesPage.convergence') }}</div>
               <div class="control-state-value">
                 <el-tag size="small" :type="getConvergenceTagType(selectedNode.stateConvergence)">
                   {{ formatConvergence(selectedNode.stateConvergence) }}
                 </el-tag>
               </div>
-              <div class="control-state-time">Last sync: {{ selectedNode.lastSyncAt || 'N/A' }}</div>
+              <div class="control-state-time">{{ t('nodesPage.lastSync') }}: {{ selectedNode.lastSyncAt || 'N/A' }}</div>
             </div>
           </div>
           <el-alert
@@ -308,42 +308,42 @@
           <div class="section-header">
             <h4 class="section-title">
               <el-icon><Key /></el-icon>
-              Certificate Status
+              {{ t('nodeMonitorDetail.certificateStatus') }}
             </h4>
             <el-button size="small" @click="openMonitoringDetail('certificate')">
-              Certificate Context
+              {{ t('nodesPage.certificateContext') }}
             </el-button>
           </div>
           <el-descriptions :column="2" border>
-            <el-descriptions-item label="Status">
+            <el-descriptions-item :label="t('nodeManagement.status')">
               <el-tag size="small" :type="getCertificateStatusTagType(selectedNode.certificate?.status)">
                 {{ selectedNode.certificate?.status || 'missing' }}
               </el-tag>
             </el-descriptions-item>
-            <el-descriptions-item label="Serial Number">
+            <el-descriptions-item :label="t('nodeMonitorDetail.serialNumber')">
               {{ selectedNode.certificate?.serial_number || 'N/A' }}
             </el-descriptions-item>
-            <el-descriptions-item label="Issued At">
+            <el-descriptions-item :label="t('nodeMonitorDetail.issuedAt')">
               {{ formatCommandTime(selectedNode.certificate?.issued_at) }}
             </el-descriptions-item>
-            <el-descriptions-item label="Expires At">
+            <el-descriptions-item :label="t('nodeMonitorDetail.expiresAt')">
               {{ formatCommandTime(selectedNode.certificate?.not_after) }}
             </el-descriptions-item>
-            <el-descriptions-item label="Last Renewed">
+            <el-descriptions-item :label="t('nodesPage.lastRenewed')">
               {{ formatCommandTime(selectedNode.certificateActivity?.last_renewed_at) }}
             </el-descriptions-item>
-            <el-descriptions-item label="Renew Failure">
+            <el-descriptions-item :label="t('nodesPage.renewFailure')">
               {{ selectedNode.certificateActivity?.last_renew_failure || 'N/A' }}
             </el-descriptions-item>
-            <el-descriptions-item label="Last Revoked">
+            <el-descriptions-item :label="t('nodesPage.lastRevoked')">
               {{ formatCommandTime(selectedNode.certificateActivity?.last_revoked_at) }}
             </el-descriptions-item>
-            <el-descriptions-item label="Revoke Reason">
+            <el-descriptions-item :label="t('nodeMonitorDetail.revokeReason')">
               {{ selectedNode.certificateActivity?.last_revoke_reason || selectedNode.certificate?.revoke_reason || 'N/A' }}
             </el-descriptions-item>
           </el-descriptions>
           <div v-if="selectedNode.certificateActivity?.last_renewed_serial_number" class="certificate-note">
-            Last renewed serial: {{ selectedNode.certificateActivity.last_renewed_serial_number }}
+            {{ t('nodeMonitorDetail.lastRenewedSerial') }}: {{ selectedNode.certificateActivity.last_renewed_serial_number }}
           </div>
         </div>
 
@@ -351,7 +351,7 @@
         <div class="detail-section">
           <h4 class="section-title">
             <el-icon><TrendCharts /></el-icon>
-            Real-time Metrics
+            {{ t('nodesPage.realTimeMetrics') }}
           </h4>
           <div class="stats-grid">
             <div class="stat-box">
@@ -360,7 +360,7 @@
               </div>
               <div class="stat-info">
                 <div class="stat-box-value">{{ selectedNode.bandwidth?.upload || 0 }} Mbps</div>
-                <div class="stat-box-label">Upload</div>
+                <div class="stat-box-label">{{ t('nodeManagement.upload') }}</div>
               </div>
             </div>
             <div class="stat-box">
@@ -369,7 +369,7 @@
               </div>
               <div class="stat-info">
                 <div class="stat-box-value">{{ selectedNode.bandwidth?.download || 0 }} Mbps</div>
-                <div class="stat-box-label">Download</div>
+                <div class="stat-box-label">{{ t('nodeManagement.download') }}</div>
               </div>
             </div>
             <div class="stat-box">
@@ -378,7 +378,7 @@
               </div>
               <div class="stat-info">
                 <div class="stat-box-value">{{ selectedNode.latency || 0 }} ms</div>
-                <div class="stat-box-label">Latency</div>
+                <div class="stat-box-label">{{ t('nodeManagement.latency') }}</div>
               </div>
             </div>
             <div class="stat-box">
@@ -387,7 +387,7 @@
               </div>
               <div class="stat-info">
                 <div class="stat-box-value">{{ formatLargeNumber(policyDatapathStats.aclPackets) }}</div>
-                <div class="stat-box-label">ACL Packets</div>
+                <div class="stat-box-label">{{ t('nodesPage.aclPackets') }}</div>
               </div>
             </div>
             <div class="stat-box">
@@ -396,7 +396,7 @@
               </div>
               <div class="stat-info">
                 <div class="stat-box-value">{{ formatMetricBytes(policyDatapathStats.qosPassedBytes) }}</div>
-                <div class="stat-box-label">QoS Passed</div>
+                <div class="stat-box-label">{{ t('nodesPage.qosPassed') }}</div>
               </div>
             </div>
           </div>
@@ -406,10 +406,10 @@
         <div class="detail-section">
           <h4 class="section-title">
             <el-icon><Upload /></el-icon>
-            Advertised Routes (Site-to-Site)
+            {{ t('nodesPage.advertisedRoutesSite') }}
           </h4>
           <div class="routes-list">
-            <el-empty v-if="!selectedNode.routes || selectedNode.routes.length === 0" :image-size="40" description="No advertised routes" />
+            <el-empty v-if="!selectedNode.routes || selectedNode.routes.length === 0" :image-size="40" :description="t('nodesPage.noAdvertisedRoutes')" />
             <el-tag
               v-for="route in selectedNode.routes"
               :key="route"
@@ -427,12 +427,12 @@
         <div class="detail-section">
           <h4 class="section-title">
             <el-icon><Position /></el-icon>
-            Learned Routes (Mesh)
+            {{ t('nodesPage.learnedRoutesMesh') }}
           </h4>
           <el-table
             :data="selectedNode.learnedRoutes || []"
             size="small"
-            empty-text="No routes learned from peers"
+            :empty-text="t('nodesPage.noLearnedRoutes')"
             class="learned-routes-table"
           >
             <el-table-column prop="cidr" label="CIDR" width="150">
@@ -440,14 +440,14 @@
                 <code class="route-code">{{ row.cidr }}</code>
               </template>
             </el-table-column>
-            <el-table-column prop="next_hop_node" label="Next Hop Node" min-width="120" />
-            <el-table-column prop="next_hop_ip" label="VPN IP" width="120" />
-            <el-table-column prop="region" label="Region" width="100">
+            <el-table-column prop="next_hop_node" :label="t('nodesPage.nextHopNode')" min-width="120" />
+            <el-table-column prop="next_hop_ip" :label="t('nodesPage.vpnIp')" width="120" />
+            <el-table-column prop="region" :label="t('nodeManagement.region')" width="100">
               <template #default="{ row }">
                 <span class="region-badge">{{ row.region.toUpperCase() }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="Status" width="100">
+            <el-table-column :label="t('nodeManagement.status')" width="100">
               <template #default="{ row }">
                 <span class="status-badge" :class="row.status">
                   {{ row.status }}
@@ -462,14 +462,14 @@
           <div class="section-header">
             <h4 class="section-title">
               <el-icon><Timer /></el-icon>
-              Recent Commands
+              {{ t('nodesPage.recentCommands') }}
             </h4>
             <div class="detail-toolbar">
               <el-button size="small" @click="openMonitoringDetail('commands')">
-                Monitoring Detail
+                {{ t('nodesPage.monitoringDetail') }}
               </el-button>
               <el-button size="small" @click="openPolicyCenter()">
-                Policy Center
+                {{ t('nodesPage.policyCenter') }}
               </el-button>
               <el-button
                 v-if="hasPermission('commands:write')"
@@ -478,7 +478,7 @@
                 :loading="commandLoading"
                 @click="runQuickCommand('sync')"
               >
-                Force Sync
+                {{ t('nodesPage.forceSync') }}
               </el-button>
               <el-button
                 v-if="hasPermission('commands:write')"
@@ -486,14 +486,14 @@
                 :loading="commandLoading"
                 @click="runQuickCommand('health_check')"
               >
-                Health Check
+                {{ t('monitoringPage.healthCheck') }}
               </el-button>
             </div>
           </div>
           <el-table
             :data="selectedNode.recentCommands || []"
             size="small"
-            empty-text="No commands yet"
+            :empty-text="t('nodesPage.noCommandsYet')"
           >
             <el-table-column label="ID" width="110">
               <template #default="{ row }">
@@ -503,29 +503,29 @@
                 <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column prop="command" label="Command" min-width="120" />
-            <el-table-column prop="status" label="Status" width="120">
+            <el-table-column prop="command" :label="t('nodeMonitorDetail.command')" min-width="120" />
+            <el-table-column prop="status" :label="t('nodeManagement.status')" width="120">
               <template #default="{ row }">
                 <el-tag :type="commandStatusTagType(row.status)" size="small">
                   {{ commandStatusLabel(row.status, t) }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="message" label="Message" min-width="220" show-overflow-tooltip />
-            <el-table-column label="Created" width="180">
+            <el-table-column prop="message" :label="t('nodeMonitorDetail.message')" min-width="220" show-overflow-tooltip />
+            <el-table-column :label="t('nodeMonitorDetail.created')" width="180">
               <template #default="{ row }">
                 {{ formatCommandTime(row.created_at) }}
               </template>
             </el-table-column>
-            <el-table-column label="Completed" width="180">
+            <el-table-column :label="t('nodeMonitorDetail.completed')" width="180">
               <template #default="{ row }">
                 {{ formatCommandTime(row.completed_at || row.updated_at) }}
               </template>
             </el-table-column>
-            <el-table-column label="Actions" width="100">
+            <el-table-column :label="t('nodeManagement.actions')" width="100">
               <template #default="{ row }">
                 <el-button size="small" link @click="openMonitoringCommand(row)">
-                  Open
+                  {{ t('nodesPage.open') }}
                 </el-button>
               </template>
             </el-table-column>
@@ -536,36 +536,36 @@
           <div class="section-header">
             <h4 class="section-title">
               <el-icon><Warning /></el-icon>
-              Active Alerts
+              {{ t('nodesPage.activeAlerts') }}
             </h4>
             <el-button size="small" @click="openMonitoringDetail('alerts')">
-              Open Monitoring
+              {{ t('nodesPage.openMonitoring') }}
             </el-button>
           </div>
           <el-table
             :data="selectedNode.activeAlerts || []"
             size="small"
-            empty-text="No active alerts"
+            :empty-text="t('nodeMonitorDetail.noActiveAlerts')"
           >
-            <el-table-column prop="severity" label="Severity" width="120">
+            <el-table-column prop="severity" :label="t('nodeMonitorDetail.severity')" width="120">
               <template #default="{ row }">
                 <el-tag size="small" :type="getAlertSeverityTagType(row.severity)">
                   {{ row.severity || 'info' }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="alert_type" label="Type" width="150" />
-            <el-table-column prop="title" label="Title" min-width="180" show-overflow-tooltip />
-            <el-table-column prop="message" label="Message" min-width="220" show-overflow-tooltip />
-            <el-table-column label="Created" width="180">
+            <el-table-column prop="alert_type" :label="t('nodeMonitorDetail.type')" width="150" />
+            <el-table-column prop="title" :label="t('nodeMonitorDetail.titleColumn')" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="message" :label="t('nodeMonitorDetail.message')" min-width="220" show-overflow-tooltip />
+            <el-table-column :label="t('nodeMonitorDetail.created')" width="180">
               <template #default="{ row }">
                 {{ formatCommandTime(row.created_at) }}
               </template>
             </el-table-column>
-            <el-table-column label="Actions" width="100">
+            <el-table-column :label="t('nodeManagement.actions')" width="100">
               <template #default="{ row }">
                 <el-button size="small" link @click="openMonitoringAlert(row)">
-                  Open
+                  {{ t('nodesPage.open') }}
                 </el-button>
               </template>
             </el-table-column>
@@ -576,25 +576,25 @@
           <div class="section-header">
             <h4 class="section-title">
               <el-icon><Document /></el-icon>
-              Recent Policy Deliveries
+              {{ t('nodesPage.recentPolicyDeliveries') }}
             </h4>
             <el-button size="small" @click="openPolicyCenter()">
-              Open Policy Center
+              {{ t('nodesPage.openPolicyCenter') }}
             </el-button>
           </div>
           <el-table
             :data="selectedNode.recentPolicyDeliveries || []"
             size="small"
-            empty-text="No recent policy deliveries"
+            :empty-text="t('nodeMonitorDetail.noRecentPolicyDeliveries')"
           >
-            <el-table-column prop="policy_domain" label="Domain" width="120" />
-            <el-table-column label="Policy" min-width="180" show-overflow-tooltip>
+            <el-table-column prop="policy_domain" :label="t('nodeMonitorDetail.domain')" width="120" />
+            <el-table-column :label="t('nodesPage.policy')" min-width="180" show-overflow-tooltip>
               <template #default="{ row }">
                 {{ row.policy_name || row.policy_ref || '-' }}
               </template>
             </el-table-column>
-            <el-table-column prop="policy_ref" label="Ref" width="150" show-overflow-tooltip />
-            <el-table-column label="Command" width="120">
+            <el-table-column prop="policy_ref" :label="t('nodesPage.ref')" width="150" show-overflow-tooltip />
+            <el-table-column :label="t('nodeMonitorDetail.command')" width="120">
               <template #default="{ row }">
                 <el-tooltip v-if="row.command_id" :content="row.command_id" placement="top">
                   <span class="mono-text">{{ shortCommandId(row.command_id) }}</span>
@@ -602,23 +602,23 @@
                 <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column prop="command_status" label="Status" width="120">
+            <el-table-column prop="command_status" :label="t('nodeManagement.status')" width="120">
               <template #default="{ row }">
                 <el-tag size="small" :type="commandStatusTagType(row.command_status)">
                   {{ commandStatusLabel(row.command_status, t) }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="Updated" width="180">
+            <el-table-column :label="t('nodesPage.updated')" width="180">
               <template #default="{ row }">
                 {{ formatCommandTime(row.updated_at || row.completed_at || row.created_at) }}
               </template>
             </el-table-column>
-            <el-table-column prop="last_error" label="Error" min-width="220" show-overflow-tooltip />
-            <el-table-column label="Actions" width="120">
+            <el-table-column prop="last_error" :label="t('nodeMonitorDetail.error')" min-width="220" show-overflow-tooltip />
+            <el-table-column :label="t('nodeManagement.actions')" width="120">
               <template #default="{ row }">
                 <el-button size="small" link @click="openPolicyCenter(row)">
-                  Open
+                  {{ t('nodesPage.open') }}
                 </el-button>
               </template>
             </el-table-column>
@@ -630,28 +630,28 @@
     <!-- 节点接入向导 -->
     <el-dialog
       v-model="onboardingDialogVisible"
-      title="Onboard New Node"
+      :title="t('nodesPage.onboardNewNode')"
       width="760px"
       custom-class="node-onboarding-dialog"
     >
       <div class="onboarding-flow">
         <el-alert
-          title="Create an enrollment token, copy the install command, run it on the target machine, then watch the node come online."
+          :title="t('nodesPage.onboardingIntro')"
           type="info"
           show-icon
           :closable="false"
         />
 
         <div class="onboarding-section">
-          <h4>1. Enrollment Token</h4>
+          <h4>{{ t('nodesPage.enrollmentTokenStep') }}</h4>
           <el-form :model="onboardingForm" label-width="150px">
-            <el-form-item label="Token Tag">
+            <el-form-item :label="t('nodesPage.tokenTag')">
               <el-input v-model="onboardingForm.tokenTag" placeholder="node-onboarding" />
             </el-form-item>
-            <el-form-item label="Max Uses">
+            <el-form-item :label="t('nodesPage.maxUses')">
               <el-input-number v-model="onboardingForm.maxUses" :min="1" :max="1000" />
             </el-form-item>
-            <el-form-item label="TTL Hours">
+            <el-form-item :label="t('nodesPage.ttlHours')">
               <el-input-number v-model="onboardingForm.ttlHours" :min="1" :max="8760" />
             </el-form-item>
             <el-form-item>
@@ -661,13 +661,13 @@
                 :loading="onboardingCreating"
                 @click="createOnboardingToken"
               >
-                Create Token
+                {{ t('nodesPage.createToken') }}
               </el-button>
             </el-form-item>
-            <el-form-item v-if="onboardingTokenValue" label="Token">
+            <el-form-item v-if="onboardingTokenValue" :label="t('nodesPage.token')">
               <el-input :value="onboardingTokenValue" readonly>
                 <template #append>
-                  <el-button @click="copyOnboardingToken">Copy</el-button>
+                  <el-button @click="copyOnboardingToken">{{ t('common.copy') }}</el-button>
                 </template>
               </el-input>
             </el-form-item>
@@ -675,81 +675,81 @@
         </div>
 
         <div class="onboarding-section">
-          <h4>2. Target Settings</h4>
+          <h4>{{ t('nodesPage.targetSettingsStep') }}</h4>
           <el-form :model="onboardingForm" label-width="150px">
-            <el-form-item label="gRPC Server">
+            <el-form-item :label="t('nodesPage.grpcServer')">
               <el-input v-model="onboardingForm.server" placeholder="https://aria.yun:50051" />
             </el-form-item>
-            <el-form-item label="Controller API">
+            <el-form-item :label="t('nodesPage.controllerApi')">
               <el-input v-model="onboardingForm.controllerApiUrl" placeholder="https://aria.yun" />
             </el-form-item>
-            <el-form-item label="Controller CA Path">
+            <el-form-item :label="t('nodesPage.controllerCaPath')">
               <el-input v-model="onboardingForm.caCertPath" placeholder="/etc/aria/certs/ca.crt" />
             </el-form-item>
-            <el-form-item label="Controller CA URL">
+            <el-form-item :label="t('nodesPage.controllerCaUrl')">
               <el-input v-model="onboardingForm.caUrl" placeholder="https://aria.yun/api/v2/controller-info/grpc-ca.crt" />
             </el-form-item>
-            <el-form-item label="TLS Server Name">
+            <el-form-item :label="t('nodesPage.tlsServerName')">
               <el-input v-model="onboardingForm.tlsServerName" placeholder="aria.yun" />
             </el-form-item>
-            <el-form-item label="Region">
+            <el-form-item :label="t('nodeManagement.region')">
               <el-input v-model="onboardingForm.region" placeholder="default" />
             </el-form-item>
-            <el-form-item label="Interface">
+            <el-form-item :label="t('nodesPage.interface')">
               <el-input v-model="onboardingForm.interface" placeholder="aria0" />
             </el-form-item>
-            <el-form-item label="Hostname">
-              <el-input v-model="onboardingForm.hostname" placeholder="optional" />
+            <el-form-item :label="t('nodeManagement.hostname')">
+              <el-input v-model="onboardingForm.hostname" :placeholder="t('nodesPage.optionalPlaceholder')" />
             </el-form-item>
-            <el-form-item label="Advertise Routes">
-              <el-input v-model="onboardingForm.advertiseRoutes" placeholder="optional, comma separated CIDRs" />
+            <el-form-item :label="t('nodesPage.advertiseRoutes')">
+              <el-input v-model="onboardingForm.advertiseRoutes" :placeholder="t('nodesPage.commaCidrsPlaceholder')" />
             </el-form-item>
           </el-form>
         </div>
 
         <div class="onboarding-section">
-          <h4>3. Install Command</h4>
+          <h4>{{ t('nodesPage.installCommandStep') }}</h4>
           <pre class="init-command">{{ onboardingInstallCommand }}</pre>
           <div class="onboarding-actions">
             <el-button :disabled="!onboardingInstallCommand" @click="copyOnboardingCommand">
-              Copy Install Command
+              {{ t('nodesPage.copyInstallCommand') }}
             </el-button>
           </div>
-          <h5>Advanced: init-only command</h5>
+          <h5>{{ t('nodesPage.advancedInitOnlyCommand') }}</h5>
           <pre class="init-command">{{ onboardingInitCommand }}</pre>
           <div class="onboarding-actions">
             <el-button :disabled="!onboardingInitCommand" @click="copyOnboardingInitCommand">
-              Copy Init-Only Command
+              {{ t('nodesPage.copyInitOnlyCommand') }}
             </el-button>
           </div>
         </div>
 
         <div class="onboarding-section">
           <div class="onboarding-section-header">
-            <h4>4. Progress</h4>
+            <h4>{{ t('nodesPage.progressStep') }}</h4>
             <el-button size="small" :icon="Refresh" :loading="loading" @click="refreshOnboardingProgress">
-              Refresh
+              {{ t('common.refresh') }}
             </el-button>
           </div>
-          <el-table :data="recentOnboardingNodes" size="small" empty-text="No registered nodes yet">
-            <el-table-column prop="hostname" label="Hostname" min-width="150" />
-            <el-table-column label="Phase" width="120">
+          <el-table :data="recentOnboardingNodes" size="small" :empty-text="t('nodesPage.noRegisteredNodesYet')">
+            <el-table-column prop="hostname" :label="t('nodeManagement.hostname')" min-width="150" />
+            <el-table-column :label="t('nodesPage.phase')" width="120">
               <template #default="{ row }">
                 <el-tag size="small" :type="getOnboardingPhaseTagType(row.onboarding?.phase)">
                   {{ formatOnboardingPhase(row.onboarding?.phase) }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="Token" width="130">
+            <el-table-column :label="t('nodesPage.token')" width="130">
               <template #default="{ row }">{{ row.onboarding?.tokenPreview || 'N/A' }}</template>
             </el-table-column>
-            <el-table-column label="Last Sync" min-width="160">
+            <el-table-column :label="t('nodesPage.lastSync')" min-width="160">
               <template #default="{ row }">{{ row.onboarding?.lastSyncAt || row.lastSyncAt || 'N/A' }}</template>
             </el-table-column>
-            <el-table-column label="Action" width="100">
+            <el-table-column :label="t('nodesPage.action')" width="100">
               <template #default="{ row }">
                 <el-button size="small" link type="primary" @click="openNodeDetailFromOnboarding(row)">
-                  Detail
+                  {{ t('nodesPage.detail') }}
                 </el-button>
               </template>
             </el-table-column>
@@ -757,35 +757,35 @@
         </div>
 
         <div class="onboarding-section">
-          <h4>5. Verify</h4>
+          <h4>{{ t('nodesPage.verifyStep') }}</h4>
           <ul class="onboarding-checklist">
-            <li>Run the install command on the target machine.</li>
-            <li>Confirm <code>systemctl status aria-agent --no-pager</code> is active.</li>
-            <li>Check <code>journalctl -u aria-agent -n 120 --no-pager</code> if the service does not become healthy.</li>
-            <li>Refresh this page and confirm the node is online or degraded with a visible reason.</li>
-            <li>Open node detail to check last sync, desired/applied versions, commands, alerts, and certificate status.</li>
+            <li>{{ t('nodesPage.verifyInstall') }}</li>
+            <li>{{ t('nodesPage.verifySystemd') }}</li>
+            <li>{{ t('nodesPage.verifyJournal') }}</li>
+            <li>{{ t('nodesPage.verifyRefresh') }}</li>
+            <li>{{ t('nodesPage.verifyNodeDetail') }}</li>
           </ul>
         </div>
       </div>
       <template #footer>
-        <el-button @click="onboardingDialogVisible = false">Close</el-button>
+        <el-button @click="onboardingDialogVisible = false">{{ t('common.close') }}</el-button>
       </template>
     </el-dialog>
 
     <!-- 节点编辑对话框 -->
     <el-dialog
       v-model="editDialogVisible"
-      title="Edit Node Settings"
+      :title="t('nodesPage.editNodeSettings')"
       width="550px"
     >
       <el-form :model="editForm" label-width="140px" ref="editFormRef">
-        <el-form-item label="Hostname">
+        <el-form-item :label="t('nodeManagement.hostname')">
           <el-input v-model="editForm.hostname" />
         </el-form-item>
-        <el-form-item label="Region">
+        <el-form-item :label="t('nodeManagement.region')">
           <el-input v-model="editForm.region" placeholder="e.g. cn-shanghai" />
         </el-form-item>
-        <el-form-item label="Advertised Routes">
+        <el-form-item :label="t('nodeManagement.routes')">
           <div class="edit-routes-container">
             <el-tag
               v-for="tag in editForm.advertised_routes"
@@ -808,16 +808,16 @@
               placeholder="e.g. 192.168.1.0/24"
             />
             <el-button v-else class="button-new-tag" size="small" @click="showInput">
-              + New Route
+              {{ t('nodesPage.newRoute') }}
             </el-button>
           </div>
-          <p class="form-help">设置节点向 Mesh 网络宣告的本地子网路由</p>
+          <p class="form-help">{{ t('nodesPage.advertisedRoutesHelp') }}</p>
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="editDialogVisible = false">Cancel</el-button>
+        <el-button @click="editDialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button v-if="hasPermission('nodes:write')" type="primary" @click="saveNodeChanges" :loading="submitting">
-          Save Changes
+          {{ t('nodesPage.saveChanges') }}
         </el-button>
       </template>
     </el-dialog>
@@ -903,7 +903,7 @@ interface OnboardingFormState {
   advertiseRoutes: string
 }
 
-const errorMessage = (error: unknown, fallback = '未知错误'): string =>
+const errorMessage = (error: unknown, fallback = t('policyTerms.unknownError')): string =>
   error instanceof Error ? error.message : (typeof error === 'string' ? error : fallback)
 
 // 节点数据从 store 获取
@@ -986,31 +986,31 @@ const maintenanceCount = computed(() => nodes.value.filter(n => n.status === 'ma
 const nodeMetricItems = computed(() => [
   {
     key: 'total',
-    label: 'Total Nodes',
+    label: t('nodesPage.totalNodes'),
     value: nodes.value.length,
     status: 'info',
-    meta: 'Registered assets'
+    meta: t('nodesPage.totalNodesMeta')
   },
   {
     key: 'online',
-    label: 'Online',
+    label: t('common.online'),
     value: onlineCount.value,
     status: 'success',
-    meta: 'Heartbeat active'
+    meta: t('nodesPage.onlineMeta')
   },
   {
     key: 'offline',
-    label: 'Offline',
+    label: t('common.offline'),
     value: offlineCount.value,
     status: offlineCount.value > 0 ? 'danger' : 'muted',
-    meta: 'Needs attention'
+    meta: t('nodesPage.offlineMeta')
   },
   {
     key: 'maintenance',
-    label: 'Maintenance',
+    label: t('common.maintenance'),
     value: maintenanceCount.value,
     status: maintenanceCount.value > 0 ? 'warning' : 'muted',
-    meta: 'Operator controlled'
+    meta: t('nodesPage.maintenanceMeta')
   }
 ])
 const recentCommandCount = computed(() => selectedNode.value?.recentCommands?.length || 0)
@@ -1055,36 +1055,40 @@ const workbenchSummary = computed(() => {
   return [
     {
       key: 'commands',
-      label: 'Commands',
+      label: t('nodeMonitorDetail.commands'),
       value: recentCommandCount.value,
-      status: failedCommandCount.value > 0 ? `${failedCommandCount.value} failed` : `${pendingCommandCount.value} pending`,
+      status: failedCommandCount.value > 0
+        ? t('nodeMonitorDetail.failedCount').replace('{count}', String(failedCommandCount.value))
+        : t('nodeMonitorDetail.pendingCount').replace('{count}', String(pendingCommandCount.value)),
       type: failedCommandCount.value > 0 ? 'danger' : pendingCommandCount.value > 0 ? 'warning' : 'success',
       focus: 'commands'
     },
     {
       key: 'policies',
-      label: 'Policy Deliveries',
+      label: t('nodeMonitorDetail.policies'),
       value: recentDeliveryCount.value,
-      status: failedDeliveryCount.value > 0 ? `${failedDeliveryCount.value} failed` : `${pendingDeliveryCount.value} pending`,
+      status: failedDeliveryCount.value > 0
+        ? t('nodeMonitorDetail.failedCount').replace('{count}', String(failedDeliveryCount.value))
+        : t('nodeMonitorDetail.pendingCount').replace('{count}', String(pendingDeliveryCount.value)),
       type: failedDeliveryCount.value > 0 ? 'danger' : pendingDeliveryCount.value > 0 ? 'warning' : 'success',
       focus: 'policies'
     },
     {
       key: 'alerts',
-      label: 'Active Alerts',
+      label: t('nodeMonitorDetail.activeAlerts'),
       value: activeAlertCount.value,
-      status: activeAlertCount.value > 0 ? 'active' : 'clear',
+      status: activeAlertCount.value > 0 ? t('nodeMonitorDetail.active') : t('nodeMonitorDetail.clear'),
       type: activeAlertCount.value > 0 ? 'danger' : 'success',
       focus: 'alerts'
     },
     {
       key: 'certificate',
-      label: 'Certificate',
+      label: t('nodeMonitorDetail.certificate'),
       value: certStatus,
       status: selectedNode.value?.certificateActivity?.last_revoke_reason
-        ? 'revoked'
+        ? t('nodeMonitorDetail.revoked')
         : selectedNode.value?.certificateActivity?.last_renew_failure
-          ? 'renew failed'
+          ? t('nodeMonitorDetail.renewFailed')
           : certStatus,
       type: getCertificateStatusTagType(certStatus),
       focus: 'certificate'
@@ -1149,12 +1153,12 @@ const loadOnboardingControllerInfo = async () => {
 
 const createOnboardingToken = async () => {
   if (!hasPermission('tokens:write')) {
-    ElMessage.error('Missing permission to create enrollment tokens')
+    ElMessage.error(t('nodesPage.missingTokenPermission'))
     return
   }
   const tag = String(onboardingForm.tokenTag || '').trim()
   if (!tag) {
-    ElMessage.error('Token tag is required')
+    ElMessage.error(t('nodesPage.tokenTagRequired'))
     return
   }
 
@@ -1165,10 +1169,10 @@ const createOnboardingToken = async () => {
       max_uses: Number(onboardingForm.maxUses || 1),
       ttl: `${Number(onboardingForm.ttlHours || 24)}h`
     })
-    ElMessage.success('Enrollment token created')
+    ElMessage.success(t('nodesPage.tokenCreated'))
   } catch (error) {
     console.error('Failed to create enrollment token:', error)
-    ElMessage.error(`Failed to create token: ${errorMessage(error, String(error || '未知错误'))}`)
+    ElMessage.error(t('nodesPage.createTokenFailed').replace('{message}', errorMessage(error, String(error || t('policyTerms.unknownError')))))
   } finally {
     onboardingCreating.value = false
   }
@@ -1258,22 +1262,22 @@ const buildOnboardingInstallCommand = () => {
 
 const copyText = async (value: string, successMessage: string) => {
   if (!value) {
-    ElMessage.warning('Nothing to copy')
+    ElMessage.warning(t('nodesPage.nothingToCopy'))
     return
   }
   if (!navigator?.clipboard?.writeText) {
-    ElMessage.error('Clipboard API is unavailable')
+    ElMessage.error(t('nodesPage.clipboardUnavailable'))
     return
   }
   await navigator.clipboard.writeText(value)
   ElMessage.success(successMessage)
 }
 
-const copyOnboardingToken = () => copyText(onboardingTokenValue.value, 'Token copied')
+const copyOnboardingToken = () => copyText(onboardingTokenValue.value, t('nodesPage.tokenCopied'))
 
-const copyOnboardingCommand = () => copyText(onboardingInstallCommand.value, 'Install command copied')
+const copyOnboardingCommand = () => copyText(onboardingInstallCommand.value, t('nodesPage.installCommandCopied'))
 
-const copyOnboardingInitCommand = () => copyText(onboardingInitCommand.value, 'Init command copied')
+const copyOnboardingInitCommand = () => copyText(onboardingInitCommand.value, t('nodesPage.initCommandCopied'))
 
 const tokenPreview = (value: unknown) => {
   const raw = String(value || '').trim()
@@ -1299,14 +1303,14 @@ const getOnboardingPhaseTagType = (phase?: string) => {
 const formatOnboardingPhase = (phase?: string) => {
   switch (phase) {
     case 'online':
-      return 'Online'
+      return t('nodesPage.onboardingOnline')
     case 'syncing':
-      return 'Syncing'
+      return t('nodesPage.onboardingSyncing')
     case 'degraded':
-      return 'Degraded'
+      return t('nodesPage.onboardingDegraded')
     case 'registered':
     default:
-      return 'Registered'
+      return t('nodesPage.onboardingRegistered')
   }
 }
 
@@ -1347,7 +1351,7 @@ const viewNodeDetails = async (node: AnyRecord) => {
     detailDialogVisible.value = true
   } catch (error) {
     console.error('Failed to load node detail:', error)
-    ElMessage.error('Failed to load node details')
+    ElMessage.error(t('nodesPage.loadNodeDetailsFailed'))
   }
 }
 
@@ -1376,7 +1380,7 @@ const handleInputConfirm = () => {
   if (inputValue.value) {
     // 简单的 CIDR 校验逻辑
     if (!/^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(inputValue.value)) {
-      ElMessage.warning('Please enter a valid CIDR (e.g. 192.168.1.0/24)')
+      ElMessage.warning(t('nodesPage.invalidCidr'))
       return
     }
     if (!editForm.advertised_routes.includes(inputValue.value)) {
@@ -1394,11 +1398,11 @@ const saveNodeChanges = async () => {
       hostname: editForm.hostname,
       region: editForm.region
     })
-    ElMessage.success('Node settings updated successfully')
+    ElMessage.success(t('nodesPage.nodeUpdated'))
     editDialogVisible.value = false
     await refreshNodes()
   } catch (error) {
-    ElMessage.error('Failed to update node settings')
+    ElMessage.error(t('nodesPage.updateNodeFailed'))
   } finally {
     submitting.value = false
   }
@@ -1407,9 +1411,9 @@ const saveNodeChanges = async () => {
 const handleDeleteNode = async (id: string) => {
   try {
     await nodeStore.deleteNodeRemote(id)
-    ElMessage.success('Node deleted')
+    ElMessage.success(t('nodesPage.nodeDeleted'))
   } catch (error) {
-    ElMessage.error('Failed to delete node')
+    ElMessage.error(t('nodesPage.deleteNodeFailed'))
   }
 }
 
@@ -1549,7 +1553,7 @@ const normalizeQueuedCommand = (command: string, response: AnyRecord = {}) => ({
   id: response?.command_id || response?.id || '',
   command: response?.command || command,
   status: response?.status || 'pending',
-  message: response?.message || 'Command queued for delivery',
+  message: response?.message || t('nodesPage.commandQueuedForDelivery'),
   created_at: response?.created_at || new Date().toISOString(),
   updated_at: response?.updated_at || response?.created_at || new Date().toISOString(),
   timeout_seconds: response?.timeout_seconds,
@@ -1569,7 +1573,7 @@ const prependCommandIfMissing = (command: AnyRecord) => {
 const runQuickCommand = async (command: string) => {
   if (!selectedNode.value?.id) return
   if (!hasPermission('commands:write')) {
-    ElMessage.error('Missing permission to send commands')
+    ElMessage.error(t('nodesPage.missingCommandPermission'))
     return
   }
 
@@ -1582,7 +1586,7 @@ const runQuickCommand = async (command: string) => {
     } as any)
     const queuedCommand = normalizeQueuedCommand(command, response)
     prependCommandIfMissing(queuedCommand)
-    ElMessage.success(`${command} queued`)
+    ElMessage.success(t('nodesPage.commandQueued').replace('{command}', command))
     await reloadSelectedNode(queuedCommand)
     const latest = findRecentCommand(queuedCommand.id)
     if (!latest || !isTerminalCommandStatus(latest.status)) {
@@ -1590,7 +1594,7 @@ const runQuickCommand = async (command: string) => {
     }
   } catch (error) {
     console.error(`Failed to queue ${command}:`, error)
-    ElMessage.error(`Failed to queue ${command}`)
+    ElMessage.error(t('nodesPage.commandQueueFailed').replace('{command}', command))
   } finally {
     commandLoading.value = false
   }
@@ -1598,12 +1602,12 @@ const runQuickCommand = async (command: string) => {
 
 const formatConvergence = (state?: string) => {
   const map: Record<string, string> = {
-    converged: 'Converged',
-    pending: 'Pending',
-    diverged: 'Diverged',
-    idle: 'Idle'
+    converged: t('policies.converged'),
+    pending: t('policies.pending'),
+    diverged: t('policies.diverged'),
+    idle: t('policies.idle')
   }
-  return map[state || ''] || state || 'Unknown'
+  return map[state || ''] || state || t('status.unknown')
 }
 
 const getConvergenceTagType = (state?: string) => {
