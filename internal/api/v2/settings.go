@@ -55,6 +55,20 @@ type backupManifest struct {
 	Tables    map[string][]interface{} `json:"tables"`
 }
 
+type backupRestoreRequest struct {
+	DryRun  bool     `json:"dry_run"`
+	Tables  []string `json:"tables,omitempty"`
+	Confirm string   `json:"confirm,omitempty"`
+}
+
+type backupRestorePlan struct {
+	BackupID       string         `json:"backup_id"`
+	DryRun         bool           `json:"dry_run"`
+	SelectedTables []string       `json:"selected_tables"`
+	TableCounts    map[string]int `json:"table_counts"`
+	Warnings       []string       `json:"warnings"`
+}
+
 type backupFile struct {
 	record backupRecord
 	path   string
@@ -411,6 +425,23 @@ func (r *Router) restoreBackup(w http.ResponseWriter, req *http.Request, backupI
 		return
 	}
 
+	var restoreReq backupRestoreRequest
+	if req.Body != nil && req.Body != http.NoBody {
+		if err := json.NewDecoder(req.Body).Decode(&restoreReq); err != nil && err != io.EOF {
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Invalid restore request body", nil)
+			return
+		}
+	}
+	selected, err := selectedRestoreTables(restoreReq.Tables)
+	if err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, err.Error(), nil)
+		return
+	}
+	if restoreReq.DryRun {
+		apibase.WriteSuccess(w, buildRestorePlan(manifest, backupID, selected), "Backup restore dry-run completed")
+		return
+	}
+
 	username, _ := middleware.GetUsername(req.Context())
 	if strings.TrimSpace(username) == "" {
 		username = "system"
@@ -427,6 +458,58 @@ func (r *Router) restoreBackup(w http.ResponseWriter, req *http.Request, backupI
 		"restored_tables": restoredTables,
 		"restored_at":     time.Now().UTC().Format(time.RFC3339),
 	}, "Backup restored successfully")
+}
+
+func selectedRestoreTables(requested []string) ([]backupTableSpec, error) {
+	if len(requested) == 0 {
+		return backupRestoreTables, nil
+	}
+
+	allowed := make(map[string]backupTableSpec, len(backupRestoreTables))
+	for _, spec := range backupRestoreTables {
+		allowed[spec.Name] = spec
+	}
+
+	selected := make([]backupTableSpec, 0, len(requested))
+	seen := make(map[string]bool, len(requested))
+	for _, name := range requested {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		spec, ok := allowed[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown restore table: %s", name)
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		selected = append(selected, spec)
+	}
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("at least one restore table is required")
+	}
+	return selected, nil
+}
+
+func buildRestorePlan(manifest *backupManifest, backupID string, selected []backupTableSpec) backupRestorePlan {
+	counts := make(map[string]int, len(selected))
+	names := make([]string, 0, len(selected))
+	for _, spec := range selected {
+		names = append(names, spec.Name)
+		counts[spec.Name] = len(manifest.Tables[spec.Name])
+	}
+	return backupRestorePlan{
+		BackupID:       backupID,
+		DryRun:         true,
+		SelectedTables: names,
+		TableCounts:    counts,
+		Warnings: []string{
+			"restore replaces selected control-plane configuration tables",
+			"active Agent runtime state may need a sync after restore",
+		},
+	}
 }
 
 func (r *Router) buildBackupManifest(createdBy string) (*backupManifest, error) {

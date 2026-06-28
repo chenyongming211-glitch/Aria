@@ -18,6 +18,24 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
+const settingsBackupRestoreFixtureManifest = `{
+  "version":"v0.1.0",
+  "created_at":"2026-04-22T15:00:00Z",
+  "created_by":"alice",
+  "tables":{
+    "tenants":[{"id":"11111111-1111-1111-1111-111111111111","name":"Tenant A","code":"tenant-a","status":"active","resource_quota":{},"created_at":"2026-04-22T15:00:00Z","updated_at":"2026-04-22T15:00:00Z"}],
+    "users":[{"id":"22222222-2222-2222-2222-222222222222","username":"alice","password_hash":"hash","tenant_id":"11111111-1111-1111-1111-111111111111","role":"admin","email":"alice@example.com","must_change_password":false,"created_at":"2026-04-22T15:00:00Z","last_login":"2026-04-22T15:00:00Z"}],
+    "roles":[],
+    "tokens":[],
+    "nodes":[],
+    "ip_groups":[],
+    "ip_group_members":[],
+    "acl_rules":[],
+    "qos_rules":[],
+    "blacklist_rules":[]
+  }
+}`
+
 func TestSettingsBackupsLifecycle(t *testing.T) {
 	t.Setenv("ARIA_BACKUP_DIR", t.TempDir())
 
@@ -316,6 +334,96 @@ func TestSettingsBackupRestoreAppliesManifest(t *testing.T) {
 	}
 }
 
+func TestSettingsBackupRestoreDryRunDoesNotModifyDatabase(t *testing.T) {
+	t.Setenv("ARIA_BACKUP_DIR", t.TempDir())
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	backupID := "dry-run-fixture"
+	writeSettingsBackupFixture(t, backupID, settingsBackupRestoreFixtureManifest)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSettingsContext(
+		httptest.NewRequest(
+			http.MethodPost,
+			"/api/v2/settings/backups/"+backupID+"/restore",
+			strings.NewReader(`{"dry_run":true,"tables":["tenants","users"]}`),
+		),
+		"super_admin",
+		"bob",
+	)
+	rr := httptest.NewRecorder()
+
+	router.HandleSettings(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected dry-run status %d, got %d, body=%s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	if data["backup_id"] != backupID {
+		t.Fatalf("expected backup_id=%q, got %#v", backupID, data["backup_id"])
+	}
+	if data["dry_run"] != true {
+		t.Fatalf("expected dry_run=true, got %#v", data["dry_run"])
+	}
+	tableCounts, ok := data["table_counts"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected table_counts field, got %#v", data["table_counts"])
+	}
+	if tableCounts["tenants"] != float64(1) || tableCounts["users"] != float64(1) {
+		t.Fatalf("expected tenants/users counts of 1, got %#v", tableCounts)
+	}
+	if _, exists := tableCounts["roles"]; exists {
+		t.Fatalf("expected dry-run table_counts to omit unselected table roles, got %#v", tableCounts)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("dry-run should not execute SQL, got unmet expectations: %v", err)
+	}
+}
+
+func TestSettingsBackupRestoreDryRunRejectsUnknownTable(t *testing.T) {
+	t.Setenv("ARIA_BACKUP_DIR", t.TempDir())
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	backupID := "dry-run-unknown-table"
+	writeSettingsBackupFixture(t, backupID, settingsBackupRestoreFixtureManifest)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSettingsContext(
+		httptest.NewRequest(
+			http.MethodPost,
+			"/api/v2/settings/backups/"+backupID+"/restore",
+			strings.NewReader(`{"dry_run":true,"tables":["tenants","unknown_table"]}`),
+		),
+		"super_admin",
+		"bob",
+	)
+	rr := httptest.NewRecorder()
+
+	router.HandleSettings(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusBadRequest, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "unknown restore table: unknown_table") {
+		t.Fatalf("expected unknown table error, got %s", rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("dry-run validation should not execute SQL, got unmet expectations: %v", err)
+	}
+}
+
 func withSettingsContext(req *http.Request, role, username string) *http.Request {
 	ctx := context.WithValue(req.Context(), middleware.UserRoleKey, role)
 	if username != "" {
@@ -335,6 +443,18 @@ func decodeBackupID(t *testing.T, body []byte) string {
 		t.Fatalf("failed to decode backup response: %v", err)
 	}
 	return payload.Data.ID
+}
+
+func writeSettingsBackupFixture(t *testing.T, backupID, manifest string) {
+	t.Helper()
+	backupDir, err := backupDir()
+	if err != nil {
+		t.Fatalf("backupDir failed: %v", err)
+	}
+	backupPath := backupDir + "/" + backupID + ".json"
+	if err := os.WriteFile(backupPath, []byte(manifest), 0o600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
 }
 
 func assertColumnPresent(t *testing.T, columns []string, expected string) {

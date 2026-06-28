@@ -84,6 +84,14 @@ export const useSettingsApi = {
     return response.data?.data || response.data
   },
 
+  restoreBackupDryRun: async (backupId: string, tables: string[] = []) => {
+    const response = await api.post(API_ENDPOINTS.SETTINGS.BACKUP_RESTORE_DRY_RUN(backupId), {
+      dry_run: true,
+      tables
+    })
+    return response.data?.data || response.data
+  },
+
   downloadBackup: async (backup: BackupInput) => {
     const backupId = typeof backup === 'string' ? backup : backup?.id
     if (!backupId) {

@@ -105,7 +105,8 @@ export const API_ENDPOINTS = {
     BACKUP_UPLOAD: '/v2/settings/backups/upload',
     BACKUP_DETAIL: (id: string) => `/v2/settings/backups/${id}`,
     BACKUP_DOWNLOAD: (id: string) => `/v2/settings/backups/${id}/download`,
-    BACKUP_RESTORE: (id: string) => `/v2/settings/backups/${id}/restore`
+    BACKUP_RESTORE: (id: string) => `/v2/settings/backups/${id}/restore`,
+    BACKUP_RESTORE_DRY_RUN: (id: string) => `/v2/settings/backups/${id}/restore`
   },
 
   // 租户管理 API
