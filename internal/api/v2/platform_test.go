@@ -310,6 +310,8 @@ func TestAgentInstallerScriptIncludesInstallInitAndSystemd(t *testing.T) {
 		"aria-agent init",
 		"systemctl enable --now aria-agent",
 		"/etc/aria/certs/ca.crt",
+		"/etc/aria/certs/agent.crt",
+		"/etc/aria/certs/agent.key",
 		"ExecStart=/usr/local/bin/aria-agent up --interface",
 		"ip link del aria\\$i",
 		"ensure_runtime_commands",

@@ -877,11 +877,34 @@ async fn bootstrap_register(
         tracing::warn!("Unable to detect public IPv4 address, registering without public_ip");
     }
 
+    let should_issue_certificate = should_request_bootstrap_certificate(bootstrap);
+    let common_name = state
+        .node_id
+        .clone()
+        .or_else(|| bootstrap.hostname.clone())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "aria-agent".to_string());
+    let certificate_request = if should_issue_certificate {
+        let (csr_pem, private_key_pem) =
+            certificate_client::generate_certificate_request(&common_name)
+                .context("failed to generate bootstrap certificate request")?;
+        Some((csr_pem, private_key_pem))
+    } else {
+        None
+    };
+    let (bootstrap_client_cert, bootstrap_client_key) = if certificate_request.is_some() {
+        // The configured certificate paths intentionally do not exist yet. Register with the
+        // enrollment token first, then write the returned certificate before later gRPC reconnects.
+        (String::new(), String::new())
+    } else {
+        (bootstrap.client_cert.clone(), bootstrap.client_key.clone())
+    };
+
     let grpc_client = grpc_client::GrpcClient::new_with_options(
         bootstrap.controller_url.clone(),
         bootstrap.ca_cert.clone(),
-        bootstrap.client_cert.clone(),
-        bootstrap.client_key.clone(),
+        bootstrap_client_cert,
+        bootstrap_client_key,
         bootstrap.tls_server_name.clone(),
     )
     .await
@@ -897,9 +920,55 @@ async fn bootstrap_register(
             bootstrap.region.clone().unwrap_or_else(|| "default".to_string()),
             machine_id.clone(),
             bootstrap.advertised_routes.clone().unwrap_or_default(),
+            certificate_request.as_ref().map(|(csr_pem, _)| csr_pem.clone()),
         )
         .await
         .context("Failed to register agent with Controller")?;
+
+    if let Some((_, private_key_pem)) = certificate_request {
+        let cert_pem = registration
+            .certificate_pem
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .context("Controller registration did not return certificate_pem")?;
+        let ca_pem = registration
+            .certificate_ca
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .context("Controller registration did not return certificate_ca")?;
+        let not_after = registration
+            .certificate_not_after
+            .filter(|value| *value > 0)
+            .context("Controller registration did not return certificate_not_after")?;
+        let issued = certificate_client::RenewedCertificate {
+            cert_pem,
+            ca_pem,
+            private_key_pem,
+            not_after: UNIX_EPOCH + Duration::from_secs(not_after as u64),
+        };
+        certificate_client::write_renewed_certificate_files(
+            &bootstrap.ca_cert,
+            &bootstrap.client_cert,
+            &bootstrap.client_key,
+            &issued,
+        )
+        .with_context(|| {
+            format!(
+                "failed to write bootstrap certificate files ca={}, cert={}, key={}",
+                bootstrap.ca_cert, bootstrap.client_cert, bootstrap.client_key
+            )
+        })?;
+        tracing::info!(
+            "Bootstrap client certificate issued successfully; expires at {:?}",
+            issued.not_after
+        );
+        if let Some(renew_before) = registration.certificate_renew_before {
+            tracing::info!(
+                "Controller recommends renewing the bootstrap client certificate {} seconds before expiry",
+                renew_before
+            );
+        }
+    }
 
     state.device_id = Some(machine_id);
     if let Some(node_id) = registration.node_id {
@@ -922,6 +991,16 @@ async fn bootstrap_register(
             .as_secs() as i64,
     );
     Ok(true)
+}
+
+fn should_request_bootstrap_certificate(bootstrap: &config::BootstrapConfig) -> bool {
+    let ca_path = bootstrap.ca_cert.trim();
+    let cert_path = bootstrap.client_cert.trim();
+    let key_path = bootstrap.client_key.trim();
+    if ca_path.is_empty() || cert_path.is_empty() || key_path.is_empty() {
+        return false;
+    }
+    !Path::new(cert_path).is_file() || !Path::new(key_path).is_file()
 }
 
 fn send_status_command() -> Result<()> {
@@ -1171,9 +1250,11 @@ async fn run_agent_runtime(
 mod tests {
     use super::{
         is_public_ipv4, needs_bootstrap_registration, normalize_public_endpoint,
-        normalize_public_ipv4, validate_init_inputs, validate_interface_name,
+        normalize_public_ipv4, should_request_bootstrap_certificate, validate_init_inputs,
+        validate_interface_name,
     };
-    use crate::config::AgentState;
+    use crate::config::{AgentState, BootstrapConfig};
+    use std::fs;
     use std::net::Ipv4Addr;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1211,6 +1292,52 @@ mod tests {
         };
 
         assert!(!needs_bootstrap_registration(&state, 1_700_000_000));
+    }
+
+    #[test]
+    fn bootstrap_certificate_requested_when_configured_files_are_missing() {
+        let base = std::env::temp_dir().join(format!(
+            "aria-agent-bootstrap-cert-missing-{}",
+            std::process::id()
+        ));
+        let bootstrap = BootstrapConfig {
+            ca_cert: base.join("ca.crt").to_string_lossy().to_string(),
+            client_cert: base.join("agent.crt").to_string_lossy().to_string(),
+            client_key: base.join("agent.key").to_string_lossy().to_string(),
+            ..Default::default()
+        };
+
+        assert!(should_request_bootstrap_certificate(&bootstrap));
+    }
+
+    #[test]
+    fn bootstrap_certificate_not_requested_when_paths_missing_or_files_exist() {
+        let base = std::env::temp_dir().join(format!(
+            "aria-agent-bootstrap-cert-present-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&base).expect("create temp cert dir");
+        let cert_path = base.join("agent.crt");
+        let key_path = base.join("agent.key");
+        fs::write(&cert_path, "cert").expect("write temp cert");
+        fs::write(&key_path, "key").expect("write temp key");
+
+        let partial = BootstrapConfig {
+            ca_cert: base.join("ca.crt").to_string_lossy().to_string(),
+            client_cert: cert_path.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+        assert!(!should_request_bootstrap_certificate(&partial));
+
+        let complete = BootstrapConfig {
+            ca_cert: base.join("ca.crt").to_string_lossy().to_string(),
+            client_cert: cert_path.to_string_lossy().to_string(),
+            client_key: key_path.to_string_lossy().to_string(),
+            ..Default::default()
+        };
+        assert!(!should_request_bootstrap_certificate(&complete));
+
+        let _ = fs::remove_dir_all(base);
     }
 
     #[test]

@@ -1775,6 +1775,7 @@ func (c *Controller) createRegisterAdapter() grpcserver.RegisterHandler {
 			RuntimeMode:      regReq.RuntimeMode,
 			KernelVersion:    regReq.KernelVersion,
 			HasAESNI:         regReq.HasAESNI,
+			CSRPEM:           regReq.CSRPEM,
 		}
 
 		assignedIP, err := c.processRegistration(req, "")
@@ -1795,13 +1796,28 @@ func (c *Controller) createRegisterAdapter() grpcserver.RegisterHandler {
 			return nil, fmt.Errorf("failed to issue runtime token: %w", err)
 		}
 
-		return &grpcserver.RegistrationResult{
+		result := &grpcserver.RegistrationResult{
 			AssignedIP:            assignedIP,
 			MetricsPushGateway:    c.metricsPushGateway,
 			NodeID:                node.ID.String(),
 			RuntimeToken:          runtimeToken,
 			RuntimeTokenExpiresAt: runtimeTokenExpiresAt.Unix(),
-		}, nil
+		}
+		if c.certService != nil && strings.TrimSpace(regReq.CSRPEM) != "" {
+			cert, err := c.store.GetNodeCertificate(node.ID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load issued node certificate: %w", err)
+			}
+			if cert == nil || !strings.EqualFold(strings.TrimSpace(cert.Status), controllerstorage.CertStatusIssued) {
+				return nil, fmt.Errorf("issued node certificate was not found")
+			}
+			result.CertificatePEM = cert.CertPEM
+			result.CertificateCA = cert.CAPEM
+			result.CertificateNotAfter = cert.NotAfter.Unix()
+			result.CertificateRenewBefore = int64(c.certService.RenewBefore().Seconds())
+		}
+
+		return result, nil
 	}
 }
 

@@ -47,6 +47,10 @@ pub struct RegisterResult {
     pub node_id: Option<String>,
     pub runtime_token: Option<String>,
     pub runtime_token_expires_at: Option<i64>,
+    pub certificate_pem: Option<String>,
+    pub certificate_ca: Option<String>,
+    pub certificate_not_after: Option<i64>,
+    pub certificate_renew_before: Option<i64>,
 }
 
 /// 获取内核版本
@@ -162,6 +166,7 @@ impl GrpcClient {
             region,
             String::new(),
             Vec::new(),
+            None,
         )
         .await
     }
@@ -176,6 +181,7 @@ impl GrpcClient {
         region: String,
         machine_id: String,
         advertised_routes: Vec<String>,
+        csr_pem: Option<String>,
     ) -> Result<RegisterResult> {
         let kernel_version = get_kernel_version();
         let has_aesni = has_aesni_support();
@@ -198,6 +204,7 @@ impl GrpcClient {
             kernel_version,
             has_aesni,
             machine_id,
+            csr_pem: csr_pem.unwrap_or_default(),
         });
         apply_unary_timeout(&mut request);
 
@@ -215,12 +222,36 @@ impl GrpcClient {
         } else {
             None
         };
+        let certificate_pem = if !resp.certificate_pem.trim().is_empty() {
+            Some(resp.certificate_pem)
+        } else {
+            None
+        };
+        let certificate_ca = if !resp.certificate_ca.trim().is_empty() {
+            Some(resp.certificate_ca)
+        } else {
+            None
+        };
+        let certificate_not_after = if resp.certificate_not_after > 0 {
+            Some(resp.certificate_not_after)
+        } else {
+            None
+        };
+        let certificate_renew_before = if resp.certificate_renew_before > 0 {
+            Some(resp.certificate_renew_before)
+        } else {
+            None
+        };
 
         Ok(RegisterResult {
             assigned_ip: resp.assigned_ip,
             node_id: (!resp.node_id.trim().is_empty()).then_some(resp.node_id),
             runtime_token,
             runtime_token_expires_at,
+            certificate_pem,
+            certificate_ca,
+            certificate_not_after,
+            certificate_renew_before,
         })
     }
     

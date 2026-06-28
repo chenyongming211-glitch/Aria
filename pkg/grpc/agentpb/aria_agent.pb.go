@@ -46,6 +46,7 @@ type RegisterRequest struct {
 	KernelVersion string `protobuf:"bytes,12,opt,name=kernel_version,json=kernelVersion,proto3" json:"kernel_version,omitempty"` // 内核版本
 	HasAesni      bool   `protobuf:"varint,13,opt,name=has_aesni,json=hasAesni,proto3" json:"has_aesni,omitempty"`               // 是否支持 AES-NI
 	MachineId     string `protobuf:"bytes,14,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`             // 机器稳定标识
+	CsrPem        string `protobuf:"bytes,15,opt,name=csr_pem,json=csrPem,proto3" json:"csr_pem,omitempty"`                      // 可选：首次注册时申请 Agent 客户端证书
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -178,15 +179,26 @@ func (x *RegisterRequest) GetMachineId() string {
 	return ""
 }
 
+func (x *RegisterRequest) GetCsrPem() string {
+	if x != nil {
+		return x.CsrPem
+	}
+	return ""
+}
+
 type RegisterResponse struct {
-	state                 protoimpl.MessageState `protogen:"open.v1"`
-	AssignedIp            string                 `protobuf:"bytes,1,opt,name=assigned_ip,json=assignedIp,proto3" json:"assigned_ip,omitempty"`                                       // 分配的 VPN IP
-	MetricsPushGateway    string                 `protobuf:"bytes,2,opt,name=metrics_push_gateway,json=metricsPushGateway,proto3" json:"metrics_push_gateway,omitempty"`             // Prometheus Push Gateway URL
-	NodeId                string                 `protobuf:"bytes,3,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`                                                   // 平台侧稳定节点身份
-	RuntimeToken          string                 `protobuf:"bytes,4,opt,name=runtime_token,json=runtimeToken,proto3" json:"runtime_token,omitempty"`                                 // 运行期短期凭据
-	RuntimeTokenExpiresAt int64                  `protobuf:"varint,5,opt,name=runtime_token_expires_at,json=runtimeTokenExpiresAt,proto3" json:"runtime_token_expires_at,omitempty"` // 运行期凭据过期时间戳
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	AssignedIp             string                 `protobuf:"bytes,1,opt,name=assigned_ip,json=assignedIp,proto3" json:"assigned_ip,omitempty"`                                        // 分配的 VPN IP
+	MetricsPushGateway     string                 `protobuf:"bytes,2,opt,name=metrics_push_gateway,json=metricsPushGateway,proto3" json:"metrics_push_gateway,omitempty"`              // Prometheus Push Gateway URL
+	NodeId                 string                 `protobuf:"bytes,3,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`                                                    // 平台侧稳定节点身份
+	RuntimeToken           string                 `protobuf:"bytes,4,opt,name=runtime_token,json=runtimeToken,proto3" json:"runtime_token,omitempty"`                                  // 运行期短期凭据
+	RuntimeTokenExpiresAt  int64                  `protobuf:"varint,5,opt,name=runtime_token_expires_at,json=runtimeTokenExpiresAt,proto3" json:"runtime_token_expires_at,omitempty"`  // 运行期凭据过期时间戳
+	CertificatePem         string                 `protobuf:"bytes,6,opt,name=certificate_pem,json=certificatePem,proto3" json:"certificate_pem,omitempty"`                            // 可选：注册期签发的 Agent 客户端证书
+	CertificateCa          string                 `protobuf:"bytes,7,opt,name=certificate_ca,json=certificateCa,proto3" json:"certificate_ca,omitempty"`                               // 可选：Controller CA
+	CertificateNotAfter    int64                  `protobuf:"varint,8,opt,name=certificate_not_after,json=certificateNotAfter,proto3" json:"certificate_not_after,omitempty"`          // 可选：证书过期时间戳
+	CertificateRenewBefore int64                  `protobuf:"varint,9,opt,name=certificate_renew_before,json=certificateRenewBefore,proto3" json:"certificate_renew_before,omitempty"` // 可选：建议提前续签秒数
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *RegisterResponse) Reset() {
@@ -250,6 +262,34 @@ func (x *RegisterResponse) GetRuntimeToken() string {
 func (x *RegisterResponse) GetRuntimeTokenExpiresAt() int64 {
 	if x != nil {
 		return x.RuntimeTokenExpiresAt
+	}
+	return 0
+}
+
+func (x *RegisterResponse) GetCertificatePem() string {
+	if x != nil {
+		return x.CertificatePem
+	}
+	return ""
+}
+
+func (x *RegisterResponse) GetCertificateCa() string {
+	if x != nil {
+		return x.CertificateCa
+	}
+	return ""
+}
+
+func (x *RegisterResponse) GetCertificateNotAfter() int64 {
+	if x != nil {
+		return x.CertificateNotAfter
+	}
+	return 0
+}
+
+func (x *RegisterResponse) GetCertificateRenewBefore() int64 {
+	if x != nil {
+		return x.CertificateRenewBefore
 	}
 	return 0
 }
@@ -1931,7 +1971,7 @@ var File_pkg_grpc_agentpb_aria_agent_proto protoreflect.FileDescriptor
 const file_pkg_grpc_agentpb_aria_agent_proto_rawDesc = "" +
 	"\n" +
 	"!pkg/grpc/agentpb/aria_agent.proto\x12\n" +
-	"aria.agent\"\xcb\x03\n" +
+	"aria.agent\"\xe4\x03\n" +
 	"\x0fRegisterRequest\x12\x1d\n" +
 	"\n" +
 	"public_key\x18\x01 \x01(\tR\tpublicKey\x12\x1a\n" +
@@ -1951,14 +1991,19 @@ const file_pkg_grpc_agentpb_aria_agent_proto_rawDesc = "" +
 	"\x0ekernel_version\x18\f \x01(\tR\rkernelVersion\x12\x1b\n" +
 	"\thas_aesni\x18\r \x01(\bR\bhasAesni\x12\x1d\n" +
 	"\n" +
-	"machine_id\x18\x0e \x01(\tR\tmachineId\"\xdc\x01\n" +
+	"machine_id\x18\x0e \x01(\tR\tmachineId\x12\x17\n" +
+	"\acsr_pem\x18\x0f \x01(\tR\x06csrPem\"\x9a\x03\n" +
 	"\x10RegisterResponse\x12\x1f\n" +
 	"\vassigned_ip\x18\x01 \x01(\tR\n" +
 	"assignedIp\x120\n" +
 	"\x14metrics_push_gateway\x18\x02 \x01(\tR\x12metricsPushGateway\x12\x17\n" +
 	"\anode_id\x18\x03 \x01(\tR\x06nodeId\x12#\n" +
 	"\rruntime_token\x18\x04 \x01(\tR\fruntimeToken\x127\n" +
-	"\x18runtime_token_expires_at\x18\x05 \x01(\x03R\x15runtimeTokenExpiresAt\"\x84\x02\n" +
+	"\x18runtime_token_expires_at\x18\x05 \x01(\x03R\x15runtimeTokenExpiresAt\x12'\n" +
+	"\x0fcertificate_pem\x18\x06 \x01(\tR\x0ecertificatePem\x12%\n" +
+	"\x0ecertificate_ca\x18\a \x01(\tR\rcertificateCa\x122\n" +
+	"\x15certificate_not_after\x18\b \x01(\x03R\x13certificateNotAfter\x128\n" +
+	"\x18certificate_renew_before\x18\t \x01(\x03R\x16certificateRenewBefore\"\x84\x02\n" +
 	"\vSyncRequest\x12\x1d\n" +
 	"\n" +
 	"public_key\x18\x01 \x01(\tR\tpublicKey\x12\x17\n" +

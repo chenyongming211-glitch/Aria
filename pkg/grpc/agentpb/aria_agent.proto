@@ -63,6 +63,7 @@ message RegisterRequest {
   string kernel_version = 12;         // 内核版本
   bool has_aesni = 13;                // 是否支持 AES-NI
   string machine_id = 14;             // 机器稳定标识
+  string csr_pem = 15;                // 可选：首次注册时申请 Agent 客户端证书
 }
 
 message RegisterResponse {
@@ -71,6 +72,10 @@ message RegisterResponse {
   string node_id = 3;                 // 平台侧稳定节点身份
   string runtime_token = 4;           // 运行期短期凭据
   int64 runtime_token_expires_at = 5; // 运行期凭据过期时间戳
+  string certificate_pem = 6;         // 可选：注册期签发的 Agent 客户端证书
+  string certificate_ca = 7;          // 可选：Controller CA
+  int64 certificate_not_after = 8;    // 可选：证书过期时间戳
+  int64 certificate_renew_before = 9; // 可选：建议提前续签秒数
 }
 
 // ============ 同步相关 ============

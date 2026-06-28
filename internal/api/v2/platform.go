@@ -294,6 +294,8 @@ AGENT_URL=""
 AGENT_SHA256=""
 CONFIG_PATH="/etc/aria/agent.yaml"
 CA_PATH="/etc/aria/certs/ca.crt"
+CLIENT_CERT_PATH="/etc/aria/certs/agent.crt"
+CLIENT_KEY_PATH="/etc/aria/certs/agent.key"
 
 usage() {
   cat <<'USAGE'
@@ -310,6 +312,8 @@ Options:
   --public-endpoint HOSTPORT|auto
   --agent-url URL
   --agent-sha256 SHA256
+  --client-cert PATH
+  --client-key PATH
 USAGE
 }
 
@@ -328,6 +332,8 @@ while [ $# -gt 0 ]; do
     --public-endpoint) PUBLIC_ENDPOINT="${2:-}"; shift 2 ;;
     --agent-url) AGENT_URL="${2:-}"; shift 2 ;;
     --agent-sha256) AGENT_SHA256="${2:-}"; shift 2 ;;
+    --client-cert) CLIENT_CERT_PATH="${2:-}"; shift 2 ;;
+    --client-key) CLIENT_KEY_PATH="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -429,6 +435,8 @@ init_args=(
   --controller-api-url "$CONTROLLER_API_URL"
   --token "$TOKEN"
   --ca-cert "$CA_PATH"
+  --client-cert "$CLIENT_CERT_PATH"
+  --client-key "$CLIENT_KEY_PATH"
   --region "$REGION"
   --interface "$INTERFACE"
 )

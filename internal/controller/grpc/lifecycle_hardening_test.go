@@ -44,11 +44,15 @@ func TestRegisterUsesHandlerIssuedRuntimeIdentity(t *testing.T) {
 		func(req *RegistrationRequest) (*RegistrationResult, error) {
 			captured = req
 			return &RegistrationResult{
-				AssignedIP:            "100.64.0.2",
-				MetricsPushGateway:    "http://metrics",
-				NodeID:                nodeID,
-				RuntimeToken:          "runtime-token",
-				RuntimeTokenExpiresAt: 1893456000,
+				AssignedIP:             "100.64.0.2",
+				MetricsPushGateway:     "http://metrics",
+				NodeID:                 nodeID,
+				RuntimeToken:           "runtime-token",
+				RuntimeTokenExpiresAt:  1893456000,
+				CertificatePEM:         "client-cert",
+				CertificateCA:          "controller-ca",
+				CertificateNotAfter:    1896048000,
+				CertificateRenewBefore: 259200,
 			}, nil
 		},
 		nil,
@@ -70,6 +74,7 @@ func TestRegisterUsesHandlerIssuedRuntimeIdentity(t *testing.T) {
 		KernelVersion:    "6.8.0",
 		HasAesni:         true,
 		MachineId:        "machine-1",
+		CsrPem:           "-----BEGIN CERTIFICATE REQUEST-----\nabc\n-----END CERTIFICATE REQUEST-----",
 	})
 	if err != nil {
 		t.Fatalf("Register failed: %v", err)
@@ -82,6 +87,12 @@ func TestRegisterUsesHandlerIssuedRuntimeIdentity(t *testing.T) {
 	}
 	if resp.RuntimeTokenExpiresAt != 1893456000 {
 		t.Fatalf("expected runtime token expiry from registration handler, got %d", resp.RuntimeTokenExpiresAt)
+	}
+	if resp.CertificatePem != "client-cert" ||
+		resp.CertificateCa != "controller-ca" ||
+		resp.CertificateNotAfter != 1896048000 ||
+		resp.CertificateRenewBefore != 259200 {
+		t.Fatalf("certificate fields were not preserved in response: %#v", resp)
 	}
 	if captured == nil {
 		t.Fatalf("expected registration handler to receive request")
@@ -98,7 +109,8 @@ func TestRegisterUsesHandlerIssuedRuntimeIdentity(t *testing.T) {
 		captured.RuntimeMode != "ebpf" ||
 		captured.KernelVersion != "6.8.0" ||
 		!captured.HasAESNI ||
-		captured.MachineID != "machine-1" {
+		captured.MachineID != "machine-1" ||
+		captured.CSRPEM != "-----BEGIN CERTIFICATE REQUEST-----\nabc\n-----END CERTIFICATE REQUEST-----" {
 		t.Fatalf("registration request was not preserved: %#v", captured)
 	}
 	if len(captured.AdvertisedRoutes) != 1 || captured.AdvertisedRoutes[0] != "10.10.0.0/16" {

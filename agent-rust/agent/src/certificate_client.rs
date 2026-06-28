@@ -84,7 +84,7 @@ pub async fn renew_certificate(
     ca_cert_path: &str,
     common_name: &str,
 ) -> Result<RenewedCertificate> {
-    let (csr_pem, private_key_pem) = generate_renewal_request(common_name)?;
+    let (csr_pem, private_key_pem) = generate_certificate_request(common_name)?;
     let client = build_http_client(controller_api_url, ca_cert_path)?;
     let endpoint = format!("{}/api/v2/agents/certificates/renew", controller_api_url.trim_end_matches('/'));
     let response = client
@@ -127,9 +127,9 @@ pub fn write_renewed_certificate_files(
     Ok(())
 }
 
-fn generate_renewal_request(common_name: &str) -> Result<(String, String)> {
+pub fn generate_certificate_request(common_name: &str) -> Result<(String, String)> {
     let key_pair = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)
-        .context("failed to generate private key for certificate renewal")?;
+        .context("failed to generate private key for certificate request")?;
     let mut params = CertificateParams::new(Vec::new())
         .context("failed to create CSR parameters")?;
     let mut dn = DistinguishedName::new();
@@ -137,7 +137,7 @@ fn generate_renewal_request(common_name: &str) -> Result<(String, String)> {
     params.distinguished_name = dn;
     let csr = params
         .serialize_request(&key_pair)
-        .context("failed to generate CSR for certificate renewal")?;
+        .context("failed to generate CSR for certificate request")?;
     let csr_pem = csr.pem().context("failed to serialize CSR to PEM")?;
     let private_key_pem = key_pair.serialize_pem();
     Ok((csr_pem, private_key_pem))

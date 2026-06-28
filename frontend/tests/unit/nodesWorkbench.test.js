@@ -471,6 +471,8 @@ describe('Nodes workbench detail', () => {
     expect(wrapper.vm.onboardingInstallCommand).toContain('--token enroll-secret-123456')
     expect(wrapper.vm.onboardingInstallCommand).toContain('--ca-url https://aria.yun/api/v2/controller-info/grpc-ca.crt')
     expect(wrapper.vm.onboardingInstallCommand).toContain('--ca-sha256 ca-sha256')
+    expect(wrapper.vm.onboardingInstallCommand).toContain('--client-cert /etc/aria/certs/agent.crt')
+    expect(wrapper.vm.onboardingInstallCommand).toContain('--client-key /etc/aria/certs/agent.key')
     expect(wrapper.vm.onboardingInstallCommand).toContain('--tls-server-name aria.yun')
     expect(wrapper.vm.onboardingInstallCommand).toContain('--interface aria0')
     expect(wrapper.vm.onboardingInstallCommand).toContain('--agent-url https://aria.yun/api/v2/downloads/aria-agent/linux/amd64')
@@ -480,6 +482,8 @@ describe('Nodes workbench detail', () => {
     expect(wrapper.vm.onboardingInitCommand).toContain('--token enroll-secret-123456')
     expect(wrapper.vm.onboardingInitCommand).toContain('--controller-api-url https://aria.yun')
     expect(wrapper.vm.onboardingInitCommand).toContain('--ca-cert /etc/aria/certs/ca.crt')
+    expect(wrapper.vm.onboardingInitCommand).toContain('--client-cert /etc/aria/certs/agent.crt')
+    expect(wrapper.vm.onboardingInitCommand).toContain('--client-key /etc/aria/certs/agent.key')
     expect(wrapper.vm.onboardingInitCommand).toContain('--tls-server-name aria.yun')
     expect(wrapper.vm.onboardingInitCommand).toContain('--advertise-routes 10.10.0.0/16,10.20.0.0/16')
 

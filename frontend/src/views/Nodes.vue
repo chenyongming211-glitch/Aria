@@ -1186,6 +1186,8 @@ const buildOnboardingInitCommand = () => {
   ]
   const optionalArgs = [
     ['--ca-cert', onboardingForm.caCertPath],
+    ['--client-cert', '/etc/aria/certs/agent.crt'],
+    ['--client-key', '/etc/aria/certs/agent.key'],
     ['--tls-server-name', onboardingForm.tlsServerName || inferTLSServerName(onboardingForm.server)],
     ['--region', onboardingForm.region],
     ['--interface', onboardingForm.interface],
@@ -1224,6 +1226,8 @@ const buildOnboardingInstallCommand = () => {
   const optionalArgs = [
     ['--ca-url', onboardingForm.caUrl],
     ['--ca-sha256', onboardingForm.caSha256],
+    ['--client-cert', '/etc/aria/certs/agent.crt'],
+    ['--client-key', '/etc/aria/certs/agent.key'],
     ['--tls-server-name', onboardingForm.tlsServerName || inferTLSServerName(onboardingForm.server)],
     ['--region', onboardingForm.region],
     ['--interface', onboardingForm.interface],

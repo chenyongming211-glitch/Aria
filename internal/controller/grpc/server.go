@@ -47,14 +47,19 @@ type RegistrationRequest struct {
 	KernelVersion    string
 	HasAESNI         bool
 	MachineID        string
+	CSRPEM           string
 }
 
 type RegistrationResult struct {
-	AssignedIP            string
-	MetricsPushGateway    string
-	NodeID                string
-	RuntimeToken          string
-	RuntimeTokenExpiresAt int64
+	AssignedIP             string
+	MetricsPushGateway     string
+	NodeID                 string
+	RuntimeToken           string
+	RuntimeTokenExpiresAt  int64
+	CertificatePEM         string
+	CertificateCA          string
+	CertificateNotAfter    int64
+	CertificateRenewBefore int64
 }
 
 type RegisterHandler func(*RegistrationRequest) (*RegistrationResult, error)
@@ -93,11 +98,15 @@ func (s *ControllerServer) Register(ctx context.Context, req *agentpb.RegisterRe
 	}
 
 	return &agentpb.RegisterResponse{
-		AssignedIp:            result.AssignedIP,
-		MetricsPushGateway:    result.MetricsPushGateway,
-		NodeId:                result.NodeID,
-		RuntimeToken:          result.RuntimeToken,
-		RuntimeTokenExpiresAt: result.RuntimeTokenExpiresAt,
+		AssignedIp:             result.AssignedIP,
+		MetricsPushGateway:     result.MetricsPushGateway,
+		NodeId:                 result.NodeID,
+		RuntimeToken:           result.RuntimeToken,
+		RuntimeTokenExpiresAt:  result.RuntimeTokenExpiresAt,
+		CertificatePem:         result.CertificatePEM,
+		CertificateCa:          result.CertificateCA,
+		CertificateNotAfter:    result.CertificateNotAfter,
+		CertificateRenewBefore: result.CertificateRenewBefore,
 	}, nil
 }
 
@@ -121,6 +130,7 @@ func registrationRequestFromProto(req *agentpb.RegisterRequest) *RegistrationReq
 		KernelVersion:    req.KernelVersion,
 		HasAESNI:         req.HasAesni,
 		MachineID:        req.MachineId,
+		CSRPEM:           req.CsrPem,
 	}
 }
 
