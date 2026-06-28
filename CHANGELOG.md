@@ -5,6 +5,18 @@ All notable changes to the Aria project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.83] - 2026-06-28
+
+### Added
+
+- Added Settings Backup restore dry-run, selective table restore, confirmation phrase enforcement, and restore audit details.
+- Added registration-time Agent certificate issuance through the gRPC bootstrap path and installer-generated client certificate paths.
+- Surfaced certificate renewal failures and lifecycle revocation context in Nodes and Monitoring.
+
+### Fixed
+
+- Revoked active issued node certificates on delete, suspend, and ban lifecycle transitions, with `cert.revoked` audit evidence.
+
 ## [0.2.64] - 2026-06-27
 
 ### Fixed

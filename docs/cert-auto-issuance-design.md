@@ -1,7 +1,7 @@
 # 自动证书签发设计（v0.1.x 第一阶段）
 
-**版本**: v0.1  
-**日期**: 2026-04-20  
+**版本**: v0.2
+**日期**: 2026-06-28
 **优先级**: P2（生产就绪）  
 **范围**: Controller 侧自动签发/续签/撤销基础能力
 
@@ -61,22 +61,28 @@
 ### 3.1 首次签发
 
 1. Agent 生成本地私钥与 CSR
-2. Controller 校验 CSR 签名与节点身份
-3. Controller 签发客户端证书并返回证书链
-4. 写入 `node_certificates`（`issued`）
+2. Agent 在 gRPC Register 请求中带上 `csr_pem`
+3. Controller 先完成 enrollment/runtime token 绑定，确认请求节点身份
+4. Controller 校验 CSR 签名，签发客户端证书并返回证书链
+5. 写入 `node_certificates`（`issued`）
+6. Agent 将 CA、客户端证书和私钥原子写入 `--ca-cert`、`--client-cert`、`--client-key` 指定路径
 
 ### 3.2 自动续签
 
 1. 定时任务扫描即将过期证书（如 `< 72h`）
 2. Agent 提交新 CSR
 3. Controller 签发新证书并更新元数据（记录 `renewed_from`）
+4. Agent 写入新证书后继续使用当前 runtime token 和 mTLS 配置
+5. 续签失败时，Agent 将 `certificate renew failed: ...` 写入同步观测状态；Nodes 与 Monitoring 展示最近失败原因
 
 ### 3.3 撤销失效
 
 节点删除/禁用时：
 
-1. 将证书状态置为 `revoked`
-2. 后续连接按证书状态拒绝（策略由鉴权层执行）
+1. 将当前 `issued` 证书状态置为 `revoked`
+2. 写入 `cert.revoked` 审计事件，记录节点状态、原因和撤销数量
+3. Nodes 与 Monitoring 展示当前证书状态、撤销时间和撤销原因
+4. 后续连接按证书状态拒绝（策略由鉴权层执行）
 
 ---
 
@@ -87,6 +93,8 @@
 - 证书有效期默认短周期（建议 7~30 天）
 - 租户隔离：证书元数据与节点/租户绑定
 - CA 私钥仅在 Controller 侧持有，不下发
+- 注册期签发绑定 enrollment/runtime token 解析出的节点身份，不信任请求体里的跨节点身份
+- 生命周期撤销只更新当前 `issued` 证书，不覆盖历史 `expired/revoked` 状态
 
 ---
 
@@ -103,27 +111,32 @@
 
 ### 5.2 行为测试（后续）
 
-- 节点删除后证书状态变为 `revoked`
-- 即将过期证书可续签
-- 跨租户证书请求拒绝
+- [x] 节点删除后证书状态变为 `revoked`
+- [x] 节点暂停、封禁后证书状态变为 `revoked`
+- [x] 即将过期证书可续签
+- [x] 跨租户证书请求拒绝
+- [x] 注册期 gRPC Register 可以返回 Controller 签发的证书链
 
 ---
 
 ## 6. 分阶段落地计划
 
-### 阶段 A（本次）
+### 阶段 A
 
 - [x] 设计文档
 - [x] 证书元数据表与存储方法
 - [x] CSR 签发服务与基础单测
 
-### 阶段 B（下一步）
+### 阶段 B
 
-- [ ] 接入注册/续签 API（REST/gRPC）
-- [ ] 接入节点禁用/删除撤销流程
-- [ ] 加入审计事件
+- [x] 接入注册/续签 API（REST/gRPC）
+- [x] 接入节点禁用/删除/封禁撤销流程
+- [x] 加入签发、续签失败和撤销审计事件
+- [x] 接入 Nodes / Monitoring 可见性
 
 ### 阶段 C（增强）
 
 - [ ] 管理端证书可观测性（列表/过期预警）
 - [ ] 覆盖率门禁与续签压测
+- [ ] gRPC mTLS 鉴权强制检查证书状态
+- [ ] 证书轮换演练 runbook
