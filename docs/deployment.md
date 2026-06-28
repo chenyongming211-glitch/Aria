@@ -1140,6 +1140,36 @@ Purpose:
 | Command and Agent smoke | Node `d5c7723c-3d86-48ce-a9fc-4695cd170b1c` accepted `health_check`, and the command completed. Online nodes `node-43-143-245-123`, `node-82-156-137-42`, `node-82-156-48-111`, and `node-VM-16-6-ubuntu` all reported `online`, last seen within 5 seconds, and `observed_state=applied` after Agent redeploy. |
 | Deployment note | This release intentionally redeployed the Agent artifact because the protobuf registration response now carries certificate fields. Historical `deleted` duplicate hostname rows still exist in the database but do not affect the online node records used by the smoke checks. |
 
+### 2026-06-28 Nodes Advertised Route Edit Hotfix
+
+Status: gray deployed from `codex/ip-group-reference-closure` and server-side
+smoke validated.
+
+Purpose:
+
+- Fix the Nodes edit dialog so advertised route changes are synchronized through
+  the dedicated node route API instead of being dropped by the generic node
+  update endpoint.
+- Add frontend workflow coverage and route API composable coverage so future
+  changes catch this UI-to-API wiring failure.
+- Publish the hotfix as `0.2.86` instead of reusing the previous deployed
+  version.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-28T13:53Z deployment; 2026-06-28T13:56Z smoke validation |
+| Git commit | `8de994a27a344eb0090fe8ae4ef629898bca805c` |
+| Branch CI run | `28324396372` |
+| Version | `0.2.86` |
+| Controller image | Local runtime image `aria-controller:0.2.86` / `aria-controller:local@sha256:beb2f2774ae4ddc324be0d81b40ad9ea789ee54e885f9623d6e2289f31e0d7bd`. |
+| Frontend backup | `/root/aria-controller/frontend/dist.prev-20260628T135217Z` |
+| Config backup | `/root/aria-controller/backups/pre-0.2.86-config-20260628T135217Z.tar.gz` |
+| DB backup | `/root/aria-controller/backups/pre-0.2.86-20260628T135217Z.sql` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch Actions. |
+| Verification | Local `go test ./...`, frontend unit tests (`202` tests), linux/amd64 Controller/ariactl build, frontend build, and `git diff --check` passed. Branch Actions run `28324396372` passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` returned `0.2.86`; `aria-controller` and `aria-frontend` were healthy; Controller logs showed `Version: 0.2.86`, HTTP ready, and gRPC one-way TLS listening on `:50051`; frontend entry returned HTTP 200 with `Cache-Control: no-store` and served `assets/Nodes-00cbd08b.js` plus `assets/useRouteApi-78f98f60.js`. |
+| Route smoke | Login succeeded as `sysadmin`; selected tenant `Aria Default` and node `node-82-156-137-42`; temporary route `10.254.86.0/24` was added through `POST /api/v2/tenants/{tenant_id}/nodes/{node_id}/routes`, appeared in the route list, was deleted through `DELETE /api/v2/tenants/{tenant_id}/nodes/{node_id}/routes/{cidr}`, and no longer appeared afterward. |
+| Deployment note | This is a gray deployment from the feature branch, not a `master` deployment. Merge to `master` should still follow the normal confirmation gate. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
