@@ -54,17 +54,17 @@ describe('controlLoopStatus', () => {
     }
   })
 
-  it('统一返回策略状态和命令状态的中文展示', () => {
-    expect(policyStatusLabel('pending')).toBe('待下发')
-    expect(policyStatusLabel('in_progress')).toBe('下发中')
-    expect(policyStatusLabel('applied')).toBe('已应用')
-    expect(policyStatusLabel('error')).toBe('失败')
-    expect(policyStatusLabel('stale')).toBe('已过期')
+  it('未传翻译函数时只返回原始状态兜底', () => {
+    expect(policyStatusLabel('pending')).toBe('pending')
+    expect(policyStatusLabel('in_progress')).toBe('in_progress')
+    expect(policyStatusLabel('applied')).toBe('applied')
+    expect(policyStatusLabel('error')).toBe('error')
+    expect(policyStatusLabel('stale')).toBe('stale')
     expect(policyStatusTagType('error')).toBe('danger')
 
-    expect(commandStatusLabel('acknowledged')).toBe('执行中')
-    expect(commandStatusLabel('completed')).toBe('已完成')
-    expect(commandStatusLabel('timeout')).toBe('超时')
+    expect(commandStatusLabel('acknowledged')).toBe('acknowledged')
+    expect(commandStatusLabel('completed')).toBe('completed')
+    expect(commandStatusLabel('timeout')).toBe('timeout')
     expect(commandStatusTagType('completed')).toBe('success')
     expect(commandStatusTagType('timeout')).toBe('danger')
   })

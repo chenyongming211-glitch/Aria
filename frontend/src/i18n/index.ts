@@ -1242,6 +1242,7 @@ const messages: Record<string, LocaleMessages> = {
       tokenCount: '令牌数量',
       actions: '操作',
       create: '创建租户',
+      createNew: '新建租户',
       edit: '编辑租户',
       view: '查看详情',
       delete: '删除租户',

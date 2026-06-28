@@ -1,6 +1,7 @@
 import api from './useApi'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 import { usePolicyApi } from '@/composables/usePolicyApi'
+import { t } from '@/i18n'
 import {
   mapCommandStatusToPolicyStatus,
   pendingCountForCommandStatus
@@ -208,7 +209,7 @@ function groupLabel(group: ACLGroup | undefined, groupName: unknown, groupId: un
   if (group?.name && group.kind !== 'inline') return group.name
   const normalizedCIDR = cidrOrAny(cidr)
   if (normalizedCIDR !== 'any') return normalizedCIDR
-  if (groupId) return '未知 IP Group'
+  if (groupId) return t('policyTerms.unknownIpGroup')
   return 'any'
 }
 

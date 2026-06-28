@@ -1,6 +1,7 @@
 import api from './useApi'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 import { usePolicyApi } from '@/composables/usePolicyApi'
+import { t } from '@/i18n'
 import {
   mapCommandStatusToPolicyStatus,
   pendingCountForCommandStatus
@@ -237,7 +238,7 @@ function qosGroupForRule(rule: QoSRuleRecord): string {
   if (direction === 'ingress') return src || dst || 'any'
   const cidr = dst || src
   if (cidr) return cidr
-  if (rule.group_id) return '未知 IP Group'
+  if (rule.group_id) return t('policyTerms.unknownIpGroup')
   return 'any'
 }
 

@@ -103,21 +103,8 @@ export function isRetryablePolicyStatus(status: StatusInput): boolean {
 }
 
 export function policyStatusLabel(status: StatusInput, translate?: StatusTranslator): string {
-  const labels: Record<string, string> = {
-    accepted: '已接受',
-    applied: '已应用',
-    canceled: '已取消',
-    cancelled: '已取消',
-    error: '失败',
-    failed: '失败',
-    healthy: 'Healthy',
-    idle: '空闲',
-    in_progress: '下发中',
-    pending: '待下发',
-    stale: '已过期'
-  }
   const normalized = normalizeStatus(status)
-  const fallback = labels[normalized] || (status ? String(status) : '未知')
+  const fallback = status ? String(status) : 'unknown'
   return translateLabel(policyLabelKeys[normalized] || 'status.unknown', fallback, translate)
 }
 
@@ -143,26 +130,8 @@ export function policyStatusTagType(status: StatusInput): StatusTagType {
 }
 
 export function commandStatusLabel(status: StatusInput, translate?: StatusTranslator): string {
-  const labels: Record<string, string> = {
-    acknowledged: '执行中',
-    applied: '已应用',
-    canceled: '已取消',
-    cancelled: '已取消',
-    completed: '已完成',
-    error: '失败',
-    failed: '失败',
-    idle: '空闲',
-    in_progress: '执行中',
-    pending: '待下发',
-    queued: '排队中',
-    running: '执行中',
-    sent: '已发送',
-    stale: '已过期',
-    timeout: '超时',
-    timed_out: '超时'
-  }
   const normalized = normalizeStatus(status)
-  const fallback = labels[normalized] || (status ? String(status) : '未知')
+  const fallback = status ? String(status) : 'unknown'
   return translateLabel(commandLabelKeys[normalized] || 'status.unknown', fallback, translate)
 }
 
