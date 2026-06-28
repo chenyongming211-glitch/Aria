@@ -185,7 +185,12 @@ fn write_atomic_file(path: &str, data: &[u8], mode: u32) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_controller_api_url;
+    use super::{resolve_controller_api_url, should_renew_certificate};
+    use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::Duration;
+    use time::{Duration as TimeDuration, OffsetDateTime};
 
     #[test]
     fn uses_override_when_present() {
@@ -205,5 +210,55 @@ mod tests {
         )
         .expect("resolve_controller_api_url should succeed");
         assert_eq!(resolved, "https://controller.example.com:8080");
+    }
+
+    #[test]
+    fn should_renew_when_certificate_is_inside_renew_window() {
+        let cert_path = write_test_certificate(
+            "inside-renew-window",
+            OffsetDateTime::now_utc() + TimeDuration::hours(1),
+        );
+
+        assert!(
+            should_renew_certificate(cert_path.to_str().unwrap(), Duration::from_secs(2 * 60 * 60))
+                .expect("renew check should parse test certificate")
+        );
+
+        let _ = fs::remove_file(cert_path);
+    }
+
+    #[test]
+    fn should_not_renew_when_certificate_is_outside_renew_window() {
+        let cert_path = write_test_certificate(
+            "outside-renew-window",
+            OffsetDateTime::now_utc() + TimeDuration::days(30),
+        );
+
+        assert!(
+            !should_renew_certificate(cert_path.to_str().unwrap(), Duration::from_secs(2 * 60 * 60))
+                .expect("renew check should parse test certificate")
+        );
+
+        let _ = fs::remove_file(cert_path);
+    }
+
+    fn write_test_certificate(name: &str, not_after: OffsetDateTime) -> PathBuf {
+        let key_pair = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)
+            .expect("test private key should be generated");
+        let mut params = CertificateParams::new(vec![format!("{}.local", name)])
+            .expect("test certificate params should be valid");
+        params.not_before = OffsetDateTime::now_utc() - TimeDuration::minutes(1);
+        params.not_after = not_after;
+
+        let cert = params
+            .self_signed(&key_pair)
+            .expect("test certificate should be self-signed");
+        let path = std::env::temp_dir().join(format!(
+            "aria-agent-{}-{}.crt",
+            name,
+            std::process::id()
+        ));
+        fs::write(&path, cert.pem()).expect("test certificate should be written");
+        path
     }
 }

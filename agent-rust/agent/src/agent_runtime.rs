@@ -809,6 +809,13 @@ impl AgentRuntime {
                 _ = certificate_renew_timer.tick() => {
                     if let Err(e) = self.maybe_renew_certificate().await {
                         tracing::warn!("Certificate renewal check failed: {:?}", e);
+                        self.set_sync_observation("error", format!("certificate renew failed: {}", e));
+                        if let Err(save_err) = self.persist_runtime_state() {
+                            tracing::warn!(
+                                "Failed to persist runtime state after certificate renewal error: {:?}",
+                                save_err
+                            );
+                        }
                     }
                 }
 
