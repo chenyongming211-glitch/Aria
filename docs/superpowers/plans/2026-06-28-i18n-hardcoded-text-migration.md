@@ -33,14 +33,14 @@ Vue 组件:   ❌ 27 个文件全部硬编码中文，0 次 $t()
 
 这些组件逻辑简单，只做展示，不改业务。
 
-- [ ] `components/ui/ActionIconButton.vue`
-- [ ] `components/ui/DataPanel.vue`
-- [ ] `components/ui/FilterBar.vue`
-- [ ] `components/ui/MetricStrip.vue`
-- [ ] `components/ui/PageHeader.vue`
-- [ ] `components/ui/StatusBadge.vue`
-- [ ] `components/layout/Layout.vue`
-- [ ] `components/layout/TenantSelector.vue`
+- [x] `components/ui/ActionIconButton.vue`
+- [x] `components/ui/DataPanel.vue`
+- [x] `components/ui/FilterBar.vue`
+- [x] `components/ui/MetricStrip.vue`
+- [x] `components/ui/PageHeader.vue`
+- [x] `components/ui/StatusBadge.vue`
+- [x] `components/layout/Layout.vue`
+- [x] `components/layout/TenantSelector.vue`
 
 ### B2: 简单页面（中风险）
 

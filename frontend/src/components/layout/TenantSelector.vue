@@ -8,7 +8,7 @@
   >
     <div class="tenant-selector-trigger">
       <el-tag type="primary" size="small" effect="dark">
-        {{ currentTenant?.name || 'Loading...' }}
+        {{ currentTenant?.name || t('common.loading') }}
       </el-tag>
       <el-icon class="ml-2"><CaretBottom /></el-icon>
     </div>
@@ -26,7 +26,7 @@
               <div class="tenant-code">{{ tenant.code }}</div>
             </div>
             <el-tag :type="getStatusType(tenant.status)" size="small">
-              {{ tenant.status }}
+              {{ getStatusLabel(tenant.status) }}
             </el-tag>
           </div>
         </el-dropdown-item>
@@ -39,6 +39,7 @@
 import { CaretBottom } from '@element-plus/icons-vue'
 import { storeToRefs } from 'pinia'
 import { useTenantStore } from '@/stores'
+import { t } from '@/i18n'
 
 const tenantStore = useTenantStore()
 const { currentTenant, tenants } = storeToRefs(tenantStore)
@@ -50,6 +51,8 @@ const getStatusType = (status) => {
     default: return 'info'
   }
 }
+
+const getStatusLabel = (status) => t(`common.${status}`) || status
 
 const switchTenant = (tenant) => {
   tenantStore.switchTenant(tenant)

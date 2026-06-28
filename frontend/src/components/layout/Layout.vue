@@ -142,7 +142,7 @@
               @click="toggleLang"
               class="header-btn lang-btn"
             >
-              {{ currentLang === 'en' ? '中文' : 'EN' }}
+              {{ languageSwitchLabel }}
             </el-button>
 
             <el-divider direction="vertical" class="header-divider" />
@@ -240,6 +240,7 @@ const appVersion = computed(() => appStore.version)
 const sidebarWidth = computed(() => isCollapsed.value ? '72px' : '240px')
 const defaultOpeneds = computed(() => isCollapsed.value ? [] : ['connectivity', 'policy-center', 'platform'])
 const isSuperAdmin = computed(() => currentUser.value?.role === 'super_admin')
+const languageSwitchLabel = computed(() => currentLang.value === 'en' ? t('common.chinese') : t('common.english'))
 
 const canAccess = hasPermission
 const canAnyAccess = hasAnyPermission
