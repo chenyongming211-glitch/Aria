@@ -267,6 +267,32 @@
             </div>
           </el-col>
         </el-row>
+        <el-row :gutter="20" class="certificate-activity-row">
+          <el-col :xs="24" :sm="8">
+            <div class="state-block">
+              <div class="state-label">Last Revoked At</div>
+              <div class="state-value">
+                {{ certificateActivity?.last_revoked_at ? formatTime(certificateActivity.last_revoked_at) : '—' }}
+              </div>
+            </div>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <div class="state-block">
+              <div class="state-label">Revoke Status</div>
+              <div class="state-value">
+                {{ certificateActivity?.last_revoke_node_status || '—' }}
+              </div>
+            </div>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <div class="state-block">
+              <div class="state-label">Revoke Reason</div>
+              <div class="state-value state-wrap">
+                {{ certificateActivity?.last_revoke_reason || node.certificate?.revoke_reason || '—' }}
+              </div>
+            </div>
+          </el-col>
+        </el-row>
         <div v-if="certificateActivity?.last_renewed_serial_number" class="state-message">
           Last renewed serial: {{ certificateActivity.last_renewed_serial_number }}
         </div>
@@ -521,7 +547,11 @@ const workbenchSummary = computed(() => {
       key: 'certificate',
       label: 'Certificate',
       value: certificateStatus,
-      status: certificateActivity.value?.last_renew_failure ? 'renew failed' : certificateStatus,
+      status: certificateActivity.value?.last_revoke_reason
+        ? 'revoked'
+        : certificateActivity.value?.last_renew_failure
+          ? 'renew failed'
+          : certificateStatus,
       type: certificateBadgeType.value,
       focus: 'certificate'
     }

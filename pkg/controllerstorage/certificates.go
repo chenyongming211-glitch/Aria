@@ -91,15 +91,30 @@ func (s *Storage) GetNodeCertificate(nodeID uuid.UUID) (*NodeCertificate, error)
 }
 
 func (s *Storage) RevokeNodeCertificate(nodeID uuid.UUID, reason string) error {
-	_, err := s.db.Exec(`
+	_, err := revokeNodeCertificatesTx(s.db, nodeID, reason)
+	return err
+}
+
+func revokeNodeCertificatesTx(tx roleExec, nodeID uuid.UUID, reason string) (int64, error) {
+	if reason == "" {
+		reason = "node_lifecycle"
+	}
+	result, err := tx.Exec(`
 		UPDATE node_certificates
 		SET status = $2,
 		    revoked_at = NOW(),
 		    revoke_reason = $3,
 		    updated_at = NOW()
-		WHERE node_id = $1
-	`, nodeID, CertStatusRevoked, reason)
-	return err
+		WHERE node_id = $1 AND status = $4
+	`, nodeID, CertStatusRevoked, reason, CertStatusIssued)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return affected, nil
 }
 
 func scanNodeCertificate(row interface{ Scan(dest ...interface{}) error }) (*NodeCertificate, error) {

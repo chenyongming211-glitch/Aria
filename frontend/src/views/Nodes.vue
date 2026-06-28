@@ -335,6 +335,12 @@
             <el-descriptions-item label="Renew Failure">
               {{ selectedNode.certificateActivity?.last_renew_failure || 'N/A' }}
             </el-descriptions-item>
+            <el-descriptions-item label="Last Revoked">
+              {{ formatCommandTime(selectedNode.certificateActivity?.last_revoked_at) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="Revoke Reason">
+              {{ selectedNode.certificateActivity?.last_revoke_reason || selectedNode.certificate?.revoke_reason || 'N/A' }}
+            </el-descriptions-item>
           </el-descriptions>
           <div v-if="selectedNode.certificateActivity?.last_renewed_serial_number" class="certificate-note">
             Last renewed serial: {{ selectedNode.certificateActivity.last_renewed_serial_number }}
@@ -1075,7 +1081,11 @@ const workbenchSummary = computed(() => {
       key: 'certificate',
       label: 'Certificate',
       value: certStatus,
-      status: selectedNode.value?.certificateActivity?.last_renew_failure ? 'renew failed' : certStatus,
+      status: selectedNode.value?.certificateActivity?.last_revoke_reason
+        ? 'revoked'
+        : selectedNode.value?.certificateActivity?.last_renew_failure
+          ? 'renew failed'
+          : certStatus,
       type: getCertificateStatusTagType(certStatus),
       focus: 'certificate'
     }

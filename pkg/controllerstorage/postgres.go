@@ -850,7 +850,7 @@ func (s *Storage) ReuseHostnameIP(hostname string, tenantID uuid.UUID) (assigned
 		return "", 0, err
 	}
 
-	if err := revokeNodeCertificatesTx(tx, nodeID, "hostname_reused"); err != nil {
+	if _, err := revokeNodeCertificatesTx(tx, nodeID, "hostname_reused"); err != nil {
 		return "", 0, err
 	}
 	if err := failIncompleteAgentCommandsForNodeTx(tx, pubKey, "node deleted for hostname reuse"); err != nil {
@@ -920,7 +920,7 @@ func (s *Storage) MarkNodeDeleted(publicKey string) error {
 	`, publicKey); err != nil {
 		return err
 	}
-	if err := revokeNodeCertificatesTx(tx, nodeID, "node_deleted"); err != nil {
+	if _, err := revokeNodeCertificatesTx(tx, nodeID, "node_deleted"); err != nil {
 		return err
 	}
 	if err := failIncompleteAgentCommandsForNodeTx(tx, publicKey, "node deleted"); err != nil {

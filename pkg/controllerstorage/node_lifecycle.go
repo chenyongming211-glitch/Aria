@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"github.com/google/uuid"
 )
 
 type NodeLifecycleTransition struct {
@@ -49,8 +47,18 @@ func (s *Storage) ApplyNodeLifecycleTransition(publicKey string, transition Node
 	node.Status = targetStatus
 
 	if nodeStatusRequiresCertificateRevoke(targetStatus) {
-		if err := revokeNodeCertificatesTx(tx, node.ID, transition.RevokeReason); err != nil {
+		revokeReason := strings.TrimSpace(transition.RevokeReason)
+		if revokeReason == "" {
+			revokeReason = fmt.Sprintf("node %s", targetStatus)
+		}
+		revokedCount, err := revokeNodeCertificatesTx(tx, node.ID, revokeReason)
+		if err != nil {
 			return nil, err
+		}
+		if revokedCount > 0 {
+			if err := createLifecycleCertificateRevokedAuditEventTx(tx, node, transition, targetStatus, revokeReason, revokedCount); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -91,21 +99,6 @@ func nodeStatusRequiresCertificateRevoke(status string) bool {
 	return nodeStatusStopsCommands(status)
 }
 
-func revokeNodeCertificatesTx(tx roleExec, nodeID uuid.UUID, reason string) error {
-	if reason == "" {
-		reason = "node_lifecycle"
-	}
-	_, err := tx.Exec(`
-		UPDATE node_certificates
-		SET status = $2,
-		    revoked_at = NOW(),
-		    revoke_reason = $3,
-		    updated_at = NOW()
-		WHERE node_id = $1
-	`, nodeID, CertStatusRevoked, reason)
-	return err
-}
-
 func nodeStatusStopsCommands(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "deleted", "suspended", "banned":
@@ -113,4 +106,34 @@ func nodeStatusStopsCommands(status string) bool {
 	default:
 		return false
 	}
+}
+
+func createLifecycleCertificateRevokedAuditEventTx(
+	tx roleExec,
+	node *Node,
+	transition NodeLifecycleTransition,
+	targetStatus string,
+	revokeReason string,
+	revokedCount int64,
+) error {
+	actor := strings.TrimSpace(transition.AuditActor)
+	if actor == "" {
+		actor = "system"
+	}
+	detail := map[string]interface{}{
+		"public_key":         node.PublicKey,
+		"hostname":           node.Hostname,
+		"node_status":        targetStatus,
+		"reason":             revokeReason,
+		"revoked_cert_count": revokedCount,
+	}
+	detailJSON, err := json.Marshal(detail)
+	if err != nil {
+		return fmt.Errorf("marshal certificate revoked audit detail: %w", err)
+	}
+	_, err = tx.Exec(`
+		INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, node.TenantID, node.ID, AuditCertRevoked, actor, "Node certificate revoked due to node lifecycle change", detailJSON)
+	return err
 }

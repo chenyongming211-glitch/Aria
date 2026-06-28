@@ -249,6 +249,15 @@ func (r *Router) buildNodeCertificateActivity(tenantID, nodeID uuid.UUID) (map[s
 		return nil, err
 	}
 
+	lastRevoked, _, err := r.store.ListAuditEvents(tenantID, controllerstorage.AuditEventFilter{
+		NodeID:    &nodeID,
+		EventType: controllerstorage.AuditCertRevoked,
+		Limit:     1,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	activity := map[string]interface{}{}
 	if len(lastRenewed) > 0 && lastRenewed[0] != nil {
 		activity["last_renewed_at"] = lastRenewed[0].CreatedAt
@@ -266,6 +275,15 @@ func (r *Router) buildNodeCertificateActivity(tenantID, nodeID uuid.UUID) (map[s
 		activity["last_renew_failed_at"] = lastRenewFailed[0].CreatedAt
 		if reason := eventDetailString(lastRenewFailed[0].Detail, "error", "message"); reason != "" {
 			activity["last_renew_failure"] = reason
+		}
+	}
+	if len(lastRevoked) > 0 && lastRevoked[0] != nil {
+		activity["last_revoked_at"] = lastRevoked[0].CreatedAt
+		if reason := eventDetailString(lastRevoked[0].Detail, "reason", "message"); reason != "" {
+			activity["last_revoke_reason"] = reason
+		}
+		if status := eventDetailString(lastRevoked[0].Detail, "node_status", "status"); status != "" {
+			activity["last_revoke_node_status"] = status
 		}
 	}
 

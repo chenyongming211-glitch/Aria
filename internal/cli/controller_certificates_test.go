@@ -1454,8 +1454,8 @@ func expectMarkNodeDeleted(mock sqlmock.Sqlmock, publicKey string) {
 		    revoked_at = NOW(),
 		    revoke_reason = $3,
 		    updated_at = NOW()
-		WHERE node_id = $1`)).
-		WithArgs(sqlmock.AnyArg(), controllerstorage.CertStatusRevoked, "node_deleted").
+		WHERE node_id = $1 AND status = $4`)).
+		WithArgs(sqlmock.AnyArg(), controllerstorage.CertStatusRevoked, "node_deleted", controllerstorage.CertStatusIssued).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE policy_deliveries")).
 		WithArgs(publicKey, controllerstorage.AgentCommandStatusFailed, "node deleted", controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged).
@@ -1499,9 +1499,15 @@ func expectNodeLifecycleTransition(
 			    revoked_at = NOW(),
 			    revoke_reason = $3,
 			    updated_at = NOW()
-			WHERE node_id = $1
+			WHERE node_id = $1 AND status = $4
 		`)).
-		WithArgs(nodeID, controllerstorage.CertStatusRevoked, revokeReason).
+		WithArgs(nodeID, controllerstorage.CertStatusRevoked, revokeReason, controllerstorage.CertStatusIssued).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`)).
+		WithArgs(tenantID, nodeID, controllerstorage.AuditCertRevoked, actor, "Node certificate revoked due to node lifecycle change", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`
 		UPDATE policy_deliveries

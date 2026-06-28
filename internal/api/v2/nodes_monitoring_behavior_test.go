@@ -476,9 +476,9 @@ func TestNodesAPI_DeleteReturnsInternalErrorWhenCertificateRevokeFails(t *testin
 			    revoked_at = NOW(),
 			    revoke_reason = $3,
 			    updated_at = NOW()
-			WHERE node_id = $1
+			WHERE node_id = $1 AND status = $4
 	`)).
-		WithArgs(nodeID, controllerstorage.CertStatusRevoked, "node deleted via API").
+		WithArgs(nodeID, controllerstorage.CertStatusRevoked, "node deleted via API", controllerstorage.CertStatusIssued).
 		WillReturnError(errors.New("revoke failed"))
 	mock.ExpectRollback()
 
@@ -887,6 +887,29 @@ func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
 			[]byte(`{"error":"runtime token expired"}`),
 			now.Add(-time.Hour),
 		))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM audit_events WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3")).
+		WithArgs(tenantID, nodeID, controllerstorage.AuditCertRevoked).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, event_type, actor, summary, detail, created_at
+		FROM audit_events
+		WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3
+		ORDER BY created_at DESC
+		LIMIT $4 OFFSET $5
+	`)).
+		WithArgs(tenantID, nodeID, controllerstorage.AuditCertRevoked, 1, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at",
+		}).AddRow(
+			uuid.New(),
+			tenantID,
+			nodeID.String(),
+			controllerstorage.AuditCertRevoked,
+			"system",
+			"certificate revoked",
+			[]byte(`{"reason":"node suspended","node_status":"suspended"}`),
+			now.Add(-30*time.Minute),
+		))
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT id, node_public_key, command, params, status, COALESCE(message, ''), priority, timeout_seconds,
 		       created_at, updated_at, sent_at, acknowledged_at, completed_at, result
@@ -995,6 +1018,12 @@ func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
 	}
 	if certificateActivity["last_renew_failure"] != "runtime token expired" {
 		t.Fatalf("expected last_renew_failure to be populated, got %#v", certificateActivity["last_renew_failure"])
+	}
+	if certificateActivity["last_revoke_reason"] != "node suspended" {
+		t.Fatalf("expected last_revoke_reason to be populated, got %#v", certificateActivity["last_revoke_reason"])
+	}
+	if certificateActivity["last_revoke_node_status"] != "suspended" {
+		t.Fatalf("expected last_revoke_node_status to be populated, got %#v", certificateActivity["last_revoke_node_status"])
 	}
 	if certificateActivity["last_renewed_serial_number"] != "serial-2" {
 		t.Fatalf("expected last_renewed_serial_number to be populated, got %#v", certificateActivity["last_renewed_serial_number"])
@@ -1130,6 +1159,18 @@ func TestMonitoringAPI_NodeDetailLearnedRoutesFailureReturnsInternalError(t *tes
 		LIMIT $4 OFFSET $5
 	`)).
 		WithArgs(tenantID, nodeID, "certificate_renew_failed", 1, 0).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at"}))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM audit_events WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3")).
+		WithArgs(tenantID, nodeID, controllerstorage.AuditCertRevoked).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, event_type, actor, summary, detail, created_at
+		FROM audit_events
+		WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3
+		ORDER BY created_at DESC
+		LIMIT $4 OFFSET $5
+	`)).
+		WithArgs(tenantID, nodeID, controllerstorage.AuditCertRevoked, 1, 0).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at"}))
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT id, node_public_key, command, params, status, COALESCE(message, ''), priority, timeout_seconds,
