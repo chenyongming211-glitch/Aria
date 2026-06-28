@@ -257,6 +257,13 @@ import PageHeader from '@/components/ui/PageHeader.vue'
 import { usePolicyApi } from '@/composables/usePolicyApi'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
+import { useFocusedPolling } from '@/composables/useFocusedPolling'
+import {
+  isActivePolicyStatus,
+  patchPolicyStatusRow,
+  policyRefFromRow,
+  usePolicyStatusApi
+} from '@/composables/usePolicyStatusApi'
 import { t } from '@/i18n'
 import type { NormalizedPolicy, PolicyDelivery, PolicyKind } from '@/types'
 import {
@@ -487,6 +494,47 @@ const filteredPolicies = computed<NormalizedPolicy[]>(() => {
   })
 })
 
+const activePolicyRefs = computed(() => policies.value
+  .filter((row) => isActivePolicyStatus(row))
+  .map((row) => {
+    const raw = row as NormalizedPolicy & Record<string, any>
+    return {
+      node_id: row.nodeId || raw.node_id,
+      policy_domain: row.kind || raw.policy_domain,
+      policy_ref: policyRefFromRow(row)
+    }
+  })
+  .filter((item) => item.node_id && item.policy_domain && item.policy_ref))
+
+const policyStatusKey = (nodeId?: string, domain?: string, policyRef?: string) => (
+  `${nodeId || ''}|${domain || ''}|${policyRef || ''}`
+)
+
+const refreshFocusedPolicyStatuses = async () => {
+  const refs = activePolicyRefs.value
+  if (refs.length === 0) return
+
+  const statuses = await usePolicyStatusApi.getPolicyDeliveryStatuses(refs)
+  const byKey = new Map(statuses.map((item) => [
+    policyStatusKey(item.node_id, item.policy_domain, item.policy_ref),
+    item
+  ]))
+  policies.value.forEach((row) => {
+    const raw = row as NormalizedPolicy & Record<string, any>
+    const status = byKey.get(policyStatusKey(row.nodeId || raw.node_id, row.kind || raw.policy_domain, policyRefFromRow(row)))
+    if (status) {
+      patchPolicyStatusRow(row, status)
+    }
+  })
+  syncSelectedPolicy()
+}
+
+const policyStatusPolling = useFocusedPolling({
+  poll: refreshFocusedPolicyStatuses,
+  hasActiveItems: () => activePolicyRefs.value.length > 0,
+  intervalMs: 3000
+})
+
 const findContextPolicy = (): NormalizedPolicy | null => {
   if (!hasRouteContext.value) {
     return null
@@ -614,6 +662,7 @@ const fetchPolicies = async () => {
     policies.value = await usePolicyApi.listPolicies()
     syncSelectedPolicy()
     focusPolicyFromRoute()
+    await policyStatusPolling.trigger()
   } catch (error) {
     console.error('Failed to fetch unified policies:', error)
     ElMessage.error(`${t('policies.fetchFailed')}: ${errorMessage(error, String(error || t('policyTerms.unknownError')))}`)

@@ -308,6 +308,13 @@ import { useIpGroupApi } from '@/composables/useIpGroupApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
+import { useFocusedPolling } from '@/composables/useFocusedPolling'
+import {
+  isActivePolicyStatus,
+  patchPolicyStatusRow,
+  policyRefFromRow,
+  usePolicyStatusApi
+} from '@/composables/usePolicyStatusApi'
 import { t } from '@/i18n'
 import {
   isRetryablePolicyStatus,
@@ -551,6 +558,42 @@ const ruleMatchesPolicyContext = (row?: ACLRuleRow) => {
 
 const visibleRules = computed(() => rules.value.filter(ruleMatchesPolicyContext))
 
+const activePolicyRefs = computed(() => rules.value
+  .filter((row) => isActivePolicyStatus(row))
+  .map((row) => ({
+    node_id: row.node_id || filters.node_id,
+    policy_domain: 'acl',
+    policy_ref: policyRefFromRow(row)
+  }))
+  .filter((item) => item.node_id && item.policy_ref))
+
+const policyStatusKey = (nodeId?: string, domain?: string, policyRef?: string) => (
+  `${nodeId || ''}|${domain || ''}|${policyRef || ''}`
+)
+
+const refreshFocusedPolicyStatuses = async () => {
+  const refs = activePolicyRefs.value
+  if (refs.length === 0) return
+
+  const statuses = await usePolicyStatusApi.getPolicyDeliveryStatuses(refs)
+  const byKey = new Map(statuses.map((item) => [
+    policyStatusKey(item.node_id, item.policy_domain, item.policy_ref),
+    item
+  ]))
+  rules.value.forEach((row) => {
+    const status = byKey.get(policyStatusKey(row.node_id || filters.node_id, 'acl', policyRefFromRow(row)))
+    if (status) {
+      patchPolicyStatusRow(row, status)
+    }
+  })
+}
+
+const policyStatusPolling = useFocusedPolling({
+  poll: refreshFocusedPolicyStatuses,
+  hasActiveItems: () => activePolicyRefs.value.length > 0,
+  intervalMs: 3000
+})
+
 const paginatedRules = computed(() => {
   const start = (pagination.page - 1) * pagination.pageSize
   return visibleRules.value.slice(start, start + pagination.pageSize)
@@ -604,6 +647,7 @@ const loadRules = async () => {
     const response = await useAclApi.getACLRulesByNode(nodeId, f)
     rules.value = response
     pagination.total = visibleRules.value.length
+    await policyStatusPolling.trigger()
   } catch (error) {
     ElMessage.error(`${t('acl.loadFailed')}: ${errorMessage(error)}`)
   } finally {

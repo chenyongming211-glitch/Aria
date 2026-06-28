@@ -246,6 +246,13 @@ import { useIpGroupApi } from '@/composables/useIpGroupApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
+import { useFocusedPolling } from '@/composables/useFocusedPolling'
+import {
+  isActivePolicyStatus,
+  patchPolicyStatusRow,
+  policyRefFromRow,
+  usePolicyStatusApi
+} from '@/composables/usePolicyStatusApi'
 import { t } from '@/i18n'
 import {
   isRetryablePolicyStatus,
@@ -452,6 +459,42 @@ const ruleMatchesPolicyContext = (row?: QoSRuleRow) => {
 
 const visibleRules = computed(() => rules.value.filter(ruleMatchesPolicyContext))
 
+const activePolicyRefs = computed(() => rules.value
+  .filter((row) => isActivePolicyStatus(row))
+  .map((row) => ({
+    node_id: row.node_id || selectedNodeId.value,
+    policy_domain: 'qos',
+    policy_ref: policyRefFromRow(row)
+  }))
+  .filter((item) => item.node_id && item.policy_ref))
+
+const policyStatusKey = (nodeId?: string, domain?: string, policyRef?: string) => (
+  `${nodeId || ''}|${domain || ''}|${policyRef || ''}`
+)
+
+const refreshFocusedPolicyStatuses = async () => {
+  const refs = activePolicyRefs.value
+  if (refs.length === 0) return
+
+  const statuses = await usePolicyStatusApi.getPolicyDeliveryStatuses(refs)
+  const byKey = new Map(statuses.map((item) => [
+    policyStatusKey(item.node_id, item.policy_domain, item.policy_ref),
+    item
+  ]))
+  rules.value.forEach((row) => {
+    const status = byKey.get(policyStatusKey(row.node_id || selectedNodeId.value, 'qos', policyRefFromRow(row)))
+    if (status) {
+      patchPolicyStatusRow(row, status)
+    }
+  })
+}
+
+const policyStatusPolling = useFocusedPolling({
+  poll: refreshFocusedPolicyStatuses,
+  hasActiveItems: () => activePolicyRefs.value.length > 0,
+  intervalMs: 3000
+})
+
 const loadNodes = async () => {
   try {
     tenantNodes.value = await useTenantApi.getTenantNodes()
@@ -483,6 +526,7 @@ const refreshData = async () => {
   loading.value = true
   try {
     rules.value = await useQosApi.getQoSRulesByNode(selectedNodeId.value)
+    await policyStatusPolling.trigger()
   } catch (error) {
     ElMessage.error(t('qos.loadRulesFailed'))
   } finally {

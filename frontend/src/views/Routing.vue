@@ -155,6 +155,13 @@ import { useRouteApi } from '@/composables/useRouteApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
+import { useFocusedPolling } from '@/composables/useFocusedPolling'
+import {
+  isActivePolicyStatus,
+  patchPolicyStatusRow,
+  policyRefFromRow,
+  usePolicyStatusApi
+} from '@/composables/usePolicyStatusApi'
 import { t } from '@/i18n'
 import {
   policyStatusLabel as formatPolicyStatus,
@@ -299,6 +306,40 @@ const paginatedRoutes = computed(() => {
   return filteredRoutes.value.slice(start, start + pageSize.value)
 })
 
+const activePolicyRefs = computed(() => allRoutes.value
+  .filter((row) => isActivePolicyStatus(row))
+  .map((row) => ({
+    node_id: row.nodeId || row.node_id,
+    policy_domain: 'route',
+    policy_ref: policyRefFromRow(row)
+  }))
+  .filter((item) => item.node_id && item.policy_ref))
+
+const policyStatusKey = (nodeId, domain, policyRef) => `${nodeId || ''}|${domain || ''}|${policyRef || ''}`
+
+const refreshFocusedPolicyStatuses = async () => {
+  const refs = activePolicyRefs.value
+  if (refs.length === 0) return
+
+  const statuses = await usePolicyStatusApi.getPolicyDeliveryStatuses(refs)
+  const byKey = new Map(statuses.map((item) => [
+    policyStatusKey(item.node_id, item.policy_domain, item.policy_ref),
+    item
+  ]))
+  allRoutes.value.forEach((row) => {
+    const status = byKey.get(policyStatusKey(row.nodeId || row.node_id, 'route', policyRefFromRow(row)))
+    if (status) {
+      patchPolicyStatusRow(row, status)
+    }
+  })
+}
+
+const policyStatusPolling = useFocusedPolling({
+  poll: refreshFocusedPolicyStatuses,
+  hasActiveItems: () => activePolicyRefs.value.length > 0,
+  intervalMs: 3000
+})
+
 const loadRoutes = async () => {
   loading.value = true
   try {
@@ -308,6 +349,7 @@ const loadRoutes = async () => {
     ])
     allRoutes.value = routes
     tenantNodes.value = nodes
+    await policyStatusPolling.trigger()
     const contextNode = nodes.find((node) => node.id === routeContext.value.nodeId)
     if (contextNode) {
       currentRoute.value.nodeId = contextNode.id

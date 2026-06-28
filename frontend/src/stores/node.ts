@@ -5,6 +5,7 @@ import api from '@/composables/useApi'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 import { useAgentProxyApi } from '@/composables/useAgentProxyApi'
 import { useMonitorApi } from '@/composables/useMonitorApi'
+import { usePolicyStatusApi } from '@/composables/usePolicyStatusApi'
 import type { NodeRecord } from '@/types'
 
 type RawNodeRecord = Partial<NodeRecord> & Record<string, any>
@@ -317,6 +318,30 @@ export default defineStore('node', () => {
     }
   }
 
+  function patchNodeStatuses(statuses: RawNodeRecord[]): void {
+    for (const status of statuses) {
+      const id = status.id || status.node_id
+      if (!id) continue
+      const index = nodes.value.findIndex(node => node.id === id)
+      if (index !== -1) {
+        nodes.value[index] = normalizeNodeRecord({ ...status, id }, nodes.value[index])
+      }
+      const current = currentNode.value
+      if (current && current.id === id) {
+        currentNode.value = {
+          ...current,
+          ...normalizeNodeRecord({ ...status, id }, current as Partial<NodeViewModel> & RawNodeRecord)
+        }
+      }
+    }
+  }
+
+  async function refreshNodeStatuses(ids: string[]): Promise<RawNodeRecord[]> {
+    const statuses = await usePolicyStatusApi.getNodeStatuses(ids)
+    patchNodeStatuses(statuses as RawNodeRecord[])
+    return statuses as RawNodeRecord[]
+  }
+
   function deleteNode(id: string): void {
     nodes.value = nodes.value.filter(node => node.id !== id)
   }
@@ -376,6 +401,8 @@ export default defineStore('node', () => {
     loadNodeDetail,
     getNodeById,
     updateNode,
+    patchNodeStatuses,
+    refreshNodeStatuses,
     updateNodeRemote,
     deleteNode,
     deleteNodeRemote,

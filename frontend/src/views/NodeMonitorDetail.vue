@@ -412,6 +412,8 @@ import { ElMessage } from 'element-plus'
 import { useMonitorApi } from '@/composables/useMonitorApi'
 import { useAgentProxyApi } from '@/composables/useAgentProxyApi'
 import { usePermission } from '@/composables/usePermission'
+import { useFocusedPolling } from '@/composables/useFocusedPolling'
+import { isActiveNodeStatus } from '@/composables/usePolicyStatusApi'
 import { t } from '@/i18n'
 import {
   commandStatusLabel,
@@ -498,6 +500,12 @@ const certificateActivity = computed(() => node.value?.certificate_activity || n
 const recentCommands = computed(() => node.value?.recent_commands || [])
 const recentPolicyDeliveries = computed(() => node.value?.recent_policy_deliveries || [])
 const activeAlerts = computed(() => node.value?.active_alerts || [])
+const hasActiveDetailStatus = computed(() => {
+  if (!node.value) return false
+  return isActiveNodeStatus(node.value) ||
+    recentCommands.value.some((item: AnyRecord) => isPendingCommandStatus(item?.status)) ||
+    recentPolicyDeliveries.value.some((item: AnyRecord) => isPendingCommandStatus(item?.command_status))
+})
 
 const formatEventType = (type?: string) => {
   if (!type) return ''
@@ -601,17 +609,29 @@ const workbenchSummary = computed(() => {
   ]
 })
 
-const loadNode = async () => {
+const loadNode = async (options: { silent?: boolean } = {}) => {
   try {
-    loading.value = true
+    if (!options.silent) {
+      loading.value = true
+    }
     node.value = await useMonitorApi.getNodeDetail(nodeId.value)
   } catch (e) {
     console.error('Failed to load node detail:', e)
-    node.value = null
+    if (!options.silent) {
+      node.value = null
+    }
   } finally {
-    loading.value = false
+    if (!options.silent) {
+      loading.value = false
+    }
   }
 }
+
+const detailStatusPolling = useFocusedPolling({
+  poll: () => loadNode({ silent: true }),
+  hasActiveItems: () => hasActiveDetailStatus.value,
+  intervalMs: 3000
+})
 
 const buildContextCommandParams = () => ({
   source: 'node_monitor_detail',
@@ -789,12 +809,14 @@ const openPolicyCenter = () => {
   })
 }
 
-onMounted(() => {
-  loadNode()
+onMounted(async () => {
+  await loadNode()
+  await detailStatusPolling.trigger()
 })
 
 watch(() => route.fullPath, async () => {
   await loadNode()
+  await detailStatusPolling.trigger()
   await scrollToFocusSection()
 })
 

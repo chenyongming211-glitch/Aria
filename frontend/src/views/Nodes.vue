@@ -855,6 +855,8 @@ import { useTokenApi } from '../composables/useTokenApi'
 import { fetchControllerInfo } from '../composables/useControllerInfo'
 import { usePermission } from '../composables/usePermission'
 import { useTenantChangeReload } from '../composables/useTenantChangeReload'
+import { useFocusedPolling } from '../composables/useFocusedPolling'
+import { isActiveNodeStatus } from '../composables/usePolicyStatusApi'
 import { t } from '../i18n'
 import ActionIconButton from '../components/ui/ActionIconButton.vue'
 import DataPanel from '../components/ui/DataPanel.vue'
@@ -910,6 +912,30 @@ const errorMessage = (error: unknown, fallback = t('policyTerms.unknownError')):
 // 节点数据从 store 获取
 const nodes = computed<AnyRecord[]>(() => nodeStore.nodes as AnyRecord[])
 const loading = computed(() => nodeStore.loading)
+const activeNodeStatusIds = computed(() => nodes.value
+  .filter((node) => isActiveNodeStatus(node))
+  .map((node) => String(node.id || ''))
+  .filter(Boolean))
+
+const refreshFocusedNodeStatuses = async () => {
+  if (activeNodeStatusIds.value.length === 0) return
+  const statuses = await nodeStore.refreshNodeStatuses(activeNodeStatusIds.value)
+  if (selectedNode.value?.id) {
+    const status = statuses.find((item: AnyRecord) => (item.node_id || item.id) === selectedNode.value?.id)
+    if (status) {
+      selectedNode.value = {
+        ...selectedNode.value,
+        ...(nodeStore.currentNode?.id === selectedNode.value.id ? nodeStore.currentNode : {})
+      }
+    }
+  }
+}
+
+const nodeStatusPolling = useFocusedPolling({
+  poll: refreshFocusedNodeStatuses,
+  hasActiveItems: () => activeNodeStatusIds.value.length > 0,
+  intervalMs: 3000
+})
 
 const searchQuery = ref('')
 const currentPage = ref(1)
@@ -1121,6 +1147,7 @@ const paginatedNodes = computed(() => {
 // 方法
 const refreshNodes = async () => {
   await nodeStore.loadNodes()
+  await nodeStatusPolling.trigger()
 }
 
 const refreshOnboardingProgress = async () => {

@@ -3,6 +3,8 @@ package controllerstorage
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,6 +25,12 @@ type PolicyDelivery struct {
 	CreatedAt     time.Time              `json:"created_at"`
 	UpdatedAt     time.Time              `json:"updated_at"`
 	CompletedAt   *time.Time             `json:"completed_at,omitempty"`
+}
+
+type PolicyDeliveryRef struct {
+	NodeID       uuid.UUID
+	PolicyDomain string
+	PolicyRef    string
 }
 
 func (s *Storage) CreatePolicyDelivery(delivery *PolicyDelivery) (*PolicyDelivery, error) {
@@ -158,6 +166,57 @@ func (s *Storage) ListPolicyDeliveriesByNodeAndDomain(tenantID, nodeID uuid.UUID
 	}
 
 	return deliveries, nil
+}
+
+func (s *Storage) ListLatestPolicyDeliveriesByRefs(tenantID uuid.UUID, items []PolicyDeliveryRef) (map[PolicyDeliveryRef]*PolicyDelivery, error) {
+	result := make(map[PolicyDeliveryRef]*PolicyDelivery, len(items))
+	if len(items) == 0 {
+		return result, nil
+	}
+
+	var query strings.Builder
+	args := make([]interface{}, 0, 1+len(items)*3)
+	args = append(args, tenantID)
+
+	query.WriteString(`SELECT DISTINCT ON (node_id, policy_domain, policy_ref)
+			id, tenant_id, node_id, policy_domain, policy_ref, COALESCE(policy_name, ''), action, command_id, command_status,
+			COALESCE(last_error, ''), metadata, created_at, updated_at, completed_at
+		FROM policy_deliveries
+		WHERE tenant_id = $1 AND (`)
+	for i, item := range items {
+		if i > 0 {
+			query.WriteString(" OR ")
+		}
+		base := len(args) + 1
+		query.WriteString(fmt.Sprintf("(node_id = $%d AND policy_domain = $%d AND policy_ref = $%d)", base, base+1, base+2))
+		args = append(args, item.NodeID, item.PolicyDomain, item.PolicyRef)
+	}
+	query.WriteString(`)
+		ORDER BY node_id, policy_domain, policy_ref, created_at DESC`)
+
+	rows, err := s.db.Query(query.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		delivery, err := scanPolicyDelivery(rows)
+		if err != nil {
+			return nil, err
+		}
+		key := PolicyDeliveryRef{
+			NodeID:       delivery.NodeID,
+			PolicyDomain: delivery.PolicyDomain,
+			PolicyRef:    delivery.PolicyRef,
+		}
+		result[key] = delivery
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func scanPolicyDelivery(row interface {

@@ -128,6 +128,8 @@ func (r *Router) HandleTenantScoped(w http.ResponseWriter, req *http.Request) {
 	switch {
 	case rest == "":
 		r.handleSingleTenant(w, req, tenantID, role)
+	case strings.HasPrefix(rest, "policy-deliveries"):
+		r.handleTenantPolicyDeliveries(w, req, tenantID)
 	case strings.HasPrefix(rest, "policies"):
 		r.handleTenantPolicies(w, req, tenantID)
 	case strings.HasPrefix(rest, "users"):
@@ -202,6 +204,99 @@ func (r *Router) handleTenantPolicies(w http.ResponseWriter, req *http.Request, 
 	default:
 		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
 	}
+}
+
+type policyDeliveryStatusRequest struct {
+	Items []policyDeliveryStatusRequestItem `json:"items"`
+}
+
+type policyDeliveryStatusRequestItem struct {
+	NodeID       string `json:"node_id"`
+	PolicyDomain string `json:"policy_domain"`
+	PolicyRef    string `json:"policy_ref"`
+}
+
+func (r *Router) handleTenantPolicyDeliveries(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
+	parts := splitPath(req.URL.Path)
+	if len(parts) != 6 || parts[4] != "policy-deliveries" || parts[5] != "status" {
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Unknown policy delivery endpoint", nil)
+		return
+	}
+	if req.Method != http.MethodPost {
+		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+		return
+	}
+
+	var body policyDeliveryStatusRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Invalid request body: "+err.Error(), nil)
+		return
+	}
+	if len(body.Items) == 0 || len(body.Items) > 100 {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "items must contain 1-100 entries", nil)
+		return
+	}
+
+	refs := make([]controllerstorage.PolicyDeliveryRef, 0, len(body.Items))
+	requiredPermissions := make(map[string]struct{})
+	for _, item := range body.Items {
+		nodeID, err := uuid.Parse(strings.TrimSpace(item.NodeID))
+		if err != nil {
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "node_id must be a valid UUID", nil)
+			return
+		}
+		domain := strings.ToLower(strings.TrimSpace(item.PolicyDomain))
+		permission, ok := policyStatusReadPermission(domain)
+		if !ok {
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "policy_domain must be acl, qos, or route", nil)
+			return
+		}
+		policyRef := strings.TrimSpace(item.PolicyRef)
+		if policyRef == "" || len(policyRef) > 255 {
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "policy_ref must be 1-255 characters", nil)
+			return
+		}
+		refs = append(refs, controllerstorage.PolicyDeliveryRef{
+			NodeID:       nodeID,
+			PolicyDomain: domain,
+			PolicyRef:    policyRef,
+		})
+		requiredPermissions[permission] = struct{}{}
+	}
+
+	for permission := range requiredPermissions {
+		if !r.authorizeTenantAnyPermission(w, req, tenantID, permission, middleware.PermPoliciesRead) {
+			return
+		}
+	}
+
+	deliveries, err := r.store.ListLatestPolicyDeliveriesByRefs(tenantID, refs)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load policy delivery status", nil)
+		return
+	}
+
+	items := make([]map[string]interface{}, 0, len(refs))
+	for _, ref := range refs {
+		item := map[string]interface{}{
+			"node_id":          ref.NodeID.String(),
+			"policy_domain":    ref.PolicyDomain,
+			"policy_ref":       ref.PolicyRef,
+			"policy_status":    "idle",
+			"pending_cmds":     0,
+			"delivery_history": []map[string]interface{}{},
+		}
+		if delivery := deliveries[ref]; delivery != nil {
+			serialized := policyDeliveryToMap(delivery)
+			item["last_delivery"] = serialized
+			item["delivery_history"] = []map[string]interface{}{serialized}
+			item["policy_status"] = mapCommandStatusToPolicyStatus(delivery.CommandStatus)
+			item["pending_cmds"] = pendingCountForCommandStatus(delivery.CommandStatus)
+		}
+		items = append(items, item)
+	}
+
+	apibase.WriteSuccess(w, map[string]interface{}{"items": items}, fmt.Sprintf("%d policy delivery statuses retrieved", len(items)))
 }
 
 func (r *Router) retryTenantPolicySync(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
@@ -297,6 +392,19 @@ func policyRetryPermission(domain string) (string, bool) {
 		return middleware.PermQosWrite, true
 	case "route":
 		return middleware.PermRoutesWrite, true
+	default:
+		return "", false
+	}
+}
+
+func policyStatusReadPermission(domain string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(domain)) {
+	case "acl":
+		return middleware.PermAclsRead, true
+	case "qos":
+		return middleware.PermQosRead, true
+	case "route":
+		return middleware.PermRoutesRead, true
 	default:
 		return "", false
 	}
@@ -430,6 +538,11 @@ func (r *Router) handleTenantNodes(w http.ResponseWriter, req *http.Request, ten
 
 	// 针对单个节点的操作 /api/v2/tenants/{tid}/nodes/{nid}/...
 	if len(parts) >= 6 {
+		if len(parts) == 6 && parts[5] == "status" {
+			r.handleTenantNodeStatus(w, req, tenantID)
+			return
+		}
+
 		nodeID := parts[5]
 		node, err := r.getTenantNodeRecord(nodeID, tenantID)
 		if err != nil {
@@ -479,6 +592,81 @@ func (r *Router) handleTenantNodes(w http.ResponseWriter, req *http.Request, ten
 	}
 
 	apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidPath, "Invalid node path", nil)
+}
+
+type nodeStatusRequest struct {
+	NodeIDs []string `json:"node_ids"`
+}
+
+func (r *Router) handleTenantNodeStatus(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
+	if req.Method != http.MethodPost {
+		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+		return
+	}
+	if !r.authorizeTenantPermission(w, req, tenantID, middleware.PermNodesRead) {
+		return
+	}
+
+	var body nodeStatusRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Invalid request body: "+err.Error(), nil)
+		return
+	}
+	if len(body.NodeIDs) == 0 || len(body.NodeIDs) > 100 {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "node_ids must contain 1-100 entries", nil)
+		return
+	}
+
+	items := make([]map[string]interface{}, 0, len(body.NodeIDs))
+	for _, rawNodeID := range body.NodeIDs {
+		nodeID := strings.TrimSpace(rawNodeID)
+		parsedNodeID, err := uuid.Parse(nodeID)
+		if err != nil {
+			apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "node_id must be a valid UUID", nil)
+			return
+		}
+
+		node, err := r.getTenantNodeRecord(nodeID, tenantID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				items = append(items, map[string]interface{}{
+					"node_id":               parsedNodeID.String(),
+					"status":                "missing",
+					"availability_status":   "missing",
+					"sync_status":           "missing",
+					"configuration_status":  "error",
+					"convergence_status":    "error",
+					"state_convergence":     "error",
+					"pending_cmds":          0,
+					"desired_state_version": "",
+					"applied_state_version": "",
+					"observed_state":        "missing",
+					"last_sync_at":          nil,
+					"last_command_status":   "",
+					"last_command_error":    "",
+				})
+				continue
+			}
+			r.writeNodeLookupError(w, err)
+			return
+		}
+
+		if err := r.failTimedOutNodeCommands(node); err != nil {
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to refresh timed out commands", nil)
+			return
+		}
+		summary, err := r.buildNodeOperationsSummary(node)
+		if err != nil {
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load node status", nil)
+			return
+		}
+		if _, exists := summary["convergence_status"]; !exists {
+			summary["convergence_status"] = summary["state_convergence"]
+		}
+		items = append(items, summary)
+	}
+
+	apibase.WriteSuccess(w, map[string]interface{}{"items": items}, fmt.Sprintf("%d node statuses retrieved", len(items)))
 }
 
 func (r *Router) listTenantPolicies(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
@@ -1578,6 +1766,53 @@ func (r *Router) authorizeTenantPermission(w http.ResponseWriter, req *http.Requ
 			req.URL.Path,
 			permission,
 			err,
+		)
+		return true
+	}
+
+	apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Insufficient permissions", nil)
+	return false
+}
+
+func (r *Router) authorizeTenantAnyPermission(w http.ResponseWriter, req *http.Request, targetTenantID uuid.UUID, permissions ...string) bool {
+	if !r.authorizeTenant(w, req, targetTenantID, false) {
+		return false
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("RBAC_ENFORCEMENT")))
+	if mode == "" {
+		mode = "enforce"
+	}
+	if mode == "off" || len(permissions) == 0 {
+		return true
+	}
+
+	role, _ := middleware.GetUserRole(req.Context())
+	if role == "super_admin" {
+		return true
+	}
+
+	roleName := controllerstorage.NormalizeRoleName(role)
+	rolePermissions, err := r.store.GetRolePermissions(targetTenantID, roleName)
+	if err != nil {
+		apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Role permission lookup failed", nil)
+		return false
+	}
+	for _, permission := range permissions {
+		if strings.TrimSpace(permission) != "" && containsString(rolePermissions, permission) {
+			return true
+		}
+	}
+
+	if mode == "audit" {
+		w.Header().Set("X-RBAC-Audit-Denied", "true")
+		log.Printf(
+			"[RBAC][audit] denied-but-allowed role=%s tenant=%s method=%s path=%s required_any_permission=%s",
+			roleName,
+			targetTenantID.String(),
+			req.Method,
+			req.URL.Path,
+			strings.Join(permissions, ","),
 		)
 		return true
 	}
