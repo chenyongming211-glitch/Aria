@@ -1379,19 +1379,20 @@ const showInput = () => {
   })
 }
 
-const handleInputConfirm = () => {
-  if (inputValue.value) {
-    // 简单的 CIDR 校验逻辑
-    if (!/^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(inputValue.value)) {
+const handleInputConfirm = (): boolean => {
+  const pendingRoute = inputValue.value.trim()
+  if (pendingRoute) {
+    if (!/^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(pendingRoute)) {
       ElMessage.warning(t('nodesPage.invalidCidr'))
-      return
+      return false
     }
-    if (!editForm.advertised_routes.includes(inputValue.value)) {
-      editForm.advertised_routes.push(inputValue.value)
+    if (!editForm.advertised_routes.includes(pendingRoute)) {
+      editForm.advertised_routes.push(pendingRoute)
     }
   }
   inputVisible.value = false
   inputValue.value = ''
+  return true
 }
 
 const normalizeEditedRoutes = (routes: string[]): string[] => {
@@ -1423,6 +1424,9 @@ const syncEditedAdvertisedRoutes = async () => {
 }
 
 const saveNodeChanges = async () => {
+  if (!handleInputConfirm()) {
+    return
+  }
   submitting.value = true
   try {
     await nodeStore.updateNodeRemote(editForm.id, {

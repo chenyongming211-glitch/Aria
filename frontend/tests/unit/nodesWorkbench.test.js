@@ -349,6 +349,20 @@ describe('Nodes workbench detail', () => {
     expect(mockNodeStore.loadNodes).toHaveBeenCalled()
   })
 
+  it('commits a pending advertised route input before saving node edits', async () => {
+    const wrapper = mountNodes()
+
+    wrapper.vm.handleEditNode(mockNodeStore.nodes[0])
+    wrapper.vm.inputVisible = true
+    wrapper.vm.inputValue = '10.30.0.0/16'
+
+    await wrapper.vm.saveNodeChanges()
+    await flushPromises()
+
+    expect(addRouteMock).toHaveBeenCalledWith('node-1', '10.30.0.0/16')
+    expect(mockNodeStore.loadNodes).toHaveBeenCalled()
+  })
+
   it('polls command status until the queued quick command reaches a terminal state', async () => {
     vi.useFakeTimers()
 

@@ -33,6 +33,7 @@ app.mount('#app')
 // Fetch version from API
 const appStore = useAppStore()
 appStore.fetchVersion()
+appStore.startVersionWatcher()
 
 // Add global styles for Element Plus components override (浅色主题)
 const style = document.createElement('style')

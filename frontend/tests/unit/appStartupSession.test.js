@@ -13,7 +13,8 @@ const {
     mount: vi.fn()
   },
   mockAppStore: {
-    fetchVersion: vi.fn()
+    fetchVersion: vi.fn(),
+    startVersionWatcher: vi.fn()
   },
   mockUserStore: {
     loadSession: vi.fn()
@@ -68,6 +69,7 @@ describe('application startup session hydration', () => {
     mockApp.use.mockClear()
     mockApp.mount.mockClear()
     mockAppStore.fetchVersion.mockClear()
+    mockAppStore.startVersionWatcher.mockClear()
     mockUserStore.loadSession.mockClear()
     document.head.innerHTML = ''
     document.body.innerHTML = '<div id="app"></div>'
@@ -80,5 +82,6 @@ describe('application startup session hydration', () => {
     expect(mockApp.mount).toHaveBeenCalledTimes(1)
     expect(mockUserStore.loadSession.mock.invocationCallOrder[0])
       .toBeLessThan(mockApp.mount.mock.invocationCallOrder[0])
+    expect(mockAppStore.startVersionWatcher).toHaveBeenCalledTimes(1)
   })
 })
