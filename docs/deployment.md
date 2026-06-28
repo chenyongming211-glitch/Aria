@@ -1170,6 +1170,35 @@ Purpose:
 | Route smoke | Login succeeded as `sysadmin`; selected tenant `Aria Default` and node `node-82-156-137-42`; temporary route `10.254.86.0/24` was added through `POST /api/v2/tenants/{tenant_id}/nodes/{node_id}/routes`, appeared in the route list, was deleted through `DELETE /api/v2/tenants/{tenant_id}/nodes/{node_id}/routes/{cidr}`, and no longer appeared afterward. |
 | Deployment note | This is a gray deployment from the feature branch, not a `master` deployment. Merge to `master` should still follow the normal confirmation gate. |
 
+### 2026-06-28 Nodes Advertised Route Edit Follow-up
+
+Status: gray deployed from `codex/ip-group-reference-closure` and server-side
+smoke validated.
+
+Purpose:
+
+- Fix the remaining Nodes edit edge case where a user typed a new advertised
+  route and clicked Save without pressing Enter first. The edit dialog now
+  commits the pending route input before synchronizing route diffs.
+- Add a frontend version watcher so an already-open console tab reloads after a
+  deployed version changes instead of continuing to run stale Vite chunks.
+- Publish the follow-up as `0.2.87` because `0.2.86` had the route API wiring
+  fix deployed, but already-open browser tabs could still be running old
+  JavaScript and never issue the route API request.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-28T22:31+08:00 deployment; 2026-06-28T22:34+08:00 smoke validation |
+| Git commit | `47498f375f2bbbcf5eff0d1c08279c8153e70dae` |
+| Branch CI run | `28325437321` |
+| Version | `0.2.87` |
+| Controller image | Local runtime image `aria-controller:0.2.87` / `aria-controller:local@sha256:5c6c9c7347a9fec3fbab113c7c9f32f7c0ef48da37785eb9a2e3668da39a3296`. |
+| Backup | `/root/aria-controller/deploy-backups/20260628223112` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch Actions. |
+| Verification | Local focused route-input regression test passed, local version watcher tests passed, local `npm run type-check` passed, full frontend unit tests passed (`204` tests), frontend build passed, linux/amd64 Controller/ariactl build passed, and `git diff --check` passed. Branch Actions run `28325437321` passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` returned `0.2.87`; `aria-controller` and `aria-frontend` were healthy; frontend entry returned HTTP 200 with `Cache-Control: no-store` and served `assets/index-13a4d431.js`, `assets/Nodes-5b8f9205.js`, and `assets/useRouteApi-fea59ada.js`. The deployed entry bundle contains `startVersionWatcher` and `reloadOnChange`. |
+| Route smoke | Login succeeded as `sysadmin`; selected tenant `Aria Default` and node `node-82-156-48-111`; temporary route `10.254.87.0/24` was added through `POST /api/v2/tenants/{tenant_id}/nodes/{node_id}/routes`, appeared in the route list, was deleted through `DELETE /api/v2/tenants/{tenant_id}/nodes/{node_id}/routes/{cidr}`, and no longer appeared afterward. |
+| Deployment note | This is a gray deployment from the feature branch, not a `master` deployment. Users with a tab that was opened before `0.2.87` may still need one manual refresh; once the `0.2.87` entry is loaded, later version changes trigger the frontend watcher. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
