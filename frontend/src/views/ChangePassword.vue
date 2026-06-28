@@ -19,8 +19,8 @@
       <section class="password-panel">
         <div class="panel-header">
           <el-icon class="panel-icon"><Lock /></el-icon>
-          <h2>修改初始密码</h2>
-          <p>首次登录需要设置新的登录密码</p>
+          <h2>{{ t('changePassword.title') }}</h2>
+          <p>{{ t('changePassword.subtitle') }}</p>
         </div>
 
         <el-form
@@ -31,34 +31,34 @@
           class="password-form"
           @keyup.enter="handleChangePassword"
         >
-          <el-form-item label="当前密码" prop="oldPassword">
+          <el-form-item :label="t('changePassword.currentPassword')" prop="oldPassword">
             <el-input
               v-model="passwordForm.oldPassword"
               type="password"
               autocomplete="current-password"
-              placeholder="请输入当前密码"
+              :placeholder="t('changePassword.currentPasswordPlaceholder')"
               show-password
               size="large"
             />
           </el-form-item>
 
-          <el-form-item label="新密码" prop="newPassword">
+          <el-form-item :label="t('changePassword.newPassword')" prop="newPassword">
             <el-input
               v-model="passwordForm.newPassword"
               type="password"
               autocomplete="new-password"
-              placeholder="请输入新密码（至少 6 位）"
+              :placeholder="t('changePassword.newPasswordPlaceholder')"
               show-password
               size="large"
             />
           </el-form-item>
 
-          <el-form-item label="确认新密码" prop="confirmPassword">
+          <el-form-item :label="t('changePassword.confirmPassword')" prop="confirmPassword">
             <el-input
               v-model="passwordForm.confirmPassword"
               type="password"
               autocomplete="new-password"
-              placeholder="请再次输入新密码"
+              :placeholder="t('changePassword.confirmPasswordPlaceholder')"
               show-password
               size="large"
             />
@@ -71,7 +71,7 @@
             :loading="loading"
             @click="handleChangePassword"
           >
-            确认修改
+            {{ t('changePassword.submit') }}
           </el-button>
         </el-form>
       </section>
@@ -80,11 +80,12 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Lock } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores'
+import { t } from '@/i18n'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -100,25 +101,25 @@ const passwordForm = reactive({
 
 const validateConfirmPassword = (rule, value, callback) => {
   if (value !== passwordForm.newPassword) {
-    callback(new Error('两次输入的密码不一致'))
+    callback(new Error(t('changePassword.mismatch')))
     return
   }
   callback()
 }
 
-const passwordRules = reactive({
+const passwordRules = computed(() => ({
   oldPassword: [
-    { required: true, message: '请输入当前密码', trigger: 'blur' }
+    { required: true, message: t('changePassword.currentRequired'), trigger: 'blur' }
   ],
   newPassword: [
-    { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 6, message: '密码至少 6 位', trigger: 'blur' }
+    { required: true, message: t('changePassword.newRequired'), trigger: 'blur' },
+    { min: 6, message: t('changePassword.newLength'), trigger: 'blur' }
   ],
   confirmPassword: [
-    { required: true, message: '请再次输入新密码', trigger: 'blur' },
+    { required: true, message: t('changePassword.confirmRequired'), trigger: 'blur' },
     { validator: validateConfirmPassword, trigger: 'blur' }
   ]
-})
+}))
 
 const handleChangePassword = async () => {
   if (!passwordFormRef.value) return
@@ -133,15 +134,15 @@ const handleChangePassword = async () => {
   try {
     const result = await userStore.changePassword(passwordForm.oldPassword, passwordForm.newPassword)
     if (!result.success) {
-      ElMessage.error(result.message || '密码修改失败')
+      ElMessage.error(result.message || t('changePassword.failed'))
       return
     }
 
-    ElMessage.success('密码修改成功，请重新登录')
+    ElMessage.success(t('changePassword.success'))
     userStore.logout()
     router.replace('/login')
   } catch (error) {
-    ElMessage.error(`密码修改失败: ${error.message || '未知错误'}`)
+    ElMessage.error(`${t('changePassword.failed')}: ${error.message || t('changePassword.unknownError')}`)
   } finally {
     loading.value = false
   }

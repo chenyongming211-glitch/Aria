@@ -4,11 +4,11 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <h3>租户管理</h3>
+          <h3>{{ t('tenantManagement.title') }}</h3>
           <div class="header-actions">
             <el-input
               v-model="searchQuery"
-              placeholder="搜索租户..."
+              :placeholder="t('tenantManagement.searchPlaceholder')"
               style="width: 200px; margin-right: 10px;"
               clearable
             >
@@ -18,11 +18,11 @@
             </el-input>
             <el-button type="primary" @click="refreshTenants">
               <el-icon><Refresh /></el-icon>
-              刷新
+              {{ t('common.refresh') }}
             </el-button>
             <el-button type="primary" @click="createTenant">
               <el-icon><Plus /></el-icon>
-              创建租户
+              {{ t('tenantManagement.create') }}
             </el-button>
           </div>
         </div>
@@ -36,7 +36,7 @@
         row-key="id"
         :tree-props="{children: 'children', hasChildren: 'hasChildren'}"
       >
-        <el-table-column prop="name" label="名称" width="200">
+        <el-table-column prop="name" :label="t('tenantManagement.name')" width="200">
           <template #default="{ row }">
             <div class="tenant-name-cell">
               <el-icon v-if="row.icon" :class="row.icon" class="tenant-icon" />
@@ -44,39 +44,39 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="code" label="编码" width="150" />
-        <el-table-column prop="status" label="状态" width="120">
+        <el-table-column prop="code" :label="t('tenantManagement.coding')" width="150" />
+        <el-table-column prop="status" :label="t('tenantManagement.status')" width="120">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">
               {{ getStatusText(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="nodeCount" label="节点数" width="100" />
-        <el-table-column prop="tokenCount" label="Token数" width="100" />
-        <el-table-column prop="createdAt" label="创建时间" width="180" />
-        <el-table-column prop="description" label="描述" show-overflow-tooltip />
-        <el-table-column label="操作" width="280">
+        <el-table-column prop="nodeCount" :label="t('tenantManagement.nodeCount')" width="100" />
+        <el-table-column prop="tokenCount" :label="t('tenantManagement.tokenCount')" width="100" />
+        <el-table-column prop="createdAt" :label="t('tenantManagement.createdAt')" width="180" />
+        <el-table-column prop="description" :label="t('tenantManagement.description')" show-overflow-tooltip />
+        <el-table-column :label="t('tenantManagement.actions')" width="280">
           <template #default="{ row }">
-            <el-button size="small" @click="viewTenantDetails(row)">查看</el-button>
-            <el-button size="small" type="primary" @click="editTenant(row)">编辑</el-button>
-            <el-button size="small" type="info" @click="manageAccess(row)">管理访问</el-button>
+            <el-button size="small" @click="viewTenantDetails(row)">{{ t('common.view') }}</el-button>
+            <el-button size="small" type="primary" @click="editTenant(row)">{{ t('common.edit') }}</el-button>
+            <el-button size="small" type="info" @click="manageAccess(row)">{{ t('tenantManagement.manageAccess') }}</el-button>
             <el-popconfirm
-              :title="`确定要${row.status === 'active' ? '暂停' : '激活'}租户 ${row.name} 吗?`"
+              :title="getToggleConfirm(row)"
               @confirm="toggleTenantStatus(row)"
             >
               <template #reference>
                 <el-button size="small" :type="row.status === 'active' ? 'warning' : 'success'">
-                  {{ row.status === 'active' ? '暂停' : '激活' }}
+                  {{ row.status === 'active' ? t('tenantManagement.suspend') : t('tenantManagement.activate') }}
                 </el-button>
               </template>
             </el-popconfirm>
             <el-popconfirm
-              title="确定要删除此租户吗？此操作无法撤销。"
+              :title="t('tenantManagement.deleteConfirm')"
               @confirm="deleteTenant(row.id)"
             >
               <template #reference>
-                <el-button size="small" type="danger">删除</el-button>
+                <el-button size="small" type="danger">{{ t('common.delete') }}</el-button>
               </template>
             </el-popconfirm>
           </template>
@@ -110,26 +110,26 @@
         ref="tenantFormRef"
         label-width="100px"
       >
-        <el-form-item label="名称" prop="name">
-          <el-input v-model="editingTenant.name" :disabled="isEditingExisting" placeholder="请输入租户名称" />
+        <el-form-item :label="t('tenantManagement.name')" prop="name">
+          <el-input v-model="editingTenant.name" :disabled="isEditingExisting" :placeholder="t('tenantManagement.namePlaceholder')" />
         </el-form-item>
-        <el-form-item label="编码" prop="code">
-          <el-input v-model="editingTenant.code" :disabled="isEditingExisting" placeholder="请输入租户编码" />
+        <el-form-item :label="t('tenantManagement.coding')" prop="code">
+          <el-input v-model="editingTenant.code" :disabled="isEditingExisting" :placeholder="t('tenantManagement.codePlaceholder')" />
         </el-form-item>
-        <el-form-item label="描述" prop="description">
+        <el-form-item :label="t('tenantManagement.description')" prop="description">
           <el-input
             v-model="editingTenant.description"
             type="textarea"
             :rows="3"
-            placeholder="请输入租户描述"
+            :placeholder="t('tenantManagement.descriptionPlaceholder')"
           />
         </el-form-item>
       </el-form>
 
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="closeDetailDialog">取消</el-button>
-          <el-button type="primary" @click="saveTenant">确认</el-button>
+          <el-button @click="closeDetailDialog">{{ t('common.cancel') }}</el-button>
+          <el-button type="primary" @click="saveTenant">{{ t('common.confirm') }}</el-button>
         </span>
       </template>
     </el-dialog>
@@ -137,34 +137,34 @@
     <!-- Access Management Dialog -->
     <el-dialog
       v-model="accessDialogVisible"
-      title="管理访问"
+      :title="t('tenantManagement.manageAccessTitle')"
       width="70%"
     >
       <div v-if="selectedTenant">
         <el-tabs v-model="accessTab">
-          <el-tab-pane label="用户" name="users">
+          <el-tab-pane :label="t('tenantManagement.users')" name="users">
             <el-button type="primary" @click="addUserToTenant" style="margin-bottom: 15px;">
               <el-icon><Plus /></el-icon>
-              添加用户
+              {{ t('tenantManagement.addUser') }}
             </el-button>
 
             <el-table :data="selectedTenant.users" style="width: 100%">
-              <el-table-column prop="username" label="用户名" width="150" />
-              <el-table-column prop="email" label="邮箱" width="200" />
-              <el-table-column prop="role" label="角色" width="120">
+              <el-table-column prop="username" :label="t('common.username')" width="150" />
+              <el-table-column prop="email" :label="t('common.email')" width="200" />
+              <el-table-column prop="role" :label="t('common.role')" width="120">
                 <template #default="{ row }">
                   <el-tag :type="getRoleType(row.role)">{{ getRoleLabel(row.role) }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="150">
+              <el-table-column :label="t('common.actions')" width="150">
                 <template #default="{ row }">
-                  <el-button size="small" type="primary" @click="editUserRole(row)">编辑</el-button>
+                  <el-button size="small" type="primary" @click="editUserRole(row)">{{ t('common.edit') }}</el-button>
                   <el-popconfirm
-                    title="确定要删除此用户吗？"
+                    :title="t('tenantManagement.deleteUserConfirm')"
                     @confirm="removeUserFromTenant(row.id)"
                   >
                     <template #reference>
-                      <el-button size="small" type="danger">删除</el-button>
+                      <el-button size="small" type="danger">{{ t('common.delete') }}</el-button>
                     </template>
                   </el-popconfirm>
                 </template>
@@ -177,21 +177,21 @@
 
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="accessDialogVisible = false">关闭</el-button>
+          <el-button @click="accessDialogVisible = false">{{ t('common.close') }}</el-button>
         </span>
       </template>
     </el-dialog>
 
     <el-dialog
       v-model="roleDialogVisible"
-      title="修改用户角色"
+      :title="t('tenantManagement.editUserRole')"
       width="420px"
     >
       <el-form :model="roleForm" label-width="80px">
-        <el-form-item label="用户">
+        <el-form-item :label="t('common.user')">
           <el-input :value="editingUser?.username || ''" disabled />
         </el-form-item>
-        <el-form-item label="角色">
+        <el-form-item :label="t('common.role')">
           <el-select v-model="roleForm.role" style="width: 100%">
             <el-option
               v-for="role in roleOptions"
@@ -205,8 +205,8 @@
 
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="roleDialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="roleSaving" @click="saveUserRole">更新</el-button>
+          <el-button @click="roleDialogVisible = false">{{ t('common.cancel') }}</el-button>
+          <el-button type="primary" :loading="roleSaving" @click="saveUserRole">{{ t('common.update') }}</el-button>
         </span>
       </template>
     </el-dialog>
@@ -219,6 +219,7 @@ import { Search, Refresh, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/composables/useApi'
 import { API_ENDPOINTS } from '@/config/api'
+import { t } from '@/i18n'
 
 const tenants = ref([])
 const loading = ref(false)
@@ -243,7 +244,7 @@ const loadTenants = async () => {
     }))
   } catch (error) {
     console.error('Failed to load tenants:', error)
-    ElMessage.error('Failed to load tenants')
+    ElMessage.error(t('tenantManagement.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -266,11 +267,11 @@ const roleForm = reactive({
   role: 'operator'
 })
 
-const roleOptions = [
-  { value: 'admin', label: '管理员 (admin)' },
-  { value: 'operator', label: '操作员 (operator)' },
-  { value: 'viewer', label: '只读 (viewer)' }
-]
+const roleOptions = computed(() => [
+  { value: 'admin', label: `${t('tenantManagement.roleAdmin')} (admin)` },
+  { value: 'operator', label: `${t('tenantManagement.roleOperator')} (operator)` },
+  { value: 'viewer', label: `${t('tenantManagement.roleViewer')} (viewer)` }
+])
 
 const safeLower = (value) => String(value ?? '').toLowerCase()
 
@@ -293,8 +294,15 @@ const paginatedTenants = computed(() => {
 })
 
 const dialogTitle = computed(() => {
-  return editingTenant.value?.id ? '编辑租户' : '创建新租户'
+  return editingTenant.value?.id ? t('tenantManagement.edit') : t('tenantManagement.createNew')
 })
+
+const getToggleConfirm = (tenant) => {
+  const action = tenant.status === 'active' ? t('tenantManagement.suspend') : t('tenantManagement.activate')
+  return t('tenantManagement.toggleConfirm')
+    .replace('{action}', action)
+    .replace('{name}', tenant.name)
+}
 
 const getStatusType = (status) => {
   switch(status) {
@@ -307,9 +315,9 @@ const getStatusType = (status) => {
 
 const getStatusText = (status) => {
   switch(status) {
-    case 'active': return '激活'
-    case 'suspended': return '已暂停'
-    case 'inactive': return '未激活'
+    case 'active': return t('tenantManagement.statusActive')
+    case 'suspended': return t('tenantManagement.statusSuspended')
+    case 'inactive': return t('tenantManagement.statusInactive')
     default: return status
   }
 }
@@ -326,25 +334,25 @@ const getRoleType = (role) => {
 
 const getRoleLabel = (role) => {
   switch (role) {
-    case 'admin': return '管理员'
-    case 'operator': return '操作员'
-    case 'member': return '成员'
-    case 'viewer': return '只读'
+    case 'admin': return t('tenantManagement.roleAdmin')
+    case 'operator': return t('tenantManagement.roleOperator')
+    case 'member': return t('tenantManagement.roleMember')
+    case 'viewer': return t('tenantManagement.roleViewer')
     default: return role || '-'
   }
 }
 
-const tenantRules = reactive({
+const tenantRules = computed(() => ({
   name: [
-    { required: true, message: 'Please enter tenant name', trigger: 'blur' },
-    { min: 2, max: 50, message: 'Tenant name must be between 2 and 50 characters', trigger: 'blur' }
+    { required: true, message: t('tenantManagement.nameRequired'), trigger: 'blur' },
+    { min: 2, max: 50, message: t('tenantManagement.nameLength'), trigger: 'blur' }
   ],
   code: [
-    { required: true, message: 'Please enter tenant code', trigger: 'blur' },
-    { min: 2, max: 20, message: 'Tenant code must be between 2 and 20 characters', trigger: 'blur' },
-    { pattern: /^[a-z0-9][a-z0-9\-]*[a-z0-9]$/, message: 'Code must start and end with alphanumeric, may contain hyphens', trigger: 'blur' }
+    { required: true, message: t('tenantManagement.codeRequired'), trigger: 'blur' },
+    { min: 2, max: 20, message: t('tenantManagement.codeLength'), trigger: 'blur' },
+    { pattern: /^[a-z0-9][a-z0-9\-]*[a-z0-9]$/, message: t('tenantManagement.codePattern'), trigger: 'blur' }
   ]
-})
+}))
 
 const refreshTenants = () => {
   loadTenants()
@@ -389,12 +397,12 @@ const toggleTenantStatus = async (tenant) => {
       tenants.value[index] = { ...tenants.value[index], status: newStatus }
     }
 
-    const action = newStatus === 'active' ? 'activated' : 'suspended'
-    ElMessage.success(`Tenant ${tenant.name} has been ${action}`)
+    const action = newStatus === 'active' ? t('tenantManagement.activated') : t('tenantManagement.statusSuspendedVerb')
+    ElMessage.success(t('tenantManagement.statusUpdated').replace('{name}', tenant.name).replace('{action}', action))
   } catch (error) {
     tenant.status = previousStatus
     console.error('Failed to update tenant status:', error)
-    ElMessage.error('更新租户状态失败')
+    ElMessage.error(t('tenantManagement.updateStatusFailed'))
   }
 }
 
@@ -402,10 +410,10 @@ const deleteTenant = async (id) => {
   try {
     await api.delete(API_ENDPOINTS.TENANT.DETAIL(id))
     tenants.value = tenants.value.filter(tenant => tenant.id !== id)
-    ElMessage.success('Tenant deleted')
+    ElMessage.success(t('tenantManagement.deleted'))
   } catch (error) {
     console.error('Failed to delete tenant:', error)
-    ElMessage.error('Failed to delete tenant')
+    ElMessage.error(t('tenantManagement.deleteFailed'))
   }
 }
 
@@ -427,7 +435,7 @@ const saveTenant = async () => {
       if (index !== -1) {
         tenants.value[index] = { ...tenants.value[index], ...tenantData }
       }
-      ElMessage.success('Tenant updated successfully')
+      ElMessage.success(t('tenantManagement.updated'))
     } else {
       const response = await api.post(API_ENDPOINTS.TENANT.LIST, tenantData)
       const newTenant = {
@@ -439,13 +447,13 @@ const saveTenant = async () => {
         users: []
       }
       tenants.value.push(newTenant)
-      ElMessage.success('Tenant created successfully')
+      ElMessage.success(t('tenantManagement.created'))
     }
 
     detailDialogVisible.value = false
   } catch (error) {
     console.error('Failed to save tenant:', error)
-    ElMessage.error('Failed to save tenant')
+    ElMessage.error(t('tenantManagement.saveFailed'))
   }
 }
 
@@ -458,23 +466,23 @@ const manageAccess = async (tenant) => {
     selectedTenant.value.users = response.data?.data || response.data || []
   } catch (error) {
     console.error('Failed to load users:', error)
-    ElMessage.error('加载用户列表失败')
+    ElMessage.error(t('tenantManagement.loadUsersFailed'))
   }
 }
 
 const addUserToTenant = () => {
-  ElMessageBox.prompt('请输入用户名', '添加用户', {
-    confirmButtonText: '添加',
-    cancelButtonText: '取消',
+  ElMessageBox.prompt(t('tenantManagement.promptUsername'), t('tenantManagement.addUserTitle'), {
+    confirmButtonText: t('tenantManagement.add'),
+    cancelButtonText: t('common.cancel'),
     inputPattern: /\S+/,
-    inputErrorMessage: '请输入用户名'
+    inputErrorMessage: t('tenantManagement.promptUsername')
   }).then(async ({ value }) => {
     const username = value
-    ElMessageBox.prompt('请输入密码', '设置密码', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
+    ElMessageBox.prompt(t('tenantManagement.promptPassword'), t('tenantManagement.setPasswordTitle'), {
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel'),
       inputPattern: /.{6,}/,
-      inputErrorMessage: '密码至少6位'
+      inputErrorMessage: t('tenantManagement.passwordMin')
     }).then(async ({ value: password }) => {
       try {
         await api.post(API_ENDPOINTS.TENANT.USERS(selectedTenant.value.id), {
@@ -483,11 +491,11 @@ const addUserToTenant = () => {
           role: 'operator',
           email: ''
         })
-        ElMessage.success('用户添加成功')
+        ElMessage.success(t('tenantManagement.userAdded'))
         manageAccess(selectedTenant.value)
       } catch (error) {
         console.error('Failed to add user:', error)
-        ElMessage.error('添加用户失败')
+        ElMessage.error(t('tenantManagement.addUserFailed'))
       }
     }).catch(() => {})
   }).catch(() => {})
@@ -501,7 +509,7 @@ const editUserRole = (user) => {
 
 const saveUserRole = async () => {
   if (!selectedTenant.value?.id || !editingUser.value?.id) {
-    ElMessage.error('缺少租户或用户信息')
+    ElMessage.error(t('tenantManagement.missingTenantOrUser'))
     return
   }
 
@@ -510,12 +518,12 @@ const saveUserRole = async () => {
     await api.put(API_ENDPOINTS.TENANT.USER_DETAIL(selectedTenant.value.id, editingUser.value.id), {
       role: roleForm.role
     })
-    ElMessage.success('角色更新成功')
+    ElMessage.success(t('tenantManagement.roleUpdated'))
     roleDialogVisible.value = false
     await manageAccess(selectedTenant.value)
   } catch (error) {
     console.error('Failed to update user:', error)
-    ElMessage.error('更新用户失败')
+    ElMessage.error(t('tenantManagement.updateUserFailed'))
   } finally {
     roleSaving.value = false
   }
@@ -524,11 +532,11 @@ const saveUserRole = async () => {
 const removeUserFromTenant = async (userId) => {
   try {
     await api.delete(API_ENDPOINTS.TENANT.USER_DETAIL(selectedTenant.value.id, userId))
-    ElMessage.success('用户删除成功')
+    ElMessage.success(t('tenantManagement.userDeleted'))
     manageAccess(selectedTenant.value)
   } catch (error) {
     console.error('Failed to delete user:', error)
-    ElMessage.error('删除用户失败')
+    ElMessage.error(t('tenantManagement.deleteUserFailed'))
   }
 }
 

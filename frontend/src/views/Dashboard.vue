@@ -3,9 +3,9 @@
   <div class="dashboard page-shell">
     <section class="page-hero">
       <div class="page-hero-main">
-        <div class="page-eyebrow">Operations Overview</div>
-        <h1 class="page-heading">Network control dashboard</h1>
-        <p class="page-description">Live tenant health, traffic, node coverage, and recent control-plane activity in one operational view.</p>
+        <div class="page-eyebrow">{{ t('dashboard.eyebrow') }}</div>
+        <h1 class="page-heading">{{ t('dashboard.heading') }}</h1>
+        <p class="page-description">{{ t('dashboard.description') }}</p>
       </div>
     </section>
 
@@ -41,7 +41,7 @@
             <div class="card-header">
               <div class="header-left">
                 <el-icon class="header-icon"><TrendCharts /></el-icon>
-                <span class="header-title">Network Traffic</span>
+                <span class="header-title">{{ t('dashboard.networkTraffic') }}</span>
               </div>
               <div class="header-actions">
                 <el-radio-group v-model="timeRange" size="small">
@@ -50,7 +50,7 @@
                   <el-radio-button label="7d">7D</el-radio-button>
                   <el-radio-button label="30d">30D</el-radio-button>
                 </el-radio-group>
-                <el-button link :icon="Download">Export</el-button>
+                <el-button link :icon="Download">{{ t('dashboard.export') }}</el-button>
               </div>
             </div>
           </template>
@@ -68,9 +68,9 @@
             <div class="card-header">
               <div class="header-left">
                 <el-icon class="header-icon"><Clock /></el-icon>
-                <span class="header-title">Recent Activity</span>
+                <span class="header-title">{{ t('dashboard.recentActivity') }}</span>
               </div>
-              <el-button link @click="refreshActivities" :icon="Refresh">Refresh</el-button>
+              <el-button link @click="refreshActivities" :icon="Refresh">{{ t('common.refresh') }}</el-button>
             </div>
           </template>
           <div class="activity-list">
@@ -88,13 +88,13 @@
                 <div class="activity-text">{{ activity.text }}</div>
                 <div class="activity-meta">
                   <span class="activity-time">{{ activity.time }}</span>
-                  <el-tag v-if="activity.tag" size="small" :type="activity.tagType">
-                    {{ activity.tag }}
+                  <el-tag v-if="activity.tagKey" size="small" :type="activity.tagType">
+                    {{ t(activity.tagKey) }}
                   </el-tag>
                 </div>
               </div>
             </div>
-            <el-empty v-if="activities.length === 0" description="No recent activity" :image-size="60" />
+            <el-empty v-if="activities.length === 0" :description="t('dashboard.noRecentActivity')" :image-size="60" />
           </div>
         </el-card>
       </el-col>
@@ -109,7 +109,7 @@
             <div class="card-header">
               <div class="header-left">
                 <el-icon class="header-icon"><Location /></el-icon>
-                <span class="header-title">Region Distribution</span>
+                <span class="header-title">{{ t('dashboard.regionDistribution') }}</span>
               </div>
             </div>
           </template>
@@ -119,7 +119,7 @@
                 <div class="region-icon">{{ region.icon }}</div>
                 <div class="region-details">
                   <div class="region-name">{{ region.name }}</div>
-                  <div class="region-nodes">{{ region.nodes }} nodes</div>
+                  <div class="region-nodes">{{ region.nodes }} {{ t('dashboard.nodesUnit') }}</div>
                 </div>
               </div>
               <div class="region-stats">
@@ -132,7 +132,7 @@
                 <div class="region-percentage">{{ region.percentage }}%</div>
               </div>
             </div>
-            <el-empty v-if="regions.length === 0" description="No region data" :image-size="60" />
+            <el-empty v-if="regions.length === 0" :description="t('dashboard.noRegionData')" :image-size="60" />
           </div>
         </el-card>
       </el-col>
@@ -144,7 +144,7 @@
             <div class="card-header">
               <div class="header-left">
                 <el-icon class="header-icon"><Lightning /></el-icon>
-                <span class="header-title">Quick Actions</span>
+                <span class="header-title">{{ t('dashboard.quickActions') }}</span>
               </div>
             </div>
           </template>
@@ -173,12 +173,12 @@
             <div class="card-header">
               <div class="header-left">
                 <el-icon class="header-icon"><CircleCheck /></el-icon>
-                <span class="header-title">System Health</span>
+                <span class="header-title">{{ t('dashboard.systemHealth') }}</span>
               </div>
             </div>
           </template>
           <div v-if="healthError" class="health-error">
-            <el-alert title="数据不可用" type="warning" :closable="false" show-icon />
+            <el-alert :title="t('dashboard.dataUnavailable')" type="warning" :closable="false" show-icon />
           </div>
           <div v-else class="health-metrics" v-loading="healthLoading">
             <div v-for="metric in healthMetrics" :key="metric.name" class="health-item">
@@ -223,6 +223,7 @@ import { useRouter } from 'vue-router'
 import { useMonitorApi } from '@/composables/useMonitorApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
+import { t } from '@/i18n'
 
 const router = useRouter()
 const trafficLoading = ref(false)
@@ -263,17 +264,17 @@ const stats = computed(() => {
 
   return [
     {
-      label: 'Total Nodes',
+      label: t('dashboard.totalNodes'),
       value: total,
-      description: 'Across all regions',
+      description: t('dashboard.totalNodesDescription'),
       color: 'blue',
       icon: Monitor,
       progress: typeof total === 'number' ? Math.min(total * 5, 100) : 0
     },
     {
-      label: 'Online Nodes',
+      label: t('dashboard.onlineNodes'),
       value: online,
-      description: 'Currently active',
+      description: t('dashboard.onlineNodesDescription'),
       color: 'green',
       icon: CircleCheck,
       progress: (typeof total === 'number' && typeof online === 'number' && total > 0)
@@ -281,17 +282,17 @@ const stats = computed(() => {
         : 0
     },
     {
-      label: 'Advertised Routes',
+      label: t('dashboard.advertisedRoutes'),
       value: routes,
-      description: 'Network routes',
+      description: t('dashboard.advertisedRoutesDescription'),
       color: 'orange',
       icon: Position,
       progress: typeof routes === 'number' ? Math.min(routes * 3, 100) : 0
     },
     {
-      label: 'Bandwidth',
+      label: t('dashboard.bandwidth'),
       value: bw === 'N/A' ? 'N/A' : bw + ' Mbps',
-      description: 'Peak throughput',
+      description: t('dashboard.bandwidthDescription'),
       color: 'purple',
       icon: TrendCharts,
       progress: (typeof bw === 'number') ? Math.min(bw / 10, 100) : 0
@@ -311,28 +312,28 @@ const healthMetrics = computed(() => {
 
   return [
     {
-      name: 'Node Online Rate',
+      name: t('dashboard.nodeOnlineRate'),
       value: onlineRate.toFixed(1) + '%',
       percentage: Math.min(Math.round(onlineRate), 100),
       color: onlineRate >= 80 ? '#22C55E' : onlineRate >= 50 ? '#F59E0B' : '#EF4444',
       statusClass: onlineRate >= 80 ? 'status-good' : onlineRate >= 50 ? 'status-warning' : 'status-danger'
     },
     {
-      name: 'Sync Success Rate',
+      name: t('dashboard.syncSuccessRate'),
       value: syncRate.toFixed(1) + '%',
       percentage: Math.min(Math.round(syncRate), 100),
       color: syncRate >= 90 ? '#22C55E' : syncRate >= 70 ? '#F59E0B' : '#EF4444',
       statusClass: syncRate >= 90 ? 'status-good' : syncRate >= 70 ? 'status-warning' : 'status-danger'
     },
     {
-      name: 'Active Alerts',
+      name: t('dashboard.activeAlerts'),
       value: String(alerts),
       percentage: Math.min(alerts * 10, 100),
       color: alerts === 0 ? '#22C55E' : alerts <= 3 ? '#F59E0B' : '#EF4444',
       statusClass: alerts === 0 ? 'status-good' : alerts <= 3 ? 'status-warning' : 'status-danger'
     },
     {
-      name: 'Failed Commands',
+      name: t('dashboard.failedCommands'),
       value: String(failedCmds),
       percentage: Math.min(failedCmds * 15, 100),
       color: failedCmds === 0 ? '#22C55E' : failedCmds <= 2 ? '#F59E0B' : '#EF4444',
@@ -342,36 +343,36 @@ const healthMetrics = computed(() => {
 })
 
 // 快速操作
-const quickActions = [
+const quickActions = computed(() => [
   {
-    name: 'Add Node',
+    name: t('dashboard.addNode'),
     icon: Plus,
     bgColor: 'rgba(59, 130, 246, 0.1)',
     iconColor: '#3B82F6',
     handler: () => router.push('/nodes')
   },
   {
-    name: 'Create Route',
+    name: t('dashboard.createRoute'),
     icon: Position,
     bgColor: 'rgba(34, 197, 94, 0.1)',
     iconColor: '#22C55E',
     handler: () => router.push('/routing')
   },
   {
-    name: 'View Logs',
+    name: t('dashboard.viewLogs'),
     icon: DataAnalysis,
     bgColor: 'rgba(245, 158, 11, 0.1)',
     iconColor: '#F59E0B',
     handler: () => router.push('/monitoring')
   },
   {
-    name: 'System Config',
+    name: t('dashboard.systemConfig'),
     icon: Setting,
     bgColor: 'rgba(139, 92, 246, 0.1)',
     iconColor: '#8B5CF6',
     handler: () => router.push('/settings')
   }
-]
+])
 
 // 区域颜色映射
 const regionColors = ['#3B82F6', '#22C55E', '#F59E0B', '#06B6D4', '#8B5CF6', '#EF4444', '#EC4899']
@@ -402,14 +403,14 @@ const aggregateRegions = (nodes) => {
 
 // 事件类型映射
 const eventTypeMap = {
-  alert_fired: { type: 'config', icon: Warning, tag: 'Alert', tagType: 'danger' },
-  alert_resolved: { type: 'node', icon: CircleCheck, tag: 'Resolved', tagType: 'success' },
-  node_registered: { type: 'node', icon: Monitor, tag: 'New', tagType: 'success' },
-  node_online: { type: 'node', icon: Monitor, tag: 'Online', tagType: 'success' },
-  node_offline: { type: 'node', icon: Monitor, tag: 'Offline', tagType: 'danger' },
-  command_sent: { type: 'config', icon: Setting, tag: 'Command', tagType: 'info' },
-  config_updated: { type: 'config', icon: Setting, tag: 'Config', tagType: 'warning' },
-  default: { type: 'node', icon: Monitor, tag: 'Event', tagType: 'info' }
+  alert_fired: { type: 'config', icon: Warning, tagKey: 'dashboard.eventAlert', tagType: 'danger' },
+  alert_resolved: { type: 'node', icon: CircleCheck, tagKey: 'dashboard.eventResolved', tagType: 'success' },
+  node_registered: { type: 'node', icon: Monitor, tagKey: 'dashboard.eventNew', tagType: 'success' },
+  node_online: { type: 'node', icon: Monitor, tagKey: 'dashboard.eventOnline', tagType: 'success' },
+  node_offline: { type: 'node', icon: Monitor, tagKey: 'dashboard.eventOffline', tagType: 'danger' },
+  command_sent: { type: 'config', icon: Setting, tagKey: 'dashboard.eventCommand', tagType: 'info' },
+  config_updated: { type: 'config', icon: Setting, tagKey: 'dashboard.eventConfig', tagType: 'warning' },
+  default: { type: 'node', icon: Monitor, tagKey: 'dashboard.event', tagType: 'info' }
 }
 
 const formatEventTime = (ts) => {
@@ -418,10 +419,10 @@ const formatEventTime = (ts) => {
   if (isNaN(date.getTime())) return ts
   const now = Date.now()
   const diff = Math.floor((now - date.getTime()) / 1000)
-  if (diff < 60) return 'just now'
-  if (diff < 3600) return Math.floor(diff / 60) + ' min ago'
-  if (diff < 86400) return Math.floor(diff / 3600) + ' hours ago'
-  return Math.floor(diff / 86400) + ' days ago'
+  if (diff < 60) return t('dashboard.justNow')
+  if (diff < 3600) return t('dashboard.minutesAgo').replace('{count}', String(Math.floor(diff / 60)))
+  if (diff < 86400) return t('dashboard.hoursAgo').replace('{count}', String(Math.floor(diff / 3600)))
+  return t('dashboard.daysAgo').replace('{count}', String(Math.floor(diff / 86400)))
 }
 
 const normalizeAdvertisedRoutes = (routes) => {
@@ -477,7 +478,7 @@ const fetchTrafficData = async () => {
     }
   } catch (error) {
     console.error('获取流量数据失败:', error)
-    trafficError.value = 'Failed to load traffic data'
+    trafficError.value = t('dashboard.trafficLoadFailed')
     nodesData.value.bandwidth = 'N/A'
   } finally {
     trafficLoading.value = false
@@ -511,7 +512,7 @@ const fetchActivities = async () => {
         icon: mapping.icon,
         text: ev.message || ev.description || ev.event_type || 'Event',
         time: formatEventTime(ev.created_at || ev.timestamp),
-        tag: mapping.tag,
+        tagKey: mapping.tagKey,
         tagType: mapping.tagType
       }
     })
@@ -553,7 +554,7 @@ const renderTrafficChart = (data) => {
       axisPointer: { lineStyle: { color: 'rgba(59, 130, 246, 0.2)' } }
     },
     legend: {
-      data: ['Upload', 'Download'],
+      data: [t('dashboard.upload'), t('dashboard.download')],
       textStyle: { color: '#475569' },
       top: 0
     },
@@ -575,7 +576,7 @@ const renderTrafficChart = (data) => {
     },
     series: [
       {
-        name: 'Upload',
+        name: t('dashboard.upload'),
         type: 'line',
         smooth: true,
         symbol: 'none',
@@ -592,7 +593,7 @@ const renderTrafficChart = (data) => {
         }
       },
       {
-        name: 'Download',
+        name: t('dashboard.download'),
         type: 'line',
         smooth: true,
         symbol: 'none',

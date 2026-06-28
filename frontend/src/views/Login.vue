@@ -28,9 +28,9 @@
           <img src="/aria-3d-cloud.png" alt="Aria Logo" class="big-logo" />
         </div>
         <div class="features-tags">
-          <span class="feature-tag">高性能</span>
-          <span class="feature-tag">零信任</span>
-          <span class="feature-tag">智能路由</span>
+          <span class="feature-tag">{{ t('login.featurePerformance') }}</span>
+          <span class="feature-tag">{{ t('login.featureZeroTrust') }}</span>
+          <span class="feature-tag">{{ t('login.featureSmartRouting') }}</span>
         </div>
       </div>
 
@@ -38,8 +38,8 @@
       <div class="login-side">
         <div class="login-card">
           <div class="login-header">
-            <h2>欢迎回来</h2>
-            <p>请登录您的账号</p>
+            <h2>{{ t('login.welcome') }}</h2>
+            <p>{{ t('login.subtitle') }}</p>
           </div>
 
           <el-form
@@ -54,7 +54,7 @@
                 v-model.trim="loginForm.username"
                 name="username"
                 autocomplete="username"
-                placeholder="用户名"
+                :placeholder="t('login.usernamePlaceholder')"
                 size="large"
                 class="login-input"
               >
@@ -68,7 +68,7 @@
               <el-input
                 v-model.trim="loginForm.password"
                 type="password"
-                placeholder="密码"
+                :placeholder="t('login.passwordPlaceholder')"
                 size="large"
                 class="login-input"
                 show-password
@@ -82,7 +82,7 @@
             <el-form-item>
               <div class="form-footer">
                 <el-checkbox v-model="loginForm.rememberMe" class="login-checkbox">
-                  记住我
+                  {{ t('login.rememberMe') }}
                 </el-checkbox>
               </div>
             </el-form-item>
@@ -95,8 +95,8 @@
                 :loading="loading"
                 @click="handleLogin"
               >
-                <span v-if="!loading">登录</span>
-                <span v-else>登录中...</span>
+                <span v-if="!loading">{{ t('login.submit') }}</span>
+                <span v-else>{{ t('login.submitting') }}</span>
               </el-button>
             </el-form-item>
           </el-form>
@@ -111,11 +111,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { User, Lock } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useUserStore, useAppStore } from '@/stores'
+import { t } from '@/i18n'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -158,16 +159,16 @@ const loginForm = ref({
 const loading = ref(false)
 const loginFormRef = ref(null)
 
-const loginRules = reactive({
+const loginRules = computed(() => ({
   username: [
-    { required: true, message: '请输入用户名', trigger: 'blur' },
-    { min: 3, max: 50, message: '用户名长度需为 3-50 个字符', trigger: 'blur' }
+    { required: true, message: t('login.usernameRequired'), trigger: 'blur' },
+    { min: 3, max: 50, message: t('login.usernameLength'), trigger: 'blur' }
   ],
   password: [
-    { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 6, message: '密码至少 6 个字符', trigger: 'blur' }
+    { required: true, message: t('login.passwordRequired'), trigger: 'blur' },
+    { min: 6, message: t('login.passwordLength'), trigger: 'blur' }
   ]
-})
+}))
 
 const handleLogin = async () => {
   if (!loginFormRef.value) return
@@ -231,16 +232,16 @@ const handleLogin = async () => {
       }
 
       router.push('/dashboard')
-      ElMessage.success('登录成功')
+      ElMessage.success(t('login.success'))
     } else {
-      ElMessage.error('登录失败，请检查凭据')
+      ElMessage.error(t('login.invalidCredentials'))
     }
   } catch (error) {
     console.error('Login error:', error)
     if (error && typeof error === 'object' && !Array.isArray(error) && Object.keys(error).length > 0) {
       return
     }
-    ElMessage.error('登录失败，请稍后重试')
+    ElMessage.error(t('login.retryLater'))
   } finally {
     loading.value = false
   }

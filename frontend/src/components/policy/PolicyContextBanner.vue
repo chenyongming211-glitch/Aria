@@ -1,12 +1,12 @@
 <template>
   <div v-if="hasContext" class="policy-context-banner" data-testid="policy-context-banner">
     <div class="policy-context-banner__main">
-      <span class="policy-context-banner__label">当前上下文</span>
+      <span class="policy-context-banner__label">{{ t('policyContext.currentContext') }}</span>
       <el-tag v-if="domain" size="small" effect="plain">{{ domain }}</el-tag>
       <el-tag v-if="nodeLabel" size="small" effect="plain">{{ nodeLabel }}</el-tag>
-      <el-tag v-if="policyRef" size="small" type="warning" effect="plain">Policy {{ policyRef }}</el-tag>
+      <el-tag v-if="policyRef" size="small" type="warning" effect="plain">{{ t('policyContext.policy') }} {{ policyRef }}</el-tag>
       <el-tooltip v-if="commandId" :content="commandId" placement="top">
-        <el-tag size="small" type="info" effect="plain">Command {{ shortCommandId }}</el-tag>
+        <el-tag size="small" type="info" effect="plain">{{ t('policyContext.command') }} {{ shortCommandId }}</el-tag>
       </el-tooltip>
     </div>
     <div class="policy-context-banner__actions">
@@ -17,7 +17,7 @@
         data-testid="open-context-node"
         @click="$emit('open-node-detail')"
       >
-        查看节点详情
+        {{ t('policyContext.openNodeDetail') }}
       </el-button>
       <el-button
         v-if="domain || nodeId || policyRef || commandId"
@@ -26,10 +26,10 @@
         data-testid="open-context-policy-center"
         @click="$emit('open-policy-center')"
       >
-        返回 Policy Center
+        {{ t('policyContext.openPolicyCenter') }}
       </el-button>
       <el-button size="small" text data-testid="clear-policy-context" @click="$emit('clear')">
-        清除上下文
+        {{ t('policyContext.clearContext') }}
       </el-button>
     </div>
   </div>
@@ -37,6 +37,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { t } from '@/i18n'
 
 const props = defineProps<{
   domain?: string

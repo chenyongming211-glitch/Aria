@@ -1,23 +1,23 @@
 <template>
   <div class="roles-page">
     <div class="page-header">
-      <h2>角色管理</h2>
+      <h2>{{ t('roles.title') }}</h2>
       <el-button v-if="hasPermission('roles:write')" type="primary" @click="showCreateDialog">
-        创建角色
+        {{ t('roles.create') }}
       </el-button>
     </div>
 
     <el-table :data="roles" v-loading="loading" stripe>
-      <el-table-column prop="name" label="角色名称" width="180" />
-      <el-table-column prop="description" label="描述" min-width="200" />
-      <el-table-column label="类型" width="100">
+      <el-table-column prop="name" :label="t('roles.roleName')" width="180" />
+      <el-table-column prop="description" :label="t('roles.description')" min-width="200" />
+      <el-table-column :label="t('roles.type')" width="100">
         <template #default="{ row }">
           <el-tag :type="row.is_system ? 'info' : 'success'" size="small">
-            {{ row.is_system ? '系统' : '自定义' }}
+            {{ row.is_system ? t('common.system') : t('common.custom') }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="权限" min-width="400">
+      <el-table-column :label="t('roles.permissions')" min-width="400">
         <template #default="{ row }">
           <el-tag
             v-for="perm in row.permissions"
@@ -29,7 +29,7 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="160" v-if="hasPermission('roles:write')">
+      <el-table-column :label="t('common.actions')" width="160" v-if="hasPermission('roles:write')">
         <template #default="{ row }">
           <el-button
             v-if="!row.is_system"
@@ -38,7 +38,7 @@
             link
             @click="showEditDialog(row)"
           >
-            编辑
+            {{ t('common.edit') }}
           </el-button>
           <el-button
             v-if="!row.is_system"
@@ -47,7 +47,7 @@
             link
             @click="handleDelete(row)"
           >
-            删除
+            {{ t('common.delete') }}
           </el-button>
         </template>
       </el-table-column>
@@ -55,43 +55,43 @@
 
     <el-dialog
       v-model="dialogVisible"
-      :title="editingRole ? '编辑角色' : '创建角色'"
+      :title="editingRole ? t('roles.edit') : t('roles.create')"
       width="600px"
     >
       <el-form :model="form" label-width="80px">
-        <el-form-item label="名称">
+        <el-form-item :label="t('common.name')">
           <el-input
             v-model="form.name"
             :disabled="!!editingRole"
-            placeholder="输入角色名称"
+            :placeholder="t('roles.inputRoleName')"
           />
         </el-form-item>
-        <el-form-item label="描述">
+        <el-form-item :label="t('common.description')">
           <el-input v-model="form.description" type="textarea" :rows="2" />
         </el-form-item>
-        <el-form-item label="权限">
+        <el-form-item :label="t('roles.permissions')">
           <div class="permission-matrix">
             <div
               v-for="group in permissionGroups"
-              :key="group.label"
+              :key="group.key"
               class="perm-group"
             >
-              <div class="perm-group-label">{{ group.label }}</div>
+              <div class="perm-group-label">{{ t(group.labelKey) }}</div>
               <el-checkbox
                 v-for="perm in group.items"
                 :key="perm.value"
                 v-model="form.permissionMap[perm.value]"
               >
-                {{ perm.label }}
+                {{ t(perm.labelKey) }}
               </el-checkbox>
             </div>
           </div>
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" @click="handleSave" :loading="saving">
-          保存
+          {{ t('common.save') }}
         </el-button>
       </template>
     </el-dialog>
@@ -105,6 +105,7 @@ import api from '@/composables/useApi'
 import { API_ENDPOINTS, getCurrentTenantId } from '@/config/api'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
+import { t } from '@/i18n'
 
 const { hasPermission } = usePermission()
 
@@ -115,54 +116,54 @@ const saving = ref(false)
 const editingRole = ref(null)
 
 const permissionGroups = [
-  { label: '节点', items: [
-    { value: 'nodes:read', label: '查看' },
-    { value: 'nodes:write', label: '管理' }
+  { key: 'nodes', labelKey: 'roles.groups.nodes', items: [
+    { value: 'nodes:read', labelKey: 'roles.permissionsRead' },
+    { value: 'nodes:write', labelKey: 'roles.permissionsWrite' }
   ]},
-  { label: '路由', items: [
-    { value: 'routes:read', label: '查看' },
-    { value: 'routes:write', label: '管理' }
+  { key: 'routes', labelKey: 'roles.groups.routes', items: [
+    { value: 'routes:read', labelKey: 'roles.permissionsRead' },
+    { value: 'routes:write', labelKey: 'roles.permissionsWrite' }
   ]},
-  { label: 'ACL', items: [
-    { value: 'acls:read', label: '查看' },
-    { value: 'acls:write', label: '管理' }
+  { key: 'acl', labelKey: 'roles.groups.acl', items: [
+    { value: 'acls:read', labelKey: 'roles.permissionsRead' },
+    { value: 'acls:write', labelKey: 'roles.permissionsWrite' }
   ]},
-  { label: 'IP Group', items: [
-    { value: 'ip-groups:read', label: '查看' },
-    { value: 'ip-groups:write', label: '管理' }
+  { key: 'ip-groups', labelKey: 'roles.groups.ipGroups', items: [
+    { value: 'ip-groups:read', labelKey: 'roles.permissionsRead' },
+    { value: 'ip-groups:write', labelKey: 'roles.permissionsWrite' }
   ]},
-  { label: 'QoS', items: [
-    { value: 'qos:read', label: '查看' },
-    { value: 'qos:write', label: '管理' }
+  { key: 'qos', labelKey: 'roles.groups.qos', items: [
+    { value: 'qos:read', labelKey: 'roles.permissionsRead' },
+    { value: 'qos:write', labelKey: 'roles.permissionsWrite' }
   ]},
-  { label: '黑名单', items: [
-    { value: 'blacklist:read', label: '查看' },
-    { value: 'blacklist:write', label: '管理' }
+  { key: 'blacklist', labelKey: 'roles.groups.blacklist', items: [
+    { value: 'blacklist:read', labelKey: 'roles.permissionsRead' },
+    { value: 'blacklist:write', labelKey: 'roles.permissionsWrite' }
   ]},
-  { label: '监控', items: [
-    { value: 'monitoring:read', label: '查看' }
+  { key: 'monitoring', labelKey: 'roles.groups.monitoring', items: [
+    { value: 'monitoring:read', labelKey: 'roles.permissionsRead' }
   ]},
-  { label: '远程命令', items: [
-    { value: 'commands:write', label: '发送命令' }
+  { key: 'commands', labelKey: 'roles.groups.commands', items: [
+    { value: 'commands:write', labelKey: 'roles.permissionSendCommand' }
   ]},
-  { label: 'Token', items: [
-    { value: 'tokens:read', label: '查看' },
-    { value: 'tokens:write', label: '管理' }
+  { key: 'token', labelKey: 'roles.groups.token', items: [
+    { value: 'tokens:read', labelKey: 'roles.permissionsRead' },
+    { value: 'tokens:write', labelKey: 'roles.permissionsWrite' }
   ]},
-  { label: '用户', items: [
-    { value: 'users:read', label: '查看' },
-    { value: 'users:write', label: '管理' }
+  { key: 'users', labelKey: 'roles.groups.users', items: [
+    { value: 'users:read', labelKey: 'roles.permissionsRead' },
+    { value: 'users:write', labelKey: 'roles.permissionsWrite' }
   ]},
-  { label: '角色', items: [
-    { value: 'roles:read', label: '查看' },
-    { value: 'roles:write', label: '管理' }
+  { key: 'roles', labelKey: 'roles.groups.roles', items: [
+    { value: 'roles:read', labelKey: 'roles.permissionsRead' },
+    { value: 'roles:write', labelKey: 'roles.permissionsWrite' }
   ]},
-  { label: 'AI', items: [
-    { value: 'ai:use', label: '使用' }
+  { key: 'ai', labelKey: 'roles.groups.ai', items: [
+    { value: 'ai:use', labelKey: 'roles.permissionUse' }
   ]},
-  { label: '设置', items: [
-    { value: 'settings:read', label: '查看' },
-    { value: 'settings:write', label: '管理' }
+  { key: 'settings', labelKey: 'roles.groups.settings', items: [
+    { value: 'settings:read', labelKey: 'roles.permissionsRead' },
+    { value: 'settings:write', labelKey: 'roles.permissionsWrite' }
   ]}
 ]
 
@@ -178,7 +179,7 @@ const loadRoles = async () => {
   const tenantId = getCurrentTenantId()
   if (!tenantId) {
     roles.value = []
-    ElMessage.warning('请先选择租户')
+    ElMessage.warning(t('roles.selectTenantFirst'))
     return
   }
 
@@ -187,7 +188,7 @@ const loadRoles = async () => {
     const response = await api.get(API_ENDPOINTS.TENANT.ROLES(tenantId))
     roles.value = response.data?.data || []
   } catch (error) {
-    ElMessage.error('加载角色失败')
+    ElMessage.error(t('roles.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -221,13 +222,13 @@ const getSelectedPermissions = () => {
 const handleSave = async () => {
   const tenantId = getCurrentTenantId()
   if (!tenantId) {
-    ElMessage.warning('请先选择租户')
+    ElMessage.warning(t('roles.selectTenantFirst'))
     return
   }
 
   const perms = getSelectedPermissions()
   if (perms.length === 0) {
-    ElMessage.warning('请至少选择一个权限')
+    ElMessage.warning(t('roles.selectPermission'))
     return
   }
 
@@ -238,10 +239,10 @@ const handleSave = async () => {
         description: form.description,
         permissions: perms
       })
-      ElMessage.success('角色更新成功')
+      ElMessage.success(t('roles.updateSuccess'))
     } else {
       if (!form.name.trim()) {
-        ElMessage.warning('请输入角色名称')
+        ElMessage.warning(t('roles.nameRequired'))
         saving.value = false
         return
       }
@@ -250,12 +251,12 @@ const handleSave = async () => {
         description: form.description,
         permissions: perms
       })
-      ElMessage.success('角色创建成功')
+      ElMessage.success(t('roles.createSuccess'))
     }
     dialogVisible.value = false
     loadRoles()
   } catch (error) {
-    ElMessage.error(error.response?.data?.message || '操作失败')
+    ElMessage.error(error.response?.data?.message || t('roles.operationFailed'))
   } finally {
     saving.value = false
   }
@@ -264,22 +265,22 @@ const handleSave = async () => {
 const handleDelete = async (role) => {
   const tenantId = getCurrentTenantId()
   if (!tenantId) {
-    ElMessage.warning('请先选择租户')
+    ElMessage.warning(t('roles.selectTenantFirst'))
     return
   }
 
   try {
     await ElMessageBox.confirm(
-      `确定删除角色 "${role.name}" 吗？`,
-      '确认删除',
+      t('roles.deleteConfirm').replace('{name}', role.name),
+      t('roles.deleteTitle'),
       { type: 'warning' }
     )
     await api.delete(API_ENDPOINTS.TENANT.ROLE_DETAIL(tenantId, role.id))
-    ElMessage.success('角色已删除')
+    ElMessage.success(t('roles.deleteSuccess'))
     loadRoles()
   } catch (error) {
     if (error !== 'cancel') {
-      ElMessage.error(error.response?.data?.message || '删除失败')
+      ElMessage.error(error.response?.data?.message || t('roles.deleteFailed'))
     }
   }
 }

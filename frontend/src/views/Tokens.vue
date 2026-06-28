@@ -34,15 +34,15 @@
         style="width: 100%"
         v-loading="loading"
       >
-        <el-table-column prop="id" label="ID" width="200" />
-        <el-table-column label="Token" width="220">
+        <el-table-column prop="id" :label="t('common.id')" width="200" />
+        <el-table-column :label="t('common.token')" width="220">
           <template #default="{ row }">
             {{ tokenDisplay(row) }}
           </template>
         </el-table-column>
-        <el-table-column prop="tenant_id" label="Tenant ID" width="200" />
-        <el-table-column prop="tag" label="Tag" width="150" />
-        <el-table-column prop="used_count" label="Usage" width="100">
+        <el-table-column prop="tenant_id" :label="t('common.tenantId')" width="200" />
+        <el-table-column prop="tag" :label="t('common.tag')" width="150" />
+        <el-table-column prop="used_count" :label="t('common.usage')" width="100">
           <template #default="{ row }">
             {{ row.used_count }} / {{ row.max_uses }}
           </template>
@@ -54,21 +54,21 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" :label="t('common.created')" width="180" />
-        <el-table-column prop="expires_at" label="Expires At" width="180" />
+        <el-table-column prop="created_at" :label="t('common.createdAt')" width="180" />
+        <el-table-column prop="expires_at" :label="t('common.expiresAt')" width="180" />
         <el-table-column :label="t('common.actions')" width="250">
           <template #default="{ row }">
             <el-button size="small" @click="viewToken(row)">{{ t('common.view') }}</el-button>
             <el-popconfirm
               v-if="hasPermission('tokens:write')"
-              :title="`Are you sure to revoke this token?`"
+              :title="t('tokens.revokeConfirm')"
               @confirm="revokeToken(row.id)"
             >
               <template #reference>
                 <el-button size="small" type="danger">{{ t('common.revoke') }}</el-button>
               </template>
             </el-popconfirm>
-            <el-button size="small" :disabled="!row.token" @click="copyToken(row.token)" type="info">Copy</el-button>
+            <el-button size="small" :disabled="!row.token" @click="copyToken(row.token)" type="info">{{ t('common.copy') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -89,7 +89,7 @@
     <!-- Token Creation Dialog -->
     <el-dialog
       v-model="dialogVisible"
-      :title="isCreating ? 'Create New Token' : 'Token Details'"
+      :title="isCreating ? t('tokens.createTitle') : t('tokens.tokenDetails')"
       width="50%"
     >
       <el-form
@@ -97,16 +97,16 @@
         :model="currentToken"
         label-width="120px"
       >
-        <el-form-item label="Tag">
+        <el-form-item :label="t('common.tag')">
           <el-input v-model="currentToken.tag" :disabled="!isCreating" />
         </el-form-item>
-        <el-form-item label="Max Uses" v-if="isCreating">
+        <el-form-item :label="t('common.maxUses')" v-if="isCreating">
           <el-input-number v-model="currentToken.max_uses" :min="1" :max="1000" />
         </el-form-item>
-        <el-form-item label="TTL (hours)" v-if="isCreating">
+        <el-form-item :label="t('common.ttlHours')" v-if="isCreating">
           <el-input-number v-model="currentToken.ttl_hours" :min="1" :max="8760" /> <!-- Up to 1 year -->
         </el-form-item>
-        <el-form-item label="Status" v-if="!isCreating">
+        <el-form-item :label="t('common.status')" v-if="!isCreating">
           <el-select v-model="currentToken.status" disabled>
             <el-option :label="t('common.active')" value="active" />
             <el-option :label="t('common.expired')" value="expired" />
@@ -114,26 +114,26 @@
             <el-option :label="t('common.revoked')" value="revoked" />
           </el-select>
         </el-form-item>
-        <el-form-item label="Token" v-if="!isCreating">
+        <el-form-item :label="t('common.token')" v-if="!isCreating">
           <el-input :value="currentToken.token" readonly>
             <template #append>
-              <el-button :disabled="!currentToken.token" @click="copyToken(currentToken.token)">Copy</el-button>
+              <el-button :disabled="!currentToken.token" @click="copyToken(currentToken.token)">{{ t('common.copy') }}</el-button>
             </template>
           </el-input>
           <div v-if="!currentToken.token && currentToken.token_preview" class="token-preview">
             {{ currentToken.token_preview }}
           </div>
         </el-form-item>
-        <el-form-item label="Tenant ID" v-if="currentToken.tenant_id">
+        <el-form-item :label="t('common.tenantId')" v-if="currentToken.tenant_id">
           <el-input :value="currentToken.tenant_id" readonly />
         </el-form-item>
-        <el-form-item label="Usage">
+        <el-form-item :label="t('common.usage')">
           <div>{{ currentToken.used_count || 0 }} / {{ currentToken.max_uses || '∞' }}</div>
         </el-form-item>
-        <el-form-item label="Created At">
+        <el-form-item :label="t('common.createdAt')">
           <el-input :value="currentToken.created_at" readonly />
         </el-form-item>
-        <el-form-item label="Expires At">
+        <el-form-item :label="t('common.expiresAt')">
           <el-input :value="currentToken.expires_at" readonly />
         </el-form-item>
       </el-form>
@@ -264,27 +264,27 @@ const viewToken = async (token) => {
 // Copy token to clipboard
 const copyToken = async (tokenValue) => {
   if (!tokenValue) {
-    ElMessage.warning('Token value is only shown when it is first created')
+    ElMessage.warning(t('tokens.firstCreatedOnly'))
     return
   }
 
   try {
     await navigator.clipboard.writeText(tokenValue)
     ElNotification({
-      title: 'Success',
-      message: 'Token copied to clipboard!',
+      title: t('tokens.copySuccessTitle'),
+      message: t('tokens.copySuccess'),
       type: 'success'
     })
   } catch (err) {
     console.error('Failed to copy token: ', err)
-    ElMessage.error('Failed to copy token')
+    ElMessage.error(t('tokens.copyFailed'))
   }
 }
 
 // Save token (create)
 const saveToken = async () => {
   if (!currentToken.value.tag.trim()) {
-    ElMessage.error('Token tag is required')
+    ElMessage.error(t('tokens.tagRequired'))
     return
   }
 
@@ -299,10 +299,10 @@ const saveToken = async () => {
 
     // Add new token to list
     tokens.value.unshift(response)
-    ElMessage.success('Token created successfully!')
+    ElMessage.success(t('tokens.created'))
     ElNotification({
-      title: 'Token Created',
-      message: `Token created: ${tokenDisplay(response)}. Please copy it now as it won't be shown again.`,
+      title: t('tokens.createdTitle'),
+      message: t('tokens.createdMessage').replace('{token}', tokenDisplay(response)),
       type: 'success',
       duration: 0 // Don't auto-close
     })
@@ -310,7 +310,7 @@ const saveToken = async () => {
     dialogVisible.value = false
   } catch (error) {
     console.error('Failed to create token:', error)
-    ElMessage.error(`Failed to create token: ${error.message || error}`)
+    ElMessage.error(`${t('tokens.createFailed')}: ${error.message || error}`)
   }
 }
 
@@ -325,10 +325,10 @@ const revokeToken = async (tokenId) => {
       tokens.value[index].status = 'revoked'
     }
 
-    ElMessage.success('Token revoked successfully')
+    ElMessage.success(t('tokens.revoked'))
   } catch (error) {
     console.error('Failed to revoke token:', error)
-    ElMessage.error(`Failed to revoke token: ${error.message || error}`)
+    ElMessage.error(`${t('tokens.revokeFailed')}: ${error.message || error}`)
   }
 }
 

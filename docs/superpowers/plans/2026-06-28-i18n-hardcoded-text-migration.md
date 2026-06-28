@@ -46,14 +46,14 @@ Vue 组件:   ❌ 27 个文件全部硬编码中文，0 次 $t()
 
 页面结构固定，不涉及复杂交互。
 
-- [ ] `Login.vue`
-- [ ] `ChangePassword.vue`
-- [ ] `Dashboard.vue`
-- [ ] `Roles.vue`
-- [ ] `Settings.vue`
-- [ ] `TenantManagement.vue`
-- [ ] `Tokens.vue`
-- [ ] `PolicyContextBanner.vue`（如有硬编码）
+- [x] `Login.vue`
+- [x] `ChangePassword.vue`
+- [x] `Dashboard.vue`
+- [x] `Roles.vue`
+- [x] `Settings.vue`
+- [x] `TenantManagement.vue`
+- [x] `Tokens.vue`
+- [x] `PolicyContextBanner.vue`（如有硬编码）
 
 ### B3: 复杂页面（高风险）
 

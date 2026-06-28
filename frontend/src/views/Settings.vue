@@ -4,26 +4,22 @@
       <template #header>
         <div class="card-header">
           <div>
-            <h3>{{ currentLang === 'zh' ? 'Settings' : 'Settings' }}</h3>
+            <h3>{{ t('settingsBackup.title') }}</h3>
             <p class="card-subtitle">
-              {{ currentLang === 'zh'
-                ? '当前仅保留真实可用的配置备份能力；其余系统设置项暂未开放。'
-                : 'Only real backup management is currently enabled. Other system settings remain unavailable.' }}
+              {{ t('settingsBackup.subtitle') }}
             </p>
           </div>
         </div>
       </template>
 
       <el-alert
-        :title="currentLang === 'zh' ? '产品化收口中' : 'Productization In Progress'"
+        :title="t('settingsBackup.productizationTitle')"
         type="info"
         :closable="false"
         show-icon
       >
         <template #default>
-          {{ currentLang === 'zh'
-            ? '通用、网络、安全、通知等设置项此前为本地假动作，现已从页面下线，避免误导。'
-            : 'General, network, security, and notification settings were placeholder-only and have been removed from this page to avoid misleading behavior.' }}
+          {{ t('settingsBackup.productizationBody') }}
         </template>
       </el-alert>
 
@@ -31,15 +27,13 @@
         <el-card class="backup-card">
           <template #header>
             <div class="card-header">
-              <span>{{ currentLang === 'zh' ? '配置备份' : 'Configuration Backups' }}</span>
+              <span>{{ t('settingsBackup.configurationBackups') }}</span>
             </div>
           </template>
 
           <div class="backup-actions">
             <p class="backup-description">
-              {{ currentLang === 'zh'
-                ? '创建当前控制面配置快照，包含租户、用户、角色、节点及策略数据。'
-                : 'Create a snapshot of the current control-plane configuration, including tenants, users, roles, nodes, and policy data.' }}
+              {{ t('settingsBackup.description') }}
             </p>
             <div class="backup-action-buttons">
               <input
@@ -50,10 +44,10 @@
                 @change="handleUploadBackup"
               />
               <el-button :disabled="!canWriteSettings || uploading" :loading="uploading" @click="triggerUploadBackup">
-                {{ currentLang === 'zh' ? '上传备份' : 'Upload Backup' }}
+                {{ t('settingsBackup.uploadBackup') }}
               </el-button>
               <el-button type="primary" :disabled="!canWriteSettings || creating" :loading="creating" @click="createBackup">
-                {{ currentLang === 'zh' ? '立即创建备份' : 'Create Backup' }}
+                {{ t('settingsBackup.createBackup') }}
               </el-button>
             </div>
           </div>
@@ -62,19 +56,19 @@
         <el-card class="backup-card">
           <template #header>
             <div class="card-header">
-              <span>{{ currentLang === 'zh' ? '最近备份' : 'Recent Backups' }}</span>
+              <span>{{ t('settingsBackup.recentBackups') }}</span>
               <el-button text @click="loadBackups">
-                {{ currentLang === 'zh' ? '刷新' : 'Refresh' }}
+                {{ t('common.refresh') }}
               </el-button>
             </div>
           </template>
 
           <el-table :data="backupHistory" v-loading="loading" style="width: 100%">
-            <el-table-column prop="filename" :label="currentLang === 'zh' ? '文件名' : 'Filename'" min-width="280" />
-            <el-table-column prop="size" :label="currentLang === 'zh' ? '大小' : 'Size'" width="120" />
-            <el-table-column prop="created_at" :label="currentLang === 'zh' ? '创建时间' : 'Created At'" width="180" />
-            <el-table-column prop="created_by" :label="currentLang === 'zh' ? '创建人' : 'Created By'" width="120" />
-            <el-table-column :label="currentLang === 'zh' ? '操作' : 'Actions'" width="180">
+            <el-table-column prop="filename" :label="t('common.filename')" min-width="280" />
+            <el-table-column prop="size" :label="t('common.size')" width="120" />
+            <el-table-column prop="created_at" :label="t('common.createdAt')" width="180" />
+            <el-table-column prop="created_by" :label="t('common.createdBy')" width="120" />
+            <el-table-column :label="t('common.actions')" width="180">
               <template #default="{ row }">
                 <el-button
                   size="small"
@@ -82,7 +76,7 @@
                   :loading="downloadingIds.has(row.id)"
                   @click="downloadBackup(row)"
                 >
-                  {{ currentLang === 'zh' ? '下载' : 'Download' }}
+                  {{ t('common.download') }}
                 </el-button>
                 <el-button
                   size="small"
@@ -91,10 +85,10 @@
                   :loading="restoringIds.has(row.id)"
                   @click="openRestoreDialog(row)"
                 >
-                  {{ currentLang === 'zh' ? '恢复' : 'Restore' }}
+                  {{ t('common.restore') }}
                 </el-button>
                 <el-popconfirm
-                  :title="currentLang === 'zh' ? '确定删除这个备份吗？' : 'Delete this backup?'"
+                  :title="t('settingsBackup.deleteConfirm')"
                   @confirm="deleteBackup(row.id)"
                 >
                   <template #reference>
@@ -104,7 +98,7 @@
                       :disabled="!canWriteSettings || deletingIds.has(row.id)"
                       :loading="deletingIds.has(row.id)"
                     >
-                      {{ currentLang === 'zh' ? '删除' : 'Delete' }}
+                      {{ t('common.delete') }}
                     </el-button>
                   </template>
                 </el-popconfirm>
@@ -112,7 +106,7 @@
             </el-table-column>
           </el-table>
 
-          <el-empty v-if="!loading && backupHistory.length === 0" :description="currentLang === 'zh' ? '暂无备份' : 'No backups yet'" />
+          <el-empty v-if="!loading && backupHistory.length === 0" :description="t('settingsBackup.noBackups')" />
         </el-card>
       </div>
     </el-card>
@@ -120,33 +114,33 @@
     <el-dialog
       v-if="restoreDialogVisible"
       v-model="restoreDialogVisible"
-      :title="currentLang === 'zh' ? '恢复备份' : 'Restore Backup'"
+      :title="t('settingsBackup.restoreBackup')"
       width="680px"
     >
       <div class="restore-dialog">
         <el-alert
-          :title="currentLang === 'zh' ? '恢复会覆盖所选控制面配置表' : 'Restore replaces selected control-plane configuration tables'"
+          :title="t('settingsBackup.restoreWarning')"
           type="warning"
           :closable="false"
           show-icon
         />
 
         <div class="restore-section">
-          <div class="restore-label">{{ currentLang === 'zh' ? '备份文件' : 'Backup File' }}</div>
+          <div class="restore-label">{{ t('settingsBackup.backupFile') }}</div>
           <div class="restore-value">{{ selectedBackup?.filename || selectedBackup?.id || '-' }}</div>
         </div>
 
         <div class="restore-section">
-          <div class="restore-label">{{ currentLang === 'zh' ? '恢复范围' : 'Restore Scope' }}</div>
+          <div class="restore-label">{{ t('settingsBackup.restoreScope') }}</div>
           <el-checkbox-group v-model="restoreTables" class="restore-table-grid" @change="previewRestore">
             <el-checkbox v-for="table in restoreTableOptions" :key="table.value" :label="table.value">
-              {{ currentLang === 'zh' ? table.zh : table.en }}
+              {{ t(table.labelKey) }}
             </el-checkbox>
           </el-checkbox-group>
         </div>
 
         <div class="restore-section">
-          <div class="restore-label">{{ currentLang === 'zh' ? 'Dry-run 预览' : 'Dry-run Preview' }}</div>
+          <div class="restore-label">{{ t('settingsBackup.dryRunPreview') }}</div>
           <el-skeleton v-if="previewing" :rows="3" animated />
           <div v-else-if="restorePlan" class="restore-plan">
             <div v-for="table in restorePlanRows" :key="table.name" class="restore-plan-row">
@@ -154,21 +148,21 @@
               <strong>{{ table.count }}</strong>
             </div>
           </div>
-          <el-empty v-else :description="currentLang === 'zh' ? '暂无预览' : 'No preview yet'" />
+          <el-empty v-else :description="t('settingsBackup.noPreview')" />
         </div>
 
         <div class="restore-section">
-          <div class="restore-label">{{ currentLang === 'zh' ? '确认短语' : 'Confirmation Phrase' }}</div>
+          <div class="restore-label">{{ t('settingsBackup.confirmationPhrase') }}</div>
           <el-input v-model="restoreConfirm" :placeholder="restoreRequiredConfirm" />
         </div>
       </div>
 
       <template #footer>
         <el-button @click="restoreDialogVisible = false">
-          {{ currentLang === 'zh' ? '取消' : 'Cancel' }}
+          {{ t('common.cancel') }}
         </el-button>
         <el-button :loading="previewing" @click="previewRestore">
-          {{ currentLang === 'zh' ? '重新预览' : 'Preview Again' }}
+          {{ t('settingsBackup.previewAgain') }}
         </el-button>
         <el-button
           type="warning"
@@ -176,7 +170,7 @@
           :loading="selectedBackup ? restoringIds.has(selectedBackup.id) : false"
           @click="applyRestore"
         >
-          {{ currentLang === 'zh' ? '确认恢复' : 'Apply Restore' }}
+          {{ t('settingsBackup.applyRestore') }}
         </el-button>
       </template>
     </el-dialog>
@@ -186,13 +180,12 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useAppStore, useUserStore } from '@/stores'
+import { useUserStore } from '@/stores'
 import { useSettingsApi } from '@/composables/useSettingsApi'
+import { t } from '@/i18n'
 
-const appStore = useAppStore()
 const userStore = useUserStore()
 
-const currentLang = computed(() => appStore.lang)
 const canWriteSettings = computed(() => userStore.user?.role === 'super_admin')
 
 const loading = ref(false)
@@ -210,16 +203,16 @@ const restoreConfirm = ref('')
 const restorePlan = ref(null)
 const previewing = ref(false)
 const restoreTableOptions = [
-  { value: 'tenants', zh: '租户', en: 'Tenants' },
-  { value: 'roles', zh: '角色', en: 'Roles' },
-  { value: 'users', zh: '用户', en: 'Users' },
-  { value: 'tokens', zh: '令牌', en: 'Tokens' },
-  { value: 'nodes', zh: '节点', en: 'Nodes' },
-  { value: 'ip_groups', zh: 'IP Group', en: 'IP Groups' },
-  { value: 'ip_group_members', zh: 'IP Group 成员', en: 'IP Group Members' },
-  { value: 'acl_rules', zh: 'ACL 规则', en: 'ACL Rules' },
-  { value: 'qos_rules', zh: 'QoS 规则', en: 'QoS Rules' },
-  { value: 'blacklist_rules', zh: '黑名单规则', en: 'Blacklist Rules' }
+  { value: 'tenants', labelKey: 'settingsBackup.tables.tenants' },
+  { value: 'roles', labelKey: 'settingsBackup.tables.roles' },
+  { value: 'users', labelKey: 'settingsBackup.tables.users' },
+  { value: 'tokens', labelKey: 'settingsBackup.tables.tokens' },
+  { value: 'nodes', labelKey: 'settingsBackup.tables.nodes' },
+  { value: 'ip_groups', labelKey: 'settingsBackup.tables.ipGroups' },
+  { value: 'ip_group_members', labelKey: 'settingsBackup.tables.ipGroupMembers' },
+  { value: 'acl_rules', labelKey: 'settingsBackup.tables.aclRules' },
+  { value: 'qos_rules', labelKey: 'settingsBackup.tables.qosRules' },
+  { value: 'blacklist_rules', labelKey: 'settingsBackup.tables.blacklistRules' }
 ]
 const restoreTables = ref(restoreTableOptions.map(table => table.value))
 
@@ -255,7 +248,7 @@ const loadBackups = async () => {
   try {
     backupHistory.value = await useSettingsApi.listBackups()
   } catch (error) {
-    ElMessage.error(error.message || (currentLang.value === 'zh' ? '加载备份失败' : 'Failed to load backups'))
+    ElMessage.error(error.message || t('settingsBackup.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -266,9 +259,9 @@ const createBackup = async () => {
   try {
     const created = await useSettingsApi.createBackup()
     backupHistory.value = [created, ...backupHistory.value.filter(item => item.id !== created.id)]
-    ElMessage.success(currentLang.value === 'zh' ? '备份创建成功' : 'Backup created successfully')
+    ElMessage.success(t('settingsBackup.createSuccess'))
   } catch (error) {
-    ElMessage.error(error.message || (currentLang.value === 'zh' ? '创建备份失败' : 'Failed to create backup'))
+    ElMessage.error(error.message || t('settingsBackup.createFailed'))
   } finally {
     creating.value = false
   }
@@ -288,9 +281,9 @@ const handleUploadBackup = async (event) => {
   try {
     const uploaded = await useSettingsApi.uploadBackup(file)
     backupHistory.value = [uploaded, ...backupHistory.value.filter(item => item.id !== uploaded.id)]
-    ElMessage.success(currentLang.value === 'zh' ? '备份上传成功' : 'Backup uploaded successfully')
+    ElMessage.success(t('settingsBackup.uploadSuccess'))
   } catch (error) {
-    ElMessage.error(error.message || (currentLang.value === 'zh' ? '上传备份失败' : 'Failed to upload backup'))
+    ElMessage.error(error.message || t('settingsBackup.uploadFailed'))
   } finally {
     uploading.value = false
     if (event?.target) {
@@ -306,7 +299,7 @@ const downloadBackup = async (backup) => {
   try {
     await useSettingsApi.downloadBackup(backup)
   } catch (error) {
-    ElMessage.error(error.message || (currentLang.value === 'zh' ? '下载备份失败' : 'Failed to download backup'))
+    ElMessage.error(error.message || t('settingsBackup.downloadFailed'))
   } finally {
     const reset = new Set(downloadingIds.value)
     reset.delete(backup.id)
@@ -321,9 +314,9 @@ const deleteBackup = async (backupId) => {
   try {
     await useSettingsApi.deleteBackup(backupId)
     backupHistory.value = backupHistory.value.filter(item => item.id !== backupId)
-    ElMessage.success(currentLang.value === 'zh' ? '备份已删除' : 'Backup deleted')
+    ElMessage.success(t('settingsBackup.deleteSuccess'))
   } catch (error) {
-    ElMessage.error(error.message || (currentLang.value === 'zh' ? '删除备份失败' : 'Failed to delete backup'))
+    ElMessage.error(error.message || t('settingsBackup.deleteFailed'))
   } finally {
     const reset = new Set(deletingIds.value)
     reset.delete(backupId)
@@ -350,7 +343,7 @@ const previewRestore = async () => {
     restorePlan.value = await useSettingsApi.restoreBackupDryRun(selectedBackup.value.id, restoreTables.value)
   } catch (error) {
     restorePlan.value = null
-    ElMessage.error(error.message || (currentLang.value === 'zh' ? '恢复预览失败' : 'Failed to preview restore'))
+    ElMessage.error(error.message || t('settingsBackup.previewFailed'))
   } finally {
     previewing.value = false
   }
@@ -370,15 +363,11 @@ const applyRestore = async () => {
       tables: restoreTables.value
     })
     const summary = formatRestoreSummary(restored)
-    ElMessage.success(
-      currentLang.value === 'zh'
-        ? `备份恢复完成${summary ? `：${summary}` : ''}`
-        : `Backup restored successfully${summary ? `: ${summary}` : ''}`
-    )
+    ElMessage.success(t('settingsBackup.restoreSuccess').replace('{summary}', summary ? `: ${summary}` : ''))
     restoreDialogVisible.value = false
     await loadBackups()
   } catch (error) {
-    ElMessage.error(error.message || (currentLang.value === 'zh' ? '恢复备份失败' : 'Failed to restore backup'))
+    ElMessage.error(error.message || t('settingsBackup.restoreFailed'))
   } finally {
     const reset = new Set(restoringIds.value)
     reset.delete(backupId)
