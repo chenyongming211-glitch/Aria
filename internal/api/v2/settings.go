@@ -23,6 +23,7 @@ import (
 
 const backupTimestampLayout = "2006-01-02 15:04:05"
 const maxBackupUploadBytes = 10 << 20
+const backupRestoreConfirmPhrase = "RESTORE ARIA CONFIG"
 
 var backupExportTables = []struct {
 	Name  string
@@ -441,13 +442,19 @@ func (r *Router) restoreBackup(w http.ResponseWriter, req *http.Request, backupI
 		apibase.WriteSuccess(w, buildRestorePlan(manifest, backupID, selected), "Backup restore dry-run completed")
 		return
 	}
+	if strings.TrimSpace(restoreReq.Confirm) != backupRestoreConfirmPhrase {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, "Restore confirmation phrase is required", map[string]string{
+			"required_confirm": backupRestoreConfirmPhrase,
+		})
+		return
+	}
 
 	username, _ := middleware.GetUsername(req.Context())
 	if strings.TrimSpace(username) == "" {
 		username = "system"
 	}
 
-	restoredTables, err := r.restoreBackupManifest(manifest, backupID, username)
+	restoredTables, err := r.restoreBackupManifest(manifest, backupID, username, selected)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to restore backup: "+err.Error(), nil)
 		return
@@ -681,7 +688,7 @@ func readBackupManifestHeader(path string) (*backupManifest, error) {
 	return &manifest, nil
 }
 
-func (r *Router) restoreBackupManifest(manifest *backupManifest, backupID, actor string) (map[string]int, error) {
+func (r *Router) restoreBackupManifest(manifest *backupManifest, backupID, actor string, selected []backupTableSpec) (map[string]int, error) {
 	tx, err := r.store.DB().Begin()
 	if err != nil {
 		return nil, err
@@ -690,14 +697,14 @@ func (r *Router) restoreBackupManifest(manifest *backupManifest, backupID, actor
 		_ = tx.Rollback()
 	}()
 
-	for _, table := range backupRestoreCleanupTables {
+	for _, table := range cleanupTablesForRestore(selected) {
 		if _, err := tx.Exec("DELETE FROM " + table); err != nil {
 			return nil, fmt.Errorf("cleanup %s failed: %w", table, err)
 		}
 	}
 
-	restoredTables := make(map[string]int, len(backupRestoreTables))
-	for _, spec := range backupRestoreTables {
+	restoredTables := make(map[string]int, len(selected))
+	for _, spec := range selected {
 		rows := manifest.Tables[spec.Name]
 		count, err := restoreBackupTable(tx, spec, rows)
 		if err != nil {
@@ -706,7 +713,8 @@ func (r *Router) restoreBackupManifest(manifest *backupManifest, backupID, actor
 		restoredTables[spec.Name] = count
 	}
 
-	if err := recordBackupRestoreAuditEvents(tx, manifest, backupID, actor, restoredTables); err != nil {
+	selectedTables := tableNamesFromSpecs(selected)
+	if err := recordBackupRestoreAuditEvents(tx, manifest, backupID, actor, selectedTables, restoredTables); err != nil {
 		return nil, err
 	}
 
@@ -714,6 +722,24 @@ func (r *Router) restoreBackupManifest(manifest *backupManifest, backupID, actor
 		return nil, err
 	}
 	return restoredTables, nil
+}
+
+func cleanupTablesForRestore(selected []backupTableSpec) []string {
+	if len(selected) == 0 || len(selected) == len(backupRestoreTables) {
+		return backupRestoreCleanupTables
+	}
+
+	selectedNames := make(map[string]bool, len(selected))
+	for _, spec := range selected {
+		selectedNames[spec.Name] = true
+	}
+	tables := make([]string, 0, len(selected))
+	for _, table := range backupRestoreCleanupTables {
+		if selectedNames[table] {
+			tables = append(tables, table)
+		}
+	}
+	return tables
 }
 
 func validateBackupManifest(manifest *backupManifest, requireRestoreFields bool) error {
@@ -821,7 +847,15 @@ func restoreBackupTable(tx *sql.Tx, spec backupTableSpec, rows []interface{}) (i
 	return len(rows), nil
 }
 
-func recordBackupRestoreAuditEvents(tx *sql.Tx, manifest *backupManifest, backupID, actor string, restoredTables map[string]int) error {
+func tableNamesFromSpecs(specs []backupTableSpec) []string {
+	names := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		names = append(names, spec.Name)
+	}
+	return names
+}
+
+func recordBackupRestoreAuditEvents(tx *sql.Tx, manifest *backupManifest, backupID, actor string, selectedTables []string, restoredTables map[string]int) error {
 	tenantIDs := collectManifestTenantIDs(manifest)
 	if len(tenantIDs) == 0 {
 		return nil
@@ -829,6 +863,7 @@ func recordBackupRestoreAuditEvents(tx *sql.Tx, manifest *backupManifest, backup
 
 	detailJSON, err := json.Marshal(map[string]interface{}{
 		"backup_id":       backupID,
+		"selected_tables": selectedTables,
 		"restored_tables": restoredTables,
 	})
 	if err != nil {

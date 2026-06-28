@@ -12,6 +12,10 @@ interface BackupLike {
 }
 
 type BackupInput = string | BackupLike
+interface RestoreBackupOptions {
+  confirm?: string
+  tables?: string[]
+}
 
 const contentDispositionFilename = (value?: string | null): string => {
   if (!value) return ''
@@ -79,8 +83,8 @@ export const useSettingsApi = {
     return response.data?.data || response.data
   },
 
-  restoreBackup: async (backupId: string) => {
-    const response = await api.post(API_ENDPOINTS.SETTINGS.BACKUP_RESTORE(backupId))
+  restoreBackup: async (backupId: string, options: RestoreBackupOptions = {}) => {
+    const response = await api.post(API_ENDPOINTS.SETTINGS.BACKUP_RESTORE(backupId), options)
     return response.data?.data || response.data
   },
 

@@ -305,7 +305,15 @@ func TestSettingsBackupRestoreAppliesManifest(t *testing.T) {
 	mock.ExpectCommit()
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
-	req := withSettingsContext(httptest.NewRequest(http.MethodPost, "/api/v2/settings/backups/"+backupID+"/restore", nil), "super_admin", "bob")
+	req := withSettingsContext(
+		httptest.NewRequest(
+			http.MethodPost,
+			"/api/v2/settings/backups/"+backupID+"/restore",
+			strings.NewReader(`{"confirm":"RESTORE ARIA CONFIG"}`),
+		),
+		"super_admin",
+		"bob",
+	)
 	rr := httptest.NewRecorder()
 
 	router.HandleSettings(rr, req)
@@ -329,6 +337,149 @@ func TestSettingsBackupRestoreAppliesManifest(t *testing.T) {
 		t.Fatalf("expected users restore count 1, got %#v", restoredTables["users"])
 	}
 
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestSettingsBackupRestoreRequiresConfirmationPhrase(t *testing.T) {
+	t.Setenv("ARIA_BACKUP_DIR", t.TempDir())
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	backupID := "restore-confirmation"
+	writeSettingsBackupFixture(t, backupID, settingsBackupRestoreFixtureManifest)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSettingsContext(
+		httptest.NewRequest(http.MethodPost, "/api/v2/settings/backups/"+backupID+"/restore", strings.NewReader(`{}`)),
+		"super_admin",
+		"bob",
+	)
+	rr := httptest.NewRecorder()
+
+	router.HandleSettings(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusBadRequest, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "Restore confirmation phrase is required") {
+		t.Fatalf("expected confirmation phrase error, got %s", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), backupRestoreConfirmPhrase) {
+		t.Fatalf("expected required confirmation phrase in response, got %s", rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("restore without confirmation should not execute SQL, got unmet expectations: %v", err)
+	}
+}
+
+func TestSettingsBackupRestoreSelectedTablesOnly(t *testing.T) {
+	t.Setenv("ARIA_BACKUP_DIR", t.TempDir())
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	backupID := "restore-selected-tables"
+	manifest := `{
+	  "version":"v0.1.0",
+	  "created_at":"2026-04-22T15:00:00Z",
+	  "created_by":"alice",
+	  "tables":{
+	    "tenants":[{"id":"11111111-1111-1111-1111-111111111111","name":"Tenant A","code":"tenant-a","status":"active","resource_quota":{},"created_at":"2026-04-22T15:00:00Z","updated_at":"2026-04-22T15:00:00Z"}],
+	    "users":[{"id":"22222222-2222-2222-2222-222222222222","username":"alice","password_hash":"hash","tenant_id":"11111111-1111-1111-1111-111111111111","role":"admin","email":"alice@example.com","must_change_password":false,"created_at":"2026-04-22T15:00:00Z","last_login":"2026-04-22T15:00:00Z"}],
+	    "roles":[],
+	    "tokens":[],
+	    "nodes":[],
+	    "ip_groups":[{"id":"33333333-3333-3333-3333-333333333333","tenant_id":"11111111-1111-1111-1111-111111111111","name":"office","description":"Office network","kind":"custom","created_by":null,"created_at":"2026-04-22T15:00:00Z","updated_at":"2026-04-22T15:00:00Z"}],
+	    "ip_group_members":[{"id":"44444444-4444-4444-4444-444444444444","tenant_id":"11111111-1111-1111-1111-111111111111","group_id":"33333333-3333-3333-3333-333333333333","cidr":"10.10.0.0/16","note":"office","created_at":"2026-04-22T15:00:00Z"}],
+	    "acl_rules":[],
+	    "qos_rules":[],
+	    "blacklist_rules":[]
+	  }
+	}`
+	writeSettingsBackupFixture(t, backupID, manifest)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM ip_group_members")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM ip_groups")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO ip_groups (id, tenant_id, name, description, kind, created_by, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)")).
+		WithArgs(
+			"33333333-3333-3333-3333-333333333333",
+			"11111111-1111-1111-1111-111111111111",
+			"office",
+			"Office network",
+			"custom",
+			nil,
+			"2026-04-22T15:00:00Z",
+			"2026-04-22T15:00:00Z",
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO ip_group_members (id, tenant_id, group_id, cidr, note, created_at) VALUES ($1, $2, $3, $4, $5, $6)")).
+		WithArgs(
+			"44444444-4444-4444-4444-444444444444",
+			"11111111-1111-1111-1111-111111111111",
+			"33333333-3333-3333-3333-333333333333",
+			"10.10.0.0/16",
+			"office",
+			"2026-04-22T15:00:00Z",
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+				INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
+				VALUES ($1, NULL, $2, $3, $4, $5)
+			`)).
+		WithArgs(
+			"11111111-1111-1111-1111-111111111111",
+			"settings_backup_restored",
+			"bob",
+			"Configuration backup restored",
+			sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSettingsContext(
+		httptest.NewRequest(
+			http.MethodPost,
+			"/api/v2/settings/backups/"+backupID+"/restore",
+			strings.NewReader(`{"confirm":"RESTORE ARIA CONFIG","tables":["ip_groups","ip_group_members"]}`),
+		),
+		"super_admin",
+		"bob",
+	)
+	rr := httptest.NewRecorder()
+
+	router.HandleSettings(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected restore status %d, got %d, body=%s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	restoredTables, ok := data["restored_tables"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected restored_tables field, got %#v", data["restored_tables"])
+	}
+	if restoredTables["ip_groups"] != float64(1) {
+		t.Fatalf("expected ip_groups restore count 1, got %#v", restoredTables["ip_groups"])
+	}
+	if restoredTables["ip_group_members"] != float64(1) {
+		t.Fatalf("expected ip_group_members restore count 1, got %#v", restoredTables["ip_group_members"])
+	}
+	if _, exists := restoredTables["tenants"]; exists {
+		t.Fatalf("expected selected restore to omit tenants, got %#v", restoredTables)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
