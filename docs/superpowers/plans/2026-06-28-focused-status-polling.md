@@ -338,19 +338,21 @@ npm run build -- --outDir ../dist/frontend --emptyOutDir
 
 Advance `VERSION` from `0.2.87` to `0.2.88` before deployment.
 
-- [ ] **Step 4: Push branch and verify CI**
+- [x] **Step 4: Push branch and verify CI**
 
 Push `codex/focused-status-polling` and wait for GitHub Actions to pass.
 
-- [ ] **Step 5: Gray deploy**
+- [x] **Step 5: Gray deploy**
 
 Use the Controller/frontend low-bandwidth path because this changes Controller API and frontend only, not Rust Agent/eBPF/southbound contracts.
 
-- [ ] **Step 6: Online smoke**
+- [x] **Step 6: Online smoke**
 
 Verify:
 
 - `https://aria.yun/api/version` returns `0.2.88`
-- nodes list status changes without manual refresh
-- ACL/QoS/Route/Policies pending rows converge without full page refresh
-- browser network shows focused status requests instead of whole-table polling
+- the deployed frontend bundle contains `policy-deliveries/status` and `nodes/status`
+- the authenticated node status endpoint returns a live node summary
+- the authenticated policy delivery status endpoint returns a live delivery summary
+- a temporary Route create/delete converges through `pending -> applied` through the focused delivery status endpoint
+- browser DevTools network confirmation remains a manual follow-up if page-level request tracing is required

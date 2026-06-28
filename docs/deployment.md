@@ -1199,6 +1199,36 @@ Purpose:
 | Route smoke | Login succeeded as `sysadmin`; selected tenant `Aria Default` and node `node-82-156-48-111`; temporary route `10.254.87.0/24` was added through `POST /api/v2/tenants/{tenant_id}/nodes/{node_id}/routes`, appeared in the route list, was deleted through `DELETE /api/v2/tenants/{tenant_id}/nodes/{node_id}/routes/{cidr}`, and no longer appeared afterward. |
 | Deployment note | This is a gray deployment from the feature branch, not a `master` deployment. Users with a tab that was opened before `0.2.87` may still need one manual refresh; once the `0.2.87` entry is loaded, later version changes trigger the frontend watcher. |
 
+### 2026-06-28 Focused Status Polling Gray Deployment
+
+Status: gray deployed from `codex/focused-status-polling` and server-side smoke
+validated.
+
+Purpose:
+
+- Add focused control-loop polling so policy and node status rows update from
+  lightweight status endpoints instead of waiting for manual full-page refresh.
+- Add tenant-scoped status endpoints for explicit policy delivery refs and node
+  IDs.
+- Keep the deployment on the low-bandwidth Controller/frontend path because the
+  release changes Controller API and frontend code only, not Rust Agent/eBPF
+  runtime behavior.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-28T23:25+08:00 deployment; 2026-06-28T23:30+08:00 smoke validation |
+| Git commit | `1fb5d75c8ec787d7857148d76ed6f88cce47046b` |
+| Branch CI run | `28326752826` |
+| Version | `0.2.88` |
+| Controller image | Local runtime image `aria-controller:0.2.88` / `aria-controller:local@sha256:274abced48d991e241d28605f2339b54aeebc3e6b0e33ce728b5adadfe8ba069`. |
+| Backup | `/root/aria-controller/deploy-backups/20260628T152550Z-0.2.88-28326752826-1fb5d75c8ec7` |
+| Release path | `/root/aria-controller/releases/0.2.88-20260628T152550Z-0.2.88-28326752826-1fb5d75c8ec7` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch Actions. |
+| Verification | Local focused backend tests passed, local `go test ./internal/api/v2 ./pkg/controllerstorage` passed, local `go test ./...` passed, local frontend type-check passed, targeted frontend status polling tests passed, full frontend unit tests passed, local frontend build passed, linux/amd64 Controller/ariactl build passed, and `git diff --check` passed. Branch Actions run `28326752826` passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` returned `0.2.88`; `aria-controller` and `aria-frontend` were healthy; deployed frontend assets contain `policy-deliveries/status` and `nodes/status`. |
+| Status endpoint smoke | Login succeeded as `sysadmin`; `POST /api/v2/tenants/{tenant_id}/nodes/status` returned HTTP 200 for live node `554ec635-7267-4771-b3a5-9d174350a954` with `status=online`, `configuration_status=applied`, `convergence_status=converged`, and `pending_cmds=0`; `POST /api/v2/tenants/{tenant_id}/policy-deliveries/status` returned HTTP 200 for latest route delivery `1.1.1.1/32` with `policy_status=applied` and `pending_cmds=0`. |
+| Focused polling smoke | Temporary route `10.255.188.128/32` on node `53ac38c9-f8ff-475d-83aa-1ca80cbdbdd9` returned `create_http=200`; the focused delivery status endpoint observed `pending` then `applied/completed`; deleting the route returned `delete_http=200`; the focused delivery status endpoint again observed `pending` then `applied/completed`; final route list confirmed `cleanup_route_exists=false`. |
+| Deployment note | This is a gray deployment from the feature branch, not a `master` deployment. Browser DevTools network tracing was not run in this environment; page-level request tracing can be checked manually if needed, while the deployed bundle and API smoke confirm the focused endpoint path is active. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
