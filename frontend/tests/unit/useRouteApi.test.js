@@ -99,4 +99,50 @@ describe('useRouteApi', () => {
     expect(result[0].pendingCmds).toBe(0)
     expect(result[0].lastCommandError).toBe('apply failed')
   })
+
+  it('应该通过节点路由集合接口新增宣告路由', async () => {
+    api.post.mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: { id: '10.20.0.0/16', cidr: '10.20.0.0/16' }
+      }
+    })
+
+    const result = await useRouteApi.addRoute('node-1', '10.20.0.0/16')
+
+    expect(api.post).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/routes', {
+      cidr: '10.20.0.0/16'
+    })
+    expect(result).toEqual({ id: '10.20.0.0/16', cidr: '10.20.0.0/16' })
+  })
+
+  it('应该通过单条节点路由接口更新宣告路由', async () => {
+    api.put.mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: { id: '10.30.0.0/16', cidr: '10.30.0.0/16' }
+      }
+    })
+
+    const result = await useRouteApi.updateRoute('node-1', '10.20.0.0/16', '10.30.0.0/16')
+
+    expect(api.put).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/routes/10.20.0.0%2F16', {
+      cidr: '10.30.0.0/16'
+    })
+    expect(result).toEqual({ id: '10.30.0.0/16', cidr: '10.30.0.0/16' })
+  })
+
+  it('应该通过单条节点路由接口删除宣告路由', async () => {
+    api.delete.mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: { id: '10.20.0.0/16', cidr: '10.20.0.0/16' }
+      }
+    })
+
+    const result = await useRouteApi.deleteRoute('node-1', '10.20.0.0/16')
+
+    expect(api.delete).toHaveBeenCalledWith('/v2/tenants/tenant-1/nodes/node-1/routes/10.20.0.0%2F16')
+    expect(result).toEqual({ id: '10.20.0.0/16', cidr: '10.20.0.0/16' })
+  })
 })

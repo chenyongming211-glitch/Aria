@@ -6,6 +6,8 @@ const {
   mockNodeStore,
   sendAgentCommandMock,
   getNodeMetricsMock,
+  addRouteMock,
+  deleteRouteMock,
   tokenApiMock,
   fetchControllerInfoMock
 } = vi.hoisted(() => ({
@@ -108,6 +110,8 @@ const {
     created_at: '2026-05-30T10:05:00Z'
   })),
   getNodeMetricsMock: vi.fn(async () => ({ upload_mbps: 1.234, download_mbps: 2.345, latency_ms: 12.3 })),
+  addRouteMock: vi.fn(async () => ({ id: '10.20.0.0/16', cidr: '10.20.0.0/16' })),
+  deleteRouteMock: vi.fn(async () => ({ id: '10.10.0.0/16', cidr: '10.10.0.0/16' })),
   tokenApiMock: {
     createToken: vi.fn(async () => ({
       id: 'token-1',
@@ -157,6 +161,13 @@ vi.mock('/src/composables/useAgentProxyApi', () => ({
 vi.mock('/src/composables/useMonitorApi', () => ({
   useMonitorApi: {
     getNodeMetrics: getNodeMetricsMock
+  }
+}))
+
+vi.mock('/src/composables/useRouteApi', () => ({
+  useRouteApi: {
+    addRoute: addRouteMock,
+    deleteRoute: deleteRouteMock
   }
 }))
 
@@ -259,10 +270,13 @@ describe('Nodes workbench detail', () => {
     routerPush.mockReset()
     sendAgentCommandMock.mockClear()
     getNodeMetricsMock.mockClear()
+    addRouteMock.mockClear()
+    deleteRouteMock.mockClear()
     tokenApiMock.createToken.mockClear()
     fetchControllerInfoMock.mockClear()
     mockNodeStore.loadNodes.mockClear()
     mockNodeStore.loadNodeDetail.mockClear()
+    mockNodeStore.updateNodeRemote.mockClear()
   })
 
   afterEach(() => {
@@ -315,6 +329,24 @@ describe('Nodes workbench detail', () => {
       command: 'sync',
       status: 'pending'
     })
+  })
+
+  it('syncs advertised route changes through the route API when saving node edits', async () => {
+    const wrapper = mountNodes()
+
+    wrapper.vm.handleEditNode(mockNodeStore.nodes[0])
+    wrapper.vm.editForm.advertised_routes = ['10.20.0.0/16']
+
+    await wrapper.vm.saveNodeChanges()
+    await flushPromises()
+
+    expect(mockNodeStore.updateNodeRemote).toHaveBeenCalledWith('node-1', {
+      hostname: 'edge-1',
+      region: 'sh'
+    })
+    expect(addRouteMock).toHaveBeenCalledWith('node-1', '10.20.0.0/16')
+    expect(deleteRouteMock).toHaveBeenCalledWith('node-1', '10.10.0.0/16')
+    expect(mockNodeStore.loadNodes).toHaveBeenCalled()
   })
 
   it('polls command status until the queued quick command reaches a terminal state', async () => {

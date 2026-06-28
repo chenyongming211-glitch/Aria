@@ -182,9 +182,6 @@ export const API_ENDPOINTS = {
     FEISHU: '/v2/integrations/feishu/webhook'
   },
 
-  // 健康检查
-  HEALTH: '/health',
-
   // 版本
   VERSION: '/version'
 };
