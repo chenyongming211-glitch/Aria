@@ -850,6 +850,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import useNodeStore from '../stores/node'
 import { useAgentProxyApi } from '../composables/useAgentProxyApi'
 import { useMonitorApi } from '../composables/useMonitorApi'
+import { useRouteApi } from '../composables/useRouteApi'
 import { useTokenApi } from '../composables/useTokenApi'
 import { fetchControllerInfo } from '../composables/useControllerInfo'
 import { usePermission } from '../composables/usePermission'
@@ -967,6 +968,7 @@ const onboardingForm = reactive<OnboardingFormState>({
 // 编辑相关状态
 const editDialogVisible = ref(false)
 const submitting = ref(false)
+const editOriginalAdvertisedRoutes = ref<string[]>([])
 const editForm = reactive<EditFormState>({
   id: '',
   hostname: '',
@@ -1362,6 +1364,7 @@ const handleEditNode = (node: AnyRecord) => {
   editForm.region = node.region
   // 确保是数组拷贝
   editForm.advertised_routes = Array.isArray(node.routes) ? [...node.routes] : []
+  editOriginalAdvertisedRoutes.value = [...editForm.advertised_routes]
   editDialogVisible.value = true
 }
 
@@ -1391,6 +1394,34 @@ const handleInputConfirm = () => {
   inputValue.value = ''
 }
 
+const normalizeEditedRoutes = (routes: string[]): string[] => {
+  const seen = new Set<string>()
+  const normalized: string[] = []
+  for (const route of routes) {
+    const trimmed = String(route || '').trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    normalized.push(trimmed)
+  }
+  return normalized
+}
+
+const syncEditedAdvertisedRoutes = async () => {
+  const original = normalizeEditedRoutes(editOriginalAdvertisedRoutes.value)
+  const next = normalizeEditedRoutes(editForm.advertised_routes)
+  const originalSet = new Set(original)
+  const nextSet = new Set(next)
+  const routesToAdd = next.filter((route) => !originalSet.has(route))
+  const routesToDelete = original.filter((route) => !nextSet.has(route))
+
+  for (const route of routesToAdd) {
+    await useRouteApi.addRoute(editForm.id, route)
+  }
+  for (const route of routesToDelete) {
+    await useRouteApi.deleteRoute(editForm.id, route)
+  }
+}
+
 const saveNodeChanges = async () => {
   submitting.value = true
   try {
@@ -1398,6 +1429,7 @@ const saveNodeChanges = async () => {
       hostname: editForm.hostname,
       region: editForm.region
     })
+    await syncEditedAdvertisedRoutes()
     ElMessage.success(t('nodesPage.nodeUpdated'))
     editDialogVisible.value = false
     await refreshNodes()
