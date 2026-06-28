@@ -1110,6 +1110,36 @@ Purpose:
 | API smoke | Login succeeded as `sysadmin`; tenant listing returned 4 tenants; selected active tenant `0bc152e2-5bdc-4b62-9333-3376dacc28db`; tenant Nodes returned 4 items; first node `node-82-156-137-42` returned `region=beijing`, `vpc_id=""`, `public_ip=82.156.137.42`, and `assigned_ip=100.64.0.40`. |
 | Deployment note | This docs-only deployment record commit does not require a runtime redeploy. |
 
+### 2026-06-28 Platform Backup and Certificate Lifecycle Deployment
+
+Status: deployed from `master` and server-side smoke validated.
+
+Purpose:
+
+- Close Settings/Backup restore safety: dry-run, selected table restore, and
+  mandatory confirmation phrase for destructive restore.
+- Close the first certificate lifecycle path: registration-time certificate
+  issue, renewal failure visibility, and node lifecycle revocation.
+- Deploy Controller, frontend, and Agent artifact together because this release
+  changes the Agent gRPC/protobuf certificate contract.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-28T10:40+08:00 gray deployment; 2026-06-28T11:05+08:00 master deployment; 2026-06-28T11:10+08:00 master smoke validation |
+| Git commit | `8f2e45442b51fae62ec33e0763e0c99ec3401423` |
+| Branch CI run | `28308920401` |
+| Master CI run | `28309407829` |
+| Version | `0.2.83` |
+| Controller image | Local runtime image `aria-controller:0.2.83` / `aria-controller:local@sha256:7894cd0fc3c26ea8a4d490e2782b2a5654f7e9cbdfd3cd9d33287f0605647223`. |
+| Gray backup | `/root/aria-controller/deploy-backups/20260628T024010Z-0.2.83-28308920401-8f2e45442b51-gray` |
+| Master backup | `/root/aria-controller/deploy-backups/20260628T030510Z-0.2.83-28309407829-8f2e45442b51-master` |
+| Agent artifact | Master Actions artifact `rust-agent-binary` from run `28309407829`, deployed to `/root/aria-controller/artifacts/aria-agent-linux-amd64` and all four online Agents. SHA256: `e9b6d77ba40f9c01ed97396a554e4675467b728923ba4c2d1b8f699282fa9695`. |
+| Verification | Branch Actions run `28308920401` and master Actions run `28309407829` both passed Go Build, Frontend Build, and Rust Agent Build. Local linux/amd64 Controller/ariactl build passed, local frontend build passed, and Rust Agent artifact was taken from master Actions. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` returned `0.2.83`; `aria-controller` and `aria-frontend` were healthy; Controller logs showed `Version: 0.2.83`, HTTP ready, and gRPC one-way TLS listening on `:50051`. |
+| Backup smoke | Login succeeded as `sysadmin`; backup create succeeded; dry-run restore with selected tables returned `selected_tables=["tenants","roles"]`; real restore without the confirmation phrase returned HTTP 400; the smoke backup was deleted after validation. |
+| Certificate smoke | REST Agent register with CSR returned certificate material and created an `issued` node certificate. Deleting that temporary node through `DELETE /api/v2/tenants/{tenant_id}/nodes/{node_id}` changed the node to `deleted`, changed the certificate to `revoked` with reason `node deleted via API`, and created one `cert.revoked` audit event. Existing node monitoring for `node-82-156-137-42` returned certificate status `issued`. |
+| Command and Agent smoke | Node `d5c7723c-3d86-48ce-a9fc-4695cd170b1c` accepted `health_check`, and the command completed. Online nodes `node-43-143-245-123`, `node-82-156-137-42`, `node-82-156-48-111`, and `node-VM-16-6-ubuntu` all reported `online`, last seen within 5 seconds, and `observed_state=applied` after Agent redeploy. |
+| Deployment note | This release intentionally redeployed the Agent artifact because the protobuf registration response now carries certificate fields. Historical `deleted` duplicate hostname rows still exist in the database but do not affect the online node records used by the smoke checks. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors

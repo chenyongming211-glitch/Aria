@@ -1,6 +1,6 @@
 # Platform Backup And Certificate Lifecycle Closure Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Finish the next product-critical closure after the v0.1.0 onboarding/control/operations loops: make Settings/Backup safe enough for production use, then make certificate lifecycle complete enough for managed Agent deployment.
 
@@ -69,7 +69,7 @@
 - Modify: `frontend/src/config/api.ts`
 - Modify: `frontend/src/composables/useSettingsApi.ts`
 
-- [ ] **Step 1: Add dry-run request and response types**
+- [x] **Step 1: Add dry-run request and response types**
 
 Add types near the existing backup types in `internal/api/v2/settings.go`:
 
@@ -89,7 +89,7 @@ type backupRestorePlan struct {
 }
 ```
 
-- [ ] **Step 2: Write dry-run tests**
+- [x] **Step 2: Write dry-run tests**
 
 Add tests to `internal/api/v2/settings_test.go`:
 
@@ -116,7 +116,7 @@ go test ./internal/api/v2 -run 'TestBackupRestoreDryRun' -count=1
 
 Expected: both tests fail before implementation, pass after implementation.
 
-- [ ] **Step 3: Implement restore preview**
+- [x] **Step 3: Implement restore preview**
 
 Add helpers in `internal/api/v2/settings.go`:
 
@@ -167,7 +167,7 @@ func buildRestorePlan(manifest *backupManifest, backupID string, selected []back
 }
 ```
 
-- [ ] **Step 4: Wire dry-run into `restoreBackup`**
+- [x] **Step 4: Wire dry-run into `restoreBackup`**
 
 Parse the request body before applying restore:
 
@@ -190,7 +190,7 @@ if restoreReq.DryRun {
 
 Do not call `restoreBackupManifest` on dry-run.
 
-- [ ] **Step 5: Add frontend API method**
+- [x] **Step 5: Add frontend API method**
 
 In `frontend/src/config/api.ts`, add:
 
@@ -210,7 +210,7 @@ restoreBackupDryRun: async (backupId: string, tables: string[] = []) => {
 }
 ```
 
-- [ ] **Step 6: Verify Batch 1**
+- [x] **Step 6: Verify Batch 1**
 
 Run:
 
@@ -221,7 +221,7 @@ git diff --check
 
 Expected: Go tests pass and no whitespace errors.
 
-- [ ] **Step 7: Commit Batch 1**
+- [x] **Step 7: Commit Batch 1**
 
 ```bash
 git add internal/api/v2/settings.go internal/api/v2/settings_test.go frontend/src/config/api.ts frontend/src/composables/useSettingsApi.ts
@@ -240,7 +240,7 @@ git commit -m "feat: add backup restore dry-run"
 - Modify: `frontend/src/views/Settings.vue`
 - Modify: `frontend/src/composables/useSettingsApi.ts`
 
-- [ ] **Step 1: Define confirmation phrase**
+- [x] **Step 1: Define confirmation phrase**
 
 Add a constant in `internal/api/v2/settings.go`:
 
@@ -248,7 +248,7 @@ Add a constant in `internal/api/v2/settings.go`:
 const backupRestoreConfirmPhrase = "RESTORE ARIA CONFIG"
 ```
 
-- [ ] **Step 2: Write confirmation tests**
+- [x] **Step 2: Write confirmation tests**
 
 Add tests:
 
@@ -272,7 +272,7 @@ go test ./internal/api/v2 -run 'TestBackupRestoreRequiresConfirmationPhrase|Test
 
 Expected: fail before implementation.
 
-- [ ] **Step 3: Implement selected restore**
+- [x] **Step 3: Implement selected restore**
 
 Change `restoreBackupManifest` signature:
 
@@ -282,7 +282,7 @@ func (r *Router) restoreBackupManifest(manifest *backupManifest, backupID, actor
 
 Compute cleanup tables from selected restore specs instead of always clearing every table. Keep full restore as the default when no specific tables are requested.
 
-- [ ] **Step 4: Enforce confirmation**
+- [x] **Step 4: Enforce confirmation**
 
 Before applying restore:
 
@@ -295,7 +295,7 @@ if strings.TrimSpace(restoreReq.Confirm) != backupRestoreConfirmPhrase {
 }
 ```
 
-- [ ] **Step 5: Improve audit details**
+- [x] **Step 5: Improve audit details**
 
 When restore succeeds, write `settings_backup_restored` audit detail:
 
@@ -307,7 +307,7 @@ Detail: map[string]interface{}{
 }
 ```
 
-- [ ] **Step 6: Add UI preview dialog**
+- [x] **Step 6: Add UI preview dialog**
 
 In `frontend/src/views/Settings.vue`, replace direct popconfirm restore with a dialog flow:
 
@@ -352,7 +352,7 @@ const applyRestore = async () => {
 }
 ```
 
-- [ ] **Step 7: Verify Batch 2**
+- [x] **Step 7: Verify Batch 2**
 
 Run:
 
@@ -364,7 +364,7 @@ git diff --check
 
 Expected: Go restore tests pass; frontend build succeeds.
 
-- [ ] **Step 8: Commit Batch 2**
+- [x] **Step 8: Commit Batch 2**
 
 ```bash
 git add internal/api/v2/settings.go internal/api/v2/settings_test.go frontend/src/views/Settings.vue frontend/src/composables/useSettingsApi.ts
@@ -384,7 +384,7 @@ git commit -m "feat: harden backup restore workflow"
 - Modify: `agent-rust/agent/src/certificate_client.rs`
 - Modify: `agent-rust/agent/src/agent_runtime.rs`
 
-- [ ] **Step 1: Write Controller tests**
+- [x] **Step 1: Write Controller tests**
 
 Add tests:
 
@@ -413,7 +413,7 @@ go test ./internal/cli -run 'TestIssueCertificate' -count=1
 
 Expected: tests fail before implementation if any path is incomplete.
 
-- [ ] **Step 2: Normalize issue and renew response**
+- [x] **Step 2: Normalize issue and renew response**
 
 Make issue and renew response include:
 
@@ -432,7 +432,7 @@ Make issue and renew response include:
 
 Do not return private key material from Controller.
 
-- [ ] **Step 3: Add Agent issue client**
+- [x] **Step 3: Add Agent issue client**
 
 In `agent-rust/agent/src/certificate_client.rs`, add:
 
@@ -467,7 +467,7 @@ pub async fn issue_certificate(
 }
 ```
 
-- [ ] **Step 4: Call issue when cert files are absent**
+- [x] **Step 4: Call issue when cert files are absent**
 
 In Agent startup path, after runtime token is available and before requiring mTLS-only operation:
 
@@ -480,7 +480,7 @@ if client_cert_path_is_configured && certificate_file_missing {
 
 Failure message must name the missing path and the HTTP endpoint. Do not silently fall back to insecure mode.
 
-- [ ] **Step 5: Verify Batch 3**
+- [x] **Step 5: Verify Batch 3**
 
 Run:
 
@@ -492,7 +492,7 @@ git diff --check
 
 Expected: Controller tests pass; Rust certificate client tests pass.
 
-- [ ] **Step 6: Commit Batch 3**
+- [x] **Step 6: Commit Batch 3**
 
 ```bash
 git add internal/cli/controller_serve.go internal/cli/controller_register_certificate_test.go internal/cli/controller_certificates_test.go agent-rust/agent/src/certificate_client.rs agent-rust/agent/src/agent_runtime.rs
@@ -515,7 +515,7 @@ git commit -m "feat: issue agent certificates during bootstrap"
 - Modify: `frontend/src/stores/node.ts`
 - Modify: `frontend/src/views/Nodes.vue`
 
-- [ ] **Step 1: Add Agent renewal state tests**
+- [x] **Step 1: Add Agent renewal state tests**
 
 Add Rust tests:
 
@@ -539,7 +539,7 @@ Run:
 cd agent-rust && cargo test -p aria-agent certificate_client
 ```
 
-- [ ] **Step 2: Persist renewal failure as observed state**
+- [x] **Step 2: Persist renewal failure as observed state**
 
 When Agent renewal fails, set sync observation:
 
@@ -549,7 +549,7 @@ self.set_sync_observation("error", format!("certificate renew failed: {}", err))
 
 Ensure the next Sync reports this to Controller through `observed_state` and `observed_message`.
 
-- [ ] **Step 3: Add Controller monitoring tests**
+- [x] **Step 3: Add Controller monitoring tests**
 
 Add tests:
 
@@ -561,7 +561,7 @@ func TestNodeMonitoringIncludesCertificateRenewFailure(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Add UI display normalization**
+- [x] **Step 4: Add UI display normalization**
 
 In `frontend/src/stores/node.ts`, normalize:
 
@@ -578,7 +578,7 @@ In `frontend/src/views/Nodes.vue`, show:
 - last_renewed_at
 - last_renew_failure
 
-- [ ] **Step 5: Verify Batch 4**
+- [x] **Step 5: Verify Batch 4**
 
 Run:
 
@@ -590,7 +590,7 @@ git diff --check
 
 Expected: tests pass.
 
-- [ ] **Step 6: Commit Batch 4**
+- [x] **Step 6: Commit Batch 4**
 
 ```bash
 git add agent-rust/agent/src/agent_runtime.rs agent-rust/agent/src/certificate_client.rs pkg/controllerstorage/certificate_lifecycle.go pkg/controllerstorage/certificate_lifecycle_test.go internal/api/v2/monitoring.go internal/api/v2/nodes_monitoring_behavior_test.go frontend/src/stores/node.ts frontend/src/views/Nodes.vue
@@ -610,7 +610,7 @@ git commit -m "feat: surface certificate renewal state"
 - Modify: `internal/api/v2/nodes_monitoring_behavior_test.go`
 - Modify: `frontend/src/views/Nodes.vue`
 
-- [ ] **Step 1: Write lifecycle tests**
+- [x] **Step 1: Write lifecycle tests**
 
 Add tests:
 
@@ -628,7 +628,7 @@ func TestBanNodeRevokesIssuedCertificate(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Reuse existing certificate revoke helper**
+- [x] **Step 2: Reuse existing certificate revoke helper**
 
 Call the existing certificate revocation storage helper from lifecycle transitions. The revoke reason must be deterministic:
 
@@ -636,7 +636,7 @@ Call the existing certificate revocation storage helper from lifecycle transitio
 fmt.Sprintf("node %s", targetStatus)
 ```
 
-- [ ] **Step 3: Add audit event**
+- [x] **Step 3: Add audit event**
 
 For each lifecycle-driven revoke, write:
 
@@ -649,7 +649,7 @@ Detail: map[string]interface{}{
 }
 ```
 
-- [ ] **Step 4: Verify Batch 5**
+- [x] **Step 4: Verify Batch 5**
 
 Run:
 
@@ -661,7 +661,7 @@ git diff --check
 
 Expected: lifecycle tests pass and monitoring still compiles.
 
-- [ ] **Step 5: Commit Batch 5**
+- [x] **Step 5: Commit Batch 5**
 
 ```bash
 git add pkg/controllerstorage/node_lifecycle.go pkg/controllerstorage/certificates.go pkg/controllerstorage/certificate_lifecycle_test.go internal/api/v2/nodes_monitoring_behavior_test.go frontend/src/views/Nodes.vue
@@ -681,11 +681,11 @@ git commit -m "feat: revoke certificates on node lifecycle changes"
 - Modify: `docs/deployment.md`
 - Modify: `docs/superpowers/plans/2026-06-28-platform-backup-certificate-closure.md`
 
-- [ ] **Step 1: Bump version**
+- [x] **Step 1: Bump version**
 
 Increment `VERSION` by one patch before any deployment-intended artifact is published.
 
-- [ ] **Step 2: Update product blueprint**
+- [x] **Step 2: Update product blueprint**
 
 In `docs/v0.1.0-product-blueprint.md`, update:
 
@@ -694,7 +694,7 @@ In `docs/v0.1.0-product-blueprint.md`, update:
 - Keep AI/Hermes as deferred.
 - Keep ACE/domain diff as deferred.
 
-- [ ] **Step 3: Update certificate design doc**
+- [x] **Step 3: Update certificate design doc**
 
 In `docs/cert-auto-issuance-design.md`, document:
 
@@ -704,7 +704,7 @@ In `docs/cert-auto-issuance-design.md`, document:
 - lifecycle revoke
 - user-visible failure states
 
-- [ ] **Step 4: Run full validation**
+- [x] **Step 4: Run full validation**
 
 Because this plan touches Rust Agent and certificate runtime behavior, run full CI or an equivalent Linux builder:
 
@@ -717,7 +717,7 @@ git diff --check
 
 Expected: all selected checks pass. If using GitHub Actions, wait for Go, frontend, and Rust jobs before declaring green.
 
-- [ ] **Step 5: Gray validation checklist**
+- [x] **Step 5: Gray validation checklist**
 
 Validate on the existing online Controller and at least one Agent:
 
@@ -743,7 +743,7 @@ Smoke:
 - ACL/QoS/Route existing policy delivery still applied
 ```
 
-- [ ] **Step 6: Merge and deploy**
+- [x] **Step 6: Merge and deploy**
 
 Use the established closure routine:
 
@@ -758,20 +758,22 @@ git push origin master
 # deploy master artifacts
 ```
 
-- [ ] **Step 7: Final record**
+- [x] **Step 7: Final record**
 
 Append final evidence to this plan:
 
 ```text
-Completed version:
-Branch CI:
-Master CI:
-Controller deployed commit:
-Frontend deployed commit:
-Agent deployed commit:
-Backup gray result:
-Certificate gray result:
-Smoke result:
+Completed version: 0.2.83
+Branch CI: 28308920401 passed Go Build, Frontend Build, and Rust Agent Build.
+Master CI: 28309407829 passed Go Build, Frontend Build, and Rust Agent Build.
+Controller deployed commit: 8f2e45442b51fae62ec33e0763e0c99ec3401423.
+Frontend deployed commit: 8f2e45442b51fae62ec33e0763e0c99ec3401423.
+Agent deployed commit: 8f2e45442b51fae62ec33e0763e0c99ec3401423 via master Actions rust-agent-binary artifact.
+Gray backup: /root/aria-controller/deploy-backups/20260628T024010Z-0.2.83-28308920401-8f2e45442b51-gray.
+Master backup: /root/aria-controller/deploy-backups/20260628T030510Z-0.2.83-28309407829-8f2e45442b51-master.
+Backup gray result: create, dry-run selected tables, destructive restore confirmation guard, and cleanup validated online.
+Certificate gray result: register with CSR returned certificate material; API delete revoked the issued certificate with reason "node deleted via API"; cert.revoked audit count was 1.
+Smoke result: api/version and controller-info returned 0.2.83; frontend returned HTTP 200; login succeeded; health_check command completed; monitored certificate status was issued; online Agents were last seen within 5 seconds and observed_state=applied.
 ```
 
 ---
