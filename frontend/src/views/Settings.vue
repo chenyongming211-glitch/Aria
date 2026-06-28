@@ -117,7 +117,12 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="restoreDialogVisible" :title="currentLang === 'zh' ? '恢复备份' : 'Restore Backup'" width="680px">
+    <el-dialog
+      v-if="restoreDialogVisible"
+      v-model="restoreDialogVisible"
+      :title="currentLang === 'zh' ? '恢复备份' : 'Restore Backup'"
+      width="680px"
+    >
       <div class="restore-dialog">
         <el-alert
           :title="currentLang === 'zh' ? '恢复会覆盖所选控制面配置表' : 'Restore replaces selected control-plane configuration tables'"
