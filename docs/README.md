@@ -17,6 +17,7 @@
 - `docs/control-loop-closure-plan.md`：控制闭环实施方案，定义 `前端下发 -> Controller 校验/存储 -> Agent 执行 -> 前端回显` 的状态模型、实施步骤和验收标准。
 - `docs/operations-loop-closure-plan.md`：运维闭环实施方案，定义 `监控发现 -> 人工确认 -> 执行结果留痕` 的事件模型、确认流和验收标准；AI 建议暂缓到 Hermes Agent 阶段。
 - `docs/frontend-typescript-refactor-plan.md`：前端 TypeScript 渐进重构计划，定义从类型检查、DTO、API composables、Pinia store 到高风险页面迁移的分批实施路径。
+- `docs/superpowers/plans/2026-06-28-i18n-hardcoded-text-migration.md`：前端 i18n 硬编码文本迁移方案，将 27 个 `.vue` 文件中硬编码的中文迁移到 i18n 系统，使中英文语言切换真正生效。
 - `docs/qos-product-decision.md`：QoS/ACL 产品决策；明确取消旧的“三级 QoS”/`service / peers / ip` 分类模型，统一为节点级策略，并确立 IP Group 为主的产品模型。
 - `docs/rbac-design.md`：高级 RBAC 设计与落地进度（含 audit/enforce 模式）。
 - `docs/architecture-refactor.md`：Go Controller + Rust Agent 的当前职责拆分与接口连接方式。
