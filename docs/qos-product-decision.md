@@ -1,6 +1,6 @@
 # QoS Product Decision
 
-Last updated: 2026-06-23
+Last updated: 2026-06-28
 
 Aria SD-WAN no longer uses the old "three-tier QoS" model. Do not describe QoS
 as `service / peers / ip`, and do not introduce new UI, API, Controller, or
@@ -122,6 +122,97 @@ returns overlap warnings on IP Group detail/create/update responses, and the UI
 shows those warnings so operators understand which group will match a packet
 first. Overlap is not a hard validation failure.
 
+## IP Group Reference Contract
+
+IP Group references are first-class control-loop evidence. They are not only a
+delete guard. Operators must be able to answer these questions before changing
+or deleting a group:
+
+- Which ACL/QoS rules currently reference this group?
+- Which nodes are affected?
+- What is the latest delivery status for each referencing rule?
+- Where can I jump in the UI to inspect or edit that rule?
+
+The reference model should expose product identifiers and names only:
+
+- `domain`: `acl` or `qos`
+- `rule_id` and `rule_name`
+- `node_id` and `node_name`
+- `direction`
+- `enabled`
+- `latest_delivery`, selected from the newest matching `policy_deliveries`
+  record by `created_at DESC`
+- a frontend route target for the owning rule
+
+Runtime group ids must not appear in northbound reference responses or operator
+errors. If a CIDR is already used by another group, the error should identify
+the product group or policy name, not an internal runtime group number.
+
+The latest delivery status for a reference is defined as:
+
+```text
+tenant_id = current tenant
+node_id = referencing rule node
+policy_domain = acl|qos
+policy_ref = rule_id
+ORDER BY created_at DESC
+LIMIT 1
+```
+
+Implementations should avoid one query per reference. Prefer a `LEFT JOIN
+LATERAL` or window-function query that fetches the newest delivery row while
+listing references. This matters because a rule may have old failed deliveries
+followed by a successful retry, and the UI must not show stale failure state.
+
+References should be queried lazily through a dedicated endpoint:
+
+```text
+GET /api/v2/tenants/{tenant_id}/ip-groups/{group_id}/references?limit=20&offset=0
+```
+
+The response shape is:
+
+```json
+{
+  "items": [],
+  "total": 0,
+  "limit": 20,
+  "offset": 0,
+  "has_more": false
+}
+```
+
+Group detail responses should stay lightweight and should not embed an
+unbounded reference list.
+
+Deleting a referenced group remains forbidden. The UI should preflight the
+references endpoint before delete, show the first page of references, and offer
+links to the affected ACL/QoS rules. Do not add force-delete or auto-clear
+semantics for referenced groups.
+
+Updating group name or members should keep the current control-loop contract:
+the Controller updates the group and queues policy sync for all affected nodes
+in one storage transaction. The update response should continue to expose
+dispatch evidence, and the reference list should show the latest delivery state
+after Agent sync.
+
+Inline groups created from direct CIDR input are system-managed artifacts. They
+should remain hidden or collapsed by default in the IP Group UI, and should not
+be manually edited or deleted while referenced by a rule. A future cleanup job
+may remove unreferenced inline groups.
+
+Reference navigation is part of the product contract:
+
+```text
+ACL reference -> /policy-center/acls?node_id={node_id}&rule_id={rule_id}
+QoS reference -> /policy-center/bandwidth?node_id={node_id}&rule_id={rule_id}
+```
+
+The destination pages must select the node, load rules, locate the row by
+`rule_id`, and highlight or open the matching rule. Existing `policyRef` and
+`commandId` query parameters remain valid context links, but `rule_id` is the
+canonical direct rule target.
+
 ## Policy Priority And Conflict Resolution
 
 ACL and QoS rules both have explicit priority. Priority is part of the product
@@ -239,6 +330,13 @@ Every ACL/QoS release candidate must be verified in this order:
      from the current generation;
    - failed delivery surfaces a human-readable rule or IP Group name rather than
      an internal runtime group id.
+7. Verify IP Group reference behavior:
+   - a group referenced by ACL/QoS cannot be deleted;
+   - the references endpoint returns the newest delivery after a failed delivery
+     is retried successfully;
+   - ACL/QoS reference links open the correct node and rule;
+   - updating a referenced group queues sync for affected nodes and exposes
+     dispatch evidence.
 
 ## Current Implementation Status
 
@@ -269,6 +367,9 @@ Known remaining compatibility surface:
 - QoS `priority` remains limited to `0..255` until the eBPF ABI is widened.
 - `bpf_spin_lock` remains intentionally out of scope for the current Aya map
   layout.
+- The IP Group reference endpoint, delete preflight, and rule-level click-through
+  are planned closure work and should be implemented before treating IP Group
+  management as fully closed.
 
 Runtime verification should check both ACL and QoS attachment points:
 

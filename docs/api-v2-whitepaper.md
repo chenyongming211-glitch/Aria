@@ -122,6 +122,7 @@ IP Group 是 ACL/QoS 的主要产品匹配模型。直接 CIDR 输入仅作为�
 | `GET` | `/api/v2/tenants/{tenant_id}/ip-groups` | `ip-groups:read` |
 | `POST` | `/api/v2/tenants/{tenant_id}/ip-groups` | `ip-groups:write` |
 | `GET` | `/api/v2/tenants/{tenant_id}/ip-groups/{group_id}` | `ip-groups:read` |
+| `GET` | `/api/v2/tenants/{tenant_id}/ip-groups/{group_id}/references` | `ip-groups:read` |
 | `PUT` | `/api/v2/tenants/{tenant_id}/ip-groups/{group_id}` | `ip-groups:write` |
 | `DELETE` | `/api/v2/tenants/{tenant_id}/ip-groups/{group_id}` | `ip-groups:write` |
 
@@ -141,6 +142,50 @@ IP Group 是 ACL/QoS 的主要产品匹配模型。直接 CIDR 输入仅作为�
 Overlaps are allowed and returned as warnings. Exact duplicate CIDRs across two
 non-inline groups are rejected because the Agent/eBPF runtime can only assign
 one runtime group id to an exact LPM key.
+
+`GET /api/v2/tenants/{tenant_id}/ip-groups/{group_id}/references?limit=20&offset=0`
+
+该接口按需返回引用这个 IP Group 的 ACL/QoS 规则，不嵌入到 group 详情里，避免大租户下
+一次性返回过多规则。每条引用必须带上最新一条 `policy_deliveries` 记录，选择规则为
+`tenant_id + node_id + policy_domain + policy_ref` 匹配后按 `created_at DESC LIMIT 1`。
+
+```json
+{
+  "items": [
+    {
+      "domain": "acl",
+      "rule_id": "54e9849d-01f4-48f1-8f05-a4c9a34d9473",
+      "rule_name": "office-acl",
+      "node_id": "2b3a5d52-2892-4a34-a43a-8a934e1d13d6",
+      "node_name": "node-1",
+      "direction": "egress",
+      "enabled": true,
+      "latest_delivery": {
+        "status": "completed",
+        "command_id": "3f671b23-d6bb-45d9-82d0-1f3f6acbd49e",
+        "last_error": "",
+        "created_at": "2026-06-28T10:12:00Z"
+      },
+      "route": {
+        "name": "ACLRules",
+        "path": "/policy-center/acls",
+        "query": {
+          "node_id": "2b3a5d52-2892-4a34-a43a-8a934e1d13d6",
+          "rule_id": "54e9849d-01f4-48f1-8f05-a4c9a34d9473"
+        }
+      }
+    }
+  ],
+  "total": 1,
+  "limit": 20,
+  "offset": 0,
+  "has_more": false
+}
+```
+
+删除 IP Group 前，客户端应先查询 references。若存在引用，UI 必须展示引用列表并阻止
+删除。服务端 `DELETE` 也必须保持 fail-closed：存在引用时返回 `409 Conflict`，不得自动
+清空 ACL/QoS 引用。
 
 ### 5.2 ACL 策略管理（匹配 eBPF `POLICY_MAP`）
 
