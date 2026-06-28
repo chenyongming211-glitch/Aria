@@ -16,6 +16,22 @@ import (
 	"github.com/google/uuid"
 )
 
+var ipGroupReferenceAPIColumns = []string{
+	"domain",
+	"rule_id",
+	"rule_name",
+	"node_id",
+	"node_name",
+	"direction",
+	"enabled",
+	"total",
+	"delivery_id",
+	"command_id",
+	"command_status",
+	"last_error",
+	"delivery_created_at",
+}
+
 func TestIPGroupCreateRejectsInvalidCIDR(t *testing.T) {
 	db, _, err := sqlmock.New()
 	if err != nil {
@@ -139,6 +155,88 @@ func TestHandleTenantIPGroupsRequiresWritePermissionForCreate(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestHandleTenantIPGroupReferencesListsWithReadPermission(t *testing.T) {
+	t.Setenv("RBAC_ENFORCEMENT", "enforce")
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	tenantID := uuid.New()
+	groupID := uuid.New()
+	nodeID := uuid.New()
+	ruleID := uuid.New()
+	deliveryID := uuid.New()
+	now := time.Now()
+
+	expectTenantStatusActive(mock, tenantID)
+	expectPermissionLookup(mock, tenantID, "viewer", []string{middleware.PermIPGroupsRead})
+	mock.ExpectQuery(regexp.QuoteMeta("WITH refs AS")).
+		WithArgs(tenantID, groupID, 1, 0).
+		WillReturnRows(sqlmock.NewRows(ipGroupReferenceAPIColumns).
+			AddRow("acl", ruleID, "office-acl", nodeID, "node-a", "egress", true, 1, deliveryID, "cmd-1", controllerstorage.AgentCommandStatusCompleted, "", now))
+
+	req := withAuthContext(
+		httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/ip-groups/"+groupID.String()+"/references?limit=1&offset=0", nil),
+		"viewer",
+		tenantID,
+	)
+	rec := httptest.NewRecorder()
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	router.handleTenantIPGroups(rec, req, tenantID)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, expected := range []string{"office-acl", "latest_delivery", "completed", "/policy-center/acls", "rule_id"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected response to contain %q, got %s", expected, body)
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestHandleTenantIPGroupReferencesRejectsInvalidPagination(t *testing.T) {
+	t.Setenv("RBAC_ENFORCEMENT", "enforce")
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	tenantID := uuid.New()
+	groupID := uuid.New()
+	expectTenantStatusActive(mock, tenantID)
+	expectPermissionLookup(mock, tenantID, "viewer", []string{middleware.PermIPGroupsRead})
+
+	req := withAuthContext(
+		httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/ip-groups/"+groupID.String()+"/references?limit=0", nil),
+		"viewer",
+		tenantID,
+	)
+	rec := httptest.NewRecorder()
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	router.handleTenantIPGroups(rec, req, tenantID)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "invalid pagination") {
+		t.Fatalf("expected invalid pagination error, got %s", rec.Body.String())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

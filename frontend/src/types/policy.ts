@@ -53,6 +53,38 @@ export interface NormalizedIPGroup {
   warnings: string[]
 }
 
+export interface IPGroupReferenceRoute {
+  name?: 'ACLRules' | 'BandwidthControl' | string
+  path: string
+  query: Record<string, string>
+}
+
+export interface IPGroupReference {
+  domain: 'acl' | 'qos' | string
+  rule_id: string
+  rule_name: string
+  node_id: NodeId
+  node_name: string
+  direction: string
+  enabled: boolean
+  latest_delivery?: {
+    id?: string
+    status?: DeliveryCommandStatus | string
+    command_id?: CommandId
+    last_error?: string
+    created_at?: ISODateTimeString
+  }
+  route: IPGroupReferenceRoute
+}
+
+export interface IPGroupReferencePage {
+  items: IPGroupReference[]
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+}
+
 export interface DispatchResult {
   desired_state_version?: string
   desired_state_updated_at?: ISODateTimeString

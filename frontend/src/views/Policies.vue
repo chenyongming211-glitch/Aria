@@ -7,7 +7,7 @@
       <template #actions>
         <el-button v-if="hasPermission('ip-groups:read')" @click="goToIpGroups">
           <el-icon><Collection /></el-icon>
-          IP Group
+          {{ t('nav.ipGroupManagement') }}
         </el-button>
         <el-button v-if="hasPermission('acls:read')" @click="goToKind('acl')">
           <el-icon><Lock /></el-icon>

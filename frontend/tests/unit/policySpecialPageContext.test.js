@@ -80,7 +80,9 @@ const {
     getTenantNodes: vi.fn(async () => [{ id: 'node-1', hostname: 'edge-1' }])
   },
   ipGroupApiMock: {
-    listIPGroups: vi.fn(async () => [])
+    listIPGroups: vi.fn(async () => []),
+    listIPGroupReferences: vi.fn(async () => ({ items: [], total: 0, limit: 20, offset: 0, has_more: false })),
+    deleteIPGroup: vi.fn(async () => ({}))
   },
   routerPushMock: vi.fn()
 }))
@@ -157,6 +159,7 @@ const stubs = {
   'el-table': { template: '<div><slot /></div>' },
   'el-table-column': { template: '<div></div>' },
   'el-pagination': { template: '<div></div>' },
+  'el-drawer': { template: '<div><slot /></div>' },
   'el-dialog': { template: '<div><slot /><slot name="footer" /></div>' },
   'el-form': { template: '<form><slot /></form>' },
   'el-form-item': { template: '<div><slot /></div>' }
@@ -181,11 +184,25 @@ describe('policy special page context filters', () => {
     routeApiMock.getRoutes.mockClear()
     tenantApiMock.getTenantNodes.mockClear()
     ipGroupApiMock.listIPGroups.mockClear()
+    ipGroupApiMock.listIPGroupReferences.mockClear()
+    ipGroupApiMock.deleteIPGroup.mockClear()
   })
 
   it('filters ACL rules by policyRef without mutating the name search box', async () => {
     routeState.query = { nodeId: 'node-1', policyRef: 'acl-1', commandId: 'stale-cmd' }
     routeState.fullPath = '/acl-rules?nodeId=node-1&policyRef=acl-1&commandId=stale-cmd'
+
+    const wrapper = mountPage(ACLRules)
+    await flushPromises()
+
+    expect(wrapper.vm.filters.name).toBe('')
+    expect(wrapper.vm.visibleRules.map((rule) => rule.id)).toEqual(['acl-1'])
+    expect(wrapper.find('[data-testid="policy-context-banner"]').text()).toContain('acl-1')
+  })
+
+  it('filters ACL rules by rule_id links from IP group references', async () => {
+    routeState.query = { node_id: 'node-1', rule_id: 'acl-1' }
+    routeState.fullPath = '/policy-center/acls?node_id=node-1&rule_id=acl-1'
 
     const wrapper = mountPage(ACLRules)
     await flushPromises()
@@ -204,6 +221,17 @@ describe('policy special page context filters', () => {
 
     expect(wrapper.vm.visibleRules.map((rule) => rule.id)).toEqual(['qos-1'])
     expect(wrapper.find('[data-testid="policy-context-banner"]').text()).toContain('QoS')
+  })
+
+  it('filters QoS rules by rule_id links from IP group references', async () => {
+    routeState.query = { node_id: 'node-1', rule_id: 'qos-1' }
+    routeState.fullPath = '/policy-center/bandwidth?node_id=node-1&rule_id=qos-1'
+
+    const wrapper = mountPage(BandwidthControl)
+    await flushPromises()
+
+    expect(wrapper.vm.visibleRules.map((rule) => rule.id)).toEqual(['qos-1'])
+    expect(wrapper.find('[data-testid="policy-context-banner"]').text()).toContain('qos-1')
   })
 
   it('filters routes by policy_ref without using the free-text search field', async () => {
@@ -357,5 +385,37 @@ describe('policy special page context filters', () => {
         commandId: 'cmd-1'
       }
     })
+  })
+
+  it('blocks IP group deletion when policy references exist', async () => {
+    ipGroupApiMock.listIPGroupReferences.mockResolvedValueOnce({
+      items: [
+        {
+          domain: 'acl',
+          rule_id: 'acl-1',
+          rule_name: 'office-acl',
+          node_id: 'node-1',
+          node_name: 'edge-1',
+          direction: 'egress',
+          enabled: true,
+          route: {
+            path: '/policy-center/acls',
+            query: { node_id: 'node-1', rule_id: 'acl-1' }
+          }
+        }
+      ],
+      total: 1,
+      limit: 20,
+      offset: 0,
+      has_more: false
+    })
+
+    const wrapper = mountPage(IPGroups)
+    await flushPromises()
+
+    await wrapper.vm.handleDelete({ id: 'group-1', name: 'office', kind: 'custom' })
+
+    expect(ipGroupApiMock.deleteIPGroup).not.toHaveBeenCalled()
+    expect(wrapper.vm.referencesDrawerVisible).toBe(true)
   })
 })

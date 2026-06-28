@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"aria/internal/api/apibase"
@@ -28,17 +29,26 @@ type ipGroupPayload struct {
 }
 
 func (r *Router) handleTenantIPGroups(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
+	groupID, hasGroupID, subresource, ok := ipGroupPathFromPath(req.URL.Path)
+	if !ok {
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Unknown IP group endpoint", nil)
+		return
+	}
+
 	requiredPermission := middleware.PermIPGroupsRead
-	if req.Method != http.MethodGet {
+	if req.Method != http.MethodGet && subresource != "references" {
 		requiredPermission = middleware.PermIPGroupsWrite
 	}
 	if !r.authorizeTenantPermission(w, req, tenantID, requiredPermission) {
 		return
 	}
 
-	groupID, hasGroupID, ok := ipGroupIDFromPath(req.URL.Path)
-	if !ok {
-		apibase.WriteError(w, http.StatusNotFound, apibase.CodeEndpointNotFound, "Unknown IP group endpoint", nil)
+	if subresource == "references" {
+		if req.Method != http.MethodGet {
+			apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+			return
+		}
+		r.listTenantIPGroupReferences(w, req, tenantID, groupID)
 		return
 	}
 
@@ -73,24 +83,35 @@ func (r *Router) handleTenantIPGroups(w http.ResponseWriter, req *http.Request, 
 }
 
 func ipGroupIDFromPath(path string) (uuid.UUID, bool, bool) {
+	groupID, hasGroupID, subresource, ok := ipGroupPathFromPath(path)
+	if subresource != "" {
+		return uuid.Nil, false, false
+	}
+	return groupID, hasGroupID, ok
+}
+
+func ipGroupPathFromPath(path string) (uuid.UUID, bool, string, bool) {
 	parts := splitPath(path)
 	for i, part := range parts {
 		if part != "ip-groups" {
 			continue
 		}
 		if len(parts) == i+1 {
-			return uuid.Nil, false, true
+			return uuid.Nil, false, "", true
+		}
+		groupID, err := uuid.Parse(parts[i+1])
+		if err != nil {
+			return uuid.Nil, true, "", false
 		}
 		if len(parts) == i+2 {
-			groupID, err := uuid.Parse(parts[i+1])
-			if err != nil {
-				return uuid.Nil, true, false
-			}
-			return groupID, true, true
+			return groupID, true, "", true
 		}
-		return uuid.Nil, false, false
+		if len(parts) == i+3 && parts[i+2] == "references" {
+			return groupID, true, "references", true
+		}
+		return uuid.Nil, false, "", false
 	}
-	return uuid.Nil, false, false
+	return uuid.Nil, false, "", false
 }
 
 func (r *Router) listTenantIPGroups(w http.ResponseWriter, tenantID uuid.UUID) {
@@ -117,6 +138,32 @@ func (r *Router) getTenantIPGroup(w http.ResponseWriter, tenantID, groupID uuid.
 		return
 	}
 	apibase.WriteSuccess(w, ipGroupResponse(group), "IP group retrieved")
+}
+
+func (r *Router) listTenantIPGroupReferences(w http.ResponseWriter, req *http.Request, tenantID, groupID uuid.UUID) {
+	limit, offset, err := parseIPGroupReferencePagination(req)
+	if err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
+		return
+	}
+
+	page, err := r.store.ListIPGroupReferences(req.Context(), tenantID, groupID, limit, offset)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to list IP group references: "+err.Error(), nil)
+		return
+	}
+
+	items := make([]map[string]interface{}, 0, len(page.Items))
+	for _, ref := range page.Items {
+		items = append(items, ipGroupReferenceResponse(ref))
+	}
+	apibase.WriteSuccess(w, map[string]interface{}{
+		"items":    items,
+		"total":    page.Total,
+		"limit":    page.Limit,
+		"offset":   page.Offset,
+		"has_more": page.HasMore,
+	}, fmt.Sprintf("%d IP group references retrieved", len(items)))
 }
 
 func (r *Router) createTenantIPGroup(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
@@ -303,6 +350,77 @@ func ipGroupResponse(group *controllerstorage.IPGroupRecord) map[string]interfac
 		response["created_by"] = group.CreatedBy.String
 	}
 	return response
+}
+
+func parseIPGroupReferencePagination(req *http.Request) (int, int, error) {
+	query := req.URL.Query()
+	limit := 20
+	offset := 0
+	if raw := strings.TrimSpace(query.Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			return 0, 0, fmt.Errorf("invalid pagination")
+		}
+		limit = parsed
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if raw := strings.TrimSpace(query.Get("offset")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			return 0, 0, fmt.Errorf("invalid pagination")
+		}
+		offset = parsed
+	}
+	return limit, offset, nil
+}
+
+func ipGroupReferenceResponse(ref *controllerstorage.IPGroupReferenceRecord) map[string]interface{} {
+	if ref == nil {
+		return map[string]interface{}{}
+	}
+	response := map[string]interface{}{
+		"domain":    ref.Domain,
+		"rule_id":   ref.RuleID.String(),
+		"rule_name": ref.RuleName,
+		"node_id":   ref.NodeID.String(),
+		"node_name": ref.NodeName,
+		"direction": ref.Direction,
+		"enabled":   ref.Enabled,
+		"route":     ipGroupReferenceRoute(ref.Domain, ref.NodeID, ref.RuleID),
+	}
+	if ref.LatestDelivery != nil {
+		response["latest_delivery"] = map[string]interface{}{
+			"id":         ref.LatestDelivery.ID.String(),
+			"status":     ref.LatestDelivery.Status,
+			"command_id": ref.LatestDelivery.CommandID,
+			"last_error": ref.LatestDelivery.LastError,
+			"created_at": ref.LatestDelivery.CreatedAt,
+		}
+	}
+	return response
+}
+
+func ipGroupReferenceRoute(domain string, nodeID, ruleID uuid.UUID) map[string]interface{} {
+	if domain == "acl" {
+		return map[string]interface{}{
+			"name": "ACLRules",
+			"path": "/policy-center/acls",
+			"query": map[string]string{
+				"node_id": nodeID.String(),
+				"rule_id": ruleID.String(),
+			},
+		}
+	}
+	return map[string]interface{}{
+		"name": "BandwidthControl",
+		"path": "/policy-center/bandwidth",
+		"query": map[string]string{
+			"node_id": nodeID.String(),
+			"rule_id": ruleID.String(),
+		},
+	}
 }
 
 func writeIPGroupError(w http.ResponseWriter, action string, err error) {

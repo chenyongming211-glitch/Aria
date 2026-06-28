@@ -1,6 +1,12 @@
 import api from './useApi'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
-import type { IPGroupMember, IPGroupRecord, NormalizedIPGroup } from '@/types/policy'
+import type {
+  IPGroupMember,
+  IPGroupRecord,
+  IPGroupReference,
+  IPGroupReferencePage,
+  NormalizedIPGroup
+} from '@/types/policy'
 
 interface ApiResponseLike {
   data?: unknown
@@ -63,6 +69,52 @@ function normalizeIPGroup(group: unknown = {}): NormalizedIPGroup {
   }
 }
 
+function normalizeReference(value: unknown): IPGroupReference | null {
+  if (!isRecord(value)) return null
+  const route = isRecord(value.route) ? value.route : {}
+  const query = isRecord(route.query)
+    ? Object.fromEntries(Object.entries(route.query).map(([key, item]) => [key, String(item || '')]))
+    : {}
+  const latestDelivery = isRecord(value.latest_delivery)
+    ? {
+        id: String(value.latest_delivery.id || ''),
+        status: String(value.latest_delivery.status || ''),
+        command_id: String(value.latest_delivery.command_id || ''),
+        last_error: String(value.latest_delivery.last_error || ''),
+        created_at: String(value.latest_delivery.created_at || '')
+      }
+    : undefined
+  return {
+    domain: String(value.domain || ''),
+    rule_id: String(value.rule_id || ''),
+    rule_name: String(value.rule_name || ''),
+    node_id: String(value.node_id || ''),
+    node_name: String(value.node_name || ''),
+    direction: String(value.direction || ''),
+    enabled: value.enabled !== false,
+    latest_delivery: latestDelivery,
+    route: {
+      name: String(route.name || ''),
+      path: String(route.path || ''),
+      query
+    }
+  }
+}
+
+function normalizeReferencePage(response: ApiResponseLike): IPGroupReferencePage {
+  const body = response?.data
+  const data = isRecord(body) && 'success' in body ? body.data : body
+  const page = isRecord(data) ? data : {}
+  const items = Array.isArray(page.items)
+    ? page.items.map(normalizeReference).filter((item): item is IPGroupReference => Boolean(item))
+    : []
+  const total = Number(page.total ?? items.length)
+  const limit = Number(page.limit ?? 20)
+  const offset = Number(page.offset ?? 0)
+  const hasMore = Boolean(page.has_more ?? (offset + items.length < total))
+  return { items, total, limit, offset, has_more: hasMore }
+}
+
 function normalizePayload(group: Partial<IPGroupRecord> = {}) {
   return {
     name: String(group.name || '').trim(),
@@ -86,6 +138,17 @@ export const useIpGroupApi = {
     const tenantId = requireCurrentTenantId()
     const response = await api.get(API_ENDPOINTS.TENANT.IP_GROUP(tenantId, groupId))
     return normalizeIPGroup(response.data?.data || response.data)
+  },
+
+  listIPGroupReferences: async (groupId: string, params: { limit?: number; offset?: number } = {}) => {
+    const tenantId = requireCurrentTenantId()
+    const response = await api.get(API_ENDPOINTS.TENANT.IP_GROUP_REFERENCES(tenantId, groupId), {
+      params: {
+        limit: params.limit ?? 20,
+        offset: params.offset ?? 0
+      }
+    })
+    return normalizeReferencePage(response)
   },
 
   createIPGroup: async (group: Partial<IPGroupRecord>) => {

@@ -468,7 +468,7 @@ const queryString = (...keys: string[]) => {
 }
 const routeContext = computed(() => ({
   nodeId: queryString('nodeId', 'node_id'),
-  policyRef: queryString('policyRef', 'policy_ref'),
+  policyRef: queryString('ruleId', 'rule_id', 'policyRef', 'policy_ref'),
   commandId: queryString('commandId', 'command_id')
 }))
 const hasRouteContext = computed(() => Boolean(

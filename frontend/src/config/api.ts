@@ -129,6 +129,7 @@ export const API_ENDPOINTS = {
     NODE_QOS_RULE: (tenantId: string, nodeId: string, ruleId: PathParam) => buildTenantPath(tenantId, `/nodes/${nodeId}/qos/${ruleId}`),
     IP_GROUPS: (tenantId: string) => buildTenantPath(tenantId, '/ip-groups'),
     IP_GROUP: (tenantId: string, groupId: string) => buildTenantPath(tenantId, `/ip-groups/${groupId}`),
+    IP_GROUP_REFERENCES: (tenantId: string, groupId: string) => buildTenantPath(tenantId, `/ip-groups/${groupId}/references`),
     AI_CHAT: (tenantId: string) => buildTenantPath(tenantId, '/ai/chat'),
     AI_CONFIRM: (tenantId: string) => buildTenantPath(tenantId, '/ai/confirm'),
     ROLES: (tenantId: string) => buildTenantPath(tenantId, '/roles'),

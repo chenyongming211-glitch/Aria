@@ -75,4 +75,58 @@ describe('useIpGroupApi', () => {
       members: [{ cidr: '10.10.0.0/16', note: 'office' }]
     })
   })
+
+  it('应该分页加载 IP 组引用并规范化跳转信息', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          items: [
+            {
+              domain: 'acl',
+              rule_id: 'acl-1',
+              rule_name: 'office-acl',
+              node_id: 'node-1',
+              node_name: 'edge-1',
+              direction: 'egress',
+              enabled: true,
+              latest_delivery: {
+                status: 'completed',
+                command_id: 'cmd-1',
+                last_error: '',
+                created_at: '2026-06-28T10:12:00Z'
+              },
+              route: {
+                name: 'ACLRules',
+                path: '/policy-center/acls',
+                query: {
+                  node_id: 'node-1',
+                  rule_id: 'acl-1'
+                }
+              }
+            }
+          ],
+          total: 1,
+          limit: 20,
+          offset: 0,
+          has_more: false
+        }
+      }
+    })
+
+    const page = await useIpGroupApi.listIPGroupReferences('group-1', { limit: 20, offset: 0 })
+
+    expect(api.get).toHaveBeenCalledWith('/v2/tenants/tenant-1/ip-groups/group-1/references', {
+      params: { limit: 20, offset: 0 }
+    })
+    expect(page.items[0]).toEqual(expect.objectContaining({
+      domain: 'acl',
+      rule_id: 'acl-1',
+      rule_name: 'office-acl',
+      route: expect.objectContaining({
+        path: '/policy-center/acls',
+        query: { node_id: 'node-1', rule_id: 'acl-1' }
+      })
+    }))
+  })
 })
