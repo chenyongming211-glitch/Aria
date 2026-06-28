@@ -94,8 +94,8 @@ describe('useAclApi', () => {
 
       const rules = await useAclApi.getACLRulesByNode('node-1')
 
-      expect(rules[0].runtime_src_group).toBe('未知 IP Group')
-      expect(rules[0].runtime_dst_group).toBe('未知 IP Group')
+      expect(rules[0].runtime_src_group).toBe('未知IP组')
+      expect(rules[0].runtime_dst_group).toBe('未知IP组')
     })
 
   })

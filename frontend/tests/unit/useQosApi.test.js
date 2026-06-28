@@ -146,7 +146,7 @@ describe('useQosApi', () => {
 
     const rules = await useQosApi.getQoSRulesByNode('node-1')
 
-    expect(rules[0].runtime_group).toBe('未知 IP Group')
+    expect(rules[0].runtime_group).toBe('未知IP组')
   })
 
   it('应该保留 QoS 列表里的投递状态、命令和失败原因', async () => {
