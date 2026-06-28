@@ -306,6 +306,24 @@ describe('monitoring workflow routing', () => {
     expect(wrapper.text()).toContain('Resolve')
   })
 
+  it('localizes monitoring event, alert, and severity labels in Chinese', async () => {
+    localStorageMock.getItem.mockImplementation((key) => (key === 'aria-lang' ? 'zh' : null))
+
+    const wrapper = mountWithStubs(Monitoring)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('监控中心')
+    expect(wrapper.vm.formatEventType('policy_failed')).toBe('策略失败')
+    expect(wrapper.vm.formatEventType('certificate_expiring')).toBe('证书即将过期')
+    expect(wrapper.vm.formatSeverity('warning')).toBe('警告')
+    expect(wrapper.vm.formatMonitoringTitle({
+      event_type: 'policy_failed',
+      title: 'Policy failed'
+    })).toBe('策略失败')
+    expect(wrapper.text()).not.toContain('Policy failed')
+    expect(wrapper.text()).not.toContain('policy_failed')
+  })
+
   it('keeps failed-command metric shortcuts wired through the shared metric strip', async () => {
     const wrapper = mountWithStubs(Monitoring)
     await flushPromises()
@@ -597,13 +615,15 @@ describe('node monitor detail context handling', () => {
       eventType: 'policy_failed'
     }
     routeState.fullPath = '/monitoring/nodes/node-1?focus=certificate&commandId=cmd-1&policyRef=acl-1'
+    localStorageMock.getItem.mockImplementation((key) => (key === 'aria-lang' ? 'en' : null))
+    globalThis.localStorage = localStorageMock
   })
 
   it('derives context summary and highlights the targeted command row', async () => {
     const wrapper = mountWithStubs(NodeMonitorDetail)
     await flushPromises()
 
-    expect(wrapper.vm.contextDescription).toContain('Event: policy_failed')
+    expect(wrapper.vm.contextDescription).toContain('Event: Policy Failed')
     expect(wrapper.vm.contextDescription).toContain('Policy: acl-1')
     expect(wrapper.vm.contextDescription).toContain('Command: cmd-1')
     expect(wrapper.vm.certificateStatusLabel).toBe('issued')
@@ -619,6 +639,24 @@ describe('node monitor detail context handling', () => {
     expect(wrapper.vm.alertRowClassName({ row: { id: 'alert-1' } })).toBe('context-match-row')
     expect(wrapper.vm.cmdStatusType('sent')).toBe('warning')
     expect(wrapper.vm.cmdStatusType('acknowledged')).toBe('warning')
+  })
+
+  it('localizes node monitoring context and alert labels in Chinese', async () => {
+    localStorageMock.getItem.mockImplementation((key) => (key === 'aria-lang' ? 'zh' : null))
+
+    const wrapper = mountWithStubs(NodeMonitorDetail)
+    await flushPromises()
+
+    expect(wrapper.vm.contextDescription).toContain('事件: 策略失败')
+    expect(wrapper.vm.contextDescription).toContain('策略: acl-1')
+    expect(wrapper.vm.contextDescription).toContain('命令: cmd-1')
+    expect(wrapper.vm.formatSeverity('warning')).toBe('警告')
+    expect(wrapper.vm.formatMonitoringTitle({
+      alert_type: 'policy_failed',
+      title: 'Policy apply failed'
+    })).toBe('策略失败')
+    expect(wrapper.text()).not.toContain('Event: policy_failed')
+    expect(wrapper.text()).not.toContain('Policy apply failed')
   })
 
   it('routes to policy center with current node and policy filters', async () => {
@@ -731,7 +769,7 @@ describe('node monitor detail context handling', () => {
     const wrapper = mountWithStubs(NodeMonitorDetail)
     await flushPromises()
 
-    expect(wrapper.vm.contextDescription).toContain('Event: policy_failed')
+    expect(wrapper.vm.contextDescription).toContain('Event: Policy Failed')
     expect(wrapper.vm.contextDescription).toContain('Policy: acl-1')
     expect(wrapper.vm.contextDescription).toContain('Command: cmd-1')
     expect(wrapper.vm.policyRowClassName({ row: { policy_ref: 'acl-1', command_id: 'other' } })).toBe('context-match-row')

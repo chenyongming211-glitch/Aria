@@ -382,11 +382,15 @@
         >
           <el-table-column prop="severity" :label="t('nodeMonitorDetail.severity')" width="120">
             <template #default="{ row }">
-              <el-tag :type="alertSeverityType(row.severity)" size="small">{{ row.severity || 'info' }}</el-tag>
+              <el-tag :type="alertSeverityType(row.severity)" size="small">{{ formatSeverity(row.severity) }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="alert_type" :label="t('nodeMonitorDetail.type')" width="160" />
-          <el-table-column prop="title" :label="t('nodeMonitorDetail.titleColumn')" min-width="180" />
+          <el-table-column prop="alert_type" :label="t('nodeMonitorDetail.type')" width="160">
+            <template #default="{ row }">{{ formatEventType(row.alert_type) }}</template>
+          </el-table-column>
+          <el-table-column prop="title" :label="t('nodeMonitorDetail.titleColumn')" min-width="180">
+            <template #default="{ row }">{{ formatMonitoringTitle(row) }}</template>
+          </el-table-column>
           <el-table-column prop="message" :label="t('nodeMonitorDetail.message')" min-width="220" show-overflow-tooltip />
           <el-table-column prop="created_at" :label="t('nodeMonitorDetail.created')" width="180">
             <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
@@ -458,7 +462,7 @@ const hasContext = computed(() => Object.values(contextQuery.value).some(Boolean
 const contextDescription = computed(() => {
   const parts = []
   if (contextQuery.value.eventType) {
-    parts.push(`${t('nodeMonitorDetail.event')}: ${contextQuery.value.eventType}`)
+    parts.push(`${t('nodeMonitorDetail.event')}: ${formatEventType(contextQuery.value.eventType)}`)
   }
   if (contextQuery.value.policyRef) {
     parts.push(`${t('nodeMonitorDetail.policy')}: ${contextQuery.value.policyRef}`)
@@ -494,6 +498,41 @@ const certificateActivity = computed(() => node.value?.certificate_activity || n
 const recentCommands = computed(() => node.value?.recent_commands || [])
 const recentPolicyDeliveries = computed(() => node.value?.recent_policy_deliveries || [])
 const activeAlerts = computed(() => node.value?.active_alerts || [])
+
+const formatEventType = (type?: string) => {
+  if (!type) return ''
+  const labels: Record<string, string> = {
+    node_offline: t('monitoringPage.nodeOffline'),
+    node_online: t('monitoringPage.nodeOnline'),
+    certificate_expiring: t('monitoringPage.certificateExpiring'),
+    certificate_expired: t('monitoringPage.certificateExpired'),
+    certificate_renew_failed: t('monitoringPage.certificateRenewFailed'),
+    certificate_renewed: t('monitoringPage.certificateRenewed'),
+    sync_failed: t('monitoringPage.syncFailed'),
+    policy_failed: t('monitoringPage.policyFailed'),
+    command_completed: t('monitoringPage.commandCompleted'),
+    command_failed: t('monitoringPage.commandFailed'),
+    policy_delivered: t('monitoringPage.policyDelivered'),
+    alert_created: t('monitoringPage.alertCreated'),
+    alert_resolved: t('monitoringPage.alertResolved')
+  }
+  return labels[type] || type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+const formatSeverity = (severity?: string) => {
+  if (!severity) return t('common.info')
+  const labels: Record<string, string> = {
+    critical: t('common.critical'),
+    warning: t('common.warning'),
+    info: t('common.info')
+  }
+  return labels[severity] || severity
+}
+
+const formatMonitoringTitle = (record: AnyRecord = {}) => {
+  const type = record.alert_type || record.event_type
+  return type ? formatEventType(type) : (record.title || '')
+}
 
 const certificateBadgeType = computed(() => {
   switch (node.value?.certificate?.status) {

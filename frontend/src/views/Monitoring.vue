@@ -79,11 +79,15 @@
       >
         <el-table-column prop="severity" :label="t('monitoringPage.severity')" width="120">
           <template #default="{ row }">
-            <StatusBadge :status="row.severity || 'info'" :label="row.severity || 'info'" :tone="severityTone(row.severity)" />
+            <StatusBadge :status="row.severity || 'info'" :label="formatSeverity(row.severity)" :tone="severityTone(row.severity)" />
           </template>
         </el-table-column>
-        <el-table-column prop="alert_type" :label="t('monitoringPage.type')" width="160" />
-        <el-table-column prop="title" :label="t('monitoringPage.titleColumn')" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="alert_type" :label="t('monitoringPage.type')" width="160">
+          <template #default="{ row }">{{ formatEventType(row.alert_type) }}</template>
+        </el-table-column>
+        <el-table-column prop="title" :label="t('monitoringPage.titleColumn')" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">{{ formatMonitoringTitle(row) }}</template>
+        </el-table-column>
         <el-table-column prop="message" :label="t('monitoringPage.message')" min-width="220" show-overflow-tooltip />
         <el-table-column :label="t('monitoringPage.context')" min-width="220">
           <template #default="{ row }">
@@ -193,13 +197,13 @@
                 <StatusBadge
                   v-if="event.source === 'alert' && event.severity"
                   :status="event.severity"
-                  :label="event.severity"
+                  :label="formatSeverity(event.severity)"
                   :tone="severityTone(event.severity)"
                 />
               </div>
               <span class="event-time">{{ formatTime(event.created_at) }}</span>
             </div>
-            <div class="event-title">{{ event.title }}</div>
+            <div class="event-title">{{ formatMonitoringTitle(event) }}</div>
             <div v-if="event.detail && Object.keys(event.detail).length > 0" class="event-context-row">
               <el-tag v-if="event.detail.policy_ref" size="small" effect="plain">
                 {{ t('monitoringPage.policy') }}: {{ event.detail.policy_ref }}
@@ -786,6 +790,21 @@ const formatEventType = (type?: string) => {
     alert_resolved: t('monitoringPage.alertResolved')
   }
   return labels[type] || type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+const formatSeverity = (severity?: string) => {
+  if (!severity) return t('common.info')
+  const labels: Record<string, string> = {
+    critical: t('common.critical'),
+    warning: t('common.warning'),
+    info: t('common.info')
+  }
+  return labels[severity] || severity
+}
+
+const formatMonitoringTitle = (record: AnyRecord = {}) => {
+  const type = record.alert_type || record.event_type
+  return type ? formatEventType(type) : (record.title || '')
 }
 
 const eventTypeTone = (type?: string) => {
