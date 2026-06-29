@@ -277,3 +277,105 @@ i18n 字典：被架空                    i18n 字典：被使用
 2. **前端:** `IPGroups.vue` 表格新增「引用节点」列，显示被哪些节点使用、共计多少条规则，点击节点名跳转详情。
 
 3. **前端（可选）:** 删除 IP Group 时若被规则引用，弹出确认框告知影响范围。
+
+---
+
+## 关联待办：垃圾代码清理
+
+**状态:** 🔴 未开始
+
+### 可立即删除（无依赖）
+
+| # | 项目 | 行数/体积 | 说明 |
+|:---:|------|:---:|------|
+| 1 | `frontend-refactor/` | 226 MB | 废弃重构分支残留，只剩 `node_modules` |
+| 2 | `temp-dist/` | 3.4 MB | 构建残留 |
+| 3 | `internal/api/handlers/tenant_mgmt.go` | 16 行 | 空壳 struct，无人引用 |
+| 4 | `internal/agent/tools/tools.go:25` | 1 函数 | `NewListNodesTool()`，返硬编码假数据，注释已标记废弃 |
+| 5 | `pkg/controllerstorage/redis.go:360` | 1 函数 | `NewRateLimiter()`，无调用方 |
+| 6 | `internal/cli/controller_serve.go:10` | 1 import | `io/ioutil` 已废弃 (Go 1.16+)，改为 `os.ReadFile` |
+
+### Rust 死代码（~720 行）
+
+| # | 文件 | 内容 | 行数 |
+|:---:|------|------|:---:|
+| 7 | `wireguard.rs` | `check_dependencies()` | 19 |
+| 8 | `agent_runtime.rs` | `load_ebpf_programs()` 单接口版 + `ensure_interface()` | 181 |
+| 9 | `grpc_client.rs` | `new()` + `register()` 简化版 | 39 |
+| 10 | `metrics.rs` | `MetricsCounters` 整结构 + 4 统计函数 | 84 |
+| 11 | `system_optimization.rs` | `verify_optimizations()` | 38 |
+| 12 | `routing.rs` | `add_route/remove_route/cleanup` 等 6 方法 | 120 |
+| 13 | `shared/src/lib.rs` | `Acl5TupleKey`、`BucketState` 等 7 旧结构 | 70 |
+| 14 | `proto/aria_agent.proto` | `AgentService` + 8 message | 80 |
+| 15 | `ebpf/` | 死配置字段 (`conntrack_enabled` 等) | 12 |
+| 16 | grpc_client.rs 等多处 | 过时 `#[allow(dead_code)]` 注解 | 4 处 |
+
+### 前端死代码
+
+| # | 文件 | 内容 | 行数 |
+|:---:|------|------|:---:|
+| 17 | `i18n/index.ts` | `settings.*` 37 个 key (× 2 语言) | ~74 |
+| 18 | `i18n/index.ts` | `monitoring.*` 12 个 key (× 2 语言) | ~24 |
+| 19 | `config/api.ts` | 10 个死 API 常量 | ~10 |
+| 20 | `styles/global.css` | `.kpi-grid/.kpi-card/.kpi-label/.kpi-value/.kpi-meta` | ~50 |
+| 21 | `styles/global.css` | `.animate-fade-in/.slide-up/.scale-in` + 配套 keyframes | ~50 |
+| 22 | `styles/global.css` | `@keyframes glow/float/pulse-dot/slideDown` | ~50 |
+
+### 过时注释
+
+| # | 文件 | 内容 |
+|:---:|------|------|
+| 23 | `internal/controller/grpc/server.go:138` | 注释引用不存在的 `HandleSync`，应为 `processSync` |
+| 24 | `internal/cli/controller_serve.go:1824-1828` | 同上 |
+
+### 清理优先级
+
+```
+第1批：删除 frontend-refactor/ + temp-dist/ (229MB 释放)
+第2批：删除 Go 死代码 6 处 (20 行)
+第3批：删除前端死 CSS/i18n/API 常量 (~250 行)
+第4批：删除 Rust 死代码 (~720 行)
+第5批：修正过时注释 2 处
+```
+
+---
+
+## 关联待办：策略下发状态按需聚焦轮询
+
+**状态:** ✅ 已完成
+
+**落地版本:** `0.2.88`
+
+**正式方案文档:** `docs/superpowers/plans/2026-06-28-focused-status-polling.md`
+
+**说明:** 原草案中的 `GET ?refs=` 已调整为正式实现里的 `POST` JSON body，避免 CIDR、混合 domain 和 URL 编码问题。
+
+1. **后端:** 已新增轻量端点：
+   ```
+   POST /api/v2/tenants/:tid/policy-deliveries/status
+   POST /api/v2/tenants/:tid/nodes/status
+   ```
+   只查询调用方提交的 policy refs 或 node ids，不全表刷新。
+
+2. **前端:** 已新增 `composables/useFocusedPolling.ts`
+   - 首次加载后扫描所有 `pending` / `in_progress` 的规则
+   - 对这些规则启动 3 秒轮询，只调轻量端点
+   - 局部更新对应行的状态 badge（不重渲染整个表格）
+   - 全部达到终端状态（`applied` / `error` / `stale`）后自动停止
+   - 用户执行 retry / create 后重新启动
+   - 页面隐藏时暂停（`visibilitychange`）
+
+3. **已接入页面：**
+   ```ts
+   // ACLRules.vue / BandwidthControl.vue / Routing.vue / Policies.vue
+   useFocusedPolling(...)
+   ```
+   同时接入 `Nodes.vue` 和 `NodeMonitorDetail.vue` 的节点状态聚焦刷新。
+
+| | 10s 全量轮询 | 按需聚焦轮询 |
+|------|:---:|:---:|
+| 请求数据量 | 全表 | 几条 delivery |
+| settled 后 | 仍在刷 | 自动停 |
+| 后端压力 | O(规则总数) | O(未完成数，通常 0~3) |
+| 前端渲染 | 表格重绘 | 局部 badge 更新 |
+| 延迟 | ≤10s | ≤3s |
