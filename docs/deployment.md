@@ -1229,6 +1229,34 @@ Purpose:
 | Focused polling smoke | Temporary route `10.255.188.128/32` on node `53ac38c9-f8ff-475d-83aa-1ca80cbdbdd9` returned `create_http=200`; the focused delivery status endpoint observed `pending` then `applied/completed`; deleting the route returned `delete_http=200`; the focused delivery status endpoint again observed `pending` then `applied/completed`; final route list confirmed `cleanup_route_exists=false`. |
 | Deployment note | This is a gray deployment from the feature branch, not a `master` deployment. Browser DevTools network tracing was not run in this environment; page-level request tracing can be checked manually if needed, while the deployed bundle and API smoke confirm the focused endpoint path is active. |
 
+### 2026-06-29 Focused Status Polling Master Deployment
+
+Status: deployed from `master` and server-side smoke validated.
+
+Purpose:
+
+- Bring `master` back in sync with the already-validated `0.2.88` gray
+  deployment.
+- Include the i18n follow-up task record and focused status polling deployment
+  record in the main branch.
+- Rebuild and redeploy Controller/frontend from current `master`; Agent artifact
+  remains unchanged because this release does not change Agent runtime behavior.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-06-29T23:52+08:00 deployment; 2026-06-29T23:54+08:00 smoke validation |
+| Git commit | `56bf947390af12b6061c68455ab9494327f0f6ed` |
+| Master CI run | `28384372597` |
+| Version | `0.2.88` |
+| Controller image | Local runtime image `aria-controller:0.2.88` / `aria-controller:local@sha256:dbe313d38de9871ff9adca2b706d632092b6a2e7707cbf93f91a8bcad8c2e55d`. |
+| Backup | `/root/aria-controller/deploy-backups/20260629T155222Z-0.2.88-28384372597-56bf947390af-master` |
+| Release path | `/root/aria-controller/releases/0.2.88-20260629T155222Z-0.2.88-28384372597-56bf947390af-master` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in master Actions. |
+| Verification | Master Actions run `28384372597` passed Go Build, Frontend Build, and Rust Agent Build. Local linux/amd64 Controller/ariactl build passed, and frontend build passed from current `master`. Server-side `https://aria.yun/api/version` returned `0.2.88`; frontend entry returned HTTP 200; `aria-controller` and `aria-frontend` were healthy; deployed frontend assets contain `policy-deliveries/status` and `nodes/status`. |
+| Status endpoint smoke | Login succeeded as `sysadmin`; `POST /api/v2/tenants/{tenant_id}/nodes/status` returned HTTP 200 for live node `53ac38c9-f8ff-475d-83aa-1ca80cbdbdd9` with `status=online`, `configuration_status=applied`, `convergence_status=converged`, and `pending_cmds=0`. |
+| Focused polling smoke | Temporary route `10.255.189.150/32` on node `554ec635-7267-4771-b3a5-9d174350a954` returned `create_http=200`; the focused delivery status endpoint observed `pending` then `applied/completed`; deleting the route returned `delete_http=200`; the focused delivery status endpoint again observed `pending` then `applied/completed`; final route list confirmed `cleanup_route_exists=false`. |
+| Deployment note | This is the master deployment that supersedes the `codex/focused-status-polling` gray deployment. This docs-only deployment record commit does not require another runtime redeploy. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
