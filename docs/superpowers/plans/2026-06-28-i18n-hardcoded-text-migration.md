@@ -294,6 +294,8 @@ i18n 字典：被架空                    i18n 字典：被使用
 
 **2026-06-30 进度:** 第 1 批已完成，删除未跟踪废弃目录 `frontend-refactor/` 与 `temp-dist/`，释放约 229 MB。本次 `npm run build` 会重新生成 `temp-dist/`，验证完成后已再次删除。
 
+**2026-06-30 进度:** 第 2 批已完成，删除 Go 侧无调用空壳/死代码：`tenant_mgmt.go`、模拟 `NewListNodesTool()`、未使用的 Redis `RateLimiter` 类型及方法，并将 `ioutil.ReadFile` 替换为 `os.ReadFile`。
+
 ### 可立即删除（无依赖）
 
 | # | 项目 | 行数/体积 | 说明 |

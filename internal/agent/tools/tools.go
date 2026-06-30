@@ -20,33 +20,6 @@ type Tool struct {
 	Run                ToolFunc
 }
 
-// NewListNodesTool 创建一个查询节点工具（使用模拟数据）
-// TODO: 废弃此函数，使用 NewListNodesToolWithStore
-func NewListNodesTool() Tool {
-	return Tool{
-		Name:        "list_nodes",
-		Description: "查询当前系统中所有 WireGuard 节点的列表、状态和 IP 地址",
-		Parameters: map[string]interface{}{
-			"type":       "object",
-			"properties": map[string]interface{}{},
-		},
-		Run: func(args string) (string, error) {
-			// 模拟数据
-			mockNodes := []map[string]interface{}{
-				{"name": "beijing-gateway", "ip": "10.0.1.1", "status": "Online", "latency": "35ms"},
-				{"name": "shanghai-edge", "ip": "10.0.1.2", "status": "Offline", "latency": "-"},
-				{"name": "shenzhen-idc", "ip": "10.0.1.3", "status": "Online", "latency": "42ms"},
-			}
-
-			data, err := json.Marshal(mockNodes)
-			if err != nil {
-				return "", fmt.Errorf("数据序列化失败: %v", err)
-			}
-			return string(data), nil
-		},
-	}
-}
-
 // NewListNodesToolWithStore 创建一个查询节点工具（使用真实数据）
 func NewListNodesToolWithStore(store *controllerstorage.Storage) Tool {
 	return Tool{

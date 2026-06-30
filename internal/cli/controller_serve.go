@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -461,7 +460,7 @@ func runControllerServe(cmd *cobra.Command, args []string) error {
 		}
 
 		// Load CA certificate for client verification
-		caCert, err := ioutil.ReadFile(caCertPath)
+		caCert, err := os.ReadFile(caCertPath)
 		if err != nil {
 			return fmt.Errorf("failed to read CA certificate: %w", err)
 		}
