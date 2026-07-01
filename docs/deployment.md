@@ -1284,6 +1284,31 @@ Purpose:
 | Verification | Branch and master Actions both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` returned `0.2.89`; `aria-controller` and `aria-frontend` were healthy; login, tenant listing, Nodes, ACL, QoS, Settings Backup, and `health_check` smoke checks passed. The online Agent service was active and logs showed command stream connected plus immediate sync completed. |
 | Deployment note | Other historical Agent records were stale or unreachable during this deployment window, so only the confirmed online Agent was upgraded directly. |
 
+### 2026-07-01 Policy Workbench Reference Gray Deployment
+
+Status: gray deployed from `codex/policy-workbench-unification` and
+server-side smoke validated.
+
+Purpose:
+
+- Align IP Group reference links with the current policy workbench routes.
+- Keep policy context navigation stable by preferring named frontend routes
+  with `rule_id` and `node_id` query parameters.
+- Add focused regression coverage around IP Group references, route context,
+  focused polling, Settings Backup, Agent command status, and route edits.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-07-01T15:38Z deployment; 2026-07-01T15:40Z smoke validation |
+| Git commit | `249ba299db1b1832790e177032be13b30bd4b5cb` |
+| Branch CI run | `28528858536` |
+| Version | `0.2.90` |
+| Controller image | Local runtime image `aria-controller:0.2.90` / `aria-controller:local@sha256:cb47251470a66420dc46920774aa28d676ea4ab4cce60950fd083fe649128de8`. |
+| Backup | `/root/aria-controller/deploy-backups/20260701T153655Z-0.2.90-28528858536-249ba29` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch Actions. |
+| Verification | Local targeted Go and frontend regression tests passed, local `go test ./...` passed, full frontend unit tests passed (`217` tests), frontend type-check passed, and `git diff --check` passed before push. Branch Actions run `28528858536` passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` returned `0.2.90`; frontend entry returned HTTP 200; `aria-controller` and `aria-frontend` were healthy; login succeeded as `sysadmin`; tenant scan found `Aria Default` with 4 nodes and 21 IP Groups. IP Group reference smoke confirmed ACL links use `/policy-center/acl-rules`, QoS links use `/policy-center/bandwidth-control`, and both include `route.name`, `rule_id`, `node_id`, and latest delivery status. |
+| Deployment note | This is a gray deployment from the feature branch, not a `master` deployment. Merge to `master`, run master Actions, and redeploy master artifacts after gray confirmation. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
