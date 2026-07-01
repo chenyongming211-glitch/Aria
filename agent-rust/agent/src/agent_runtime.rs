@@ -1748,7 +1748,7 @@ impl AgentRuntime {
                                 iface,
                                 &base_iface,
                                 listen_port,
-                            );
+                            )?;
                             Some(adjusted_endpoint)
                         } else {
                             None
@@ -1791,7 +1791,7 @@ impl AgentRuntime {
                                 iface,
                                 &base_iface,
                                 listen_port,
-                            );
+                            )?;
                             Some(adjusted_endpoint)
                         } else {
                             None
@@ -1849,7 +1849,7 @@ impl AgentRuntime {
         iface: &str,
         base_iface: &str,
         base_port: u16,
-    ) -> String {
+    ) -> Result<String> {
         // Calculate offset based on trailing digit or comparison
         let offset = if iface == base_iface {
             0
@@ -1875,9 +1875,9 @@ impl AgentRuntime {
                     .context("multi-tunnel port overflow; base_port + offset exceeds u16::MAX")?
             };
 
-            format!("{}:{}", host, port)
+            Ok(format!("{}:{}", host, port))
         } else {
-            endpoint.to_string()
+            Ok(endpoint.to_string())
         }
     }
 
@@ -2516,6 +2516,7 @@ fn build_failed_command_response_with_result(
 mod tests {
     use super::{
         apply_runtime_token_from_sync, canonicalize_acl_qos_snapshot, fail_route_sync_if_needed,
+        AgentRuntime,
     };
     use crate::acl_qos_manager::{AclQosSnapshot, AclRuleSpec, IPGroupSpec, QosRuleSpec};
     use crate::config::AgentConfig;
@@ -2589,6 +2590,34 @@ mod tests {
         assert!(message.contains("2 route operations failed"));
         assert!(message.contains("add 10.10.0.0/16"));
         assert!(message.contains("remove 10.20.0.0/16"));
+    }
+
+    #[test]
+    fn endpoint_port_adjustment_offsets_numbered_interfaces() {
+        let endpoint = AgentRuntime::adjust_endpoint_port_static(
+            "203.0.113.10:51820",
+            "aria3",
+            "aria0",
+            51820,
+        )
+        .expect("endpoint adjustment should succeed");
+
+        assert_eq!(endpoint, "203.0.113.10:51823");
+    }
+
+    #[test]
+    fn endpoint_port_adjustment_rejects_overflow() {
+        let err = AgentRuntime::adjust_endpoint_port_static(
+            "203.0.113.10:65535",
+            "aria3",
+            "aria0",
+            51820,
+        )
+        .expect_err("overflowing endpoint port should fail");
+
+        assert!(err
+            .to_string()
+            .contains("multi-tunnel port overflow"));
     }
 
     #[test]
