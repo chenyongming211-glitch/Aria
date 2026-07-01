@@ -359,9 +359,15 @@ const handleReferencePageChange = async (page) => {
 }
 
 const openReference = (reference) => {
-  const path = reference?.route?.path
-  if (!path) return
-  router.push({ path, query: reference.route.query || {} })
+  const routeInfo = reference?.route || {}
+  const query = routeInfo.query || {}
+  if (routeInfo.name) {
+    router.push({ name: routeInfo.name, query })
+    return
+  }
+  if (routeInfo.path) {
+    router.push({ path: routeInfo.path, query })
+  }
 }
 
 const handleDelete = async (row) => {

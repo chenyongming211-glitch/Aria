@@ -9,15 +9,38 @@ interface FetchVersionOptions {
   reload?: () => void
 }
 
+const readStorageItem = (key: string): string | null => {
+  if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') {
+    return null
+  }
+  try {
+    return localStorage.getItem(key)
+  } catch (error) {
+    console.warn(`Failed to read ${key} from localStorage:`, error)
+    return null
+  }
+}
+
+const writeStorageItem = (key: string, value: string) => {
+  if (typeof localStorage === 'undefined' || typeof localStorage.setItem !== 'function') {
+    return
+  }
+  try {
+    localStorage.setItem(key, value)
+  } catch (error) {
+    console.warn(`Failed to write ${key} to localStorage:`, error)
+  }
+}
+
 export default defineStore('app', () => {
-  const lang = ref(localStorage.getItem('aria-lang') || 'zh')
+  const lang = ref(readStorageItem('aria-lang') || 'zh')
   const version = ref('0.0.0')
   const sidebarCollapsed = ref(false)
   let versionWatcher: number | null = null
 
   const setLang = (newLang: string) => {
     lang.value = newLang
-    localStorage.setItem('aria-lang', newLang)
+    writeStorageItem('aria-lang', newLang)
   }
 
   const toggleSidebar = () => {

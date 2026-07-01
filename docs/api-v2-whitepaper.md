@@ -168,7 +168,7 @@ one runtime group id to an exact LPM key.
       },
       "route": {
         "name": "ACLRules",
-        "path": "/policy-center/acls",
+        "path": "/policy-center/acl-rules",
         "query": {
           "node_id": "2b3a5d52-2892-4a34-a43a-8a934e1d13d6",
           "rule_id": "54e9849d-01f4-48f1-8f05-a4c9a34d9473"

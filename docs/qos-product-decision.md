@@ -204,8 +204,8 @@ may remove unreferenced inline groups.
 Reference navigation is part of the product contract:
 
 ```text
-ACL reference -> /policy-center/acls?node_id={node_id}&rule_id={rule_id}
-QoS reference -> /policy-center/bandwidth?node_id={node_id}&rule_id={rule_id}
+ACL reference -> /policy-center/acl-rules?node_id={node_id}&rule_id={rule_id}
+QoS reference -> /policy-center/bandwidth-control?node_id={node_id}&rule_id={rule_id}
 ```
 
 The destination pages must select the node, load rules, locate the row by

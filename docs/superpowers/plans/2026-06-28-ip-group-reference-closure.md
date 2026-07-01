@@ -70,7 +70,7 @@ Response:
       },
       "route": {
         "name": "ACLRules",
-        "path": "/policy-center/acls",
+        "path": "/policy-center/acl-rules",
         "query": {
           "node_id": "2b3a5d52-2892-4a34-a43a-8a934e1d13d6",
           "rule_id": "54e9849d-01f4-48f1-8f05-a4c9a34d9473"
@@ -391,13 +391,13 @@ func ipGroupReferenceRouteFor(domain string, nodeID, ruleID uuid.UUID) ipGroupRe
 	if domain == "acl" {
 		return ipGroupReferenceRoute{
 			Name: "ACLRules",
-			Path: "/policy-center/acls",
+			Path: "/policy-center/acl-rules",
 			Query: map[string]string{"node_id": nodeID.String(), "rule_id": ruleID.String()},
 		}
 	}
 	return ipGroupReferenceRoute{
 		Name: "BandwidthControl",
-		Path: "/policy-center/bandwidth",
+		Path: "/policy-center/bandwidth-control",
 		Query: map[string]string{"node_id": nodeID.String(), "rule_id": ruleID.String()},
 	}
 }
@@ -546,7 +546,7 @@ Add tests for:
 ```ts
 it('blocks delete when references exist', async () => {
   mockIpGroupApi.listIPGroupReferences.mockResolvedValueOnce({
-    items: [{ domain: 'acl', rule_id: 'rule-1', rule_name: 'office-acl', node_id: 'node-1', node_name: 'node-a', direction: 'egress', enabled: true, route: { name: 'ACLRules', path: '/policy-center/acls', query: { node_id: 'node-1', rule_id: 'rule-1' } } }],
+    items: [{ domain: 'acl', rule_id: 'rule-1', rule_name: 'office-acl', node_id: 'node-1', node_name: 'node-a', direction: 'egress', enabled: true, route: { name: 'ACLRules', path: '/policy-center/acl-rules', query: { node_id: 'node-1', rule_id: 'rule-1' } } }],
     total: 1,
     limit: 20,
     offset: 0,

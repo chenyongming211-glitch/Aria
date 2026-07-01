@@ -1257,6 +1257,33 @@ Purpose:
 | Focused polling smoke | Temporary route `10.255.189.150/32` on node `554ec635-7267-4771-b3a5-9d174350a954` returned `create_http=200`; the focused delivery status endpoint observed `pending` then `applied/completed`; deleting the route returned `delete_http=200`; the focused delivery status endpoint again observed `pending` then `applied/completed`; final route list confirmed `cleanup_route_exists=false`. |
 | Deployment note | This is the master deployment that supersedes the `codex/focused-status-polling` gray deployment. This docs-only deployment record commit does not require another runtime redeploy. |
 
+### 2026-07-01 Bug 38-57 Hardening Master Deployment
+
+Status: deployed from `master` and server-side smoke validated.
+
+Purpose:
+
+- Close the BUG-38 to BUG-57 hardening batch across Controller, frontend, and
+  Rust Agent surfaces.
+- Publish the runtime-sensitive fixes under a unique patch version instead of
+  reusing `0.2.88`.
+- Deploy Controller, frontend, and the online Agent artifact so the running
+  system matches `master`.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-07-01 master deployment and smoke validation |
+| Git commit | `2887daf54f33c97752f13dfac2b9b5f27b9fbd80` |
+| Branch CI run | `28523152622` |
+| Branch workflow_dispatch | `28523600762` |
+| Master CI run | `28524622363` |
+| Master workflow_dispatch | `28525088215` |
+| Version | `0.2.89` |
+| Controller image | Local runtime image `aria-controller:0.2.89` / image id `sha256:dfe3b5191d9e7a6d475314b0c3510a806b26e0e3c4bf847dd4220d5f05b4f7bc`. |
+| Agent artifact | Master Actions artifact deployed to the online Agent `82.156.48.111`; `/usr/local/bin/aria-agent` SHA256 `f871f43ff247fde04183f6cef40a77da4fe1511200a8472bcea409562e1fd729`. The Controller-hosted Agent artifact was also updated for future installs. |
+| Verification | Branch and master Actions both passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` returned `0.2.89`; `aria-controller` and `aria-frontend` were healthy; login, tenant listing, Nodes, ACL, QoS, Settings Backup, and `health_check` smoke checks passed. The online Agent service was active and logs showed command stream connected plus immediate sync completed. |
+| Deployment note | Other historical Agent records were stale or unreachable during this deployment window, so only the confirmed online Agent was upgraded directly. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors

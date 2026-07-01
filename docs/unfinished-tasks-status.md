@@ -1,6 +1,6 @@
 # Unfinished Tasks Status
 
-**Last verified**: 2026-06-28 21:23 +0800
+**Last verified**: 2026-07-01
 
 This document records the current unfinished work from the active checkout. It
 does not count stale unchecked items from old plans when the linked feature has
@@ -10,54 +10,57 @@ already shipped or has online validation evidence.
 
 | Item | Current value |
 | --- | --- |
-| Current branch | `codex/ip-group-reference-closure` |
-| Current version | `0.2.85` |
-| `origin/master` head | `739c222 docs: record platform backup certificate deployment` |
-| Current branch delta | `10` commits ahead of `origin/master` |
-| Branch CI | `28317366377` passed for `95a435f` |
-| Online gray deploy | `0.2.85` from `95a435f` |
+| Current branch | `codex/policy-workbench-unification` |
+| Current version | `0.2.90` |
+| `origin/master` head | `2887daf fix: make agent endpoint port adjustment fallible` |
+| Current branch delta | documentation and policy workbench changes in progress |
+| Latest master CI | `28524622363` passed |
+| Latest master workflow_dispatch | `28525088215` passed |
+| Latest online deploy | `0.2.89` from `2887daf` |
 | Open tracked bugs | `0` |
-| BUG-25 to BUG-37 | all `FIXED` in `docs/confirmed-bugs.md` |
-| Tracked local modification | `docs/superpowers/plans/2026-06-28-i18n-hardcoded-text-migration.md` |
+| BUG-25 to BUG-57 | all `FIXED` in `docs/confirmed-bugs.md` |
+| Tracked local modification | none at branch creation |
 
 ## Must Close
 
-These are the active delivery closure tasks.
+These are the active delivery closure tasks for the current branch.
 
-1. Merge `codex/ip-group-reference-closure` into `master`.
-2. Run and verify `master` GitHub Actions after the merge.
-3. Deploy the `master` `0.2.85` Controller/frontend artifacts online.
-4. Add missing deployment records in `docs/deployment.md` for `0.2.84` and
-   `0.2.85`.
-5. Run IP Group reference online smoke validation:
-   - references endpoint returns ACL/QoS references;
-   - delete is blocked when a group is referenced;
-   - ACL/QoS click-through opens the referenced node/rule context;
-   - latest delivery status is shown after retry.
-6. Commit the tracked i18n plan update, including the dead-code cleanup plan.
-7. Delete the stale local branch `codex/i18n-hardcoded-text-migration` after the
-   current branch is merged, because it is already an ancestor of
-   `codex/ip-group-reference-closure`.
+1. Record the `0.2.89` deployment in `docs/deployment.md`.
+2. Unify the policy workbench experience across IP Group, ACL, Bandwidth,
+   Route, Policy Center, Nodes, and Monitoring:
+   - IP Group references show ACL/QoS usage and latest delivery status;
+   - ACL/QoS/Route rows deep-link back to the referenced node and policy;
+   - Nodes and Monitoring surface the same policy failure reason and context;
+   - focused status polling keeps pending policy and node states current.
+3. Add regression coverage for the workflow paths that have regressed recently:
+   - Nodes advertised route edit;
+   - IP Group references and delete preflight;
+   - ACL/QoS create, edit, delete, and delivery status;
+   - focused policy/node status polling;
+   - Settings Backup safety paths;
+   - Agent command status transitions.
+4. Push the feature branch and run GitHub Actions.
+5. Gray-validate the policy workbench workflow online.
+6. Merge to `master`, run master Actions, deploy master artifacts, and smoke
+   test if the branch changes deployed behavior.
 
 ## Active Follow-Up Work
 
-These are real follow-up tracks, but they should not block the 7 delivery
-closure tasks above.
+These are real follow-up tracks, but they should not block the delivery closure
+tasks above.
 
-1. Strategy workbench experience unification across IP Group, ACL, Bandwidth,
-   Route, Policy Center, Nodes, and Monitoring.
-2. Hermes Agent design and integration. The old AI write path remains
+1. Hermes Agent design and integration. The old AI write path remains
    fail-closed.
-3. IM alert integration for Feishu/DingTalk, confirmation cards, and result
+2. IM alert integration for Feishu/DingTalk, confirmation cards, and result
    writeback.
-4. Full self-healing loop for low-risk actions and multi-step action plans.
-5. Backup operations hardening: restore runbook, retention policy, offline
+3. Full self-healing loop for low-risk actions and multi-step action plans.
+4. Backup operations hardening: restore runbook, retention policy, offline
    encrypted archive, and finer-grained restore audit.
-6. Test hardening: gRPC end-to-end tests, VictoriaMetrics integration tests,
+5. Test hardening: gRPC end-to-end tests, VictoriaMetrics integration tests,
    performance baseline, and coverage threshold gate.
-7. Frontend TypeScript SFC migration. `useAiApi.js` remains deferred until
+6. Frontend TypeScript SFC migration. `useAiApi.js` remains deferred until
    Hermes work starts.
-8. Technical-debt cleanup, including the 24 dead-code cleanup items recorded in
+7. Technical-debt cleanup, including the 24 dead-code cleanup items recorded in
    the i18n plan.
 
 ## Not Counted As Active Unfinished Work
@@ -70,3 +73,5 @@ closure tasks above.
   synchronization, not reimplementation.
 - Old control-loop and operations-loop unchecked checklist entries are not
   counted here because those v0.1.0 paths already have online validation records.
+- `0.2.89` is already deployed from `master`; this branch is preparing
+  `0.2.90` and must not reuse `0.2.89` for deployment.

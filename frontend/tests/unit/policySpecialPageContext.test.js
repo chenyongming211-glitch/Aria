@@ -202,7 +202,7 @@ describe('policy special page context filters', () => {
 
   it('filters ACL rules by rule_id links from IP group references', async () => {
     routeState.query = { node_id: 'node-1', rule_id: 'acl-1' }
-    routeState.fullPath = '/policy-center/acls?node_id=node-1&rule_id=acl-1'
+    routeState.fullPath = '/policy-center/acl-rules?node_id=node-1&rule_id=acl-1'
 
     const wrapper = mountPage(ACLRules)
     await flushPromises()
@@ -225,7 +225,7 @@ describe('policy special page context filters', () => {
 
   it('filters QoS rules by rule_id links from IP group references', async () => {
     routeState.query = { node_id: 'node-1', rule_id: 'qos-1' }
-    routeState.fullPath = '/policy-center/bandwidth?node_id=node-1&rule_id=qos-1'
+    routeState.fullPath = '/policy-center/bandwidth-control?node_id=node-1&rule_id=qos-1'
 
     const wrapper = mountPage(BandwidthControl)
     await flushPromises()
@@ -387,6 +387,29 @@ describe('policy special page context filters', () => {
     })
   })
 
+  it('opens IP group references through named routes instead of trusting stale paths', async () => {
+    const wrapper = mountPage(IPGroups)
+    await flushPromises()
+
+    wrapper.vm.openReference({
+      domain: 'acl',
+      rule_id: 'acl-1',
+      rule_name: 'office-acl',
+      node_id: 'node-1',
+      node_name: 'edge-1',
+      route: {
+        name: 'ACLRules',
+        path: '/policy-center/acls',
+        query: { node_id: 'node-1', rule_id: 'acl-1' }
+      }
+    })
+
+    expect(routerPushMock).toHaveBeenCalledWith({
+      name: 'ACLRules',
+      query: { node_id: 'node-1', rule_id: 'acl-1' }
+    })
+  })
+
   it('blocks IP group deletion when policy references exist', async () => {
     ipGroupApiMock.listIPGroupReferences.mockResolvedValueOnce({
       items: [
@@ -399,7 +422,7 @@ describe('policy special page context filters', () => {
           direction: 'egress',
           enabled: true,
           route: {
-            path: '/policy-center/acls',
+            path: '/policy-center/acl-rules',
             query: { node_id: 'node-1', rule_id: 'acl-1' }
           }
         }

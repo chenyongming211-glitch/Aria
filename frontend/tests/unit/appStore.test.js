@@ -53,4 +53,19 @@ describe('app store version handling', () => {
 
     expect(api.get).toHaveBeenCalledTimes(1)
   })
+
+  it('keeps working when localStorage methods are unavailable', () => {
+    const originalLocalStorage = globalThis.localStorage
+    try {
+      globalThis.localStorage = {}
+
+      const appStore = useAppStore()
+
+      expect(appStore.lang).toBe('zh')
+      expect(() => appStore.setLang('en')).not.toThrow()
+      expect(appStore.lang).toBe('en')
+    } finally {
+      globalThis.localStorage = originalLocalStorage
+    }
+  })
 })

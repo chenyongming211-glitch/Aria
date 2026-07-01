@@ -98,7 +98,7 @@ describe('useIpGroupApi', () => {
               },
               route: {
                 name: 'ACLRules',
-                path: '/policy-center/acls',
+                path: '/policy-center/acl-rules',
                 query: {
                   node_id: 'node-1',
                   rule_id: 'acl-1'
@@ -124,7 +124,7 @@ describe('useIpGroupApi', () => {
       rule_id: 'acl-1',
       rule_name: 'office-acl',
       route: expect.objectContaining({
-        path: '/policy-center/acls',
+        path: '/policy-center/acl-rules',
         query: { node_id: 'node-1', rule_id: 'acl-1' }
       })
     }))

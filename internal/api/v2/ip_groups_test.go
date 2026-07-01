@@ -174,18 +174,20 @@ func TestHandleTenantIPGroupReferencesListsWithReadPermission(t *testing.T) {
 	groupID := uuid.New()
 	nodeID := uuid.New()
 	ruleID := uuid.New()
+	qosRuleID := uuid.New()
 	deliveryID := uuid.New()
 	now := time.Now()
 
 	expectTenantStatusActive(mock, tenantID)
 	expectPermissionLookup(mock, tenantID, "viewer", []string{middleware.PermIPGroupsRead})
 	mock.ExpectQuery(regexp.QuoteMeta("WITH refs AS")).
-		WithArgs(tenantID, groupID, 1, 0).
+		WithArgs(tenantID, groupID, 2, 0).
 		WillReturnRows(sqlmock.NewRows(ipGroupReferenceAPIColumns).
-			AddRow("acl", ruleID, "office-acl", nodeID, "node-a", "egress", true, 1, deliveryID, "cmd-1", controllerstorage.AgentCommandStatusCompleted, "", now))
+			AddRow("acl", ruleID, "office-acl", nodeID, "node-a", "egress", true, 2, deliveryID, "cmd-1", controllerstorage.AgentCommandStatusCompleted, "", now).
+			AddRow("qos", qosRuleID, "office-qos", nodeID, "node-a", "egress", true, 2, deliveryID, "cmd-2", controllerstorage.AgentCommandStatusCompleted, "", now))
 
 	req := withAuthContext(
-		httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/ip-groups/"+groupID.String()+"/references?limit=1&offset=0", nil),
+		httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/ip-groups/"+groupID.String()+"/references?limit=2&offset=0", nil),
 		"viewer",
 		tenantID,
 	)
@@ -198,7 +200,7 @@ func TestHandleTenantIPGroupReferencesListsWithReadPermission(t *testing.T) {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, expected := range []string{"office-acl", "latest_delivery", "completed", "/policy-center/acls", "rule_id"} {
+	for _, expected := range []string{"office-acl", "office-qos", "latest_delivery", "completed", "/policy-center/acl-rules", "/policy-center/bandwidth-control", "rule_id"} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("expected response to contain %q, got %s", expected, body)
 		}

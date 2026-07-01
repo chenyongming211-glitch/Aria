@@ -406,7 +406,7 @@ func ipGroupReferenceRoute(domain string, nodeID, ruleID uuid.UUID) map[string]i
 	if domain == "acl" {
 		return map[string]interface{}{
 			"name": "ACLRules",
-			"path": "/policy-center/acls",
+			"path": "/policy-center/acl-rules",
 			"query": map[string]string{
 				"node_id": nodeID.String(),
 				"rule_id": ruleID.String(),
@@ -415,7 +415,7 @@ func ipGroupReferenceRoute(domain string, nodeID, ruleID uuid.UUID) map[string]i
 	}
 	return map[string]interface{}{
 		"name": "BandwidthControl",
-		"path": "/policy-center/bandwidth",
+		"path": "/policy-center/bandwidth-control",
 		"query": map[string]string{
 			"node_id": nodeID.String(),
 			"rule_id": ruleID.String(),
