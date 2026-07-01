@@ -235,6 +235,164 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 ---
 
+## BUG-38 到 BUG-57（已复核收口）
+
+**复核日期**: 2026-06-29
+**复核方式**: 全量静态代码复核 + 行级验证
+**说明**: 本轮为全仓库 bug review，覆盖 Go Controller、Rust Agent、Vue 前端。BUG-38~48、50~54、56~57 已修复；BUG-49、BUG-55 复核为当前产品语义下非 bug。
+
+### 🔴 Critical / High（线上可能崩）
+
+#### BUG-38: 前端 learned routes 表格 region 崩溃
+
+- **状态**: ✅ FIXED
+- **严重度**: CRITICAL
+- **文件**: `frontend/src/views/Nodes.vue:447`
+- **根因**: `row.region.toUpperCase()` 作用于 learned routes 原始 API 数据，`region` 未归一化，为 `undefined` 时抛 TypeError，表格白屏。
+
+#### BUG-39: Rust Agent 端口溢出导致 Agent 崩溃或静默误配
+
+- **状态**: ✅ FIXED
+- **严重度**: HIGH
+- **文件**: `agent-rust/agent/src/agent_runtime.rs:1869`
+- **根因**: `u16 + offset` 多隧道端口计算溢出。debug 构建 panic 崩 Agent，release 静默绕回错误端口，WireGuard 连接中断。
+
+#### BUG-40: Rust Agent hot sync 路径内联 panic
+
+- **状态**: ✅ FIXED
+- **严重度**: HIGH
+- **文件**: `agent-rust/agent/src/agent_runtime.rs:1705`
+- **根因**: `panic!("WireGuardManager for {} not found", iface)` 在 `spawn_blocking` 的 sync 热路径中，接口管理丢失时直接崩。
+
+#### BUG-41: Rust Agent Mutex 毒化导致管理员命令崩 Agent
+
+- **状态**: ✅ FIXED
+- **严重度**: HIGH
+- **文件**: `agent-rust/agent/src/agent_runtime.rs:1188,1201,1226`
+- **根因**: `StdMutex::lock().unwrap()` 毒化时 panic。操作员执行 `aria-agent log` 等管理命令可能把 Agent 进程打挂。
+
+#### BUG-42: 前端 6 处 `error.message` 二次崩溃 + loading 永久挂死
+
+- **状态**: ✅ FIXED
+- **严重度**: HIGH
+- **文件**: `frontend/src/views/Settings.vue:251,264,286,302,319,346`
+- **根因**: `catch (error)` 中 `error.message` 在非 Error 对象上抛 TypeError。同时 `finally` 中的 `loading.value = false` 永远不会执行，UI 按钮永久转圈。
+
+### 🟠 HIGH（内存泄漏 / 竞态）
+
+#### BUG-43: document 事件监听器内存泄漏
+
+- **状态**: ✅ FIXED
+- **严重度**: HIGH
+- **文件**: `frontend/src/composables/useApi.ts:245-251`
+- **根因**: 4 个 document 事件监听器（mousedown/keydown/scroll/touchstart）模块级注册，永不移除。
+
+#### BUG-44: tenantChanged 监听器内存泄漏
+
+- **状态**: ✅ FIXED
+- **严重度**: HIGH
+- **文件**: `frontend/src/composables/useAclApi.ts:164-168`
+- **根因**: `window.addEventListener('tenantChanged', ...)` 模块级注册，HMR 时重复累积。
+
+#### BUG-45: ACLRules 页面 searchTimer 未清理
+
+- **状态**: ✅ FIXED
+- **严重度**: HIGH
+- **文件**: `frontend/src/views/ACLRules.vue:663-669`
+- **根因**: debounce `setTimeout` 无 `onUnmounted` 清理，离开页面后定时器仍在执行，调用已销毁组件上的 API。
+
+#### BUG-46: versionWatcher interval 永不停止
+
+- **状态**: ✅ FIXED
+- **严重度**: HIGH
+- **文件**: `frontend/src/stores/app.ts:50-57`
+- **根因**: `setInterval` 每分钟轮询版本号，跨页面持续运行，store 未暴露 stop 方法。
+
+#### BUG-47: loadSession 返回 true 时权限仍在异步加载
+
+- **状态**: ✅ FIXED
+- **严重度**: HIGH
+- **文件**: `frontend/src/stores/user.ts:364-367`
+- **根因**: `loadSession()` 同步返回 `true`，`loadCurrentPermissions()` 异步飞过。刚登录后 `hasPermission()` 检查不可靠，UI 可能渲染无权限按钮。
+
+### 🟡 MEDIUM
+
+#### BUG-48: 飞书 Webhook 无认证缺口
+
+- **状态**: ✅ FIXED
+- **严重度**: MEDIUM
+- **文件**: `internal/im/feishu.go`
+- **根因**: 配置了 `verifyToken` 时，旧逻辑只在请求携带 header token 时才校验；缺失 token 的请求会绕过认证。
+
+#### BUG-49: UpdateNodePublicIdentity 无条件清空 private_ip
+
+- **状态**: ⚪ BY DESIGN
+- **严重度**: MEDIUM
+- **文件**: `pkg/controllerstorage/postgres.go:742`
+- **根因**: `private_ip = ''` 无条件下清零，即使节点正确上报了内网 IP 也会被清掉。
+- **复核结论**: 当前产品定义只记录真实公网 IP 与 VPN IP，本地接口/private IP 不入库。
+
+#### BUG-50: Rust crypto provider 初始化 expect 直接崩
+
+- **状态**: ✅ FIXED
+- **严重度**: MEDIUM
+- **文件**: `agent-rust/agent/src/main.rs:122`
+- **根因**: `expect()` 在 `main()` 最前面，aws-lc-rs 安装失败时 Agent 无法启动，无任何错误处理。
+
+#### BUG-51: Rust YAML 解析错误静默吞掉，Agent 以全默认值启动
+
+- **状态**: ✅ FIXED
+- **严重度**: MEDIUM
+- **文件**: `agent-rust/agent/src/config.rs:427`
+- **根因**: `serde_yaml::from_str(...).ok()` 丢弃解析错误，Agent 用全默认配置（空 controller_url、空密钥）启动。
+
+### 🟢 LOW
+
+#### BUG-52: rows.Err() 未检查
+
+- **状态**: ✅ FIXED
+- **严重度**: LOW
+- **文件**: `internal/api/v2/setup.go`、`pkg/controllerstorage/postgres.go`、`pkg/controllerstorage/rbac.go`
+- **根因**: `sql.Rows` 迭代后未检查 `rows.Err()`，连接中断/数据损坏时静默返回不完整数据。
+
+#### BUG-53: json.Encode 错误丢弃 (多处)
+
+- **状态**: ✅ FIXED
+- **严重度**: LOW
+- **文件**: `internal/im/feishu.go:126,135,149,164,174,182` 等
+- **根因**: `_ = json.NewEncoder(w).Encode(...)` 丢弃编码错误，客户端收到空/截断响应 + HTTP 200。
+
+#### BUG-54: tx.Rollback 错误丢弃 (多处)
+
+- **状态**: ✅ FIXED
+- **严重度**: LOW
+- **文件**: `pkg/controllerstorage/*`、`internal/api/v2/settings.go`、`internal/api/handlers/tenant.go`
+- **根因**: deferred `tx.Rollback()` 错误被丢弃。
+
+#### BUG-55: nullableInt(0) 导致 port 0 / proto 0 不可存
+
+- **状态**: ⚪ BY DESIGN
+- **严重度**: LOW
+- **文件**: `pkg/controllerstorage/network_policy.go:1110-1114`
+- **根因**: `0` 被映射为 SQL NULL，实际值为 `0` 的合法字段无法存储。
+- **复核结论**: 当前 ACL/QoS 语义里 `0` 表示 any/未指定，读路径会用 `COALESCE(..., 0)` 恢复页面语义。
+
+#### BUG-56: Token 列表 API 失败时静默清空
+
+- **状态**: ✅ FIXED
+- **严重度**: LOW
+- **文件**: `frontend/src/views/Tokens.vue:225-229`
+- **根因**: 网络故障时静默清空 token 列表，用户看不到错误提示。
+
+#### BUG-57: Node loadDetail allSettled 双失败时 throw 非 Error 值
+
+- **状态**: ✅ FIXED
+- **严重度**: LOW
+- **文件**: `frontend/src/stores/node.ts:182-189`
+- **根因**: `throw detailResult.reason || monitorResult.reason` 可能抛非 Error 值，上层 catch 依赖 `error.message` 的代码会二次崩溃。
+
+---
+
 ## 历史说明
 
 - 较早一批问题（如 BUG-1 ~ BUG-11）已经在当前代码中维持修复状态，本次未逐条重写，只保留仍需关注的现实风险

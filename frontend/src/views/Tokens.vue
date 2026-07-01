@@ -185,6 +185,12 @@ const safeLower = (value) => String(value ?? '').toLowerCase()
 
 const tokenDisplay = (token) => token?.token_preview || token?.token || ''
 
+const errorMessage = (error) => {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string') return error
+  return t('policyTerms.unknownError')
+}
+
 const filteredTokens = computed(() => {
   if (!searchQuery.value) {
     return tokens.value
@@ -224,12 +230,7 @@ const fetchTokens = async () => {
     }
   } catch (error) {
     console.error('Failed to fetch tokens:', error)
-
-    // 不显示错误消息，避免401错误导致重复提示
-    // ElMessage.error(`Failed to load tokens: ${error.message || error}`)
-
-    // Fallback to empty array
-    tokens.value = []
+    ElMessage.error(`${t('tokens.loadFailed')}: ${errorMessage(error)}`)
   } finally {
     loading.value = false
   }

@@ -132,7 +132,7 @@ func (s *Storage) MutatePolicyAndQueueSync(mutate func(*PolicyMutationTx) (Polic
 	committed := false
 	defer func() {
 		if !committed {
-			_ = tx.Rollback()
+			rollbackTx(tx, "MutatePolicyAndQueueSync")
 		}
 	}()
 
@@ -163,7 +163,7 @@ func (s *Storage) UpdateIPGroupAndQueuePolicySyncs(tenantID, groupID uuid.UUID, 
 	committed := false
 	defer func() {
 		if !committed {
-			_ = tx.Rollback()
+			rollbackTx(tx, "UpdateIPGroupAndQueuePolicySyncs")
 		}
 	}()
 
@@ -219,7 +219,7 @@ func (s *Storage) QueuePolicySync(req PolicySyncRequest) (*PolicySyncResult, err
 	committed := false
 	defer func() {
 		if !committed {
-			_ = tx.Rollback()
+			rollbackTx(tx, "QueuePolicySync")
 		}
 	}()
 

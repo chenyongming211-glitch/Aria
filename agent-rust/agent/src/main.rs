@@ -117,9 +117,11 @@ struct Response {
 
 fn main() -> Result<()> {
     // Install rustls CryptoProvider before any TLS operation.
-    rustls::crypto::aws_lc_rs::default_provider()
-        .install_default()
-        .expect("Failed to install rustls aws_lc provider");
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        rustls::crypto::aws_lc_rs::default_provider()
+            .install_default()
+            .map_err(|_| anyhow::anyhow!("Failed to install rustls aws-lc provider"))?;
+    }
 
     let cli = Cli::parse();
 

@@ -242,12 +242,34 @@ function handleUserActivity() {
 }
 
 // 监听用户活动，更新最后活动时间
-if (typeof window !== 'undefined') {
+let activityListenersRegistered = false
+let idleSessionTimer: number | null = null
+const removeActivityListeners = () => {
+  if (activityListenersRegistered) {
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart']
+    events.forEach(event => {
+      document.removeEventListener(event, handleUserActivity)
+    })
+    activityListenersRegistered = false
+  }
+  if (idleSessionTimer !== null) {
+    window.clearInterval(idleSessionTimer)
+    idleSessionTimer = null
+  }
+}
+
+if (typeof window !== 'undefined' && !activityListenersRegistered) {
   const events = ['mousedown', 'keydown', 'scroll', 'touchstart']
   events.forEach(event => {
     document.addEventListener(event, handleUserActivity, { passive: true })
   })
-  startIdleSessionMonitor(redirectToLogin)
+  idleSessionTimer = startIdleSessionMonitor(redirectToLogin)
+  activityListenersRegistered = true
 }
 
+if (import.meta.hot) {
+  import.meta.hot.dispose(removeActivityListeners)
+}
+
+export { removeActivityListeners }
 export default api

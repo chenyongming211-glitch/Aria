@@ -26,7 +26,7 @@ func (s *Storage) ApplyNodeLifecycleTransition(publicKey string, transition Node
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, "ApplyNodeLifecycleTransition")
 
 	row := tx.QueryRow(`SELECT `+nodeSelectColumns+` FROM nodes WHERE public_key = $1 FOR UPDATE`, publicKey)
 	node, err := s.scanNode(row)

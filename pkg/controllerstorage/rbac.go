@@ -156,7 +156,7 @@ func (s *Storage) ListRoles(tenantID uuid.UUID) ([]*Role, error) {
 		}
 		roles = append(roles, r)
 	}
-	return roles, nil
+	return roles, rows.Err()
 }
 
 func (s *Storage) GetRoleByID(tenantID, roleID uuid.UUID) (*Role, error) {
@@ -254,5 +254,5 @@ func (s *Storage) EnsureAllTenantRoles() error {
 			return fmt.Errorf("failed to ensure roles for tenant %s: %w", tenantID, err)
 		}
 	}
-	return nil
+	return rows.Err()
 }

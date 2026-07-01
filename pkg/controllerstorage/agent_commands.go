@@ -114,7 +114,7 @@ func (s *Storage) GetNextPendingAgentCommand(nodePublicKey string) (*AgentComman
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, "GetNextPendingAgentCommand")
 
 	if _, err := tx.Exec(`
 		UPDATE agent_commands
@@ -204,7 +204,7 @@ func (s *Storage) FailIncompleteAgentCommandsForNode(nodePublicKey, message stri
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, "UpdateAgentCommandStatus")
 
 	if err := failIncompleteAgentCommandsForNodeTx(tx, nodePublicKey, message); err != nil {
 		return err
@@ -218,7 +218,7 @@ func (s *Storage) FailTimedOutAgentCommandsForNode(nodePublicKey string) (int64,
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, "UpdateAgentCommandStatus")
 
 	affected, err := failTimedOutAgentCommandsForNodeTx(tx, nodePublicKey)
 	if err != nil {
@@ -378,7 +378,7 @@ func (s *Storage) updateAgentCommandStatus(commandID, nodePublicKey, status, mes
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, "CommandAgent")
 
 	currentStatus, err := lockAgentCommandStatusTx(tx, commandID, nodePublicKey)
 	if err != nil {

@@ -18,8 +18,6 @@ const makeJwt = (payload) => [
   'signature'
 ].join('.')
 
-const flushPromises = () => new Promise(resolve => setTimeout(resolve, 0))
-
 describe('user session persistence', () => {
   let storage
 
@@ -40,33 +38,33 @@ describe('user session persistence', () => {
     expect(normalizeRoleName('member')).toBe('operator')
   })
 
-  it('clears token-only sessions instead of leaving a half-authenticated browser state', () => {
+  it('clears token-only sessions instead of leaving a half-authenticated browser state', async () => {
     localStorage.setItem('aria_token', 'stale-token')
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
     localStorage.setItem('aria_permissions', JSON.stringify(['nodes:read']))
 
     const userStore = useUserStore()
 
-    expect(userStore.loadSession()).toBe(false)
+    await expect(userStore.loadSession()).resolves.toBe(false)
     expect(userStore.isAuthenticated).toBe(false)
     expect(localStorage.getItem('aria_token')).toBeNull()
     expect(localStorage.getItem('aria_permissions')).toBeNull()
   })
 
-  it('clears malformed cached users without throwing during startup', () => {
+  it('clears malformed cached users without throwing during startup', async () => {
     localStorage.setItem('aria_token', 'stale-token')
     localStorage.setItem('aria_token_expire_time', `${Date.now() + 60_000}`)
     localStorage.setItem('aria_user', '{not-json')
 
     const userStore = useUserStore()
 
-    expect(() => userStore.loadSession()).not.toThrow()
+    await expect(userStore.loadSession()).resolves.toBe(false)
     expect(userStore.isAuthenticated).toBe(false)
     expect(localStorage.getItem('aria_token')).toBeNull()
     expect(localStorage.getItem('aria_user')).toBeNull()
   })
 
-  it('initializes last activity when restoring an existing session', () => {
+  it('initializes last activity when restoring an existing session', async () => {
     localStorage.setItem('aria_token', 'valid-token')
     localStorage.setItem('aria_user', JSON.stringify({
       id: 'user-1',
@@ -77,11 +75,11 @@ describe('user session persistence', () => {
 
     const userStore = useUserStore()
 
-    expect(userStore.loadSession()).toBe(true)
+    await expect(userStore.loadSession()).resolves.toBe(true)
     expect(Number(localStorage.getItem('aria_last_activity'))).toBeGreaterThan(0)
   })
 
-  it('drops malformed cached permissions while keeping a valid cached user', () => {
+  it('drops malformed cached permissions while keeping a valid cached user', async () => {
     localStorage.setItem('aria_token', 'valid-token')
     localStorage.setItem('aria_user', JSON.stringify({
       id: 'user-1',
@@ -92,13 +90,13 @@ describe('user session persistence', () => {
 
     const userStore = useUserStore()
 
-    expect(userStore.loadSession()).toBe(true)
+    await expect(userStore.loadSession()).resolves.toBe(true)
     expect(userStore.isAuthenticated).toBe(true)
     expect(userStore.permissions).toEqual([])
     expect(localStorage.getItem('aria_permissions')).toBeNull()
   })
 
-  it('normalizes cached backend users and restores super_admin wildcard permissions', () => {
+  it('normalizes cached backend users and restores super_admin wildcard permissions', async () => {
     localStorage.setItem('aria_token', 'valid-token')
     localStorage.setItem('aria_user', JSON.stringify({
       id: 'user-1',
@@ -109,7 +107,7 @@ describe('user session persistence', () => {
 
     const userStore = useUserStore()
 
-    expect(userStore.loadSession()).toBe(true)
+    await expect(userStore.loadSession()).resolves.toBe(true)
     expect(userStore.user).toMatchObject({
       username: 'sysadmin',
       name: 'sysadmin',
@@ -123,7 +121,7 @@ describe('user session persistence', () => {
     })
   })
 
-  it('clears the in-memory user store when session storage is cleared outside logout', () => {
+  it('clears the in-memory user store when session storage is cleared outside logout', async () => {
     localStorage.setItem('aria_token', 'valid-token')
     localStorage.setItem('aria_user', JSON.stringify({
       id: 'user-1',
@@ -133,7 +131,7 @@ describe('user session persistence', () => {
 
     const userStore = useUserStore()
 
-    expect(userStore.loadSession()).toBe(true)
+    await expect(userStore.loadSession()).resolves.toBe(true)
     expect(userStore.isAuthenticated).toBe(true)
 
     clearSession()
@@ -143,7 +141,7 @@ describe('user session persistence', () => {
     expect(userStore.permissions).toEqual([])
   })
 
-  it('repairs stale cached user roles from JWT claims during startup', () => {
+  it('repairs stale cached user roles from JWT claims during startup', async () => {
     localStorage.setItem('aria_token', makeJwt({
       uid: 'user-1',
       unm: 'sysadmin',
@@ -160,7 +158,7 @@ describe('user session persistence', () => {
 
     const userStore = useUserStore()
 
-    expect(userStore.loadSession()).toBe(true)
+    await expect(userStore.loadSession()).resolves.toBe(true)
     expect(userStore.user).toMatchObject({
       id: 'user-1',
       username: 'sysadmin',
@@ -361,11 +359,7 @@ describe('user session persistence', () => {
 
     const userStore = useUserStore()
 
-    expect(userStore.loadSession()).toBe(true)
-    expect(userStore.permissions).toEqual([])
-    expect(localStorage.getItem('aria_permissions')).toBeNull()
-
-    await flushPromises()
+    await expect(userStore.loadSession()).resolves.toBe(true)
 
     expect(api.get).toHaveBeenCalledWith('/v2/auth/permissions')
     expect(userStore.permissions).toEqual(['nodes:read', 'custom:use'])

@@ -783,6 +783,10 @@ func (r *Router) listAllTenants(w http.ResponseWriter) {
 			"updated_at":     updatedAt,
 		})
 	}
+	if err := rows.Err(); err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeListTenantsFailed, "Failed to list tenants", nil)
+		return
+	}
 	apibase.WriteSuccess(w, tenants, "All tenants retrieved")
 }
 

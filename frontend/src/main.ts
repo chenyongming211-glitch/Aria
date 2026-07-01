@@ -14,30 +14,37 @@ import router from './router'
 import useAppStore from './stores/app'
 import useUserStore from './stores/user'
 
-const app = createApp(App)
-const pinia = createPinia()
+async function bootstrap() {
+  const app = createApp(App)
+  const pinia = createPinia()
 
-// Register all icons
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
-  app.component(key, component)
-}
+  // Register all icons
+  for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
+    app.component(key, component)
+  }
 
-app.use(pinia)
-const userStore = useUserStore()
-userStore.loadSession()
-app.use(router)
-app.use(ElementPlus)
+  app.use(pinia)
+  const userStore = useUserStore()
+  await userStore.loadSession()
+  app.use(router)
+  app.use(ElementPlus)
 
-app.mount('#app')
+  app.mount('#app')
 
-// Fetch version from API
-const appStore = useAppStore()
-appStore.fetchVersion()
-appStore.startVersionWatcher()
+  // Fetch version from API
+  const appStore = useAppStore()
+  appStore.fetchVersion()
+  appStore.startVersionWatcher()
 
-// Add global styles for Element Plus components override (浅色主题)
-const style = document.createElement('style')
-style.textContent = `
+  if (import.meta.hot) {
+    import.meta.hot.dispose(() => {
+      appStore.stopVersionWatcher()
+    })
+  }
+
+  // Add global styles for Element Plus components override (浅色主题)
+  const style = document.createElement('style')
+  style.textContent = `
   /* === Element Plus 组件覆盖 - 浅色主题 === */
 
   /* 卡片样式 */
@@ -453,4 +460,7 @@ style.textContent = `
     color: var(--aria-primary);
   }
 `
-document.head.appendChild(style)
+  document.head.appendChild(style)
+}
+
+void bootstrap()

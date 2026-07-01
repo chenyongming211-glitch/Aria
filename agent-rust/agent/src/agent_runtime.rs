@@ -150,7 +150,8 @@ impl AgentRuntime {
 
         let mut wg_managers = HashMap::new();
         for (i, iface_name) in interfaces.iter().enumerate() {
-            let port = config.listen_port + i as u16;
+            let port = config.listen_port.checked_add(i as u16)
+                .context("listen_port overflow in multi-tunnel init")?;
             let mut wg = WireGuardManager::new(iface_name);
             wg.ensure_interface(
                 config.private_key.clone(),
@@ -646,9 +647,9 @@ impl AgentRuntime {
                 .to_string();
             vec![
                 (self.config.interface_name.clone(), self.config.listen_port),
-                (format!("{}1", base), self.config.listen_port + 1),
-                (format!("{}2", base), self.config.listen_port + 2),
-                (format!("{}3", base), self.config.listen_port + 3),
+                (format!("{}1", base), self.config.listen_port.checked_add(1).context("listen_port overflow for aria1 init")?),
+                (format!("{}2", base), self.config.listen_port.checked_add(2).context("listen_port overflow for aria2 init")?),
+                (format!("{}3", base), self.config.listen_port.checked_add(3).context("listen_port overflow for aria3 init")?),
             ]
         } else {
             vec![(self.config.interface_name.clone(), self.config.listen_port)]
@@ -731,7 +732,8 @@ impl AgentRuntime {
 
             for i in 1..4 {
                 let interface_name = format!("{}{}", base_name, i);
-                let port = self.config.listen_port + i as u16;
+                let port = self.config.listen_port.checked_add(i as u16)
+                    .context("listen_port overflow for additional interface init")?;
 
                 tracing::info!(
                     "Ensuring additional WireGuard interface {} on port {}",
@@ -1185,7 +1187,7 @@ impl AgentRuntime {
             "set_log_level" => {
                 let level = req.args["level"].as_str().unwrap_or("info").to_string();
 
-                let handle = log_handle.lock().unwrap();
+                let handle = log_handle.lock().unwrap_or_else(|poison| poison.into_inner());
                 if let Some(handle) = handle.as_ref() {
                     let new_filter = match level.as_str() {
                         "trace" => EnvFilter::new("trace"),
@@ -1198,7 +1200,7 @@ impl AgentRuntime {
 
                     match handle.reload(new_filter) {
                         Ok(_) => {
-                            let mut current = current_log_level.lock().unwrap();
+                            let mut current = current_log_level.lock().unwrap_or_else(|poison| poison.into_inner());
                             *current = level.clone();
 
                             tracing::info!("Log level updated to {}", level);
@@ -1223,7 +1225,7 @@ impl AgentRuntime {
                 }
             }
             "get_log_level" => {
-                let current = current_log_level.lock().unwrap();
+                let current = current_log_level.lock().unwrap_or_else(|poison| poison.into_inner());
                 let level = current.clone();
                 drop(current);
 
@@ -1702,7 +1704,7 @@ impl AgentRuntime {
                 for iface in &interfaces {
                     let mgr = wg_managers
                         .get(iface)
-                        .unwrap_or_else(|| panic!("WireGuardManager for {} not found", iface));
+                        .ok_or_else(|| anyhow::anyhow!("WireGuardManager for {} not found", iface))?;
                     let mut wg = mgr.blocking_lock();
 
                     let current_peers = wg.list_peers().context("Failed to list current peers")?;
@@ -1866,9 +1868,11 @@ impl AgentRuntime {
             let port_str = &endpoint[colon_pos + 1..];
 
             let port = if let Ok(orig_port) = port_str.parse::<u16>() {
-                orig_port + offset
+                orig_port.checked_add(offset)
+                    .context("multi-tunnel port overflow; orig_port + offset exceeds u16::MAX")?
             } else {
-                base_port + offset
+                base_port.checked_add(offset)
+                    .context("multi-tunnel port overflow; base_port + offset exceeds u16::MAX")?
             };
 
             format!("{}:{}", host, port)

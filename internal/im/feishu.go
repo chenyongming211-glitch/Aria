@@ -19,13 +19,13 @@ import (
 
 // FeishuHandler 飞书机器人处理器
 type FeishuHandler struct {
-	aiService  service.AIService
-	appID      string // 飞书 App ID
-	appSecret  string // 飞书 App Secret
-	encryptKey string // 加密密钥（可选）
+	aiService   service.AIService
+	appID       string // 飞书 App ID
+	appSecret   string // 飞书 App Secret
+	encryptKey  string // 加密密钥（可选）
 	verifyToken string // 验证 Token（用于验证飞书请求）
-	mu         sync.RWMutex
-	processed  map[string]time.Time // 已处理的事件 ID + 时间
+	mu          sync.RWMutex
+	processed   map[string]time.Time // 已处理的事件 ID + 时间
 }
 
 // ChatWithContextProvider 提供带上下文的聊天接口
@@ -83,9 +83,9 @@ type FeishuEvent struct {
 		} `json:"sender"`
 		Message struct {
 			MessageID string `json:"message_id"`
-			ChatType string `json:"chat_type"`
-			ChatID   string `json:"chat_id"`
-			Content  string `json:"content"` // JSON string
+			ChatType  string `json:"chat_type"`
+			ChatID    string `json:"chat_id"`
+			Content   string `json:"content"` // JSON string
 		} `json:"message"`
 	} `json:"event"`
 
@@ -102,19 +102,38 @@ type FeishuMessageContent struct {
 
 // FeishuSendMessageRequest 飞书发送消息请求
 type FeishuSendMessageRequest struct {
-	ReceiveIDType string                 `json:"receive_id_type"` // open_id, user_id, union_id
-	ReceiveID     string                 `json:"receive_id"`
-	MsgType       string                 `json:"msg_type"`
-	Content       string                 `json:"content"` // JSON string
+	ReceiveIDType string `json:"receive_id_type"` // open_id, user_id, union_id
+	ReceiveID     string `json:"receive_id"`
+	MsgType       string `json:"msg_type"`
+	Content       string `json:"content"` // JSON string
 }
 
 // FeishuAccessTokenResponse 飞书 Token 响应
 type FeishuAccessTokenResponse struct {
-	Code               int    `json:"code"`
-	Msg                string `json:"msg"`
-	AppAccessToken      string `json:"app_access_token"`
-	TenantAccessToken   string `json:"tenant_access_token"`
-	Expire             int    `json:"expire"`
+	Code              int    `json:"code"`
+	Msg               string `json:"msg"`
+	AppAccessToken    string `json:"app_access_token"`
+	TenantAccessToken string `json:"tenant_access_token"`
+	Expire            int    `json:"expire"`
+}
+
+func writeFeishuJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		fmt.Printf("[Feishu] 写入 JSON 响应失败: %v\n", err)
+	}
+}
+
+func (h *FeishuHandler) verifyIncomingToken(event FeishuEvent) bool {
+	if h.verifyToken == "" {
+		return true
+	}
+	token := event.Header.Token
+	if token == "" {
+		token = event.Token
+	}
+	return token == h.verifyToken
 }
 
 // HandleWebhook 处理飞书 Webhook 回调（长连接方式）
@@ -122,8 +141,7 @@ func (h *FeishuHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	// 1. 读取请求体
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to read request body"})
+		writeFeishuJSON(w, http.StatusBadRequest, map[string]string{"error": "Failed to read request body"})
 		return
 	}
 
@@ -131,8 +149,14 @@ func (h *FeishuHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	var event FeishuEvent
 	if err := json.Unmarshal(body, &event); err != nil {
 		fmt.Printf("[Feishu] 解析事件失败: %v, body: %s\n", err, string(body))
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to parse event"})
+		writeFeishuJSON(w, http.StatusBadRequest, map[string]string{"error": "Failed to parse event"})
+		return
+	}
+
+	// 2.1 验证 Token（如果配置了 verify_token）
+	if !h.verifyIncomingToken(event) {
+		fmt.Printf("[Feishu] Token 验证失败\n")
+		writeFeishuJSON(w, http.StatusUnauthorized, map[string]string{"error": "Invalid token"})
 		return
 	}
 
@@ -145,8 +169,7 @@ func (h *FeishuHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 
 		if exists {
 			fmt.Printf("[Feishu] 重复事件，跳过处理: %s\n", eventID)
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{"status": "ok", "reason": "duplicate"})
+			writeFeishuJSON(w, http.StatusOK, map[string]string{"status": "ok", "reason": "duplicate"})
 			return
 		}
 
@@ -156,21 +179,10 @@ func (h *FeishuHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		h.mu.Unlock()
 	}
 
-	// 2.2 验证 Token（如果配置了 verify_token）
-	if h.verifyToken != "" && event.Header.Token != "" {
-		if event.Header.Token != h.verifyToken {
-			fmt.Printf("[Feishu] Token 验证失败: expected=%s, got=%s\n", h.verifyToken, event.Header.Token)
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid token"})
-			return
-		}
-	}
-
 	// 3. 处理 URL 校验（飞书配置 Webhook 时触发）
 	if event.Type == "url_verification" {
 		fmt.Printf("[Feishu] URL 校验请求: challenge=%s\n", event.Challenge)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		writeFeishuJSON(w, http.StatusOK, map[string]string{
 			"challenge": event.Challenge,
 		})
 		return
@@ -178,8 +190,7 @@ func (h *FeishuHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// 4. 只处理文本消息事件（使用新版事件类型）
 	if event.Header.EventType != "im.message.receive_v1" {
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		writeFeishuJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 
@@ -187,14 +198,13 @@ func (h *FeishuHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	var content FeishuMessageContent
 	if err := json.Unmarshal([]byte(event.Event.Message.Content), &content); err != nil {
 		fmt.Printf("[Feishu] 解析消息内容失败: %v\n", err)
-		w.WriteHeader(http.StatusBadRequest)
+		writeFeishuJSON(w, http.StatusBadRequest, map[string]string{"error": "Failed to parse message content"})
 		return
 	}
 
 	userMessage := content.Text
 	if userMessage == "" {
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		writeFeishuJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 
@@ -299,12 +309,10 @@ func (h *FeishuHandler) processMessage(message, chatID string, w http.ResponseWr
 			cardJSON := BuildNodeListCard(nodes)
 			if err := h.ReplyFeishu(chatID, cardJSON, "interactive"); err != nil {
 				fmt.Printf("[Feishu] 发送卡片失败: %v\n", err)
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				writeFeishuJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+			writeFeishuJSON(w, http.StatusOK, map[string]string{"status": "success"})
 			return
 		}
 	}
@@ -317,12 +325,10 @@ func (h *FeishuHandler) processMessage(message, chatID string, w http.ResponseWr
 			cardJSON := BuildNodeDetailCard(node)
 			if err := h.ReplyFeishu(chatID, cardJSON, "interactive"); err != nil {
 				fmt.Printf("[Feishu] 发送卡片失败: %v\n", err)
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				writeFeishuJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+			writeFeishuJSON(w, http.StatusOK, map[string]string{"status": "success"})
 			return
 		}
 	}
@@ -337,23 +343,19 @@ func (h *FeishuHandler) processMessage(message, chatID string, w http.ResponseWr
 			cardJSON := BuildGenericJSONCard(jsonData)
 			if err := h.ReplyFeishu(chatID, cardJSON, "interactive"); err != nil {
 				fmt.Printf("[Feishu] 发送卡片失败: %v\n", err)
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				writeFeishuJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+			writeFeishuJSON(w, http.StatusOK, map[string]string{"status": "success"})
 			return
 		}
 		cardJSON := BuildGenericJSONCard(jsonData)
 		if err := h.ReplyFeishu(chatID, cardJSON, "interactive"); err != nil {
 			fmt.Printf("[Feishu] 发送卡片失败: %v\n", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			writeFeishuJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+		writeFeishuJSON(w, http.StatusOK, map[string]string{"status": "success"})
 		return
 	}
 
@@ -365,12 +367,10 @@ func (h *FeishuHandler) processMessage(message, chatID string, w http.ResponseWr
 			cardJSON := BuildRouteListCard(routes)
 			if err := h.ReplyFeishu(chatID, cardJSON, "interactive"); err != nil {
 				fmt.Printf("[Feishu] 发送卡片失败: %v\n", err)
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				writeFeishuJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+			writeFeishuJSON(w, http.StatusOK, map[string]string{"status": "success"})
 			return
 		}
 	}
@@ -385,12 +385,10 @@ func (h *FeishuHandler) processMessage(message, chatID string, w http.ResponseWr
 			cardJSON := BuildGenericJSONCard(jsonData)
 			if err := h.ReplyFeishu(chatID, cardJSON, "interactive"); err != nil {
 				fmt.Printf("[Feishu] 发送卡片失败: %v\n", err)
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				writeFeishuJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+			writeFeishuJSON(w, http.StatusOK, map[string]string{"status": "success"})
 			return
 		}
 	}
@@ -398,14 +396,12 @@ func (h *FeishuHandler) processMessage(message, chatID string, w http.ResponseWr
 	// 6. 默认兜底：发送普通文本
 	if err := h.ReplyFeishu(chatID, reply, "text"); err != nil {
 		fmt.Printf("[Feishu] 发送回复失败: %v\n", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		writeFeishuJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
 	// 返回成功
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+	writeFeishuJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }
 
 // sendMessage 发送消息到飞书

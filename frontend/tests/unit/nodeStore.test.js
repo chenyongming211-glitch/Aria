@@ -267,4 +267,26 @@ describe('node store', () => {
     expect(node.recentCommands[0].id).toBe('cmd-monitor')
     expect(node.activeAlerts[0].alert_type).toBe('sync_failed')
   })
+
+  it('normalizes double detail load failures into an Error', async () => {
+    api.get.mockImplementation(async (url) => {
+      if (url === '/v2/tenants/tenant-1/nodes/node-1') {
+        throw 'tenant detail unavailable'
+      }
+      if (url === '/v2/tenants/tenant-1/monitoring/nodes/node-1') {
+        throw { message: 'monitor detail unavailable' }
+      }
+      return { data: { success: true, data: {} } }
+    })
+
+    const store = useNodeStore()
+
+    try {
+      await store.loadNodeDetail('node-1')
+      throw new Error('expected loadNodeDetail to fail')
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error)
+      expect(error.message).toContain('tenant detail unavailable')
+    }
+  })
 })

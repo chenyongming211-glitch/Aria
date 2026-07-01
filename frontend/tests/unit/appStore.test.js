@@ -16,7 +16,12 @@ describe('app store version handling', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    vi.useRealTimers()
     reloadMock = vi.fn()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('reloads the page when a later version is detected', async () => {
@@ -31,5 +36,21 @@ describe('app store version handling', () => {
 
     expect(appStore.version).toBe('0.2.87')
     expect(reloadMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops the version watcher interval', async () => {
+    vi.useFakeTimers()
+    api.get.mockResolvedValue({ data: { version: '0.2.86' } })
+
+    const appStore = useAppStore()
+
+    appStore.startVersionWatcher(1000)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(api.get).toHaveBeenCalledTimes(1)
+
+    appStore.stopVersionWatcher()
+    await vi.advanceTimersByTimeAsync(3000)
+
+    expect(api.get).toHaveBeenCalledTimes(1)
   })
 })

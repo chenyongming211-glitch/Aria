@@ -686,7 +686,5 @@ func scanIPGroup(scanner interface {
 }
 
 func rollbackIfOpen(tx *sql.Tx) {
-	if tx != nil {
-		_ = tx.Rollback()
-	}
+	rollbackTx(tx, "IP group transaction")
 }

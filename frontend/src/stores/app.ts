@@ -56,6 +56,13 @@ export default defineStore('app', () => {
     }, intervalMs)
   }
 
+  const stopVersionWatcher = () => {
+    if (versionWatcher !== null) {
+      window.clearInterval(versionWatcher)
+      versionWatcher = null
+    }
+  }
+
   return {
     lang,
     version,
@@ -63,6 +70,7 @@ export default defineStore('app', () => {
     setLang,
     toggleSidebar,
     fetchVersion,
-    startVersionWatcher
+    startVersionWatcher,
+    stopVersionWatcher
   }
 })

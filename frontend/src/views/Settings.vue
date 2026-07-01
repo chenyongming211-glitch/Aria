@@ -243,12 +243,24 @@ const formatRestoreSummary = (result) => {
   return entries.join(', ')
 }
 
+const showCatchError = (err, fallback) => {
+  if (err instanceof Error && err.message) {
+    ElMessage.error(err.message)
+    return
+  }
+  if (typeof err === 'string' && err) {
+    ElMessage.error(err)
+    return
+  }
+  ElMessage.error(fallback)
+}
+
 const loadBackups = async () => {
   loading.value = true
   try {
     backupHistory.value = await useSettingsApi.listBackups()
   } catch (error) {
-    ElMessage.error(error.message || t('settingsBackup.loadFailed'))
+    showCatchError(error, t('settingsBackup.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -261,7 +273,7 @@ const createBackup = async () => {
     backupHistory.value = [created, ...backupHistory.value.filter(item => item.id !== created.id)]
     ElMessage.success(t('settingsBackup.createSuccess'))
   } catch (error) {
-    ElMessage.error(error.message || t('settingsBackup.createFailed'))
+    showCatchError(error, t('settingsBackup.createFailed'))
   } finally {
     creating.value = false
   }
@@ -283,7 +295,7 @@ const handleUploadBackup = async (event) => {
     backupHistory.value = [uploaded, ...backupHistory.value.filter(item => item.id !== uploaded.id)]
     ElMessage.success(t('settingsBackup.uploadSuccess'))
   } catch (error) {
-    ElMessage.error(error.message || t('settingsBackup.uploadFailed'))
+    showCatchError(error, t('settingsBackup.uploadFailed'))
   } finally {
     uploading.value = false
     if (event?.target) {
@@ -299,7 +311,7 @@ const downloadBackup = async (backup) => {
   try {
     await useSettingsApi.downloadBackup(backup)
   } catch (error) {
-    ElMessage.error(error.message || t('settingsBackup.downloadFailed'))
+    showCatchError(error, t('settingsBackup.downloadFailed'))
   } finally {
     const reset = new Set(downloadingIds.value)
     reset.delete(backup.id)
@@ -316,7 +328,7 @@ const deleteBackup = async (backupId) => {
     backupHistory.value = backupHistory.value.filter(item => item.id !== backupId)
     ElMessage.success(t('settingsBackup.deleteSuccess'))
   } catch (error) {
-    ElMessage.error(error.message || t('settingsBackup.deleteFailed'))
+    showCatchError(error, t('settingsBackup.deleteFailed'))
   } finally {
     const reset = new Set(deletingIds.value)
     reset.delete(backupId)
@@ -343,7 +355,7 @@ const previewRestore = async () => {
     restorePlan.value = await useSettingsApi.restoreBackupDryRun(selectedBackup.value.id, restoreTables.value)
   } catch (error) {
     restorePlan.value = null
-    ElMessage.error(error.message || t('settingsBackup.previewFailed'))
+    showCatchError(error, t('settingsBackup.previewFailed'))
   } finally {
     previewing.value = false
   }
@@ -367,7 +379,7 @@ const applyRestore = async () => {
     restoreDialogVisible.value = false
     await loadBackups()
   } catch (error) {
-    ElMessage.error(error.message || t('settingsBackup.restoreFailed'))
+    showCatchError(error, t('settingsBackup.restoreFailed'))
   } finally {
     const reset = new Set(restoringIds.value)
     reset.delete(backupId)

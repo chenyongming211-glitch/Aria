@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const {
   mockApp,
   mockAppStore,
-  mockUserStore
+  mockUserStore,
+  sessionDeferred
 } = vi.hoisted(() => ({
   mockApp: {
     component: vi.fn(),
@@ -15,6 +16,10 @@ const {
   mockAppStore: {
     fetchVersion: vi.fn(),
     startVersionWatcher: vi.fn()
+  },
+  sessionDeferred: {
+    promise: null,
+    resolve: null
   },
   mockUserStore: {
     loadSession: vi.fn()
@@ -70,15 +75,25 @@ describe('application startup session hydration', () => {
     mockApp.mount.mockClear()
     mockAppStore.fetchVersion.mockClear()
     mockAppStore.startVersionWatcher.mockClear()
-    mockUserStore.loadSession.mockClear()
+    sessionDeferred.promise = new Promise((resolve) => {
+      sessionDeferred.resolve = resolve
+    })
+    mockUserStore.loadSession.mockReset()
+    mockUserStore.loadSession.mockReturnValue(sessionDeferred.promise)
     document.head.innerHTML = ''
     document.body.innerHTML = '<div id="app"></div>'
   })
 
-  it('restores cached user session before mounting protected layouts', async () => {
+  it('waits for cached user session hydration before mounting protected layouts', async () => {
     await import('@/main')
 
     expect(mockUserStore.loadSession).toHaveBeenCalledTimes(1)
+    expect(mockApp.mount).not.toHaveBeenCalled()
+
+    sessionDeferred.resolve(true)
+    await sessionDeferred.promise
+    await Promise.resolve()
+
     expect(mockApp.mount).toHaveBeenCalledTimes(1)
     expect(mockUserStore.loadSession.mock.invocationCallOrder[0])
       .toBeLessThan(mockApp.mount.mock.invocationCallOrder[0])

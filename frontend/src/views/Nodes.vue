@@ -444,7 +444,7 @@
             <el-table-column prop="next_hop_ip" :label="t('nodesPage.vpnIp')" width="120" />
             <el-table-column prop="region" :label="t('nodeManagement.region')" width="100">
               <template #default="{ row }">
-                <span class="region-badge">{{ row.region.toUpperCase() }}</span>
+                <span class="region-badge">{{ (row.region || 'unknown').toUpperCase() }}</span>
               </template>
             </el-table-column>
             <el-table-column :label="t('nodeManagement.status')" width="100">

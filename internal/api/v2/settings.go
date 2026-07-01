@@ -3,8 +3,10 @@ package v2
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"os"
@@ -694,7 +696,9 @@ func (r *Router) restoreBackupManifest(manifest *backupManifest, backupID, actor
 		return nil, err
 	}
 	defer func() {
-		_ = tx.Rollback()
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Printf("WARN: rollback failed during settings restore: %v", err)
+		}
 	}()
 
 	for _, table := range cleanupTablesForRestore(selected) {

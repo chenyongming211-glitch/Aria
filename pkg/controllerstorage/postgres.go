@@ -828,7 +828,7 @@ func (s *Storage) ReuseHostnameIP(hostname string, tenantID uuid.UUID) (assigned
 	if err != nil {
 		return "", 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, "ReuseHostnameIP")
 
 	var pubKey string
 	var nodeID uuid.UUID
@@ -905,7 +905,7 @@ func (s *Storage) MarkNodeDeleted(publicKey string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, "MarkNodeDeleted")
 
 	var nodeID uuid.UUID
 	err = tx.QueryRow(`SELECT id FROM nodes WHERE public_key = $1 FOR UPDATE`, publicKey).Scan(&nodeID)
@@ -939,7 +939,7 @@ func (s *Storage) CleanupDeletedNodes(thresholdTimestamp int64) (int, error) {
 	committed := false
 	defer func() {
 		if !committed {
-			_ = tx.Rollback()
+			rollbackTx(tx, "CleanupDeletedNodes")
 		}
 	}()
 
@@ -1164,7 +1164,7 @@ func (s *Storage) GetNextAvailableOffset() (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to begin transaction: %v", err)
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, "GetNextAvailableOffset")
 
 	// Lock the state row with SELECT FOR UPDATE to prevent concurrent reads
 	var current int
@@ -1342,7 +1342,7 @@ func (s *Storage) allocateIPInternal(tenantID uuid.UUID) (string, int, error) {
 	if err != nil {
 		return "", 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, "allocateIPInternal")
 
 	row := tx.QueryRow(
 		`SELECT id, cidr, current_offset FROM ip_pools 
@@ -1573,5 +1573,5 @@ func (s *Storage) GetAIAuditLogs(sessionID string, limit int) ([]AIAuditLog, err
 		logs = append(logs, log)
 	}
 
-	return logs, nil
+	return logs, rows.Err()
 }

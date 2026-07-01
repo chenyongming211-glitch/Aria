@@ -424,7 +424,9 @@ impl ConfigManager {
         let data = std::fs::read_to_string(&self.bootstrap_path)
             .context(format!("Failed to read config file: {}", self.bootstrap_path))?;
 
-        Ok(serde_yaml::from_str::<AgentConfig>(&data).ok())
+        serde_yaml::from_str::<AgentConfig>(&data)
+            .context("Failed to parse legacy config YAML")
+            .map(Some)
     }
 }
 

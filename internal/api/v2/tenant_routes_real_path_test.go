@@ -354,6 +354,35 @@ func TestTenantListForAdminReturnsOnlyCurrentTenant(t *testing.T) {
 	}
 }
 
+func TestTenantListForSuperAdminReturnsRowsErr(t *testing.T) {
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	now := time.Now()
+	rowErr := errors.New("tenant row iteration failed")
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, code, status, resource_quota, created_at, updated_at FROM tenants ORDER BY created_at DESC`)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "code", "status", "resource_quota", "created_at", "updated_at"}).
+			AddRow(tenantID, "Default", "default", "active", "{}", now, now).
+			AddRow(uuid.New(), "Other", "other", "active", "{}", now, now).
+			RowError(1, rowErr))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withAuthContext(httptest.NewRequest(http.MethodGet, "/api/v2/tenants", nil), "super_admin", tenantID)
+	rr := httptest.NewRecorder()
+	router.HandleTenants(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for rows.Err, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestTenantListMapsOwnerToAdminRole(t *testing.T) {
 	t.Setenv("RBAC_ENFORCEMENT", "enforce")
 

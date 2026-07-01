@@ -1,14 +1,51 @@
 package controllerstorage
 
 import (
+	"bytes"
 	"errors"
+	"log"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 )
+
+func TestMutatePolicyAndQueueSyncLogsRollbackFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	var logBuf bytes.Buffer
+	oldWriter := log.Writer()
+	oldFlags := log.Flags()
+	log.SetOutput(&logBuf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(oldWriter)
+		log.SetFlags(oldFlags)
+	})
+
+	mock.ExpectBegin()
+	mock.ExpectRollback().WillReturnError(errors.New("rollback connection lost"))
+
+	_, err = NewStorageWithDB(db).MutatePolicyAndQueueSync(func(*PolicyMutationTx) (PolicySyncRequest, error) {
+		return PolicySyncRequest{}, errors.New("mutation failed")
+	})
+	if err == nil || !strings.Contains(err.Error(), "mutation failed") {
+		t.Fatalf("expected mutation failure, got %v", err)
+	}
+	if !strings.Contains(logBuf.String(), "rollback failed") {
+		t.Fatalf("expected rollback failure log, got %q", logBuf.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
 
 func TestQueuePolicySyncRollsBackWhenPolicyDeliveryFails(t *testing.T) {
 	db, mock, err := sqlmock.New()

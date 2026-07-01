@@ -161,11 +161,26 @@ const aclRuleNodeMap = new Map<string, ACLRuleNodeMapEntry>()
 
 const aclRuleKey = (tenantId: string, ruleId: ACLRuleID) => `${tenantId}:${String(ruleId)}`
 
-if (typeof window !== 'undefined') {
-  window.addEventListener('tenantChanged', () => {
-    aclRuleNodeMap.clear()
-  })
+let tenantChangedRegistered = false
+const onTenantChanged = () => { aclRuleNodeMap.clear() }
+
+if (typeof window !== 'undefined' && !tenantChangedRegistered) {
+  window.addEventListener('tenantChanged', onTenantChanged)
+  tenantChangedRegistered = true
 }
+
+const removeTenantChangedListener = () => {
+  if (typeof window !== 'undefined' && tenantChangedRegistered) {
+    window.removeEventListener('tenantChanged', onTenantChanged)
+    tenantChangedRegistered = false
+  }
+}
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(removeTenantChangedListener)
+}
+
+export { removeTenantChangedListener }
 
 function normalizeRuleRecord(rule: ACLRuleRecord, nodeId?: string): NormalizedACLRule {
   const dstPort = Number(rule.dst_port ?? rule.max_port ?? 0)

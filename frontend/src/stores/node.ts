@@ -52,7 +52,7 @@ interface NodeViewModel {
   lastCommandStatus: string
   lastCommandError: string
   recentCommands: unknown[]
-  learnedRoutes?: unknown[]
+  learnedRoutes?: import('@/types/node').LearnedRoute[]
   recentPolicyDeliveries?: unknown[]
   activeAlerts?: unknown[]
   certificate?: unknown
@@ -65,6 +65,18 @@ interface HttpErrorLike {
   response?: {
     status?: number
   }
+}
+
+function normalizeLoadError(error: unknown, fallbackMessage: string): Error {
+  if (error instanceof Error) return error
+  if (typeof error === 'string') return new Error(error)
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === 'string' && message.trim()) {
+      return new Error(message)
+    }
+  }
+  return new Error(fallbackMessage)
 }
 
 export default defineStore('node', () => {
@@ -189,7 +201,7 @@ export default defineStore('node', () => {
     ])
 
     if (detailResult.status === 'rejected' && monitorResult.status === 'rejected') {
-      throw detailResult.reason || monitorResult.reason
+      throw normalizeLoadError(detailResult.reason || monitorResult.reason, 'Failed to load node detail')
     }
 
     if (statusResult.status === 'rejected') {
@@ -240,7 +252,14 @@ export default defineStore('node', () => {
       observedAt: formatDateTime(status.observed_at || detail.observed_at),
       stateConvergence: status.convergence_status || monitorDetail?.state_convergence || detail.convergence_status || status.state_convergence || detail.state_convergence || 'idle',
       onboarding: normalizeOnboarding(detail.onboarding),
-      learnedRoutes: Array.isArray(monitorDetail?.learned_routes) ? monitorDetail.learned_routes : [],
+      learnedRoutes: Array.isArray(monitorDetail?.learned_routes)
+        ? monitorDetail.learned_routes.map((r: Record<string, unknown>) => ({
+            cidr: String(r.cidr ?? '-'),
+            next_hop_node: String(r.next_hop_node ?? '-'),
+            next_hop_ip: String(r.next_hop_ip ?? '-'),
+            region: String(r.region ?? 'unknown'),
+          }))
+        : [],
       lastCommand: status.last_command || detail.last_command || null,
       lastCommandStatus: status.last_command_status || detail.last_command_status || '',
       lastCommandError: status.last_command_error || detail.last_command_error || '',

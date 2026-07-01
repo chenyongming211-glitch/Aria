@@ -314,7 +314,7 @@ export default defineStore('user', () => {
     resetSessionState()
   }
 
-  const loadSession = () => {
+  const loadSession = async () => {
     const token = localStorage.getItem('aria_token')
     const userData = localStorage.getItem('aria_user')
 
@@ -362,7 +362,7 @@ export default defineStore('user', () => {
     }
 
     if (user.value?.role !== 'super_admin' && user.value?.tenant_id) {
-      loadCurrentPermissions().catch((error) => {
+      await loadCurrentPermissions().catch((error) => {
         console.warn('Failed to refresh session permissions:', error)
       })
     }

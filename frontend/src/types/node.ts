@@ -39,3 +39,10 @@ export interface NodeRecord {
   state_convergence?: StateConvergence | string
   convergence_status?: StateConvergence | string
 }
+
+export interface LearnedRoute {
+  cidr: string
+  next_hop_node: string
+  next_hop_ip: string
+  region: string
+}
