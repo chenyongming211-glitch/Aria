@@ -1309,6 +1309,30 @@ Purpose:
 | Verification | Local targeted Go and frontend regression tests passed, local `go test ./...` passed, full frontend unit tests passed (`217` tests), frontend type-check passed, and `git diff --check` passed before push. Branch Actions run `28528858536` passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` returned `0.2.90`; frontend entry returned HTTP 200; `aria-controller` and `aria-frontend` were healthy; login succeeded as `sysadmin`; tenant scan found `Aria Default` with 4 nodes and 21 IP Groups. IP Group reference smoke confirmed ACL links use `/policy-center/acl-rules`, QoS links use `/policy-center/bandwidth-control`, and both include `route.name`, `rule_id`, `node_id`, and latest delivery status. |
 | Deployment note | This is a gray deployment from the feature branch, not a `master` deployment. Merge to `master`, run master Actions, and redeploy master artifacts after gray confirmation. |
 
+### 2026-07-01 Policy Workbench Reference Master Deployment
+
+Status: deployed from `master` and server-side smoke validated.
+
+Purpose:
+
+- Bring `master` back in sync with the already-validated policy workbench
+  reference gray deployment.
+- Redeploy Controller and frontend from the `master` Actions artifacts.
+- Record the live `0.2.90` state so operators can distinguish it from the
+  earlier `0.2.89` hardening deployment.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-07-01T15:53Z deployment; 2026-07-01T15:55Z smoke validation |
+| Git commit | `38893ce0cf796d0b4b0ab47e6e4e42dcf6ae1055` |
+| Master CI run | `28529945452` |
+| Version | `0.2.90` |
+| Controller image | Local runtime image `aria-controller:0.2.90` / `aria-controller:local@sha256:faa5da940a58d9a91c13a7ac1841aadeea6157c521b2d6d29cd555ec896549dd`. |
+| Backup | `/root/aria-controller/deploy-backups/20260701T155331Z-0.2.90-28529945452-38893ce-master` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in master Actions. |
+| Verification | Master Actions run `28529945452` passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` returned `0.2.90`; frontend entry returned HTTP 200; `aria-controller` and `aria-frontend` were healthy; Controller logs showed `Version: 0.2.90`, `Controller ready`, and gRPC listening on `:50051` with TLS. Login succeeded as `sysadmin`; tenant scan found `Aria Default` with 4 nodes and 21 IP Groups. IP Group reference smoke confirmed ACL links use `/policy-center/acl-rules`, QoS links use `/policy-center/bandwidth-control`, and both include route names `ACLRules` and `BandwidthControl`. |
+| Deployment note | This master deployment supersedes the `codex/policy-workbench-unification` gray deployment. This docs-only deployment record commit does not require another runtime redeploy. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
