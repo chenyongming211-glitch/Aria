@@ -195,6 +195,12 @@ import { useIpGroupApi } from '@/composables/useIpGroupApi'
 import { usePermission } from '@/composables/usePermission'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
 import { t } from '@/i18n'
+import {
+  hasPolicyContext,
+  nodeDetailRouteFromContext,
+  policyCenterRouteFromContext,
+  policyContextFromQuery
+} from '@/utils/policyContext'
 
 const { hasPermission } = usePermission()
 const route = useRoute() || { query: {} }
@@ -243,62 +249,20 @@ const referencesTitle = computed(() => {
   const name = selectedReferenceGroup.value?.name || ''
   return name ? `${t('ipGroups.referencesTitle')}: ${name}` : t('ipGroups.referencesTitle')
 })
-const routeQuery = computed(() => route.query || {})
-const queryString = (...keys) => {
-  for (const key of keys) {
-    const value = routeQuery.value[key]
-    if (typeof value === 'string' && value.trim()) {
-      return value
-    }
-  }
-  return ''
-}
-const routeContext = computed(() => ({
-  nodeId: queryString('nodeId', 'node_id'),
-  policyRef: queryString('policyRef', 'policy_ref'),
-  policyDomain: queryString('kind', 'policyDomain', 'policy_domain'),
-  commandId: queryString('commandId', 'command_id')
-}))
-const hasRouteContext = computed(() => Boolean(
-  routeContext.value.nodeId || routeContext.value.policyRef || routeContext.value.policyDomain || routeContext.value.commandId
-))
-
-const contextQuery = computed(() => ({
-  ...(routeContext.value.nodeId ? { nodeId: routeContext.value.nodeId } : {}),
-  ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
-  ...(routeContext.value.policyDomain ? { kind: routeContext.value.policyDomain } : {}),
-  ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {})
-}))
+const routeContext = computed(() => policyContextFromQuery(route.query || {}))
+const hasRouteContext = computed(() => hasPolicyContext(routeContext.value))
 
 const clearRouteContext = () => {
   router.push({ name: 'IPGroups' })
 }
 
 const openPolicyCenterContext = () => {
-  router.push({ name: 'Policies', query: contextQuery.value })
-}
-
-const nodeDetailFocus = () => {
-  if (routeContext.value.commandId) return 'commands'
-  if (routeContext.value.policyRef || routeContext.value.policyDomain) return 'policies'
-  return ''
+  router.push(policyCenterRouteFromContext(routeContext.value))
 }
 
 const openContextNodeDetail = () => {
-  if (!routeContext.value.nodeId) {
-    return
-  }
-  const focus = nodeDetailFocus()
-  router.push({
-    name: 'NodeMonitorDetail',
-    params: { nodeId: routeContext.value.nodeId },
-    query: {
-      ...(focus ? { focus } : {}),
-      ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
-      ...(routeContext.value.policyDomain ? { policyDomain: routeContext.value.policyDomain } : {}),
-      ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {})
-    }
-  })
+  const target = nodeDetailRouteFromContext(routeContext.value)
+  if (target) router.push(target)
 }
 
 const loadGroups = async () => {

@@ -7,6 +7,7 @@ import type {
   IPGroupReferencePage,
   NormalizedIPGroup
 } from '@/types/policy'
+import { normalizeDeliveryEvidence } from '@/utils/policyContext'
 
 interface ApiResponseLike {
   data?: unknown
@@ -76,13 +77,16 @@ function normalizeReference(value: unknown): IPGroupReference | null {
     ? Object.fromEntries(Object.entries(route.query).map(([key, item]) => [key, String(item || '')]))
     : {}
   const latestDelivery = isRecord(value.latest_delivery)
-    ? {
-        id: String(value.latest_delivery.id || ''),
-        status: String(value.latest_delivery.status || ''),
-        command_id: String(value.latest_delivery.command_id || ''),
-        last_error: String(value.latest_delivery.last_error || ''),
-        created_at: String(value.latest_delivery.created_at || '')
-      }
+    ? (() => {
+        const evidence = normalizeDeliveryEvidence(value.latest_delivery)
+        return {
+          id: String(value.latest_delivery.id || ''),
+          status: evidence.status,
+          command_id: evidence.commandId,
+          last_error: evidence.lastError,
+          created_at: evidence.updatedAt
+        }
+      })()
     : undefined
   return {
     domain: String(value.domain || ''),

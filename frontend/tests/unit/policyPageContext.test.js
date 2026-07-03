@@ -375,6 +375,24 @@ describe('policy page context handoff', () => {
     })
   })
 
+  it('preserves selected policy context when opening IP Group management from Policy Center', async () => {
+    const wrapper = mountWithStubs(Policies)
+    await flushPromises()
+
+    const policy = wrapper.vm.filteredPolicies.find((item) => item.policyRef === 'acl-special')
+    wrapper.vm.goToIpGroups(policy)
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'IPGroups',
+      query: {
+        nodeId: 'node-2',
+        policyRef: 'acl-special',
+        kind: 'acl',
+        commandId: 'cmd-2'
+      }
+    })
+  })
+
   it('uses shared UI foundation components for the Policy Center operations shell', async () => {
     const wrapper = mountWithStubs(Policies)
     await flushPromises()
