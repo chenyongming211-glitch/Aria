@@ -180,6 +180,9 @@ func TestSyncResponseIncludesSnapshotMetadata(t *testing.T) {
 	expectNodeByPublicKey(mock, publicKey, nodeID, tenantID, now)
 	expectEmptyBlacklistRules(mock, tenantID, nodeID)
 	expectGetNodeControlState(mock, tenantID, nodeID, "dsv-phase1", now)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(runtime_token_version, 0) FROM nodes WHERE id = $1`)).
+		WithArgs(nodeID).
+		WillReturnRows(sqlmock.NewRows([]string{"runtime_token_version"}).AddRow(0))
 
 	ctx := context.WithValue(context.Background(), RuntimeNodeIDKey, nodeID.String())
 	ctx = context.WithValue(ctx, RuntimeTenantIDKey, tenantID.String())

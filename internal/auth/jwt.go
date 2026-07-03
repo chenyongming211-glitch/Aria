@@ -21,6 +21,8 @@ var (
 	jwtSecretMu sync.RWMutex
 )
 
+const jwtIssuer = "aria-controller"
+
 // getSecret 获取当前的 JWT 密钥（线程安全）
 func getSecret() ([]byte, error) {
 	jwtSecretMu.RLock()
@@ -38,11 +40,16 @@ type Claims struct {
 	Role               string `json:"rol"`
 	TenantID           string `json:"tid,omitempty"`
 	MustChangePassword bool   `json:"mcp,omitempty"`
+	TokenVersion       int    `json:"ver,omitempty"`
 	jwt.RegisteredClaims
 }
 
 // GenerateToken 生成JWT令牌
 func GenerateToken(userID, username, role, tenantID string, mustChangePassword ...bool) (string, error) {
+	return GenerateTokenWithVersion(userID, username, role, tenantID, 0, mustChangePassword...)
+}
+
+func GenerateTokenWithVersion(userID, username, role, tenantID string, tokenVersion int, mustChangePassword ...bool) (string, error) {
 	// 设置令牌过期时间（2小时）
 	expirationTime := time.Now().Add(2 * time.Hour)
 
@@ -57,10 +64,11 @@ func GenerateToken(userID, username, role, tenantID string, mustChangePassword .
 		Role:               role,
 		TenantID:           tenantID,
 		MustChangePassword: mcp,
+		TokenVersion:       tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Issuer:    "aria-controller",
+			Issuer:    jwtIssuer,
 			Subject:   userID,
 		},
 	}
@@ -93,7 +101,7 @@ func ValidateToken(tokenString string) (*Claims, error) {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return getSecret()
-	})
+	}, jwt.WithIssuer(jwtIssuer))
 
 	if err != nil {
 		if errors.Is(err, ErrJWTSecretNotConfigured) {

@@ -62,20 +62,39 @@ func extractBearerToken(ctx context.Context) (string, error) {
 	return token, nil
 }
 
-func validateNodeStatus(store *controllerstorage.Storage, nodeIDStr string) error {
-	parsedNodeID, err := uuid.Parse(nodeIDStr)
+func validateRuntimeTokenState(store *controllerstorage.Storage, claims *auth.RuntimeClaims) error {
+	if store == nil {
+		return status.Errorf(codes.Internal, "runtime auth store unavailable")
+	}
+	if claims == nil {
+		return status.Errorf(codes.Unauthenticated, "invalid runtime token")
+	}
+	parsedNodeID, err := uuid.Parse(strings.TrimSpace(claims.NodeID))
 	if err != nil {
 		return status.Errorf(codes.Unauthenticated, "invalid node_id in token")
 	}
-
-	node, err := store.GetNodeByID(parsedNodeID)
-	if err != nil || node == nil {
-		return status.Errorf(codes.Unauthenticated, "node not found")
+	parsedTenantID, err := uuid.Parse(strings.TrimSpace(claims.TenantID))
+	if err != nil {
+		return status.Errorf(codes.Unauthenticated, "invalid tenant_id in token")
 	}
 
-	switch node.Status {
+	state, err := store.GetNodeRuntimeAuthState(parsedNodeID)
+	if err != nil || state == nil {
+		return status.Errorf(codes.Unauthenticated, "node not found")
+	}
+	if state.TenantID != parsedTenantID {
+		return status.Errorf(codes.PermissionDenied, "runtime token tenant mismatch")
+	}
+	if claims.TokenVersion != state.RuntimeTokenVersion {
+		return status.Errorf(codes.Unauthenticated, "runtime token revoked")
+	}
+
+	switch state.NodeStatus {
 	case "deleted", "suspended", "banned":
-		return status.Errorf(codes.PermissionDenied, "node access denied: status '%s'", node.Status)
+		return status.Errorf(codes.PermissionDenied, "node access denied: status '%s'", state.NodeStatus)
+	}
+	if !strings.EqualFold(strings.TrimSpace(state.TenantStatus), "active") {
+		return status.Errorf(codes.PermissionDenied, "tenant is not active: status '%s'", state.TenantStatus)
 	}
 
 	return nil
@@ -105,7 +124,7 @@ func UnaryAuthInterceptor(store *controllerstorage.Storage) grpc.UnaryServerInte
 			return nil, status.Error(codes.Unauthenticated, "invalid runtime token")
 		}
 
-		if err := validateNodeStatus(store, claims.NodeID); err != nil {
+		if err := validateRuntimeTokenState(store, claims); err != nil {
 			return nil, err
 		}
 
@@ -140,7 +159,7 @@ func StreamAuthInterceptor(store *controllerstorage.Storage) grpc.StreamServerIn
 			return status.Error(codes.Unauthenticated, "invalid runtime token")
 		}
 
-		if err := validateNodeStatus(store, claims.NodeID); err != nil {
+		if err := validateRuntimeTokenState(store, claims); err != nil {
 			return err
 		}
 

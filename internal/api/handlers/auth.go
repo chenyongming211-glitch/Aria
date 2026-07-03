@@ -94,6 +94,15 @@ func writeTenantInactiveAuthError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
+func extractAuthTokenFromHeader(authHeader string) string {
+	trimmed := strings.TrimSpace(authHeader)
+	parts := strings.SplitN(trimmed, " ", 2)
+	if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+		return strings.TrimSpace(parts[1])
+	}
+	return trimmed
+}
+
 func (a *AuthAPI) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
@@ -114,9 +123,10 @@ func (a *AuthAPI) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	var userID, role, dbPasswordHash string
 	var tenantID sql.NullString
 	var mustChangePassword bool
+	var tokenVersion int
 
-	query := `SELECT id, role, tenant_id, password_hash, COALESCE(must_change_password, FALSE) FROM users WHERE username = $1`
-	err := a.store.DB().QueryRow(query, req.Username).Scan(&userID, &role, &tenantID, &dbPasswordHash, &mustChangePassword)
+	query := `SELECT id, role, tenant_id, password_hash, COALESCE(must_change_password, FALSE), COALESCE(token_version, 0) FROM users WHERE username = $1`
+	err := a.store.DB().QueryRow(query, req.Username).Scan(&userID, &role, &tenantID, &dbPasswordHash, &mustChangePassword, &tokenVersion)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidCredentials, "Invalid username or password", nil)
@@ -141,7 +151,7 @@ func (a *AuthAPI) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	token, err := auth.GenerateToken(userID, req.Username, role, tID, mustChangePassword)
+	token, err := auth.GenerateTokenWithVersion(userID, req.Username, role, tID, tokenVersion, mustChangePassword)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeCreateTokenFailed, "Failed to generate authentication token", nil)
 		return
@@ -174,12 +184,7 @@ func (a *AuthAPI) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var tokenString string
-	if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
-		tokenString = authHeader[7:]
-	} else {
-		tokenString = authHeader
-	}
+	tokenString := extractAuthTokenFromHeader(authHeader)
 
 	claims, err := auth.ValidateToken(tokenString)
 	if err != nil {
@@ -190,10 +195,11 @@ func (a *AuthAPI) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 	var username, role string
 	var tenantID sql.NullString
 	var mustChangePassword bool
+	var tokenVersion int
 	err = a.store.DB().QueryRow(
-		`SELECT username, role, tenant_id, COALESCE(must_change_password, FALSE) FROM users WHERE id = $1`,
+		`SELECT username, role, tenant_id, COALESCE(must_change_password, FALSE), COALESCE(token_version, 0) FROM users WHERE id = $1`,
 		claims.UserID,
-	).Scan(&username, &role, &tenantID, &mustChangePassword)
+	).Scan(&username, &role, &tenantID, &mustChangePassword, &tokenVersion)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "User no longer exists", nil)
@@ -207,13 +213,32 @@ func (a *AuthAPI) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 	if tenantID.Valid {
 		tID = tenantID.String
 	}
+	if claims.TokenVersion != tokenVersion {
+		apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "Invalid token", nil)
+		return
+	}
 	if normalizeAuthRole(role) != "super_admin" {
 		if writeTenantInactiveAuthError(w, a.verifyTenantActive(tID)) {
 			return
 		}
 	}
 
-	newToken, err := auth.GenerateToken(claims.UserID, username, role, tID, mustChangePassword)
+	var newTokenVersion int
+	err = a.store.DB().QueryRow(
+		`UPDATE users SET token_version = COALESCE(token_version, 0) + 1, updated_at = NOW() WHERE id = $1 AND COALESCE(token_version, 0) = $2 RETURNING COALESCE(token_version, 0)`,
+		claims.UserID,
+		tokenVersion,
+	).Scan(&newTokenVersion)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "User no longer exists", nil)
+			return
+		}
+		apibase.WriteError(w, http.StatusInternalServerError, "DB_ERROR", "Failed to refresh token state", nil)
+		return
+	}
+
+	newToken, err := auth.GenerateTokenWithVersion(claims.UserID, username, role, tID, newTokenVersion, mustChangePassword)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeCreateTokenFailed, "Failed to refresh token", nil)
 		return
@@ -237,6 +262,48 @@ func (a *AuthAPI) HandleRefresh(w http.ResponseWriter, r *http.Request) {
 func (a *AuthAPI) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
+		return
+	}
+
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeAuthHeaderRequired, "Authorization header required", nil)
+		return
+	}
+	claims, err := auth.ValidateToken(extractAuthTokenFromHeader(authHeader))
+	if err != nil {
+		apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "Invalid token", nil)
+		return
+	}
+	currentVersion, err := a.store.GetUserTokenVersion(claims.UserID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "Invalid token", nil)
+			return
+		}
+		apibase.WriteError(w, http.StatusInternalServerError, "DB_ERROR", "Failed to verify token state", nil)
+		return
+	}
+	if claims.TokenVersion != currentVersion {
+		apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "Invalid token", nil)
+		return
+	}
+	result, err := a.store.DB().Exec(
+		`UPDATE users SET token_version = COALESCE(token_version, 0) + 1, updated_at = NOW() WHERE id = $1 AND COALESCE(token_version, 0) = $2`,
+		claims.UserID,
+		currentVersion,
+	)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, "DB_ERROR", "Failed to revoke token", nil)
+		return
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, "DB_ERROR", "Failed to revoke token", nil)
+		return
+	}
+	if rowsAffected == 0 {
+		apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "Invalid token", nil)
 		return
 	}
 
@@ -347,7 +414,7 @@ func (a *AuthAPI) HandleForceChangePassword(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	_, err = a.store.DB().Exec(`UPDATE users SET password_hash = $1, must_change_password = FALSE WHERE id = $2`,
+	_, err = a.store.DB().Exec(`UPDATE users SET password_hash = $1, must_change_password = FALSE, token_version = COALESCE(token_version, 0) + 1 WHERE id = $2`,
 		string(newHash), claims.UserID)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, "DB_ERROR", "Failed to update password", nil)

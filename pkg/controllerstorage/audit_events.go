@@ -15,6 +15,8 @@ const (
 	AuditNodeReregistered = "node.reregistered"
 	AuditNodeSuspended    = "node.suspended"
 	AuditNodeDeleted      = "node.deleted"
+	AuditTenantSuspended  = "tenant.suspended"
+	AuditTenantDeleted    = "tenant.deleted"
 	AuditCertIssued       = "cert.issued"
 	AuditCertRevoked      = "cert.revoked"
 	AuditPolicyChanged    = "policy.changed"
