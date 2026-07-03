@@ -443,10 +443,10 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-63: DingTalk handler 未同步 Feishu 的重构
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B2: `codex/bugfix-b1-security`)
 - **严重度**: LOW
 - **文件**: `internal/im/dingtalk.go`
-- **根因**: 飞书 handler 已重构（writeFeishuJSON + 错误日志），钉钉 handler 仍用旧模式丢弃 `json.Encode` 错误。非回归，但一致性缺口。
+- **修复结果**: 新增 `writeDingTalkJSON`，统一设置 JSON 响应、状态码和编码错误日志；DingTalk webhook 的空消息、错误响应和正常回复都进入 checked encoder path。
 
 ---
 
@@ -481,10 +481,10 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-67: Restore 全量替换生产数据库无 pre-flight 检查
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B2: `codex/bugfix-b1-security`)
 - **严重度**: HIGH
 - **文件**: `internal/api/v2/settings.go:693-729`
-- **根因**: Restore 在一个事务内 truncate + insert 全量表。不检查是否有活跃 Agent、进行中命令、策略下发。在线恢复可能造成大规模数据中断。
+- **修复结果**: Restore dry-run 和真实恢复都会执行 preflight；真实恢复在事务前阻断在线 Agent、未完成 Agent command、未完成 policy delivery，并返回 `409 CONFLICT` 与可读 warning。
 
 #### BUG-68: 暂停租户不会级联暂停节点/撤销 Token/取消命令
 
@@ -511,10 +511,10 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-71: 部分表恢复可产生孤儿引用
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B2: `codex/bugfix-b1-security`)
 - **严重度**: MEDIUM
 - **文件**: `internal/api/v2/settings.go:472-503,731-747`
-- **根因**: 选择性表恢复只校验表名，不校验依赖闭包。Postgres FK 通常会阻止真正的孤儿数据，但用户会在执行阶段遇到 raw FK/删除失败并整事务回滚；缺少 dry-run dependency preflight 和可读错误。
+- **修复结果**: 选择性恢复会先校验表依赖闭包，并按 `backupRestoreTables` 的固定顺序执行，不再按请求顺序插入；`ip_group_members`、`ip_groups` 等关联表缺依赖时在 dry-run 阶段返回可读 `BAD_REQUEST`。
 
 #### BUG-72: 无 SuspendTenant 统一函数
 
@@ -586,10 +586,10 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-80: Backup 明文导出全部 password hash + enrollment token
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B2: `codex/bugfix-b1-security`)
 - **严重度**: CRITICAL
 - **文件**: `internal/api/v2/settings.go:35-38,86-91`
-- **根因**: 备份为可恢复性导出了 `password_hash`、完整 enrollment token 和 `enrolled_with_token`。这对恢复有用，但当前备份文件本身未加密/未二次确认敏感导出/未单独密钥保护，下载后泄露面过大。
+- **修复结果**: 默认备份写入 `sensitive_redacted=true`，并将 `users.password_hash`、`tokens.token`、`nodes.enrolled_with_token` 替换为 `<redacted>`；只有显式传 `include_sensitive=true` 且确认短语为 `EXPORT SENSITIVE ARIA BACKUP` 时才导出可恢复敏感字段。红acted 备份禁止 restore/upload 作为可恢复备份。
 
 ### 🔴 HIGH / 🟡 MEDIUM / ⚪ 不成立
 
@@ -602,10 +602,10 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-82: DingTalk webhook 未配 secret 时完全无认证
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B2: `codex/bugfix-b1-security`)
 - **严重度**: HIGH
 - **文件**: `internal/im/dingtalk.go:67,182`
-- **根因**: `h.secret == ""` 时签名验证直接 return true。若运维未配 secret，任何外界可直接调 webhook。
+- **修复结果**: `verifySign` 在 `secret` 为空时返回 false，`HandleWebhook` 统一要求签名验证通过；未配置或签名错误都会返回 `401 Unauthorized`。
 
 #### BUG-83: 零 CORS 配置
 
@@ -639,10 +639,10 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-87: Feishu webhook verifyToken 为空时认证跳过
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B2: `codex/bugfix-b1-security`)
 - **严重度**: MEDIUM
 - **文件**: `internal/im/feishu.go:129-131`
-- **根因**: 与 BUG-82 同模式。`h.verifyToken == ""` 直接跳过 token 验证。
+- **修复结果**: `verifyIncomingToken` 在 `verifyToken` 为空时返回 false，未配置 verify token 的 Feishu webhook 请求会返回 `401 Unauthorized`。
 
 #### BUG-88: Token tag 无长度/内容校验
 

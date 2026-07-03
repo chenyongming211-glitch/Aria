@@ -88,6 +88,8 @@ All three commands passed locally.
 
 **Priority:** P0/P1
 
+**Status:** ✅ FIXED locally in `codex/bugfix-b1-security`
+
 **Bugs:** BUG-80, BUG-82, BUG-87, BUG-67, BUG-71, BUG-63
 
 **Why second:** Backup export and restore can leak or replace control-plane state. Webhook endpoints are externally callable and should fail closed when security settings are incomplete.
@@ -112,6 +114,16 @@ go test ./internal/api/v2 ./internal/im -count=1
 ```
 
 **Expected result:** normal backup no longer leaks reusable secrets by default; restore dry-run catches dependency and live-runtime hazards; webhook requests without required auth fail.
+
+**2026-07-03 result:** implemented default redacted backups, explicit sensitive export confirmation, redacted-restore rejection, restore runtime preflight, selective restore dependency closure, DingTalk checked JSON response writing, and DingTalk/Feishu webhook fail-closed auth.
+
+**2026-07-03 validation:**
+
+```bash
+go test ./internal/api/v2 ./internal/im -count=1
+```
+
+Passed locally.
 
 ---
 
