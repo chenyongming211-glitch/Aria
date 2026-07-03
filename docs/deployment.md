@@ -1333,6 +1333,31 @@ Purpose:
 | Verification | Master Actions run `28529945452` passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` returned `0.2.90`; frontend entry returned HTTP 200; `aria-controller` and `aria-frontend` were healthy; Controller logs showed `Version: 0.2.90`, `Controller ready`, and gRPC listening on `:50051` with TLS. Login succeeded as `sysadmin`; tenant scan found `Aria Default` with 4 nodes and 21 IP Groups. IP Group reference smoke confirmed ACL links use `/policy-center/acl-rules`, QoS links use `/policy-center/bandwidth-control`, and both include route names `ACLRules` and `BandwidthControl`. |
 | Deployment note | This master deployment supersedes the `codex/policy-workbench-unification` gray deployment. This docs-only deployment record commit does not require another runtime redeploy. |
 
+### 2026-07-03 Policy Workbench Context Flow Gray Deployment
+
+Status: gray deployed from `codex/policy-workbench-flow` and server-side smoke
+validated.
+
+Purpose:
+
+- Keep Policy Center, IP Group references, ACL, Bandwidth, Route, and Nodes
+  navigation on a shared policy context contract.
+- Preserve `node_id`, `policy_ref`, `policy_domain`, `rule_id`, and
+  `command_id` when operators move between policy evidence pages.
+- Publish the branch under a unique patch version before gray validation.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-07-03T14:38Z deployment; 2026-07-03T14:43Z smoke validation |
+| Git commit | `47ef2f7ce2bb1d2859af0c78441470d92ff98055` |
+| Branch CI run | `28666924057` |
+| Version | `0.2.91` |
+| Controller image | Local runtime image `aria-controller:0.2.91` / `aria-controller:local@sha256:a7a3a1bdf8bfb2af31e846f52559e5071c058956af092e139dbe8a5632ddeaab`. |
+| Backup | `/root/aria-controller/deploy-backups/20260703T143725Z-0.2.91-28666924057-47ef2f7` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in branch Actions. |
+| Verification | Branch Actions run `28666924057` passed Go Build, Frontend Build, and Rust Agent Build. Local linux/amd64 Controller and ariactl builds passed from the same commit. Local `go test ./...`, full frontend unit tests (`224` tests), and frontend production build passed. Server-side `https://aria.yun/api/version` returned `0.2.91`; frontend entry and `/api/v2/controller-info` returned HTTP 200; `aria-controller` and `aria-frontend` were healthy; Controller logs showed `Version: 0.2.91`, `Controller ready`, and gRPC listening on `:50051` with TLS. Login succeeded as `sysadmin`; tenant, permissions, nodes, IP Groups, Policy Center, ACL, QoS, and focused policy delivery status smoke checks returned HTTP 200. |
+| Deployment note | This is a gray deployment from the feature branch, not a `master` deployment. Merge to `master`, run master Actions, and redeploy master artifacts after gray confirmation. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
