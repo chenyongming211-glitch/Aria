@@ -259,6 +259,13 @@ import {
   policyStatusLabel as formatPolicyStatus,
   policyStatusTagType as getPolicyTagType
 } from '@/utils/controlLoopStatus'
+import {
+  hasPolicyContext,
+  nodeDetailRouteFromContext,
+  policyCenterRouteFromContext,
+  policyContextFromQuery,
+  policyRowMatchesContext
+} from '@/utils/policyContext'
 
 const { hasPermission } = usePermission()
 const route = useRoute() || { query: {}, fullPath: '' }
@@ -342,62 +349,22 @@ const qosPanelSubtitle = computed(() => {
   }
   return `${selectedNodeName.value || t('policyTerms.currentNode')} · ${t('policyTerms.rulesCount').replace('{count}', String(visibleRules.value.length))}`
 })
-const routeQuery = computed(() => route.query || {})
-const queryString = (...keys: string[]) => {
-  for (const key of keys) {
-    const value = routeQuery.value[key]
-    if (typeof value === 'string' && value.trim()) {
-      return value
-    }
-  }
-  return ''
-}
 const routeContext = computed(() => ({
-  nodeId: queryString('nodeId', 'node_id'),
-  policyRef: queryString('ruleId', 'rule_id', 'policyRef', 'policy_ref'),
-  commandId: queryString('commandId', 'command_id')
+  ...policyContextFromQuery(route.query || {})
 }))
-const hasRouteContext = computed(() => Boolean(
-  routeContext.value.nodeId || routeContext.value.policyRef || routeContext.value.commandId
-))
+const hasRouteContext = computed(() => hasPolicyContext(routeContext.value))
 
 const clearRouteContext = () => {
   router.push({ name: 'BandwidthControl' })
 }
 
-const nodeDetailFocus = () => {
-  if (routeContext.value.commandId) return 'commands'
-  if (routeContext.value.policyRef) return 'policies'
-  return ''
-}
-
 const openContextNodeDetail = () => {
-  if (!contextNodeId.value) {
-    return
-  }
-  const focus = nodeDetailFocus()
-  router.push({
-    name: 'NodeMonitorDetail',
-    params: { nodeId: contextNodeId.value },
-    query: {
-      ...(focus ? { focus } : {}),
-      ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {}),
-      ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
-      policyDomain: 'qos'
-    }
-  })
+  const target = nodeDetailRouteFromContext({ ...routeContext.value, nodeId: contextNodeId.value, policyDomain: 'qos' })
+  if (target) router.push(target)
 }
 
 const openPolicyCenterContext = () => {
-  router.push({
-    name: 'Policies',
-    query: {
-      ...(contextNodeId.value ? { nodeId: contextNodeId.value } : {}),
-      ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {}),
-      ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
-      kind: 'qos'
-    }
-  })
+  router.push(policyCenterRouteFromContext({ ...routeContext.value, nodeId: contextNodeId.value, policyDomain: 'qos' }))
 }
 
 const form = reactive<QoSFormState>({
@@ -427,34 +394,8 @@ const groupById = computed(() => {
   return result
 })
 
-const normalizeContextValue = (value: unknown) => String(value || '').trim().toLowerCase()
-
 const ruleMatchesPolicyContext = (row?: QoSRuleRow) => {
-  const policyRef = normalizeContextValue(routeContext.value.policyRef)
-  const commandId = normalizeContextValue(routeContext.value.commandId)
-  if (!policyRef && !commandId) {
-    return true
-  }
-
-  const policyHaystack = [
-    row?.policy_ref,
-    row?.id,
-    row?.description,
-    row?.group_id,
-    row?.group_cidr,
-    row?.runtime_group
-  ].map(normalizeContextValue).filter(Boolean)
-  const commandHaystack = [
-    row?.last_delivery_command_id,
-    row?.lastDeliveryCommandId,
-    row?.last_delivery?.command_id,
-    row?.lastDelivery?.command_id
-  ].map(normalizeContextValue).filter(Boolean)
-
-  if (policyRef) {
-    return policyHaystack.includes(policyRef)
-  }
-  return commandId ? commandHaystack.includes(commandId) : true
+  return policyRowMatchesContext(row || {}, routeContext.value)
 }
 
 const visibleRules = computed(() => rules.value.filter(ruleMatchesPolicyContext))

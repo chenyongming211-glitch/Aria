@@ -167,6 +167,13 @@ import {
   policyStatusLabel as formatPolicyStatus,
   policyStatusTagType as getPolicyTagType
 } from '@/utils/controlLoopStatus'
+import {
+  hasPolicyContext,
+  nodeDetailRouteFromContext,
+  policyCenterRouteFromContext,
+  policyContextFromQuery,
+  policyRowMatchesContext
+} from '@/utils/policyContext'
 
 const { hasPermission } = usePermission()
 const route = useRoute() || { query: {}, fullPath: '' }
@@ -191,24 +198,10 @@ const currentRoute = ref({
 
 const currentDeleteRoute = ref(null)
 
-const routeQuery = computed(() => route.query || {})
-const queryString = (...keys) => {
-  for (const key of keys) {
-    const value = routeQuery.value[key]
-    if (typeof value === 'string' && value.trim()) {
-      return value
-    }
-  }
-  return ''
-}
 const routeContext = computed(() => ({
-  nodeId: queryString('nodeId', 'node_id'),
-  policyRef: queryString('policyRef', 'policy_ref'),
-  commandId: queryString('commandId', 'command_id')
+  ...policyContextFromQuery(route.query || {})
 }))
-const hasRouteContext = computed(() => Boolean(
-  routeContext.value.nodeId || routeContext.value.policyRef || routeContext.value.commandId
-))
+const hasRouteContext = computed(() => hasPolicyContext(routeContext.value))
 const contextNodeId = computed(() => routeContext.value.nodeId || currentRoute.value.nodeId)
 const contextNodeName = computed(() => {
   const node = tenantNodes.value.find((item) => item.id === contextNodeId.value)
@@ -219,67 +212,17 @@ const clearRouteContext = () => {
   router.push({ name: 'Routing' })
 }
 
-const nodeDetailFocus = () => {
-  if (routeContext.value.commandId) return 'commands'
-  if (routeContext.value.policyRef) return 'policies'
-  return ''
-}
-
 const openContextNodeDetail = () => {
-  if (!contextNodeId.value) {
-    return
-  }
-  const focus = nodeDetailFocus()
-  router.push({
-    name: 'NodeMonitorDetail',
-    params: { nodeId: contextNodeId.value },
-    query: {
-      ...(focus ? { focus } : {}),
-      ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {}),
-      ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
-      policyDomain: 'route'
-    }
-  })
+  const target = nodeDetailRouteFromContext({ ...routeContext.value, nodeId: contextNodeId.value, policyDomain: 'route' })
+  if (target) router.push(target)
 }
 
 const openPolicyCenterContext = () => {
-  router.push({
-    name: 'Policies',
-    query: {
-      ...(contextNodeId.value ? { nodeId: contextNodeId.value } : {}),
-      ...(routeContext.value.commandId ? { commandId: routeContext.value.commandId } : {}),
-      ...(routeContext.value.policyRef ? { policyRef: routeContext.value.policyRef } : {}),
-      kind: 'route'
-    }
-  })
+  router.push(policyCenterRouteFromContext({ ...routeContext.value, nodeId: contextNodeId.value, policyDomain: 'route' }))
 }
 
-const normalizeContextValue = (value) => String(value || '').trim().toLowerCase()
-
 const routeMatchesPolicyContext = (item = {}) => {
-  const policyRef = normalizeContextValue(routeContext.value.policyRef)
-  const commandId = normalizeContextValue(routeContext.value.commandId)
-  if (!policyRef && !commandId) {
-    return true
-  }
-
-  const policyHaystack = [
-    item.policyRef,
-    item.policy_ref,
-    item.id,
-    item.cidr
-  ].map(normalizeContextValue).filter(Boolean)
-  const commandHaystack = [
-    item.lastDeliveryCommandId,
-    item.last_delivery_command_id,
-    item.lastDelivery?.command_id,
-    item.last_delivery?.command_id
-  ].map(normalizeContextValue).filter(Boolean)
-
-  if (policyRef) {
-    return policyHaystack.includes(policyRef)
-  }
-  return commandId ? commandHaystack.includes(commandId) : true
+  return policyRowMatchesContext(item, routeContext.value)
 }
 
 const filteredRoutes = computed(() => {

@@ -123,10 +123,55 @@ describe('useIpGroupApi', () => {
       domain: 'acl',
       rule_id: 'acl-1',
       rule_name: 'office-acl',
+      latest_delivery: expect.objectContaining({
+        status: 'completed',
+        command_id: 'cmd-1'
+      }),
       route: expect.objectContaining({
         path: '/policy-center/acl-rules',
         query: { node_id: 'node-1', rule_id: 'acl-1' }
       })
+    }))
+  })
+
+  it('应该把引用里的 command_status 规范化为可展示的 latest_delivery.status', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          items: [
+            {
+              domain: 'qos',
+              rule_id: 'qos-1',
+              rule_name: 'limit-office',
+              node_id: 'node-1',
+              node_name: 'edge-1',
+              latest_delivery: {
+                command_status: 'failed',
+                command_id: 'cmd-2',
+                last_error: 'apply failed',
+                updated_at: '2026-07-03T10:12:00Z'
+              },
+              route: {
+                name: 'BandwidthControl',
+                query: {
+                  node_id: 'node-1',
+                  rule_id: 'qos-1'
+                }
+              }
+            }
+          ],
+          total: 1
+        }
+      }
+    })
+
+    const page = await useIpGroupApi.listIPGroupReferences('group-1')
+
+    expect(page.items[0].latest_delivery).toEqual(expect.objectContaining({
+      status: 'failed',
+      command_id: 'cmd-2',
+      last_error: 'apply failed'
     }))
   })
 })

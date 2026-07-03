@@ -238,6 +238,7 @@
         <div class="drawer-actions">
           <el-button @click="openNodeDetail(selectedPolicy)">{{ t('policies.openNodeMonitor') }}</el-button>
           <el-button v-if="canRetryPolicy(selectedPolicy)" type="warning" @click="retryPolicyDelivery(selectedPolicy)">{{ t('policies.retryDelivery') }}</el-button>
+          <el-button v-if="hasPermission('ip-groups:read')" @click="goToIpGroups(selectedPolicy)">{{ t('nav.ipGroupManagement') }}</el-button>
           <el-button type="primary" @click="goToKind(selectedPolicy.kind, selectedPolicy)">{{ t('policies.goToDomain') }}</el-button>
         </div>
       </template>
@@ -273,6 +274,7 @@ import {
   policyStatusLabel as statusLabel,
   policyStatusTagType as statusTagType
 } from '@/utils/controlLoopStatus'
+import { ipGroupsRouteFromContext, policyContextFromRow, policyPageRouteForDomain } from '@/utils/policyContext'
 
 const router = useRouter()
 const route = useRoute()
@@ -710,48 +712,22 @@ const focusPolicyFromRoute = () => {
   }
 }
 
-const policyPageQuery = (policy?: NormalizedPolicy | null): Record<string, string> => {
-  const query: Record<string, string> = {}
-  const nodeId = policy?.nodeId || routeContext.value.nodeId
-  const policyRef = policy?.policyRef || routeContext.value.policyRef
-  const commandId = commandIdForPolicy(policy) || routeContext.value.commandId
-
-  if (nodeId) {
-    query.nodeId = nodeId
+const currentPolicyContext = (policy: NormalizedPolicy | null = selectedPolicy.value) => {
+  const defaults = {
+    nodeId: routeContext.value.nodeId,
+    policyRef: routeContext.value.policyRef,
+    policyDomain: routeContext.value.kind,
+    commandId: routeContext.value.commandId
   }
-  if (policyRef) {
-    query.policyRef = policyRef
-  }
-  if (commandId) {
-    query.commandId = commandId
-  }
-  return query
+  return policy ? policyContextFromRow(policy, defaults) : defaults
 }
 
 const goToKind = (kind: PolicyKind | string, policy: NormalizedPolicy | null = selectedPolicy.value) => {
-  const query = policyPageQuery(policy)
-  switch (kind) {
-    case 'acl':
-      router.push({ name: 'ACLRules', query })
-      break
-    case 'qos':
-      router.push({ name: 'BandwidthControl', query })
-      break
-    case 'route':
-      router.push({ name: 'Routing', query })
-      break
-    default:
-      break
-  }
+  router.push(policyPageRouteForDomain(kind, currentPolicyContext(policy)))
 }
 
-const goToIpGroups = () => {
-  const query: Record<string, string> = {}
-  if (routeContext.value.nodeId) query.nodeId = routeContext.value.nodeId
-  if (routeContext.value.policyRef) query.policyRef = routeContext.value.policyRef
-  if (routeContext.value.kind) query.kind = routeContext.value.kind
-  if (routeContext.value.commandId) query.commandId = routeContext.value.commandId
-  router.push({ name: 'IPGroups', query })
+const goToIpGroups = (policy: NormalizedPolicy | null = selectedPolicy.value) => {
+  router.push(ipGroupsRouteFromContext(currentPolicyContext(policy)))
 }
 
 const showDetails = (policy: NormalizedPolicy) => {
