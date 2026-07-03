@@ -1358,6 +1358,30 @@ Purpose:
 | Verification | Branch Actions run `28666924057` passed Go Build, Frontend Build, and Rust Agent Build. Local linux/amd64 Controller and ariactl builds passed from the same commit. Local `go test ./...`, full frontend unit tests (`224` tests), and frontend production build passed. Server-side `https://aria.yun/api/version` returned `0.2.91`; frontend entry and `/api/v2/controller-info` returned HTTP 200; `aria-controller` and `aria-frontend` were healthy; Controller logs showed `Version: 0.2.91`, `Controller ready`, and gRPC listening on `:50051` with TLS. Login succeeded as `sysadmin`; tenant, permissions, nodes, IP Groups, Policy Center, ACL, QoS, and focused policy delivery status smoke checks returned HTTP 200. |
 | Deployment note | This is a gray deployment from the feature branch, not a `master` deployment. Merge to `master`, run master Actions, and redeploy master artifacts after gray confirmation. |
 
+
+### 2026-07-03 Policy Workbench Context Flow Master Deployment
+
+Status: deployed from `master` and server-side smoke validated.
+
+Purpose:
+
+- Bring `master` back in sync with the already-validated policy workbench
+  context flow gray deployment.
+- Redeploy Controller and frontend from the merged `master` commit.
+- Record the live `0.2.91` state and master CI evidence.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-07-03T14:56Z deployment; 2026-07-03T14:57Z smoke validation |
+| Git commit | `8bfc480b3ee13be44421f8d320cf0ceb68ff135a` |
+| Master CI run | `28667878751` |
+| Version | `0.2.91` |
+| Controller image | Local runtime image `aria-controller:0.2.91` / `aria-controller:local@sha256:972dab228e61146371aab32bf4328b898ae777dea09e807f002c73f4bac363f1`. |
+| Backup | `/root/aria-controller/deploy-backups/20260703T145554Z-0.2.91-28667878751-8bfc480-master` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in master Actions. |
+| Verification | Master Actions run `28667878751` passed Go Build, Frontend Build, and Rust Agent Build. Local merged-master validation passed `go test ./...`, frontend unit tests (`224` tests), frontend type-check, and frontend production build. Server-side `https://aria.yun/api/version` returned `0.2.91`; frontend entry and `/api/v2/controller-info` returned HTTP 200; `aria-controller` and `aria-frontend` were healthy. Login succeeded as `sysadmin`; tenant, permissions, nodes, IP Groups, Policy Center, ACL, QoS, and focused policy delivery status smoke checks returned HTTP 200. Controller and frontend logs showed no recent panic, fatal, error, or failed entries during the deployment window. |
+| Deployment note | This master deployment supersedes the `codex/policy-workbench-flow` gray deployment. This docs-only deployment record commit does not require another runtime redeploy. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
