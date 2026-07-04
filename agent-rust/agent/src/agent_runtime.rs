@@ -73,6 +73,33 @@ fn current_unix_timestamp() -> i64 {
         .as_secs() as i64
 }
 
+fn policy_metric_key(prefix: &str, id: &str, suffix: &str) -> String {
+    let mut key = String::with_capacity(prefix.len() + id.len() + suffix.len() + 2);
+    key.push_str(prefix);
+    key.push('.');
+    key.push_str(id);
+    key.push('.');
+    key.push_str(suffix);
+    key
+}
+
+fn insert_policy_metric(
+    metrics: &mut HashMap<String, f64>,
+    prefix: &str,
+    id: &str,
+    suffix: &str,
+    value: f64,
+) {
+    metrics.insert(policy_metric_key(prefix, id, suffix), value);
+}
+
+fn policy_metrics_capacity(acl_rule_count: usize, qos_rule_count: usize) -> usize {
+    acl_rule_count
+        .saturating_mul(4)
+        .saturating_add(qos_rule_count.saturating_mul(3))
+        .saturating_add(7)
+}
+
 fn canonicalize_acl_qos_snapshot(snapshot: &mut AclQosSnapshot) {
     for group in &mut snapshot.ip_groups {
         group.cidrs.sort();
@@ -1791,11 +1818,11 @@ impl AgentRuntime {
                 Self::diff_peers_static(current_peers, new_peers);
             let to_add = to_add
                 .iter()
-                .map(|peer| Self::peer_config_for_interface(peer, iface, base_iface, listen_port))
+                .map(|peer| Self::peer_config_for_interface(*peer, iface, base_iface, listen_port))
                 .collect::<Result<Vec<_>>>()?;
             let to_update = to_update
                 .iter()
-                .map(|peer| Self::peer_config_for_interface(peer, iface, base_iface, listen_port))
+                .map(|peer| Self::peer_config_for_interface(*peer, iface, base_iface, listen_port))
                 .collect::<Result<Vec<_>>>()?;
 
             plans.push(PeerSyncPlan {
@@ -1983,10 +2010,10 @@ impl AgentRuntime {
         }
     }
 
-    fn diff_peers_static(
+    fn diff_peers_static<'a>(
         current: &[crate::wireguard::PeerInfo],
-        desired: &[GrpcPeerInfo],
-    ) -> (Vec<GrpcPeerInfo>, Vec<String>, Vec<GrpcPeerInfo>) {
+        desired: &'a [GrpcPeerInfo],
+    ) -> (Vec<&'a GrpcPeerInfo>, Vec<String>, Vec<&'a GrpcPeerInfo>) {
         let mut to_add = Vec::new();
         let mut to_remove = Vec::new();
         let mut to_update = Vec::new();
@@ -2007,10 +2034,10 @@ impl AgentRuntime {
                     || current.allowed_ips.get(0).map(|s| s.as_str())
                         != Some(&desired_peer.assigned_ip)
                 {
-                    to_update.push(desired_peer.clone());
+                    to_update.push(desired_peer);
                 }
             } else {
-                to_add.push(desired_peer.clone());
+                to_add.push(desired_peer);
             }
         }
 
@@ -2181,7 +2208,6 @@ impl AgentRuntime {
                     );
                 }
 
-                let mut custom_metrics = HashMap::new();
                 let mut acl_packets = 0_u64;
                 let mut acl_bytes = 0_u64;
                 let mut acl_dropped_packets = 0_u64;
@@ -2221,31 +2247,62 @@ impl AgentRuntime {
                     Ok::<_, anyhow::Error>((acl, qos))
                 })
                 .await??;
-                for stat in rule_stats.0 {
-                    custom_metrics
-                        .insert(format!("acl_rule.{}.packets", stat.id), stat.packets as f64);
-                    custom_metrics.insert(format!("acl_rule.{}.bytes", stat.id), stat.bytes as f64);
-                    custom_metrics.insert(
-                        format!("acl_rule.{}.dropped_packets", stat.id),
+                let (acl_rule_stats, qos_rule_stats) = rule_stats;
+                let mut custom_metrics = HashMap::with_capacity(policy_metrics_capacity(
+                    acl_rule_stats.len(),
+                    qos_rule_stats.len(),
+                ));
+                for stat in acl_rule_stats {
+                    insert_policy_metric(
+                        &mut custom_metrics,
+                        "acl_rule",
+                        &stat.id,
+                        "packets",
+                        stat.packets as f64,
+                    );
+                    insert_policy_metric(
+                        &mut custom_metrics,
+                        "acl_rule",
+                        &stat.id,
+                        "bytes",
+                        stat.bytes as f64,
+                    );
+                    insert_policy_metric(
+                        &mut custom_metrics,
+                        "acl_rule",
+                        &stat.id,
+                        "dropped_packets",
                         stat.dropped_packets as f64,
                     );
-                    custom_metrics.insert(
-                        format!("acl_rule.{}.dropped_bytes", stat.id),
+                    insert_policy_metric(
+                        &mut custom_metrics,
+                        "acl_rule",
+                        &stat.id,
+                        "dropped_bytes",
                         stat.dropped_bytes as f64,
                     );
                 }
-                for stat in rule_stats.1 {
+                for stat in qos_rule_stats {
                     qos_shaped_bytes = qos_shaped_bytes.saturating_add(stat.shaped_bytes);
-                    custom_metrics.insert(
-                        format!("qos_rule.{}.passed_bytes", stat.id),
+                    insert_policy_metric(
+                        &mut custom_metrics,
+                        "qos_rule",
+                        &stat.id,
+                        "passed_bytes",
                         stat.passed_bytes as f64,
                     );
-                    custom_metrics.insert(
-                        format!("qos_rule.{}.dropped_bytes", stat.id),
+                    insert_policy_metric(
+                        &mut custom_metrics,
+                        "qos_rule",
+                        &stat.id,
+                        "dropped_bytes",
                         stat.dropped_bytes as f64,
                     );
-                    custom_metrics.insert(
-                        format!("qos_rule.{}.shaped_bytes", stat.id),
+                    insert_policy_metric(
+                        &mut custom_metrics,
+                        "qos_rule",
+                        &stat.id,
+                        "shaped_bytes",
                         stat.shaped_bytes as f64,
                     );
                 }
@@ -2770,6 +2827,40 @@ mod tests {
             plans[1].to_add[0].allowed_ips,
             vec!["100.64.0.2/32".to_string(), "10.20.0.0/16".to_string()]
         );
+    }
+
+    #[test]
+    fn policy_metric_keys_are_deterministic_and_pre_sized() {
+        assert_eq!(
+            policy_metric_key("acl_rule", "rule-1", "dropped_packets"),
+            "acl_rule.rule-1.dropped_packets"
+        );
+        assert_eq!(policy_metrics_capacity(2, 3), 24);
+    }
+
+    #[test]
+    fn peer_diff_keeps_behavior_while_borrowing_desired_peers() {
+        let current = vec![WireGuardPeerInfo {
+            public_key: "peer-a".to_string(),
+            endpoint: Some("203.0.113.10:51820".to_string()),
+            allowed_ips: vec!["100.64.0.2".to_string()],
+            last_handshake: None,
+            rx_bytes: 0,
+            tx_bytes: 0,
+            persistent_keepalive: 25,
+        }];
+        let desired = vec![
+            grpc_peer("peer-a", "203.0.113.10:51820", "100.64.0.2"),
+            grpc_peer("peer-b", "203.0.113.11:51820", "100.64.0.3"),
+        ];
+
+        let (to_add, to_remove, to_update) =
+            AgentRuntime::diff_peers_static(&current, &desired);
+
+        assert_eq!(to_add.len(), 1);
+        assert_eq!(to_add[0].public_key.as_str(), "peer-b");
+        assert!(to_remove.is_empty());
+        assert!(to_update.is_empty());
     }
 
     fn grpc_peer(public_key: &str, endpoint: &str, assigned_ip: &str) -> GrpcPeerInfo {

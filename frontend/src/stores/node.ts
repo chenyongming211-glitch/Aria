@@ -2,6 +2,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api from '@/composables/useApi'
+import { unwrapApiList } from '@/composables/apiResponse'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 import { useAgentProxyApi } from '@/composables/useAgentProxyApi'
 import { useMonitorApi } from '@/composables/useMonitorApi'
@@ -160,18 +161,7 @@ export default defineStore('node', () => {
       // 使用租户节点 API
       const tenantId = requireCurrentTenantId()
       const response = await api.get(API_ENDPOINTS.TENANT.NODES(tenantId))
-      
-      let nodeData: RawNodeRecord[] = []
-      const result = response.data
-      
-      // 解析响应格式
-      if (Array.isArray(result)) {
-        nodeData = result
-      } else if (result && Array.isArray(result.data)) {
-        nodeData = result.data
-      } else if (result && result.success && Array.isArray(result.data)) {
-        nodeData = result.data
-      }
+      const nodeData = unwrapApiList<RawNodeRecord>(response)
       
       if (nodeData.length > 0) {
         nodes.value = nodeData.map((node: RawNodeRecord) => normalizeNodeRecord(node))

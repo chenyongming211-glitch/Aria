@@ -1,10 +1,10 @@
 import type { ApiEnvelope } from '@/types'
 
 interface ResponseLike<T> {
-  data: ApiEnvelope<T> | T
+  data?: unknown
 }
 
-function isEnvelope<T>(value: ApiEnvelope<T> | T): value is ApiEnvelope<T> {
+function isEnvelope<T>(value: unknown): value is ApiEnvelope<T> {
   return Boolean(value && typeof value === 'object' && 'success' in value)
 }
 
@@ -13,7 +13,7 @@ export function unwrapApiData<T>(response: ResponseLike<T>): T {
   if (isEnvelope<T>(body)) {
     return body.data as T
   }
-  return body
+  return body as T
 }
 
 export function unwrapApiList<T>(response: ResponseLike<T[] | { items?: T[] } | null | undefined>): T[] {

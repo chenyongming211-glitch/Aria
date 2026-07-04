@@ -65,6 +65,44 @@ func (s *Storage) CreateAuditEvent(event *AuditEvent) (*AuditEvent, error) {
 	return scanAuditEventRow(row)
 }
 
+func (s *Storage) CreateAuditEvents(events []*AuditEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+
+	values := make([]string, 0, len(events))
+	args := make([]interface{}, 0, len(events)*6)
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		if event.Detail == nil {
+			event.Detail = map[string]interface{}{}
+		}
+		detailJSON, err := json.Marshal(event.Detail)
+		if err != nil {
+			return fmt.Errorf("failed to marshal audit event detail: %w", err)
+		}
+		var nodeID interface{}
+		if event.NodeID != nil {
+			nodeID = *event.NodeID
+		}
+		args = append(args, event.TenantID, nodeID, event.EventType, event.Actor, event.Summary, detailJSON)
+		base := len(args) - 5
+		values = append(values, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)", base, base+1, base+2, base+3, base+4, base+5))
+	}
+	if len(values) == 0 {
+		return nil
+	}
+
+	_, err := s.db.Exec(`
+		INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
+		VALUES `+strings.Join(values, ", "),
+		args...,
+	)
+	return err
+}
+
 // ListAuditEvents queries audit events for a tenant with dynamic filtering.
 // Returns the list of audit events, total count, and any error.
 func (s *Storage) ListAuditEvents(tenantID uuid.UUID, filter AuditEventFilter) ([]*AuditEvent, int, error) {

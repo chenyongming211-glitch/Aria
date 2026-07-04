@@ -20,6 +20,11 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	maxMonitoringTopologyNodes = 200
+	maxGeneratedTopologyLinks  = 256
+)
+
 // handleMonitoringStats returns tenant-level monitoring statistics.
 // GET /api/v2/tenants/{tenant_id}/monitoring/stats
 func (r *Router) handleMonitoringStats(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
@@ -231,58 +236,40 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 }
 
 func (r *Router) buildNodeCertificateActivity(tenantID, nodeID uuid.UUID) (map[string]interface{}, error) {
-	lastRenewed, _, err := r.store.ListAuditEvents(tenantID, controllerstorage.AuditEventFilter{
-		NodeID:    &nodeID,
-		EventType: "certificate_renewed",
-		Limit:     1,
-	})
+	events, err := r.store.GetLatestNodeCertificateActivity(tenantID, nodeID)
 	if err != nil {
 		return nil, err
 	}
 
-	lastRenewFailed, _, err := r.store.ListAuditEvents(tenantID, controllerstorage.AuditEventFilter{
-		NodeID:    &nodeID,
-		EventType: "certificate_renew_failed",
-		Limit:     1,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	lastRevoked, _, err := r.store.ListAuditEvents(tenantID, controllerstorage.AuditEventFilter{
-		NodeID:    &nodeID,
-		EventType: controllerstorage.AuditCertRevoked,
-		Limit:     1,
-	})
-	if err != nil {
-		return nil, err
-	}
+	lastRenewed := events["certificate_renewed"]
+	lastRenewFailed := events["certificate_renew_failed"]
+	lastRevoked := events[controllerstorage.AuditCertRevoked]
 
 	activity := map[string]interface{}{}
-	if len(lastRenewed) > 0 && lastRenewed[0] != nil {
-		activity["last_renewed_at"] = lastRenewed[0].CreatedAt
-		if serialNumber := eventDetailString(lastRenewed[0].Detail, "serial_number"); serialNumber != "" {
+	if lastRenewed != nil {
+		activity["last_renewed_at"] = lastRenewed.CreatedAt
+		if serialNumber := eventDetailString(lastRenewed.Detail, "serial_number"); serialNumber != "" {
 			activity["last_renewed_serial_number"] = serialNumber
 		}
-		if renewedFrom := eventDetailString(lastRenewed[0].Detail, "renewed_from"); renewedFrom != "" {
+		if renewedFrom := eventDetailString(lastRenewed.Detail, "renewed_from"); renewedFrom != "" {
 			activity["last_renewed_from"] = renewedFrom
 		}
-		if notAfter := eventDetailString(lastRenewed[0].Detail, "not_after"); notAfter != "" {
+		if notAfter := eventDetailString(lastRenewed.Detail, "not_after"); notAfter != "" {
 			activity["last_renewed_not_after"] = notAfter
 		}
 	}
-	if len(lastRenewFailed) > 0 && lastRenewFailed[0] != nil {
-		activity["last_renew_failed_at"] = lastRenewFailed[0].CreatedAt
-		if reason := eventDetailString(lastRenewFailed[0].Detail, "error", "message"); reason != "" {
+	if lastRenewFailed != nil {
+		activity["last_renew_failed_at"] = lastRenewFailed.CreatedAt
+		if reason := eventDetailString(lastRenewFailed.Detail, "error", "message"); reason != "" {
 			activity["last_renew_failure"] = reason
 		}
 	}
-	if len(lastRevoked) > 0 && lastRevoked[0] != nil {
-		activity["last_revoked_at"] = lastRevoked[0].CreatedAt
-		if reason := eventDetailString(lastRevoked[0].Detail, "reason", "message"); reason != "" {
+	if lastRevoked != nil {
+		activity["last_revoked_at"] = lastRevoked.CreatedAt
+		if reason := eventDetailString(lastRevoked.Detail, "reason", "message"); reason != "" {
 			activity["last_revoke_reason"] = reason
 		}
-		if status := eventDetailString(lastRevoked[0].Detail, "node_status", "status"); status != "" {
+		if status := eventDetailString(lastRevoked.Detail, "node_status", "status"); status != "" {
 			activity["last_revoke_node_status"] = status
 		}
 	}
@@ -821,7 +808,7 @@ func (r *Router) handleMonitoringNodeMetrics(w http.ResponseWriter, req *http.Re
 // handleMonitoringTopology returns the mesh topology for a tenant.
 // GET /api/v2/tenants/{tenant_id}/monitoring/topology
 func (r *Router) handleMonitoringTopology(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
-	nodes, err := r.store.GetNodesByTenant(tenantID)
+	nodes, err := r.store.GetNodesByTenantPage(tenantID, maxMonitoringTopologyNodes, 0)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to get nodes", nil)
 		return
@@ -881,8 +868,13 @@ func (r *Router) handleMonitoringTopology(w http.ResponseWriter, req *http.Reque
 		}
 	}
 
+	linksTruncated := false
 	for i := 0; i < len(nodes); i++ {
 		for j := i + 1; j < len(nodes); j++ {
+			if len(links) >= maxGeneratedTopologyLinks {
+				linksTruncated = true
+				break
+			}
 			nodeA := nodes[i]
 			nodeB := nodes[j]
 
@@ -903,10 +895,14 @@ func (r *Router) handleMonitoringTopology(w http.ResponseWriter, req *http.Reque
 				"traffic": math.Round(totalTraffic*100) / 100, // bps
 			})
 		}
+		if linksTruncated {
+			break
+		}
 	}
 
 	apibase.WriteSuccess(w, map[string]interface{}{
-		"nodes": topoNodes,
-		"links": links,
+		"nodes":           topoNodes,
+		"links":           links,
+		"links_truncated": linksTruncated,
 	}, "Topology data retrieved")
 }

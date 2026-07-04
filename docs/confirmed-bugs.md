@@ -655,24 +655,27 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-84: Node 详情页 8+ 次独立 DB 查询
 
-- **状态**: 🔴 OPEN
+- **状态**: 🟡 PARTIAL (B7: `codex/bugfix-b7-scale-performance`)
 - **严重度**: MEDIUM
 - **文件**: `internal/api/v2/monitoring.go:77-231`
 - **根因**: `handleMonitoringNodeDetail` 对节点详情、控制状态、策略统计、证书、证书审计、命令、策略下发、告警、同租户节点等逐项查询；这是确认存在的 N+1/多查询性能风险，但不是 correctness bug。
+- **修复结果**: 证书活动从 3 类事件的 count/list 多次查询收敛为一次 `DISTINCT ON (event_type)` 查询；同租户节点相关 API 读取改走分页/有界路径。节点详情仍保留若干独立业务区块查询，后续如有压测瓶颈再做更大范围聚合查询。
 
 #### BUG-85: 批量命令每节点一次独立 DB 写入
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B7: `codex/bugfix-b7-scale-performance`)
 - **严重度**: HIGH
 - **文件**: `internal/api/v2/operations.go:226-261`
 - **根因**: `handleTenantBatchAgentCommand` for 循环内每节点一次 QueueAgentCommand + audit。N=100 节点 = 100 次独立写入。
+- **修复结果**: 批量命令改为一次 `QueueAgentCommands` bulk insert；审计事件改为一次 `CreateAuditEvents` bulk insert，并补充批量队列回归测试。
 
 #### BUG-86: CommandStream 每 agent 每 2s 空轮询
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B7: `codex/bugfix-b7-scale-performance`)
 - **严重度**: MEDIUM
 - **文件**: `internal/controller/grpc/server.go:275,310`
 - **根因**: 无命令时仍每 2s 轮询一次。100 agent = 50 次/秒无用数据库查询。
+- **修复结果**: CommandStream 空闲轮询改为指数退避并设置上限；收到命令后重置退避，补充 idle backoff 单测。
 
 ### 🟡 MEDIUM / 🟢 LOW
 
@@ -692,45 +695,51 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-89: getNodes 字符串拼接 SQL（当前安全但脆弱）
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B7: `codex/bugfix-b7-scale-performance`)
 - **严重度**: MEDIUM
 - **文件**: `pkg/controllerstorage/postgres.go:783-812`
 - **根因**: `query += " " + extraWhere` 动态拼接。当前调用方只传硬编码常量，但未来开发者可传入用户输入。
+- **修复结果**: 动态字符串拼接 helper 替换为 `NodeListOptions` typed query builder；API 分页读取使用 `GetNodesByTenantPage`。
 
 #### BUG-90: acl_rules/qos_rules 缺 (tenant_id, node_id) 复合索引
 
-- **状态**: 🟡 PARTIAL
+- **状态**: ✅ FIXED (B7: `codex/bugfix-b7-scale-performance`)
 - **严重度**: MEDIUM
 - **文件**: `pkg/controllerstorage/postgres.go:379-389`、`pkg/controllerstorage/network_policy.go:625`
 - **复核结论**: 部分成立。`qos_rules` 已有 `idx_qos_rules_tenant_node`，原描述中 QoS 部分不成立；`acl_rules` 只有 `tenant_id` 和 `node_id` 单列索引，`GetEnabledTenantNodeACLRules(tenant_id,node_id)` 缺复合索引。
+- **修复结果**: 新增 `idx_acl_rules_tenant_node ON acl_rules(tenant_id, node_id)`；QoS 复合索引保持已有实现。
 
 #### BUG-91: nodes.hostname 缺索引
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B7: `codex/bugfix-b7-scale-performance`)
 - **严重度**: MEDIUM
 - **文件**: `pkg/controllerstorage/postgres.go` DDL
 - **根因**: `GetNodeByHostname` 查询 `WHERE hostname = $1` 无索引，每次注册全表扫描。
+- **修复结果**: 新增 `idx_nodes_hostname ON nodes(hostname)`。
 
 #### BUG-92: GetNodesByTenant 无分页全量加载到内存
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B7: `codex/bugfix-b7-scale-performance`)
 - **严重度**: MEDIUM
 - **文件**: `pkg/controllerstorage/postgres.go:639`
 - **根因**: 所有节点列表查询无 LIMIT/OFFSET。千级租户时全量加载。
+- **修复结果**: 新增 `GetNodesByTenantPage(tenantID, limit, offset)` 和统一分页解析；节点列表、拓扑和批量命令目标选择等 API 路径改为有界读取。运行期 peer sync 保留全量读取，因为 Agent 同步需要完整租户 peer 快照。
 
 #### BUG-93: Topology O(n²) 链路
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B7: `codex/bugfix-b7-scale-performance`)
 - **严重度**: MEDIUM
 - **文件**: `internal/api/v2/monitoring.go:884-906`
 - **根因**: 双重 for 循环构造全网状 link。200 节点 = 19,900 个 link 对象，响应体巨大。
+- **修复结果**: 拓扑节点读取限制为有界分页，并将生成链路限制为 `maxGeneratedTopologyLinks`，响应返回 `links_truncated` 标记。
 
 #### BUG-94: Rust metric label 用 format!() 创建每 30s ~1400 次分配
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B7: `codex/bugfix-b7-scale-performance`, CI Rust validation required)
 - **严重度**: LOW
 - **文件**: `agent-rust/agent/src/agent_runtime.rs:2122-2149`
 - **根因**: 每个 ACL/QoS rule stat 都用 `format!()` 新建 String。它是确认存在的性能优化点，但按 30s 周期看不应列为当前 correctness bug。
+- **修复结果**: ACL/QoS policy metric key 热路径移除 `format!()`，改用预分配 key builder，并按规则数量预分配 `custom_metrics` 容量。
 
 ### 🟢 LOW / 优化债
 
@@ -750,24 +759,27 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-97: Rust sync_peers 每次 clone 全部 PeerInfo
 
-- **状态**: 🔴 OPEN
+- **状态**: 🟡 PARTIAL (B7: `codex/bugfix-b7-scale-performance`, CI Rust validation required)
 - **严重度**: LOW
 - **文件**: `agent-rust/agent/src/agent_runtime.rs:1688-1690,1908-1911`
 - **根因**: `sync_peers` 入口先 `to_vec()`，diff 时又 clone desired peer；这是确认存在的性能优化点，不是功能错误。
+- **修复结果**: `diff_peers_static` 改为返回 desired peer 引用，移除 diff 阶段二次 clone。入口 `to_vec()` 仍保留，因为 `spawn_blocking` 需要 `'static` owned data；彻底移除需要重构 blocking 边界，另行评估。
 
 #### BUG-98: agent_commands deadline 表达式阻索引使用
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B7: `codex/bugfix-b7-scale-performance`)
 - **严重度**: LOW
 - **文件**: `pkg/controllerstorage/agent_commands.go:119-129,241-267`
 - **根因**: 超时判断使用 `sent_at + timeout_seconds * interval` / `COALESCE(...) + timeout_seconds * interval` 表达式，普通时间索引无法直接服务该条件；大量命令时会影响扫描效率。
+- **修复结果**: `agent_commands` 增加 `deadline_at`，创建索引 `idx_agent_commands_node_status_deadline`，超时扫描改查 `deadline_at < NOW()`。
 
 #### BUG-99: sync_with_state 6+ 中间 Vec 分配
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B7: `codex/bugfix-b7-scale-performance`, CI Rust validation required)
 - **严重度**: LOW
 - **文件**: `agent-rust/agent/src/grpc_client.rs:306-360`
 - **根因**: gRPC SyncResponse 转内部 SyncResult 时对 peers/ip_groups/acl/qos/blacklist 等集合逐个 map+collect；这是确认存在的内存分配优化点，不是 correctness bug。
+- **修复结果**: `SyncResponse -> SyncResult` 转换提为显式 helper，按响应集合长度 `Vec::with_capacity` 后 push，保留 runtime token 空串归一化语义。
 
 ---
 

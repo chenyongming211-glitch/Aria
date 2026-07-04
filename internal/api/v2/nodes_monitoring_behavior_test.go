@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -70,6 +71,12 @@ func expectTenantNodesQuery(mock sqlmock.Sqlmock, tenantID uuid.UUID) *sqlmock.E
 	)).WithArgs(tenantID)
 }
 
+func expectTenantNodesPageQuery(mock sqlmock.Sqlmock, tenantID uuid.UUID, limit, offset int) *sqlmock.ExpectedQuery {
+	return mock.ExpectQuery(regexp.QuoteMeta(
+		`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND status != 'deleted' ORDER BY last_seen DESC LIMIT $2 OFFSET $3`,
+	)).WithArgs(tenantID, limit, offset)
+}
+
 func expectNodeLookupWithStatus(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, routes, status string) {
 	now := time.Now()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE id = $1`)).
@@ -114,7 +121,7 @@ func TestNodesAPI_ListSuccessWithEmptyData(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	expectTenantNodesQuery(mock, tenantID).
+	expectTenantNodesPageQuery(mock, tenantID, controllerstorage.DefaultNodeListLimit, 0).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
@@ -143,7 +150,7 @@ func TestNodesAPI_ListReturnsGetNodesFailedOnDBError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	expectTenantNodesQuery(mock, tenantID).WillReturnError(errors.New("db unavailable"))
+	expectTenantNodesPageQuery(mock, tenantID, controllerstorage.DefaultNodeListLimit, 0).WillReturnError(errors.New("db unavailable"))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/nodes", nil), tenantID)
@@ -875,17 +882,13 @@ func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
 			nil,
 			now,
 		))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM audit_events WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3")).
-		WithArgs(tenantID, nodeID, "certificate_renewed").
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, event_type, actor, summary, detail, created_at
+		SELECT DISTINCT ON (event_type) id, tenant_id, node_id, event_type, actor, summary, detail, created_at
 		FROM audit_events
-		WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3
-		ORDER BY created_at DESC
-		LIMIT $4 OFFSET $5
+		WHERE tenant_id = $1 AND node_id = $2 AND event_type = ANY($3)
+		ORDER BY event_type, created_at DESC
 	`)).
-		WithArgs(tenantID, nodeID, "certificate_renewed", 1, 0).
+		WithArgs(tenantID, nodeID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at",
 		}).AddRow(
@@ -897,21 +900,7 @@ func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
 			"certificate renewed",
 			[]byte(`{"serial_number":"serial-2","renewed_from":"serial-1","not_after":"2026-04-25T10:00:00Z"}`),
 			now.Add(-2*time.Hour),
-		))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM audit_events WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3")).
-		WithArgs(tenantID, nodeID, "certificate_renew_failed").
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, event_type, actor, summary, detail, created_at
-		FROM audit_events
-		WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3
-		ORDER BY created_at DESC
-		LIMIT $4 OFFSET $5
-	`)).
-		WithArgs(tenantID, nodeID, "certificate_renew_failed", 1, 0).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at",
-		}).AddRow(
+		).AddRow(
 			uuid.New(),
 			tenantID,
 			nodeID.String(),
@@ -920,21 +909,7 @@ func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
 			"certificate renew failed",
 			[]byte(`{"error":"runtime token expired"}`),
 			now.Add(-time.Hour),
-		))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM audit_events WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3")).
-		WithArgs(tenantID, nodeID, controllerstorage.AuditCertRevoked).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, event_type, actor, summary, detail, created_at
-		FROM audit_events
-		WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3
-		ORDER BY created_at DESC
-		LIMIT $4 OFFSET $5
-	`)).
-		WithArgs(tenantID, nodeID, controllerstorage.AuditCertRevoked, 1, 0).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at",
-		}).AddRow(
+		).AddRow(
 			uuid.New(),
 			tenantID,
 			nodeID.String(),
@@ -1170,41 +1145,13 @@ func TestMonitoringAPI_NodeDetailLearnedRoutesFailureReturnsInternalError(t *tes
 	`)).
 		WithArgs(nodeID).
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM audit_events WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3")).
-		WithArgs(tenantID, nodeID, "certificate_renewed").
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, event_type, actor, summary, detail, created_at
+		SELECT DISTINCT ON (event_type) id, tenant_id, node_id, event_type, actor, summary, detail, created_at
 		FROM audit_events
-		WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3
-		ORDER BY created_at DESC
-		LIMIT $4 OFFSET $5
+		WHERE tenant_id = $1 AND node_id = $2 AND event_type = ANY($3)
+		ORDER BY event_type, created_at DESC
 	`)).
-		WithArgs(tenantID, nodeID, "certificate_renewed", 1, 0).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at"}))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM audit_events WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3")).
-		WithArgs(tenantID, nodeID, "certificate_renew_failed").
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, event_type, actor, summary, detail, created_at
-		FROM audit_events
-		WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3
-		ORDER BY created_at DESC
-		LIMIT $4 OFFSET $5
-	`)).
-		WithArgs(tenantID, nodeID, "certificate_renew_failed", 1, 0).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at"}))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM audit_events WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3")).
-		WithArgs(tenantID, nodeID, controllerstorage.AuditCertRevoked).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, event_type, actor, summary, detail, created_at
-		FROM audit_events
-		WHERE tenant_id = $1 AND node_id = $2 AND event_type = $3
-		ORDER BY created_at DESC
-		LIMIT $4 OFFSET $5
-	`)).
-		WithArgs(tenantID, nodeID, controllerstorage.AuditCertRevoked, 1, 0).
+		WithArgs(tenantID, nodeID, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at"}))
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT id, node_public_key, command, params, status, COALESCE(message, ''), priority, timeout_seconds,
@@ -2003,7 +1950,7 @@ func TestMonitoringAPI_TopologyBoundaryNoNodesReturnsEmptyCollections(t *testing
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	expectTenantNodesQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	expectTenantNodesPageQuery(mock, tenantID, maxMonitoringTopologyNodes, 0).WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/topology", nil), tenantID)
@@ -2037,7 +1984,7 @@ func TestMonitoringAPI_TopologyReturnsInternalErrorWhenNodeQueryFails(t *testing
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	expectTenantNodesQuery(mock, tenantID).WillReturnError(errors.New("query failed"))
+	expectTenantNodesPageQuery(mock, tenantID, maxMonitoringTopologyNodes, 0).WillReturnError(errors.New("query failed"))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/topology", nil), tenantID)
@@ -2067,7 +2014,7 @@ func TestMonitoringAPI_TopologyOneNodeReturnsNodeWithoutLinks(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	expectTenantNodesQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows([]string{
+	expectTenantNodesPageQuery(mock, tenantID, maxMonitoringTopologyNodes, 0).WillReturnRows(sqlmock.NewRows([]string{
 		"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
 		"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
 		"created_at", "updated_at",
@@ -2118,7 +2065,7 @@ func TestMonitoringAPI_TopologyExcludesSuspendedNodes(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	expectTenantNodesQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows([]string{
+	expectTenantNodesPageQuery(mock, tenantID, maxMonitoringTopologyNodes, 0).WillReturnRows(sqlmock.NewRows([]string{
 		"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
 		"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
 		"created_at", "updated_at",
@@ -2169,7 +2116,7 @@ func TestMonitoringAPI_TopologyTwoNodesReturnsActiveLink(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	expectTenantNodesQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows([]string{
+	expectTenantNodesPageQuery(mock, tenantID, maxMonitoringTopologyNodes, 0).WillReturnRows(sqlmock.NewRows([]string{
 		"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
 		"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
 		"created_at", "updated_at",
@@ -2211,6 +2158,50 @@ func TestMonitoringAPI_TopologyTwoNodesReturnsActiveLink(t *testing.T) {
 	}
 }
 
+func TestMonitoringAPI_TopologyCapsGeneratedMeshLinks(t *testing.T) {
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	rows := sqlmock.NewRows(operationNodeColumns())
+	for i := 0; i < 40; i++ {
+		addOperationNodeRow(
+			rows,
+			uuid.New(),
+			tenantID,
+			fmt.Sprintf("pub-key-%02d", i),
+			fmt.Sprintf("node-%02d", i),
+			"online",
+		)
+	}
+	expectTenantNodesPageQuery(mock, tenantID, maxMonitoringTopologyNodes, 0).WillReturnRows(rows)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/topology", nil), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+	links := responseDataSlice(t, data["links"])
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if len(links) > 256 {
+		t.Fatalf("topology generated too many mesh links: got %d, want at most 256", len(links))
+	}
+	if truncated, ok := data["links_truncated"].(bool); !ok || !truncated {
+		t.Fatalf("expected topology response to mark links_truncated=true, got %#v", data["links_truncated"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestMonitoringAPI_TopologyScopesVMQueryToTenantNodeInstances(t *testing.T) {
 	tenantID := uuid.New()
 	nodeAID := uuid.New()
@@ -2222,7 +2213,7 @@ func TestMonitoringAPI_TopologyScopesVMQueryToTenantNodeInstances(t *testing.T) 
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	expectTenantNodesQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows([]string{
+	expectTenantNodesPageQuery(mock, tenantID, maxMonitoringTopologyNodes, 0).WillReturnRows(sqlmock.NewRows([]string{
 		"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
 		"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
 		"created_at", "updated_at",

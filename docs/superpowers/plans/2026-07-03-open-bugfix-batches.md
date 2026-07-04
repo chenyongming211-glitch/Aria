@@ -287,6 +287,8 @@ git diff --check -- .github/workflows/build.yml deployments/ansible docs/deploym
 
 ### B7: Scale and Performance Hardening
 
+**Status:** Implemented on `codex/bugfix-b7-scale-performance`; local Go and frontend validation passed. Rust Agent local validation is blocked because this workstation has no `cargo`/`rustfmt`; require GitHub Actions Rust Agent validation before merge.
+
 **Priority:** P3/P4
 
 **Bugs:** BUG-84, BUG-85, BUG-86, BUG-89, BUG-90, BUG-91, BUG-92, BUG-93, BUG-98, BUG-94, BUG-97, BUG-99
