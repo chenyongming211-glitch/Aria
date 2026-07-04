@@ -840,19 +840,55 @@ fn needs_bootstrap_registration(state: &config::AgentState, now: i64) -> bool {
     }
 }
 
+struct RegistrationAuthMaterial {
+    enrollment_token: String,
+    runtime_token: Option<String>,
+}
+
+fn registration_auth_material(
+    bootstrap: &config::BootstrapConfig,
+    state: &config::AgentState,
+    now: i64,
+) -> Result<RegistrationAuthMaterial> {
+    let enrollment_token = bootstrap
+        .enrollment_token
+        .clone()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let runtime_token = state
+        .current_credential
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .filter(|_| {
+            state
+                .current_credential_expires_at
+                .map(|expires_at| expires_at > now)
+                .unwrap_or(true)
+        })
+        .map(str::to_string);
+
+    if enrollment_token.is_empty() && runtime_token.is_none() {
+        anyhow::bail!("enrollment_token or valid runtime credential is required for registration");
+    }
+
+    Ok(RegistrationAuthMaterial {
+        enrollment_token,
+        runtime_token,
+    })
+}
+
 async fn bootstrap_register(
     bootstrap: &config::BootstrapConfig,
     state: &mut config::AgentState,
 ) -> Result<bool> {
-    if !needs_bootstrap_registration(state, current_epoch_seconds()) {
+    let now = current_epoch_seconds();
+    if !needs_bootstrap_registration(state, now) {
         return Ok(false);
     }
 
-    let token = bootstrap
-        .enrollment_token
-        .clone()
-        .filter(|value| !value.trim().is_empty())
-        .context("enrollment_token is required for first-time registration")?;
+    let auth = registration_auth_material(bootstrap, state, now)?;
 
     let hostname = bootstrap
         .hostname
@@ -895,8 +931,8 @@ async fn bootstrap_register(
         None
     };
     let (bootstrap_client_cert, bootstrap_client_key) = if certificate_request.is_some() {
-        // The configured certificate paths intentionally do not exist yet. Register with the
-        // enrollment token first, then write the returned certificate before later gRPC reconnects.
+        // The configured certificate paths intentionally do not exist yet. Register first, then
+        // write the returned certificate before later gRPC reconnects.
         (String::new(), String::new())
     } else {
         (bootstrap.client_cert.clone(), bootstrap.client_key.clone())
@@ -918,7 +954,8 @@ async fn bootstrap_register(
             endpoint,
             public_ip,
             hostname,
-            token,
+            auth.enrollment_token,
+            auth.runtime_token,
             bootstrap.region.clone().unwrap_or_else(|| "default".to_string()),
             machine_id.clone(),
             bootstrap.advertised_routes.clone().unwrap_or_default(),
@@ -1252,8 +1289,8 @@ async fn run_agent_runtime(
 mod tests {
     use super::{
         is_public_ipv4, needs_bootstrap_registration, normalize_public_endpoint,
-        normalize_public_ipv4, should_request_bootstrap_certificate, validate_init_inputs,
-        validate_interface_name,
+        normalize_public_ipv4, registration_auth_material, should_request_bootstrap_certificate,
+        validate_init_inputs, validate_interface_name,
     };
     use crate::config::{AgentState, BootstrapConfig};
     use std::fs;
@@ -1294,6 +1331,26 @@ mod tests {
         };
 
         assert!(!needs_bootstrap_registration(&state, 1_700_000_000));
+    }
+
+    #[test]
+    fn registration_auth_material_allows_runtime_re_registration_without_enrollment_token() {
+        let bootstrap = BootstrapConfig {
+            enrollment_token: None,
+            ..Default::default()
+        };
+        let state = AgentState {
+            assigned_ip: None,
+            current_credential: Some("rt.existing".to_string()),
+            current_credential_expires_at: Some(1_700_000_600),
+            ..Default::default()
+        };
+
+        let auth = registration_auth_material(&bootstrap, &state, 1_700_000_000)
+            .expect("valid runtime credential should authorize re-registration");
+
+        assert_eq!(auth.enrollment_token, "");
+        assert_eq!(auth.runtime_token.as_deref(), Some("rt.existing"));
     }
 
     #[test]

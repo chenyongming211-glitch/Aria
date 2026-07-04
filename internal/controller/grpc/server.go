@@ -86,7 +86,12 @@ func (s *ControllerServer) Register(ctx context.Context, req *agentpb.RegisterRe
 		return nil, fmt.Errorf("registration failed: register handler is not configured")
 	}
 
-	result, err := s.registerHandler(registrationRequestFromProto(req))
+	registrationReq := registrationRequestFromProto(req)
+	if strings.TrimSpace(registrationReq.RuntimeToken) == "" {
+		registrationReq.RuntimeToken = registrationRuntimeTokenFromContext(ctx)
+	}
+
+	result, err := s.registerHandler(registrationReq)
 	if err != nil {
 		return nil, fmt.Errorf("registration failed: %w", err)
 	}
@@ -135,6 +140,22 @@ func registrationRequestFromProto(req *agentpb.RegisterRequest) *RegistrationReq
 		MachineID:        req.MachineId,
 		CSRPEM:           req.CsrPem,
 	}
+}
+
+func registrationRuntimeTokenFromContext(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+	values := md.Get("authorization")
+	if len(values) == 0 {
+		return ""
+	}
+	authz := strings.TrimSpace(values[0])
+	if strings.HasPrefix(strings.ToLower(authz), "bearer ") {
+		authz = strings.TrimSpace(authz[len("bearer "):])
+	}
+	return authz
 }
 
 // Sync 处理 Agent 定期同步请求

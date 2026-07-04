@@ -1,10 +1,12 @@
 # 代码 Bug 追踪
 
-**最后复核**: 2026-07-03
-**复核方式**: 全量静态代码复核 + 多 Agent 并行 Review + 本地 Go/Frontend 回归验证
+**最后复核**: 2026-07-04
+**复核方式**: 全量静态代码复核 + 多 Agent 并行 Review + 本地 Go/Frontend 回归验证 + 已记录 bug 状态复核
 **说明**: 本文档记录“当前状态”，不再把历史 OPEN 条目和后续 FIXED 结论混写在一起。
 **AI 范围决定**: AI Agent 后续计划替换为 Hermes Agent。本轮不扩展旧 AI 写操作闭环，但已把旧 AI 写入口后端 fail-closed：聊天只暴露只读工具，`ExecuteTool` 即使 `confirmed=true` 也拒绝旧写工具；Hermes 接入时再重新设计 pending confirmation、policy delivery 和审计链路。
 **2026-07-03 复核结论**: BUG-58~61、BUG-63~82、BUG-84~89、BUG-91~93、BUG-95~99 均有当前代码证据；BUG-62、BUG-83 复核为不成立；BUG-90 原描述部分成立（ACL 缺复合索引，QoS 已有）；BUG-94、BUG-97、BUG-99 是优化债，不按 correctness bug 排序。新增 BUG-100~110。
+**2026-07-04 状态复核结论**: B1~B7 已合入当前 `master`；BUG-64、BUG-65、BUG-66 经代码复核为 FIXED；BUG-74、BUG-75 仍为 OPEN；BUG-84、BUG-97 为 PARTIAL。
+**2026-07-04 B8 修复结论**: B8 分支修复 BUG-76、BUG-100、BUG-101；本地已通过 Go gRPC/contract 测试，Rust 编译和 Rust 单测需由 CI 验证。
 
 ---
 
@@ -496,24 +498,27 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-64: Agent 多隧道 sync_peers 部分更新不回滚
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B3: `codex/bugfix-b3-agent-runtime`)
 - **严重度**: HIGH
-- **文件**: `agent-rust/agent/src/agent_runtime.rs:1704-1814`
+- **文件**: `agent-rust/agent/src/agent_runtime.rs:1723-1973`
 - **根因**: sync_peers 遍历多隧道接口（最多 4 个），逐个 apply peer 变更。若 aria2 失败，aria0/aria1 已提交但不回滚，peer 状态不一致。
+- **修复结果**: 当前实现先采集所有接口快照并构建完整 peer sync plans；执行阶段失败会调用 rollback，用 sync 前快照恢复每个接口。
 
 #### BUG-65: Agent state 文件损坏后永久启动失败
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B3: `codex/bugfix-b3-agent-runtime`)
 - **严重度**: HIGH
 - **文件**: `agent-rust/agent/src/config.rs:397-417`
 - **根因**: `load_state_opt()` 解析失败直接 `?` 传播错误，不 fallback 到 legacy config 或 fresh state。磁盘满/崩溃截断后永久无法启动。
+- **修复结果**: `load_or_migrate_state()` 保留 `load_state_opt()` 的严格诊断语义，但 state 读取/解析失败时会 warning 并 fallback 到 legacy config 或 fresh state。
 
 #### BUG-66: 证书续期先写磁盘后验证 gRPC 重连
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B3: `codex/bugfix-b3-agent-runtime`)
 - **严重度**: HIGH
-- **文件**: `agent-rust/agent/src/agent_runtime.rs:2265-2271`
+- **文件**: `agent-rust/agent/src/agent_runtime.rs:2424-2438`、`agent-rust/agent/src/certificate_client.rs:176-192`
 - **根因**: `write_renewed_certificate_files` → 磁盘写入成功 → `reconnect_grpc` 失败。旧证书已被覆盖，重连失败时 agent 重启即砖。
+- **修复结果**: 写入新证书前备份旧 CA/client cert/client key；写入失败或 gRPC 重连失败会 restore 旧文件。
 
 #### BUG-67: Restore 全量替换生产数据库无 pre-flight 检查
 
@@ -570,22 +575,23 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 - **状态**: 🔴 OPEN
 - **严重度**: MEDIUM
-- **文件**: `agent-rust/agent/src/agent_runtime.rs:2424-2447`、`agent-rust/agent/src/agent_runtime.rs:489-519`
+- **文件**: `agent-rust/agent/src/agent_runtime.rs:524-538`、`agent-rust/agent/src/agent_runtime.rs:2591-2605`
 - **根因**: 运行时关闭 cleanup 只删 4 个 identity map；启动前 cleanup 会删 12 个 map，但正常停机后仍会留下 POLICY/QOS/STATS/CONFIG 等 pinned map，造成 bpffs 残留和运维误判。
 
 #### BUG-75: Agent state YAML 非原子写入
 
 - **状态**: 🔴 OPEN
 - **严重度**: MEDIUM
-- **文件**: `agent-rust/agent/src/config.rs:464-489`
+- **文件**: `agent-rust/agent/src/config.rs:472-485`
 - **根因**: `write_yaml_file` 直接 `std::fs::write` 无 tmp+rename。崩溃截断 → BUG-65 永久启动失败。
 
 #### BUG-76: 命令流断开时在途命令结果丢失
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B8: `codex/bugfix-b8-agent-runtime-recovery`)
 - **严重度**: MEDIUM
-- **文件**: `agent-rust/agent/src/agent_runtime.rs:942-948`
+- **文件**: `agent-rust/agent/src/agent_runtime.rs:920-1090`
 - **根因**: 命令流重连后创建新 mpsc channel，旧命令的最终 completed/failed 响应无处投递。Controller 收到 ack 但无终态。
+- **修复结果**: Agent 增加 pending command response outbox；终态发送失败时入队，CommandStream 重连后优先 flush pending terminal responses，避免 stream 断开导致命令终态丢失。
 
 #### BUG-77: Nodes.vue 保存分两步无回滚
 
@@ -657,7 +663,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 - **状态**: 🟡 PARTIAL (B7: `codex/bugfix-b7-scale-performance`)
 - **严重度**: MEDIUM
-- **文件**: `internal/api/v2/monitoring.go:77-231`
+- **文件**: `internal/api/v2/monitoring.go:82-210`、`pkg/controllerstorage/monitoring_queries.go:122-129`
 - **根因**: `handleMonitoringNodeDetail` 对节点详情、控制状态、策略统计、证书、证书审计、命令、策略下发、告警、同租户节点等逐项查询；这是确认存在的 N+1/多查询性能风险，但不是 correctness bug。
 - **修复结果**: 证书活动从 3 类事件的 count/list 多次查询收敛为一次 `DISTINCT ON (event_type)` 查询；同租户节点相关 API 读取改走分页/有界路径。节点详情仍保留若干独立业务区块查询，后续如有压测瓶颈再做更大范围聚合查询。
 
@@ -761,7 +767,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 - **状态**: 🟡 PARTIAL (B7: `codex/bugfix-b7-scale-performance`, CI Rust validation required)
 - **严重度**: LOW
-- **文件**: `agent-rust/agent/src/agent_runtime.rs:1688-1690,1908-1911`
+- **文件**: `agent-rust/agent/src/agent_runtime.rs:1723-1724,1817-1826`
 - **根因**: `sync_peers` 入口先 `to_vec()`，diff 时又 clone desired peer；这是确认存在的性能优化点，不是功能错误。
 - **修复结果**: `diff_peers_static` 改为返回 desired peer 引用，移除 diff 阶段二次 clone。入口 `to_vec()` 仍保留，因为 `spawn_blocking` 需要 `'static` owned data；彻底移除需要重构 blocking 边界，另行评估。
 
@@ -789,21 +795,23 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 **复核方式**: 4 个子 Agent 并行 Review + 主线程代码链路复核
 **说明**: 第五轮聚焦接入闭环、控制闭环、前端策略上下文、CI/CD 交付风险。
 
-### 🔴 HIGH（2）
+### 🔴 HIGH（B8 已闭合）
 
 #### BUG-100: Agent 重新 bootstrap 时不能使用已有 runtime credential
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B8: `codex/bugfix-b8-agent-runtime-recovery`)
 - **严重度**: HIGH
-- **文件**: `agent-rust/agent/src/main.rs:830-855`、`internal/cli/controller_serve.go:1003-1048`
+- **文件**: `agent-rust/agent/src/main.rs:830-890,951-960`、`agent-rust/agent/src/grpc_client.rs:175-216`、`internal/controller/grpc/server.go:83-155`、`internal/cli/controller_serve.go:1017-1048`
 - **根因**: Agent 只要 `assigned_ip` 缺失或 runtime token 60s 内过期，就进入 `bootstrap_register()` 并强制要求 `bootstrap.enrollment_token`。但 Controller 已支持已有节点用 runtime token re-registration，Agent 端没有利用，导致清理 enrollment token 后的重注册/恢复路径失败。
+- **修复结果**: Controller gRPC Register 从 metadata 读取 runtime bearer token 并传入注册 handler；Agent bootstrap re-registration 在已有未过期 runtime credential 时允许无 enrollment token 注册，并把 runtime token 放入 gRPC metadata。
 
 #### BUG-101: Sync 下发的新 runtime token 在 peer/route apply 失败时不会落盘
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B8: `codex/bugfix-b8-agent-runtime-recovery`)
 - **严重度**: HIGH
-- **文件**: `agent-rust/agent/src/agent_runtime.rs:1493-1505,1547`、`internal/controller/grpc/server.go:209-226`
-- **根因**: Controller 每次 Sync 刷新 runtime token；Agent 先把 token 写进内存，再执行 `sync_peers` / `sync_advertised_routes`。如果这两步失败，函数直接返回，`persist_runtime_state()` 不执行，新 token 不落盘，重启后可能继续使用旧 token。
+- **文件**: `agent-rust/agent/src/agent_runtime.rs:814-831,1511-1563,2617-2632`、`internal/controller/grpc/server.go:209-226`
+- **根因**: Controller 每次 Sync 刷新 runtime token；Agent 先把 token 写进内存，再执行 `sync_peers` / `sync_advertised_routes`。如果 apply 失败路径没有落盘，新 token 重启后可能丢失。
+- **修复结果**: `sync()` 在本地 apply 前记录 runtime token；定时 sync、immediate sync 和 ACL/QoS apply error 路径都会在记录 error observation 后调用 `persist_runtime_state()`。
 
 ### 🟡 MEDIUM（7）
 
