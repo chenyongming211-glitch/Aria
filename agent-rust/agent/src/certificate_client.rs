@@ -127,6 +127,101 @@ pub fn write_renewed_certificate_files(
     Ok(())
 }
 
+pub struct CertificateFileBackup {
+    files: Vec<CertificateFileSnapshot>,
+}
+
+struct CertificateFileSnapshot {
+    path: String,
+    content: Option<Vec<u8>>,
+    mode: u32,
+}
+
+impl CertificateFileBackup {
+    pub fn restore(&self) -> Result<()> {
+        for file in &self.files {
+            match &file.content {
+                Some(content) => {
+                    write_atomic_file(&file.path, content, file.mode)
+                        .with_context(|| format!("failed to restore certificate file {}", file.path))?;
+                }
+                None => {
+                    match fs::remove_file(&file.path) {
+                        Ok(()) => {}
+                        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(err) => {
+                            return Err(err)
+                                .with_context(|| format!("failed to remove new certificate file {}", file.path));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+pub fn backup_certificate_files(
+    ca_cert_path: &str,
+    client_cert_path: &str,
+    client_key_path: &str,
+) -> Result<CertificateFileBackup> {
+    let files = [ca_cert_path, client_cert_path, client_key_path]
+        .into_iter()
+        .map(snapshot_certificate_file)
+        .collect::<Result<Vec<_>>>()?;
+    Ok(CertificateFileBackup { files })
+}
+
+pub fn write_renewed_certificate_files_with_backup(
+    ca_cert_path: &str,
+    client_cert_path: &str,
+    client_key_path: &str,
+    renewed: &RenewedCertificate,
+) -> Result<CertificateFileBackup> {
+    let backup = backup_certificate_files(ca_cert_path, client_cert_path, client_key_path)?;
+    if let Err(err) = write_renewed_certificate_files(ca_cert_path, client_cert_path, client_key_path, renewed) {
+        if let Err(restore_err) = backup.restore() {
+            tracing::error!(
+                "Failed to restore certificate files after renewal write failure: {:?}",
+                restore_err
+            );
+        }
+        return Err(err);
+    }
+    Ok(backup)
+}
+
+fn snapshot_certificate_file(path: &str) -> Result<CertificateFileSnapshot> {
+    match fs::read(path) {
+        Ok(content) => Ok(CertificateFileSnapshot {
+            path: path.to_string(),
+            content: Some(content),
+            mode: certificate_file_mode(path)?,
+        }),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(CertificateFileSnapshot {
+            path: path.to_string(),
+            content: None,
+            mode: 0o600,
+        }),
+        Err(err) => Err(err).with_context(|| format!("failed to read certificate file {}", path)),
+    }
+}
+
+#[cfg(unix)]
+fn certificate_file_mode(path: &str) -> Result<u32> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = fs::metadata(path)
+        .with_context(|| format!("failed to stat certificate file {}", path))?;
+    Ok(metadata.permissions().mode() & 0o777)
+}
+
+#[cfg(not(unix))]
+fn certificate_file_mode(_path: &str) -> Result<u32> {
+    Ok(0o600)
+}
+
 pub fn generate_certificate_request(common_name: &str) -> Result<(String, String)> {
     let key_pair = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)
         .context("failed to generate private key for certificate request")?;
@@ -185,11 +280,14 @@ fn write_atomic_file(path: &str, data: &[u8], mode: u32) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_controller_api_url, should_renew_certificate};
+    use super::{
+        backup_certificate_files, resolve_controller_api_url, should_renew_certificate,
+        write_renewed_certificate_files, RenewedCertificate,
+    };
     use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
     use std::fs;
     use std::path::PathBuf;
-    use std::time::Duration;
+    use std::time::{Duration, UNIX_EPOCH};
     use time::{Duration as TimeDuration, OffsetDateTime};
 
     #[test]
@@ -240,6 +338,48 @@ mod tests {
         );
 
         let _ = fs::remove_file(cert_path);
+    }
+
+    #[test]
+    fn certificate_file_backup_restores_files_after_failed_reconnect() {
+        let base = std::env::temp_dir().join(format!(
+            "aria-agent-cert-rollback-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&base).expect("create temp cert dir");
+        let ca_path = base.join("ca.crt");
+        let cert_path = base.join("client.crt");
+        let key_path = base.join("client.key");
+        fs::write(&ca_path, "old-ca").expect("write old ca");
+        fs::write(&cert_path, "old-cert").expect("write old cert");
+        fs::write(&key_path, "old-key").expect("write old key");
+
+        let backup = backup_certificate_files(
+            ca_path.to_str().unwrap(),
+            cert_path.to_str().unwrap(),
+            key_path.to_str().unwrap(),
+        )
+        .expect("backup existing certificate files");
+        write_renewed_certificate_files(
+            ca_path.to_str().unwrap(),
+            cert_path.to_str().unwrap(),
+            key_path.to_str().unwrap(),
+            &RenewedCertificate {
+                cert_pem: "new-cert".to_string(),
+                ca_pem: "new-ca".to_string(),
+                private_key_pem: "new-key".to_string(),
+                not_after: UNIX_EPOCH + Duration::from_secs(1),
+            },
+        )
+        .expect("write renewed certificate files");
+
+        backup.restore().expect("rollback should restore previous files");
+
+        assert_eq!(fs::read_to_string(&ca_path).unwrap(), "old-ca");
+        assert_eq!(fs::read_to_string(&cert_path).unwrap(), "old-cert");
+        assert_eq!(fs::read_to_string(&key_path).unwrap(), "old-key");
+
+        let _ = fs::remove_dir_all(base);
     }
 
     fn write_test_certificate(name: &str, not_after: OffsetDateTime) -> PathBuf {

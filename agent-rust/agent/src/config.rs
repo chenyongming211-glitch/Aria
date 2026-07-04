@@ -395,8 +395,16 @@ impl ConfigManager {
     }
 
     fn load_or_migrate_state(&self) -> Result<AgentState> {
-        if let Some(state) = self.load_state_opt()? {
-            return Ok(state);
+        match self.load_state_opt() {
+            Ok(Some(state)) => return Ok(state),
+            Ok(None) => {}
+            Err(err) => {
+                tracing::warn!(
+                    "Failed to load runtime state from {}; falling back to legacy config or fresh state: {:?}",
+                    self.state_path,
+                    err
+                );
+            }
         }
 
         let state = self
@@ -490,7 +498,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{default_certificate_renew_before, AgentConfig, BootstrapConfig};
+    use super::{default_certificate_renew_before, AgentConfig, BootstrapConfig, ConfigManager};
+    use std::fs;
     use std::time::Duration;
 
     #[test]
@@ -508,5 +517,39 @@ mod tests {
         let config = AgentConfig::from_parts(bootstrap.clone(), Default::default());
         assert_eq!(config.certificate_renew_before, Duration::from_secs(6 * 60 * 60));
         assert_eq!(config.to_bootstrap().certificate_renew_before, bootstrap.certificate_renew_before);
+    }
+
+    #[test]
+    fn load_parts_falls_back_to_legacy_config_when_state_yaml_is_corrupt() {
+        let base = std::env::temp_dir().join(format!(
+            "aria-agent-corrupt-state-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&base).expect("create temp config dir");
+        let bootstrap_path = base.join("agent.yaml");
+        let manager = ConfigManager::new(bootstrap_path.to_str().unwrap());
+        let legacy = AgentConfig {
+            controller_url: "https://controller.example.com:50051".to_string(),
+            private_key: "legacy-private".to_string(),
+            public_key: "legacy-public".to_string(),
+            assigned_ip: Some("100.64.0.2".to_string()),
+            ..AgentConfig::default()
+        };
+        fs::write(
+            &bootstrap_path,
+            serde_yaml::to_string(&legacy).expect("serialize legacy config"),
+        )
+        .expect("write legacy config");
+        fs::write(manager.state_path(), "node_id: [unterminated").expect("write corrupt state");
+
+        let (_bootstrap, state) = manager
+            .load_parts()
+            .expect("corrupt state should fall back to legacy runtime config");
+
+        assert_eq!(state.public_key, "legacy-public");
+        assert_eq!(state.private_key, "legacy-private");
+        assert_eq!(state.assigned_ip.as_deref(), Some("100.64.0.2"));
+
+        let _ = fs::remove_dir_all(base);
     }
 }

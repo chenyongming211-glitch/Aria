@@ -44,6 +44,38 @@
 
 ---
 
+## BUG-64 到 BUG-66 Rust Agent Runtime Durability
+
+**复核日期**: 2026-07-04
+**复核方式**: Rust Agent runtime 局部复核
+**执行计划**: `docs/superpowers/plans/2026-07-04-b3-agent-runtime-durability.md`
+
+### BUG-64: Agent 多接口 sync_peers 部分更新不回滚
+
+- **状态**: ✅ FIXED (B3: `codex/bugfix-b3-agent-runtime`)
+- **严重度**: HIGH
+- **文件**: `agent-rust/agent/src/agent_runtime.rs`
+- **根因**: `sync_peers` 逐接口读取、diff、删除、添加、更新 peer；若后续接口计划或执行失败，前面接口已经提交，缺少统一 preflight 和 rollback。
+- **修复结果**: `sync_peers` 改为先采集所有接口快照，再构建所有接口的 peer sync plan；计划阶段失败不触碰接口。执行阶段失败会用快照尽力恢复所有接口到 sync 前状态。
+
+### BUG-65: Agent state 文件损坏后启动失败
+
+- **状态**: ✅ FIXED (B3: `codex/bugfix-b3-agent-runtime`)
+- **严重度**: HIGH
+- **文件**: `agent-rust/agent/src/config.rs`
+- **根因**: runtime 启动路径通过 `load_state_opt()?` 读取 state YAML，解析错误会直接中止，不会 fallback 到 legacy config 或 fresh state。
+- **修复结果**: 保留 `load_state_opt()` 的严格诊断语义；`load_or_migrate_state()` 在 state 读取/解析失败时记录 warning，并 fallback 到 legacy config 或 fresh state。
+
+### BUG-66: 证书续期先覆盖文件后验证 gRPC 重连
+
+- **状态**: ✅ FIXED (B3: `codex/bugfix-b3-agent-runtime`)
+- **严重度**: HIGH
+- **文件**: `agent-rust/agent/src/certificate_client.rs`, `agent-rust/agent/src/agent_runtime.rs`
+- **根因**: 续期拿到新证书后直接覆盖 CA/client cert/client key，再执行 gRPC reconnect；重连失败时旧文件已经丢失。
+- **修复结果**: 覆盖前先备份旧证书文件；写入失败或 gRPC 重连失败会恢复旧 CA/client cert/client key，避免 Agent 下次启动只剩失败的新证书组合。
+
+---
+
 ## BUG-25 到 BUG-37 本轮修复详情
 
 ### BUG-25: AI 普通聊天阶段会直接执行写工具，确认弹窗未形成后端门禁

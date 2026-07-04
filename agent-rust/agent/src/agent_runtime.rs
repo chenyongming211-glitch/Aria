@@ -8,7 +8,7 @@ use aya::{
     EbpfLoader,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tokio::signal;
@@ -31,7 +31,7 @@ use crate::identity::IdentityManager;
 use crate::metrics;
 use crate::routing::RoutingManager;
 use crate::runtime_credential::RuntimeCredentialStore;
-use crate::wireguard::{PeerConfig, WireGuardManager};
+use crate::wireguard::{PeerConfig, PeerInfo as WireGuardPeerInfo, WireGuardManager};
 
 const BPF_FS_PATH: &str = "/sys/fs/bpf/aria";
 const BPF_PIN_FALLBACK_PATH: &str = "/sys/fs/bpf";
@@ -39,6 +39,14 @@ const CERTIFICATE_RENEW_CHECK_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const TC_PRIORITY_ACL_EGRESS: u16 = 100;
 const TC_PRIORITY_QOS: u16 = 200;
 const BLACKLIST_ACL_PRIORITY: u16 = 0;
+
+#[derive(Debug, Clone)]
+struct PeerSyncPlan {
+    interface: String,
+    to_add: Vec<PeerConfig>,
+    to_remove: Vec<String>,
+    to_update: Vec<PeerConfig>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UnixRequest {
@@ -1696,122 +1704,31 @@ impl AgentRuntime {
         let result =
             tokio::task::spawn_blocking(move || -> Result<(usize, usize, usize, usize)> {
                 let interface_count = interfaces.len();
-
-                let mut total_added = 0;
-                let mut total_removed = 0;
-                let mut total_updated = 0;
-
-                for iface in &interfaces {
-                    let mgr = wg_managers
-                        .get(iface)
-                        .ok_or_else(|| anyhow::anyhow!("WireGuardManager for {} not found", iface))?;
-                    let mut wg = mgr.blocking_lock();
-
-                    let current_peers = wg.list_peers().context("Failed to list current peers")?;
-
-                    let (to_add, to_remove, to_update) =
-                        Self::diff_peers_static(&current_peers, &new_peers);
-
-                    // 删除 peer
-                    for peer in &to_remove {
-                        if iface == &base_iface {
-                            tracing::info!(
-                                "Removing peer {} from {}...",
-                                &peer[..16.min(peer.len())],
-                                iface
-                            );
-                        }
-                        wg.remove_peer(&peer).context("Failed to remove peer")?;
-                        if iface == &base_iface {
-                            metrics::record_wireguard_peer_change("remove");
-                        }
-                    }
-                    total_removed += to_remove.len();
-
-                    // 添加 peer
-                    for peer in &to_add {
-                        if iface == &base_iface {
-                            tracing::info!(
-                                "Adding peer {} to {}...",
-                                &peer.public_key[..16.min(peer.public_key.len())],
-                                iface
-                            );
-                        }
-
-                        let mut allowed_ips = vec![format!("{}/32", peer.assigned_ip)];
-                        allowed_ips.extend(peer.advertised_routes.clone());
-
-                        // 根据 iface 编号调整 endpoint 端口
-                        let endpoint = if !peer.endpoint.is_empty() {
-                            let adjusted_endpoint = Self::adjust_endpoint_port_static(
-                                &peer.endpoint,
-                                iface,
-                                &base_iface,
-                                listen_port,
-                            )?;
-                            Some(adjusted_endpoint)
-                        } else {
-                            None
-                        };
-
-                        let peer_config = PeerConfig {
-                            public_key: peer.public_key.clone(),
-                            endpoint,
-                            allowed_ips,
-                            persistent_keepalive: 25,
-                        };
-
-                        wg.add_peer(peer_config).context("Failed to add peer")?;
-                        if iface == &base_iface {
-                            metrics::record_wireguard_peer_change("add");
-                        }
-                    }
-                    total_added += to_add.len();
-
-                    // 更新 peer
-                    for peer in &to_update {
-                        if iface == &base_iface {
-                            tracing::debug!(
-                                "Updating peer {} on {}...",
-                                &peer.public_key[..16.min(peer.public_key.len())],
-                                iface
-                            );
-                        }
-
-                        wg.remove_peer(&peer.public_key)
-                            .context("Failed to remove peer for update")?;
-
-                        let mut allowed_ips = vec![format!("{}/32", peer.assigned_ip)];
-                        allowed_ips.extend(peer.advertised_routes.clone());
-
-                        // 根据 iface 编号调整 endpoint 端口
-                        let endpoint = if !peer.endpoint.is_empty() {
-                            let adjusted_endpoint = Self::adjust_endpoint_port_static(
-                                &peer.endpoint,
-                                iface,
-                                &base_iface,
-                                listen_port,
-                            )?;
-                            Some(adjusted_endpoint)
-                        } else {
-                            None
-                        };
-
-                        let peer_config = PeerConfig {
-                            public_key: peer.public_key.clone(),
-                            endpoint,
-                            allowed_ips,
-                            persistent_keepalive: 25,
-                        };
-
-                        wg.add_peer(peer_config)
-                            .context("Failed to add updated peer")?;
-                        if iface == &base_iface {
-                            metrics::record_wireguard_peer_change("update");
-                        }
-                    }
-                    total_updated += to_update.len();
+                if interface_count == 0 {
+                    anyhow::bail!("no active WireGuard interfaces for peer sync");
                 }
+
+                let snapshots = Self::collect_peer_snapshots(&interfaces, &wg_managers)?;
+                let plans = Self::build_peer_sync_plans(
+                    &snapshots,
+                    &new_peers,
+                    &base_iface,
+                    listen_port,
+                )?;
+
+                if let Err(err) = Self::apply_peer_sync_plans(&wg_managers, &plans, &base_iface) {
+                    if let Err(rollback_err) = Self::rollback_peer_sync(&wg_managers, &snapshots) {
+                        tracing::error!(
+                            "Peer sync failed and rollback was incomplete: {:?}",
+                            rollback_err
+                        );
+                    }
+                    return Err(err);
+                }
+
+                let total_added: usize = plans.iter().map(|plan| plan.to_add.len()).sum();
+                let total_removed: usize = plans.iter().map(|plan| plan.to_remove.len()).sum();
+                let total_updated: usize = plans.iter().map(|plan| plan.to_update.len()).sum();
 
                 Ok((
                     total_added / interface_count,
@@ -1839,6 +1756,191 @@ impl AgentRuntime {
                 tracing::error!("Peer sync failed: {:?}", e);
                 return Err(e);
             }
+        }
+
+        Ok(())
+    }
+
+    fn collect_peer_snapshots(
+        interfaces: &[String],
+        wg_managers: &HashMap<String, Arc<Mutex<WireGuardManager>>>,
+    ) -> Result<Vec<(String, Vec<WireGuardPeerInfo>)>> {
+        let mut snapshots = Vec::with_capacity(interfaces.len());
+        for iface in interfaces {
+            let mgr = wg_managers
+                .get(iface)
+                .ok_or_else(|| anyhow::anyhow!("WireGuardManager for {} not found", iface))?;
+            let wg = mgr.blocking_lock();
+            let current_peers = wg
+                .list_peers()
+                .with_context(|| format!("Failed to list current peers on {}", iface))?;
+            snapshots.push((iface.clone(), current_peers));
+        }
+        Ok(snapshots)
+    }
+
+    fn build_peer_sync_plans(
+        snapshots: &[(String, Vec<WireGuardPeerInfo>)],
+        new_peers: &[GrpcPeerInfo],
+        base_iface: &str,
+        listen_port: u16,
+    ) -> Result<Vec<PeerSyncPlan>> {
+        let mut plans = Vec::with_capacity(snapshots.len());
+        for (iface, current_peers) in snapshots {
+            let (to_add, to_remove, to_update) =
+                Self::diff_peers_static(current_peers, new_peers);
+            let to_add = to_add
+                .iter()
+                .map(|peer| Self::peer_config_for_interface(peer, iface, base_iface, listen_port))
+                .collect::<Result<Vec<_>>>()?;
+            let to_update = to_update
+                .iter()
+                .map(|peer| Self::peer_config_for_interface(peer, iface, base_iface, listen_port))
+                .collect::<Result<Vec<_>>>()?;
+
+            plans.push(PeerSyncPlan {
+                interface: iface.clone(),
+                to_add,
+                to_remove,
+                to_update,
+            });
+        }
+        Ok(plans)
+    }
+
+    fn peer_config_for_interface(
+        peer: &GrpcPeerInfo,
+        iface: &str,
+        base_iface: &str,
+        listen_port: u16,
+    ) -> Result<PeerConfig> {
+        let mut allowed_ips = vec![format!("{}/32", peer.assigned_ip)];
+        allowed_ips.extend(peer.advertised_routes.clone());
+
+        let endpoint = if !peer.endpoint.is_empty() {
+            Some(Self::adjust_endpoint_port_static(
+                &peer.endpoint,
+                iface,
+                base_iface,
+                listen_port,
+            )?)
+        } else {
+            None
+        };
+
+        Ok(PeerConfig {
+            public_key: peer.public_key.clone(),
+            endpoint,
+            allowed_ips,
+            persistent_keepalive: 25,
+        })
+    }
+
+    fn apply_peer_sync_plans(
+        wg_managers: &HashMap<String, Arc<Mutex<WireGuardManager>>>,
+        plans: &[PeerSyncPlan],
+        base_iface: &str,
+    ) -> Result<()> {
+        for plan in plans {
+            let mgr = wg_managers
+                .get(&plan.interface)
+                .ok_or_else(|| anyhow::anyhow!("WireGuardManager for {} not found", plan.interface))?;
+            let mut wg = mgr.blocking_lock();
+
+            for peer in &plan.to_remove {
+                if plan.interface == base_iface {
+                    tracing::info!(
+                        "Removing peer {} from {}...",
+                        &peer[..16.min(peer.len())],
+                        plan.interface
+                    );
+                }
+                wg.remove_peer(peer)
+                    .with_context(|| format!("Failed to remove peer on {}", plan.interface))?;
+                if plan.interface == base_iface {
+                    metrics::record_wireguard_peer_change("remove");
+                }
+            }
+
+            for peer in &plan.to_add {
+                if plan.interface == base_iface {
+                    tracing::info!(
+                        "Adding peer {} to {}...",
+                        &peer.public_key[..16.min(peer.public_key.len())],
+                        plan.interface
+                    );
+                }
+                wg.add_peer(peer.clone())
+                    .with_context(|| format!("Failed to add peer on {}", plan.interface))?;
+                if plan.interface == base_iface {
+                    metrics::record_wireguard_peer_change("add");
+                }
+            }
+
+            for peer in &plan.to_update {
+                if plan.interface == base_iface {
+                    tracing::debug!(
+                        "Updating peer {} on {}...",
+                        &peer.public_key[..16.min(peer.public_key.len())],
+                        plan.interface
+                    );
+                }
+                wg.remove_peer(&peer.public_key).with_context(|| {
+                    format!("Failed to remove peer for update on {}", plan.interface)
+                })?;
+                wg.add_peer(peer.clone()).with_context(|| {
+                    format!("Failed to add updated peer on {}", plan.interface)
+                })?;
+                if plan.interface == base_iface {
+                    metrics::record_wireguard_peer_change("update");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn rollback_peer_sync(
+        wg_managers: &HashMap<String, Arc<Mutex<WireGuardManager>>>,
+        snapshots: &[(String, Vec<WireGuardPeerInfo>)],
+    ) -> Result<()> {
+        for (iface, peers) in snapshots {
+            let mgr = wg_managers
+                .get(iface)
+                .ok_or_else(|| anyhow::anyhow!("WireGuardManager for {} not found", iface))?;
+            let mut wg = mgr.blocking_lock();
+            Self::restore_peer_snapshot(&mut wg, peers)
+                .with_context(|| format!("Failed to roll back peer sync on {}", iface))?;
+        }
+        Ok(())
+    }
+
+    fn restore_peer_snapshot(
+        wg: &mut WireGuardManager,
+        snapshot: &[WireGuardPeerInfo],
+    ) -> Result<()> {
+        let current_peers = wg
+            .list_peers()
+            .context("Failed to list current peers for rollback")?;
+        let desired_keys: HashSet<&str> = snapshot
+            .iter()
+            .map(|peer| peer.public_key.as_str())
+            .collect();
+
+        for peer in current_peers {
+            if !desired_keys.contains(peer.public_key.as_str()) {
+                wg.remove_peer(&peer.public_key)
+                    .context("Failed to remove extra peer during rollback")?;
+            }
+        }
+
+        for peer in snapshot {
+            wg.add_peer(PeerConfig {
+                public_key: peer.public_key.clone(),
+                endpoint: peer.endpoint.clone(),
+                allowed_ips: peer.allowed_ips.clone(),
+                persistent_keepalive: peer.persistent_keepalive,
+            })
+            .context("Failed to restore peer during rollback")?;
         }
 
         Ok(())
@@ -2262,13 +2364,21 @@ impl AgentRuntime {
         )
         .await?;
 
-        certificate_client::write_renewed_certificate_files(
+        let certificate_backup = certificate_client::write_renewed_certificate_files_with_backup(
             &self.config.ca_cert,
             &self.config.client_cert,
             &self.config.client_key,
             &renewed,
         )?;
-        self.reconnect_grpc().await?;
+        if let Err(err) = self.reconnect_grpc().await {
+            if let Err(restore_err) = certificate_backup.restore() {
+                tracing::error!(
+                    "Failed to roll back renewed certificate files after reconnect failure: {:?}",
+                    restore_err
+                );
+            }
+            return Err(err).context("failed to reconnect with renewed certificate files; previous files restored");
+        }
         tracing::info!(
             "Client certificate renewed successfully; new expiry at {:?}",
             renewed.not_after
@@ -2520,8 +2630,9 @@ mod tests {
     };
     use crate::acl_qos_manager::{AclQosSnapshot, AclRuleSpec, IPGroupSpec, QosRuleSpec};
     use crate::config::AgentConfig;
-    use crate::grpc_client::SyncResult;
+    use crate::grpc_client::{PeerInfo as GrpcPeerInfo, SyncResult};
     use crate::runtime_credential::RuntimeCredentialStore;
+    use crate::wireguard::PeerInfo as WireGuardPeerInfo;
 
     #[tokio::test]
     async fn runtime_token_is_recorded_before_local_apply_errors_are_returned() {
@@ -2618,6 +2729,62 @@ mod tests {
         assert!(err
             .to_string()
             .contains("multi-tunnel port overflow"));
+    }
+
+    #[test]
+    fn peer_sync_plan_fails_before_any_interface_can_be_mutated() {
+        let current = vec![
+            ("aria0".to_string(), Vec::<WireGuardPeerInfo>::new()),
+            ("aria9".to_string(), Vec::<WireGuardPeerInfo>::new()),
+        ];
+        let desired = vec![grpc_peer("peer-a", "203.0.113.10:65535", "100.64.0.2")];
+
+        let err = AgentRuntime::build_peer_sync_plans(&current, &desired, "aria0", 51820)
+            .expect_err("overflowing non-base interface plan should fail");
+
+        assert!(err
+            .to_string()
+            .contains("multi-tunnel port overflow"));
+    }
+
+    #[test]
+    fn peer_sync_plan_adjusts_endpoint_and_routes_for_each_interface() {
+        let current = vec![
+            ("aria0".to_string(), Vec::<WireGuardPeerInfo>::new()),
+            ("aria2".to_string(), Vec::<WireGuardPeerInfo>::new()),
+        ];
+        let desired = vec![GrpcPeerInfo {
+            advertised_routes: vec!["10.20.0.0/16".to_string()],
+            ..grpc_peer("peer-a", "203.0.113.10:51820", "100.64.0.2")
+        }];
+
+        let plans = AgentRuntime::build_peer_sync_plans(&current, &desired, "aria0", 51820)
+            .expect("valid multi-interface plan");
+
+        assert_eq!(plans.len(), 2);
+        assert_eq!(plans[0].interface, "aria0");
+        assert_eq!(plans[0].to_add[0].endpoint.as_deref(), Some("203.0.113.10:51820"));
+        assert_eq!(plans[1].interface, "aria2");
+        assert_eq!(plans[1].to_add[0].endpoint.as_deref(), Some("203.0.113.10:51822"));
+        assert_eq!(
+            plans[1].to_add[0].allowed_ips,
+            vec!["100.64.0.2/32".to_string(), "10.20.0.0/16".to_string()]
+        );
+    }
+
+    fn grpc_peer(public_key: &str, endpoint: &str, assigned_ip: &str) -> GrpcPeerInfo {
+        GrpcPeerInfo {
+            public_key: public_key.to_string(),
+            endpoint: endpoint.to_string(),
+            private_ip: String::new(),
+            public_ip: String::new(),
+            region: String::new(),
+            vpc_id: String::new(),
+            hostname: String::new(),
+            assigned_ip: assigned_ip.to_string(),
+            role: String::new(),
+            advertised_routes: Vec::new(),
+        }
     }
 
     #[test]
