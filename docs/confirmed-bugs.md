@@ -833,33 +833,37 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-107: GitHub artifact 上传失败会被 continue-on-error 吞掉
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B6: `codex/bugfix-b6-delivery-guardrails`)
 - **严重度**: MEDIUM
 - **文件**: `.github/workflows/build.yml:49-59,149-155,187-193`
 - **根因**: Go/Rust/Frontend artifact upload 同时配置 `if-no-files-found: error` 和 `continue-on-error: true`。artifact 缺失或上传失败时 job 仍可能为 green，后续部署拿不到产物。
+- **修复结果**: Go、Rust Agent、Frontend artifact upload 移除 `continue-on-error: true`，缺失或上传失败会直接使对应 job 失败。
 
 #### BUG-108: Docker publish 只依赖 Go build，且 workflow_dispatch 任意分支可推 latest
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B6: `codex/bugfix-b6-delivery-guardrails`)
 - **严重度**: MEDIUM
 - **文件**: `.github/workflows/build.yml:61-91`
 - **根因**: `docker-build` 只 `needs: go-build`，不等待 Rust Agent 和 Frontend 构建；任意手动触发分支都可推 `latest` 和 `${VERSION}`，容易把未完整验证的镜像发布成线上候选。
+- **修复结果**: Docker publish 改为依赖 Go、Rust Agent、Frontend 三个 job，并只允许手动从 `master` 或 `v*` release tag 发布。
 
 ### 🟢 LOW（2）
 
 #### BUG-109: Ansible Controller 部署仍固定旧版本镜像
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B6: `codex/bugfix-b6-delivery-guardrails`)
 - **严重度**: LOW
 - **文件**: `deployments/ansible/playbooks/deploy-controller.yml:10-13`、`deployments/ansible/group_vars/all.yml:69-75`
 - **根因**: Ansible Controller playbook / group vars 仍固定 `0.2.35-test`，当前项目版本已远高于该值；如果误用这套 playbook，会回滚到旧镜像。
+- **修复结果**: Controller Ansible 使用 `ARIA_CONTROLLER_VERSION`、`ARIA_CONTROLLER_IMAGE` 或仓库 `VERSION` 推导镜像，不再固定旧 tag。
 
 #### BUG-110: Ansible Agent 部署脚本使用旧路径、旧二进制名和旧 service
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B6: `codex/bugfix-b6-delivery-guardrails`)
 - **严重度**: LOW
 - **文件**: `deployments/ansible/playbooks/deploy-agent.yml:10-13,43-47`、`deployments/scripts/deploy-agent.sh:33,39,244`
 - **根因**: Ansible Agent playbook 仍从 `/Users/chen/Aria/agent-rust` 同步源码、部署到 `/usr/local/bin/aria`、重启 `aria` service；当前脚本使用 `/usr/local/bin/aria-agent` 和 `aria-agent` service。误用会部署/重启错误目标。
+- **修复结果**: Agent Ansible 改为部署预构建 `aria-agent` artifact 到 `/usr/local/bin/aria-agent`，并重启 `aria-agent` service。
 
 ---
 

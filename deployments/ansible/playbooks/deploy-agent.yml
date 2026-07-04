@@ -7,41 +7,59 @@
   become: yes
 
   vars:
-    agent_source_dir: /Users/chen/Aria/agent-rust
-    agent_deploy_dir: /root/agent-rust
-    agent_binary_path: /usr/local/bin/aria
+    aria_agent_binary_src: "{{ lookup('env', 'ARIA_AGENT_BINARY') | default(playbook_dir + '/../../../agent-rust/target/release/aria-agent', true) }}"
+    aria_agent_binary_path: /usr/local/bin/aria-agent
+    aria_agent_service_name: aria-agent
+    aria_agent_config_dir: /etc/aria
+    aria_agent_state_dir: /var/lib/aria
+    aria_agent_log_dir: /var/log/aria
 
   tasks:
-    - name: Install build dependencies
+    - name: Install runtime dependencies
       ansible.builtin.apt:
         pkg:
-          - pkg-config
-          - libssl-dev
+          - iproute2
+          - wireguard-tools
         state: present
       ignore_errors: yes
 
-    - name: Sync source code to remote
-      ansible.posix.synchronize:
-        src: "{{ agent_source_dir }}/"
-        dest: "{{ agent_deploy_dir }}/"
+    - name: Check local Agent binary artifact
+      ansible.builtin.stat:
+        path: "{{ aria_agent_binary_src }}"
       delegate_to: localhost
       become: no
+      register: aria_agent_binary_stat
 
-    - name: Build Agent on remote server
-      ansible.builtin.shell: |
-        export PATH="/root/.cargo/bin:/usr/local/cargo/bin:$PATH" && \
-        cd {{ agent_deploy_dir }} && \
-        cargo clean && \
-        cargo build --release --bin aria-agent
+    - name: Require local Agent binary artifact
+      ansible.builtin.fail:
+        msg: "Agent binary artifact not found at {{ aria_agent_binary_src }}. Build it with CI or set ARIA_AGENT_BINARY."
+      when: not aria_agent_binary_stat.stat.exists
+
+    - name: Ensure Agent directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ aria_agent_config_dir }}"
+        - "{{ aria_agent_state_dir }}"
+        - "{{ aria_agent_log_dir }}"
+
+    - name: Copy Agent binary to temporary path
+      ansible.builtin.copy:
+        src: "{{ aria_agent_binary_src }}"
+        dest: "{{ aria_agent_binary_path }}.new"
+        owner: root
+        group: root
+        mode: "0755"
 
     - name: Deploy new binary atomically
-      ansible.builtin.shell: |
-        cp {{ agent_deploy_dir }}/target/release/aria-agent {{ agent_binary_path }}.new && \
-        chmod +x {{ agent_binary_path }}.new && \
-        mv -f {{ agent_binary_path }}.new {{ agent_binary_path }}
+      ansible.builtin.command:
+        cmd: "mv -f {{ aria_agent_binary_path }}.new {{ aria_agent_binary_path }}"
 
     - name: Restart Agent service
       ansible.builtin.systemd:
-        name: aria
+        name: "{{ aria_agent_service_name }}"
         state: restarted
         daemon_reload: yes
+        enabled: yes
