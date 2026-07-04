@@ -5,7 +5,7 @@
 **说明**: 本文档记录“当前状态”，不再把历史 OPEN 条目和后续 FIXED 结论混写在一起。
 **AI 范围决定**: AI Agent 后续计划替换为 Hermes Agent。本轮不扩展旧 AI 写操作闭环，但已把旧 AI 写入口后端 fail-closed：聊天只暴露只读工具，`ExecuteTool` 即使 `confirmed=true` 也拒绝旧写工具；Hermes 接入时再重新设计 pending confirmation、policy delivery 和审计链路。
 **2026-07-03 复核结论**: BUG-58~61、BUG-63~82、BUG-84~89、BUG-91~93、BUG-95~99 均有当前代码证据；BUG-62、BUG-83 复核为不成立；BUG-90 原描述部分成立（ACL 缺复合索引，QoS 已有）；BUG-94、BUG-97、BUG-99 是优化债，不按 correctness bug 排序。新增 BUG-100~110。
-**2026-07-04 状态复核结论**: B1~B7 已合入当前 `master`；BUG-64、BUG-65、BUG-66 经代码复核为 FIXED；BUG-74、BUG-75 仍为 OPEN；BUG-84、BUG-97 为 PARTIAL。
+**2026-07-04 状态复核结论**: B1~B8 已合入当前 `master`；BUG-64、BUG-65、BUG-66、BUG-76、BUG-100、BUG-101 经代码复核为 FIXED；BUG-74、BUG-75 已在 B9 分支修复；BUG-84、BUG-97 为 PARTIAL。
 **2026-07-04 B8 修复结论**: B8 分支修复 BUG-76、BUG-100、BUG-101；本地已通过 Go gRPC/contract 测试，Rust 编译和 Rust 单测需由 CI 验证。
 
 ---
@@ -573,17 +573,19 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-74: eBPF map 关闭清理不完整
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B9: `codex/bugfix-b9-agent-observability`)
 - **严重度**: MEDIUM
-- **文件**: `agent-rust/agent/src/agent_runtime.rs:524-538`、`agent-rust/agent/src/agent_runtime.rs:2591-2605`
+- **文件**: `agent-rust/agent/src/agent_runtime.rs:524-538`、`agent-rust/agent/src/agent_runtime.rs:2663-2676`
 - **根因**: 运行时关闭 cleanup 只删 4 个 identity map；启动前 cleanup 会删 12 个 map，但正常停机后仍会留下 POLICY/QOS/STATS/CONFIG 等 pinned map，造成 bpffs 残留和运维误判。
+- **修复结果**: shutdown cleanup 复用启动前的 `cleanup_pinned_acl_qos_maps()`，正常停机和启动前清理覆盖同一组 ACL/QoS/identity pinned maps，并同时覆盖 `/sys/fs/bpf/aria` 与 fallback 路径。
 
 #### BUG-75: Agent state YAML 非原子写入
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B9: `codex/bugfix-b9-agent-observability`)
 - **严重度**: MEDIUM
-- **文件**: `agent-rust/agent/src/config.rs:472-485`
+- **文件**: `agent-rust/agent/src/config.rs:473-537`
 - **根因**: `write_yaml_file` 直接 `std::fs::write` 无 tmp+rename。崩溃截断 → BUG-65 永久启动失败。
+- **修复结果**: `write_yaml_file` 改为同目录临时文件写入，设置 `0600` 权限，`write_all` 后 `sync_all`，再 `rename` 覆盖目标文件；失败时清理临时文件，避免崩溃或写入中断截断原状态文件。
 
 #### BUG-76: 命令流断开时在途命令结果丢失
 

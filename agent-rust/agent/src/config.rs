@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -473,7 +474,8 @@ fn write_yaml_file<T>(path: &str, payload: &T) -> Result<()>
 where
     T: Serialize,
 {
-    if let Some(parent) = Path::new(path).parent() {
+    let target_path = Path::new(path);
+    if let Some(parent) = target_path.parent() {
         std::fs::create_dir_all(parent)
             .context("Failed to create config directory")?;
     }
@@ -481,19 +483,63 @@ where
     let data = serde_yaml::to_string(payload)
         .context("Failed to serialize config")?;
 
-    std::fs::write(path, data)
-        .context(format!("Failed to write config file: {}", path))?;
+    let file_name = target_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("agent.yaml");
+    let tmp_suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let tmp_path = target_path.with_file_name(format!(
+        ".{}.tmp.{}.{}",
+        file_name,
+        std::process::id(),
+        tmp_suffix
+    ));
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
+    let write_result = (|| -> Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+            .context(format!(
+                "Failed to create temporary config file: {}",
+                tmp_path.display()
+            ))?;
 
-        let permissions = std::fs::Permissions::from_mode(0o600);
-        std::fs::set_permissions(path, permissions)
-            .context("Failed to set config file permissions")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let permissions = std::fs::Permissions::from_mode(0o600);
+            file.set_permissions(permissions)
+                .context("Failed to set config file permissions")?;
+        }
+
+        file.write_all(data.as_bytes())
+            .context(format!("Failed to write config file: {}", tmp_path.display()))?;
+        file.sync_all()
+            .context(format!("Failed to sync config file: {}", tmp_path.display()))?;
+        drop(file);
+
+        std::fs::rename(&tmp_path, path)
+            .context(format!("Failed to replace config file: {}", path))?;
+
+        if let Some(parent) = target_path.parent() {
+            if let Ok(directory) = std::fs::File::open(parent) {
+                let _ = directory.sync_all();
+            }
+        }
+
+        Ok(())
+    })();
+
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
     }
 
-    Ok(())
+    write_result
 }
 
 #[cfg(test)]
