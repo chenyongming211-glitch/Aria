@@ -48,7 +48,9 @@ func SetupRoutes(mux *http.ServeMux, store *controllerstorage.Storage, vmClient 
 		vmClient:   vmClient,
 	}
 
-	withJWT := middleware.JWTAuthMiddleware
+	withJWT := func(handler http.HandlerFunc) http.HandlerFunc {
+		return middleware.JWTAuthMiddlewareWithStore(handler, store)
+	}
 	mux.HandleFunc("/api/v2/controller-info", router.HandleControllerInfo)
 	mux.HandleFunc("/api/v2/controller-info/grpc-ca.crt", router.HandleControllerGRPCCA)
 	mux.HandleFunc("/api/v2/install/agent.sh", router.HandleAgentInstallerScript)
@@ -477,18 +479,18 @@ func (r *Router) handleSingleTenant(w http.ResponseWriter, req *http.Request, te
 			apibase.WriteError(w, http.StatusForbidden, apibase.CodeAccessDenied, "Access denied: super_admin only", nil)
 			return
 		}
-		result, err := r.store.DB().Exec(`UPDATE tenants SET status = 'deleted', updated_at = NOW() WHERE id = $1`, tenantID)
+		err := r.store.ApplyTenantLifecycleTransition(tenantID, controllerstorage.TenantLifecycleTransition{
+			TargetStatus:   "deleted",
+			AuditEventType: controllerstorage.AuditTenantDeleted,
+			AuditActor:     role,
+			AuditSummary:   "Tenant deleted",
+		})
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				apibase.WriteError(w, http.StatusNotFound, apibase.CodeTenantNotFound, "Tenant not found", nil)
+				return
+			}
 			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeDeleteTokenFailed, "Failed to delete tenant: "+err.Error(), nil)
-			return
-		}
-		rowsAffected, err := result.RowsAffected()
-		if err != nil {
-			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeDeleteTokenFailed, "Failed to delete tenant: "+err.Error(), nil)
-			return
-		}
-		if rowsAffected == 0 {
-			apibase.WriteError(w, http.StatusNotFound, apibase.CodeTenantNotFound, "Tenant not found", nil)
 			return
 		}
 		apibase.WriteSuccess(w, map[string]string{"id": tenantID.String(), "status": "deleted"}, "Tenant deleted successfully")
@@ -843,7 +845,31 @@ func (r *Router) updateTenant(w http.ResponseWriter, req *http.Request, tenantID
 		resourceQuota = string(qb)
 	}
 
-	query := `UPDATE tenants 
+	if body.Status == "suspended" {
+		if body.Name != "" || body.Code != "" || resourceQuota != "" {
+			if !r.updateTenantMetadata(w, tenantID, body.Name, body.Code, resourceQuota) {
+				return
+			}
+		}
+		err := r.store.ApplyTenantLifecycleTransition(tenantID, controllerstorage.TenantLifecycleTransition{
+			TargetStatus:   "suspended",
+			AuditEventType: controllerstorage.AuditTenantSuspended,
+			AuditActor:     role,
+			AuditSummary:   "Tenant suspended",
+		})
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				apibase.WriteError(w, http.StatusNotFound, apibase.CodeTenantNotFound, "Tenant not found", nil)
+				return
+			}
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeCreateTenantFailed, "Failed to update tenant: "+err.Error(), nil)
+			return
+		}
+		apibase.WriteSuccess(w, map[string]string{"id": tenantID.String()}, "Tenant updated successfully")
+		return
+	}
+
+	query := `UPDATE tenants
 		SET name = COALESCE(NULLIF($1, ''), name),
 		    code = COALESCE(NULLIF($2, ''), code),
 		    status = COALESCE(NULLIF($3, ''), status),
@@ -866,6 +892,30 @@ func (r *Router) updateTenant(w http.ResponseWriter, req *http.Request, tenantID
 	}
 
 	apibase.WriteSuccess(w, map[string]string{"id": tenantID.String()}, "Tenant updated successfully")
+}
+
+func (r *Router) updateTenantMetadata(w http.ResponseWriter, tenantID uuid.UUID, name, code, resourceQuota string) bool {
+	query := `UPDATE tenants
+		SET name = COALESCE(NULLIF($1, ''), name),
+		    code = COALESCE(NULLIF($2, ''), code),
+		    resource_quota = CASE WHEN $3 = '' THEN resource_quota ELSE $3 END,
+		    updated_at = NOW()
+		WHERE id = $4`
+	result, err := r.store.DB().Exec(query, name, code, resourceQuota, tenantID)
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeCreateTenantFailed, "Failed to update tenant: "+err.Error(), nil)
+		return false
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeCreateTenantFailed, "Failed to update tenant: "+err.Error(), nil)
+		return false
+	}
+	if rowsAffected == 0 {
+		apibase.WriteError(w, http.StatusNotFound, apibase.CodeTenantNotFound, "Tenant not found", nil)
+		return false
+	}
+	return true
 }
 
 var tenantUpdateCodePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)

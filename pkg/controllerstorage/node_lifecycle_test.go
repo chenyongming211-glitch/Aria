@@ -176,6 +176,83 @@ func TestSuspendNodeRevokesIssuedCertificate(t *testing.T) {
 	}
 }
 
+func TestApplyTenantLifecycleTransitionSuspendsNodesRevokesTokensAndFailsCommands(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	tenantID := uuid.New()
+	nodeID1 := uuid.New()
+	nodeID2 := uuid.New()
+	publicKey1 := "node-key-1"
+	publicKey2 := "node-key-2"
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT status FROM tenants WHERE id = $1 FOR UPDATE`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("active"))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE tenants
+		SET status = $2, updated_at = NOW()
+		WHERE id = $1
+	`)).
+		WithArgs(tenantID, "suspended").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE users
+		SET token_version = COALESCE(token_version, 0) + 1,
+		    updated_at = NOW()
+		WHERE tenant_id = $1
+	`)).
+		WithArgs(tenantID).
+		WillReturnResult(sqlmock.NewResult(0, 3))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, public_key
+		FROM nodes
+		WHERE tenant_id = $1
+		  AND COALESCE(status, 'online') NOT IN ('deleted', 'suspended', 'banned')
+		FOR UPDATE
+	`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "public_key"}).
+			AddRow(nodeID1, publicKey1).
+			AddRow(nodeID2, publicKey2))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE nodes
+		SET status = $2,
+		    runtime_token_version = COALESCE(runtime_token_version, 0) + 1,
+		    updated_at = NOW()
+		WHERE tenant_id = $1
+		  AND COALESCE(status, 'online') NOT IN ('deleted', 'suspended', 'banned')
+	`)).
+		WithArgs(tenantID, "suspended").
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	expectLifecycleStopSideEffects(mock, nodeID1, publicKey1, "tenant suspended", "tenant status changed to suspended")
+	expectLifecycleStopSideEffects(mock, nodeID2, publicKey2, "tenant suspended", "tenant status changed to suspended")
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
+		VALUES ($1, NULL, $2, $3, $4, $5)
+	`)).
+		WithArgs(tenantID, AuditTenantSuspended, "operator", "Tenant suspended", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	err = NewStorageWithDB(db).ApplyTenantLifecycleTransition(tenantID, TenantLifecycleTransition{
+		TargetStatus:   "suspended",
+		AuditEventType: AuditTenantSuspended,
+		AuditActor:     "operator",
+		AuditSummary:   "Tenant suspended",
+	})
+	if err != nil {
+		t.Fatalf("ApplyTenantLifecycleTransition returned error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestBanNodeRevokesIssuedCertificate(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

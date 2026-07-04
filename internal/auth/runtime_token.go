@@ -59,16 +59,22 @@ func init() {
 }
 
 type RuntimeClaims struct {
-	NodeID   string `json:"nid"`
-	TenantID string `json:"tid"`
+	NodeID       string `json:"nid"`
+	TenantID     string `json:"tid"`
+	TokenVersion int    `json:"ver,omitempty"`
 	jwt.RegisteredClaims
 }
 
 func GenerateRuntimeToken(nodeID, tenantID string) (string, time.Time, error) {
+	return GenerateRuntimeTokenWithVersion(nodeID, tenantID, 0)
+}
+
+func GenerateRuntimeTokenWithVersion(nodeID, tenantID string, tokenVersion int) (string, time.Time, error) {
 	expiresAt := time.Now().Add(RuntimeTokenTTL)
 	claims := &RuntimeClaims{
-		NodeID:   nodeID,
-		TenantID: tenantID,
+		NodeID:       nodeID,
+		TenantID:     tenantID,
+		TokenVersion: tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

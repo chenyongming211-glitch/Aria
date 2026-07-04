@@ -55,6 +55,7 @@ func TestCommandStreamSendsHeaderAfterInitWithoutPendingCommand(t *testing.T) {
 			"online", int64(0), pq.StringArray{},
 			"", now, now,
 		))
+	expectRuntimeTenantStatus(mock, tenantID, "active")
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE agent_commands").
 		WithArgs(publicKey, controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent).
@@ -132,6 +133,7 @@ func TestCommandStreamRequeuesCommandWhenSendFails(t *testing.T) {
 			"online", int64(0), pq.StringArray{},
 			"", now, now,
 		))
+	expectRuntimeTenantStatus(mock, tenantID, "active")
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE agent_commands").
 		WithArgs(publicKey, controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent).

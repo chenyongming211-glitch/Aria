@@ -207,7 +207,7 @@ func (s *ControllerServer) Sync(ctx context.Context, req *agentpb.SyncRequest) (
 	}
 
 	// 刷新运行期凭据
-	runtimeToken, runtimeTokenExpiresAt, err := generateRuntimeTokenForNode(node)
+	runtimeToken, runtimeTokenExpiresAt, err := generateRuntimeTokenForNode(node, s.store)
 	if err != nil {
 		return nil, fmt.Errorf("failed to refresh runtime token: %w", err)
 	}
@@ -294,7 +294,7 @@ func (s *ControllerServer) CommandStream(stream agentpb.ControllerService_Comman
 			}
 
 			if resp.CommandId != "" && s.store != nil {
-				if err := s.ensureCommandStreamNodeActive(nodePublicKey); err != nil {
+				if _, err := s.ensureCommandStreamRuntimeActive(nodePublicKey); err != nil {
 					return err
 				}
 				if err := s.store.UpdateAgentCommandStatusForNode(resp.CommandId, nodePublicKey, resp.Status, resp.Message, resp.Result); err != nil {
@@ -319,7 +319,7 @@ func (s *ControllerServer) sendNextPendingCommand(stream agentpb.ControllerServi
 	if s.store == nil || agentID == "" {
 		return nil
 	}
-	if err := s.ensureCommandStreamNodeActive(agentID); err != nil {
+	if _, err := s.ensureCommandStreamRuntimeActive(agentID); err != nil {
 		return err
 	}
 
@@ -349,18 +349,26 @@ func (s *ControllerServer) sendNextPendingCommand(stream agentpb.ControllerServi
 }
 
 func (s *ControllerServer) ensureCommandStreamNodeActive(nodePublicKey string) error {
+	_, err := s.ensureCommandStreamRuntimeActive(nodePublicKey)
+	return err
+}
+
+func (s *ControllerServer) ensureCommandStreamRuntimeActive(nodePublicKey string) (*controllerstorage.Node, error) {
 	if s.store == nil || nodePublicKey == "" {
-		return nil
+		return nil, nil
 	}
 
 	node, err := s.store.GetNode(nodePublicKey)
 	if err != nil || node == nil {
-		return status.Error(codes.Unauthenticated, "node not found")
+		return nil, status.Error(codes.Unauthenticated, "node not found")
 	}
 	if isInactiveNodeStatus(node.Status) {
-		return status.Errorf(codes.PermissionDenied, "node access denied: status '%s'", node.Status)
+		return nil, status.Errorf(codes.PermissionDenied, "node access denied: status '%s'", node.Status)
 	}
-	return nil
+	if err := s.ensureRuntimeTenantActive(node); err != nil {
+		return nil, err
+	}
+	return node, nil
 }
 
 func isTerminalCommandStatus(status string) bool {
@@ -487,11 +495,19 @@ func mapStringRuleStats(input map[string]map[string]interface{}) map[string]inte
 	return output
 }
 
-func generateRuntimeTokenForNode(node *controllerstorage.Node) (string, int64, error) {
+func generateRuntimeTokenForNode(node *controllerstorage.Node, stores ...*controllerstorage.Storage) (string, int64, error) {
 	if node == nil {
 		return "", 0, fmt.Errorf("node is required")
 	}
-	token, expiresAt, err := auth.GenerateRuntimeToken(node.ID.String(), node.TenantID.String())
+	tokenVersion := 0
+	if len(stores) > 0 && stores[0] != nil {
+		version, err := stores[0].GetNodeRuntimeTokenVersion(node.ID)
+		if err != nil {
+			return "", 0, err
+		}
+		tokenVersion = version
+	}
+	token, expiresAt, err := auth.GenerateRuntimeTokenWithVersion(node.ID.String(), node.TenantID.String(), tokenVersion)
 	if err != nil {
 		return "", 0, err
 	}

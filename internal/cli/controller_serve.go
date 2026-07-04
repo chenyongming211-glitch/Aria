@@ -1790,7 +1790,11 @@ func (c *Controller) createRegisterAdapter() grpcserver.RegisterHandler {
 			return nil, fmt.Errorf("registered node was not found")
 		}
 
-		runtimeToken, runtimeTokenExpiresAt, err := auth.GenerateRuntimeToken(node.ID.String(), node.TenantID.String())
+		runtimeTokenVersion, err := c.store.GetNodeRuntimeTokenVersion(node.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load runtime token version: %w", err)
+		}
+		runtimeToken, runtimeTokenExpiresAt, err := auth.GenerateRuntimeTokenWithVersion(node.ID.String(), node.TenantID.String(), runtimeTokenVersion)
 		if err != nil {
 			return nil, fmt.Errorf("failed to issue runtime token: %w", err)
 		}
