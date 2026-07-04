@@ -255,6 +255,8 @@ npm run build
 
 **Bugs:** BUG-107, BUG-108, BUG-109, BUG-110
 
+**2026-07-04 status:** Implemented on `codex/bugfix-b6-delivery-guardrails`; see `docs/superpowers/plans/2026-07-04-b6-delivery-guardrails.md`.
+
 **Why sixth:** These protect delivery quality and prevent accidental stale deploys. They should be separate from runtime bugfixes so CI workflow changes are easy to review.
 
 **Files:**

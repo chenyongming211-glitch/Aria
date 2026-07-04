@@ -72,7 +72,8 @@ aria_controller_deploy_dir: /root/aria-controller
 aria_controller_config_dir: "{{ aria_controller_deploy_dir }}/config"
 aria_controller_certs_dir: "{{ aria_controller_deploy_dir }}/certs"
 aria_controller_images_dir: "{{ aria_controller_deploy_dir }}/bin/images"
-aria_controller_image: ghcr.io/chenyongming211-glitch/aria-controller:0.2.35-test
+aria_controller_version: "{{ lookup('env', 'ARIA_CONTROLLER_VERSION') | default(lookup('file', playbook_dir + '/../../../VERSION') | trim, true) }}"
+aria_controller_image: "ghcr.io/chenyongming211-glitch/aria-controller:{{ aria_controller_version }}"
 
 # Agent 部署目录
 aria_agent_deploy_dir: /root/aria-agent
