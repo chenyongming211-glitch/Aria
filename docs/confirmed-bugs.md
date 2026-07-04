@@ -436,33 +436,37 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-58: Routing.vue 3 处裸 error.message
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B5: `codex/bugfix-b5-frontend-stability`)
 - **严重度**: HIGH
 - **文件**: `frontend/src/views/Routing.vue:304,373,394`
 - **根因**: 同批改的 Policies/ACLRules/BandwidthControl 都加了 `errorMessage()` helper（`instanceof Error` 守卫），Routing.vue 遗漏。`error.message` 在非 Error 对象上抛 TypeError。
+- **修复结果**: Routing 增加安全 `errorMessage()` helper，兼容 API response message、`Error`、字符串和未知值，避免 catch 块二次抛错。
 
 #### BUG-59: IPGroups.vue 4 处裸 error.message
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B5: `codex/bugfix-b5-frontend-stability`)
 - **严重度**: HIGH
 - **文件**: `frontend/src/views/IPGroups.vue:273,305,355,383`
 - **根因**: 同 BUG-58。IPGroups.vue 在本轮有大量修改但忘记了加 `instanceof Error` 守卫。
+- **修复结果**: IPGroups 增加安全 `errorMessage()` helper，load/reference/delete/save 失败时不再依赖裸 `error.message`。
 
 #### BUG-60: Tokens.vue 2 处未使用已有的 errorMessage helper
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B5: `codex/bugfix-b5-frontend-stability`)
 - **严重度**: HIGH
 - **文件**: `frontend/src/views/Tokens.vue:314,332`
 - **根因**: 文件内 L188 已有 `errorMessage()` helper（已加 `instanceof Error` 守卫），但 `saveToken` 和 `revokeToken` 的 catch 块仍用裸 `error.message || error`。
+- **修复结果**: token create/revoke catch 块改为复用已有 helper，非 `Error` reject 值显示 fallback，不再触发 TypeError。
 
 ### 🟡 MEDIUM
 
 #### BUG-61: main.ts void bootstrap() 无人捕获 rejection
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B5: `codex/bugfix-b5-frontend-stability`)
 - **严重度**: MEDIUM
 - **文件**: `frontend/src/main.ts:466`
 - **根因**: `void bootstrap()` 丢弃了 async 函数返回的 Promise。bootstrap 内任一步（loadSession、mount）失败时 rejection 无人处理，app 静默挂掉。
+- **修复结果**: `bootstrap().catch(renderStartupFailure)` 统一捕获启动失败，记录错误并在 `#app` 渲染确定性的启动失败状态。
 
 #### BUG-62: main.ts fetchVersion() fire-and-forget
 
@@ -585,26 +589,29 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-77: Nodes.vue 保存分两步无回滚
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B5: `codex/bugfix-b5-frontend-stability`)
 - **严重度**: HIGH
 - **文件**: `frontend/src/views/Nodes.vue:1453-1472`
 - **根因**: updateNodeRemote 成功 → syncEditedAdvertisedRoutes 失败。hostname/region 已持久化但 UI 显示"更新失败"，重试 diff 基线仍是编辑前状态。
+- **修复结果**: 元数据保存成功但路由同步失败时，前端刷新节点列表和节点详情，重置编辑基线为后端最新状态，保留弹窗并显示部分成功提示。
 
 ### 🟡 前端逻辑（2 个 MEDIUM）
 
 #### BUG-78: 聚焦轮询 500 错误无限重试无退避
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B5: `codex/bugfix-b5-frontend-stability`)
 - **严重度**: MEDIUM
 - **文件**: `frontend/src/composables/useFocusedPolling.ts:32-51`
 - **根因**: poll 失败只记 warn 不降频。每 3s 锤一次 500 端点的服务器。
+- **修复结果**: 轮询从固定 `setInterval` 改为 timeout 调度，失败后指数退避，连续失败达到阈值后停止。
 
 #### BUG-79: CIDR 正则接受无效 octet/prefix
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B5: `codex/bugfix-b5-frontend-stability`)
 - **严重度**: MEDIUM
 - **文件**: `frontend/src/views/Routing.vue:347-348`、`Nodes.vue:1412`
 - **根因**: `/^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/` 接受 `999.999.999.999/99`。客户端验证不可信但导致迷惑性 UI。
+- **修复结果**: 新增共享 `isValidCidrOrIp()`，Routing 和 Nodes 复用真实 IPv4/IPv6 CIDR/IP 解析边界，拒绝非法 octet 和 prefix。
 
 ---
 
@@ -818,10 +825,11 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-106: Policy Center 顶部 IP Groups 按钮把 MouseEvent 当成 policy
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B5: `codex/bugfix-b5-frontend-stability`)
 - **严重度**: MEDIUM
 - **文件**: `frontend/src/views/Policies.vue:8,729-731`
 - **根因**: 模板 `@click="goToIpGroups"` 会把 MouseEvent 作为第一个参数传入；函数签名把第一个参数当 `NormalizedPolicy`，导致上下文推导使用事件对象，可能跳转到错误或空的 IP Groups 上下文。
+- **修复结果**: 顶部按钮改为显式调用 `goToIpGroups()`，函数同时防御 `Event` 参数，确保跳转保留当前 policy 上下文。
 
 #### BUG-107: GitHub artifact 上传失败会被 continue-on-error 吞掉
 

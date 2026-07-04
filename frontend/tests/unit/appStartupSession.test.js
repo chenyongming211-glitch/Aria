@@ -19,7 +19,8 @@ const {
   },
   sessionDeferred: {
     promise: null,
-    resolve: null
+    resolve: null,
+    reject: null
   },
   mockUserStore: {
     loadSession: vi.fn()
@@ -75,8 +76,9 @@ describe('application startup session hydration', () => {
     mockApp.mount.mockClear()
     mockAppStore.fetchVersion.mockClear()
     mockAppStore.startVersionWatcher.mockClear()
-    sessionDeferred.promise = new Promise((resolve) => {
+    sessionDeferred.promise = new Promise((resolve, reject) => {
       sessionDeferred.resolve = resolve
+      sessionDeferred.reject = reject
     })
     mockUserStore.loadSession.mockReset()
     mockUserStore.loadSession.mockReturnValue(sessionDeferred.promise)
@@ -98,5 +100,19 @@ describe('application startup session hydration', () => {
     expect(mockUserStore.loadSession.mock.invocationCallOrder[0])
       .toBeLessThan(mockApp.mount.mock.invocationCallOrder[0])
     expect(mockAppStore.startVersionWatcher).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders a deterministic startup failure when session hydration rejects', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await import('@/main')
+
+    sessionDeferred.reject(new Error('session unavailable'))
+    await sessionDeferred.promise.catch(() => {})
+    await Promise.resolve()
+
+    expect(mockApp.mount).not.toHaveBeenCalled()
+    expect(document.querySelector('#app')?.textContent).toContain('Application failed to start')
+    expect(consoleError).toHaveBeenCalledWith('[Startup] Application bootstrap failed:', expect.any(Error))
   })
 })

@@ -136,4 +136,34 @@ describe('useFocusedPolling', () => {
 
     wrapper.unmount()
   })
+
+  it('backs off and stops after repeated poll failures', async () => {
+    const { poll, controls, wrapper } = mountPolling({
+      poll: async () => {
+        throw Object.assign(new Error('server unavailable'), { response: { status: 500 } })
+      }
+    })
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(poll).toHaveBeenCalledTimes(1)
+    expect(controls().isPolling.value).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(1999)
+    expect(poll).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(poll).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(3999)
+    expect(poll).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(poll).toHaveBeenCalledTimes(3)
+    expect(controls().isPolling.value).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(poll).toHaveBeenCalledTimes(3)
+
+    wrapper.unmount()
+  })
 })

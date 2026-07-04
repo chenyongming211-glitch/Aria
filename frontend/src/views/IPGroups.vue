@@ -252,6 +252,12 @@ const referencesTitle = computed(() => {
 const routeContext = computed(() => policyContextFromQuery(route.query || {}))
 const hasRouteContext = computed(() => hasPolicyContext(routeContext.value))
 
+const errorMessage = (error, fallback = t('policyTerms.unknownError')) => {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string') return error
+  return fallback
+}
+
 const clearRouteContext = () => {
   router.push({ name: 'IPGroups' })
 }
@@ -270,7 +276,7 @@ const loadGroups = async () => {
   try {
     groups.value = await useIpGroupApi.listIPGroups()
   } catch (error) {
-    ElMessage.error(`${t('ipGroups.loadFailed')}: ${error.message || t('policyTerms.unknownError')}`)
+    ElMessage.error(`${t('ipGroups.loadFailed')}: ${errorMessage(error)}`)
   } finally {
     loading.value = false
   }
@@ -302,7 +308,7 @@ const loadReferences = async (row, offset = 0, options = {}) => {
     referencesOffset.value = page.offset
     return page
   } catch (error) {
-    ElMessage.error(`${t('ipGroups.loadReferencesFailed')}: ${error.message || t('policyTerms.unknownError')}`)
+    ElMessage.error(`${t('ipGroups.loadReferencesFailed')}: ${errorMessage(error)}`)
     if (options.failClosed) {
       throw error
     }
@@ -352,7 +358,7 @@ const handleDelete = async (row) => {
     await loadGroups()
   } catch (error) {
     if (error !== 'cancel') {
-      ElMessage.error(`${t('ipGroups.deleteFailed')}: ${error.message || t('policyTerms.unknownError')}`)
+      ElMessage.error(`${t('ipGroups.deleteFailed')}: ${errorMessage(error)}`)
     }
   }
 }
@@ -380,7 +386,7 @@ const handleSubmit = async () => {
     await loadGroups()
   } catch (error) {
     if (error !== false) {
-      ElMessage.error(`${t('ipGroups.saveFailed')}: ${error.message || t('policyTerms.unknownError')}`)
+      ElMessage.error(`${t('ipGroups.saveFailed')}: ${errorMessage(error)}`)
     }
   } finally {
     submitting.value = false

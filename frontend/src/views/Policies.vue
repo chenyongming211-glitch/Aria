@@ -5,7 +5,7 @@
       :subtitle="t('policies.subtitle')"
     >
       <template #actions>
-        <el-button v-if="hasPermission('ip-groups:read')" @click="goToIpGroups">
+        <el-button v-if="hasPermission('ip-groups:read')" @click="goToIpGroups()">
           <el-icon><Collection /></el-icon>
           {{ t('nav.ipGroupManagement') }}
         </el-button>
@@ -726,8 +726,9 @@ const goToKind = (kind: PolicyKind | string, policy: NormalizedPolicy | null = s
   router.push(policyPageRouteForDomain(kind, currentPolicyContext(policy)))
 }
 
-const goToIpGroups = (policy: NormalizedPolicy | null = selectedPolicy.value) => {
-  router.push(ipGroupsRouteFromContext(currentPolicyContext(policy)))
+const goToIpGroups = (policy: NormalizedPolicy | Event | null = selectedPolicy.value) => {
+  const policyContext = policy instanceof Event ? selectedPolicy.value : policy
+  router.push(ipGroupsRouteFromContext(currentPolicyContext(policyContext)))
 }
 
 const showDetails = (policy: NormalizedPolicy) => {

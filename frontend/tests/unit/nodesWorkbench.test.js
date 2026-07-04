@@ -363,6 +363,34 @@ describe('Nodes workbench detail', () => {
     expect(mockNodeStore.loadNodes).toHaveBeenCalled()
   })
 
+  it('refreshes the node edit baseline when route sync fails after metadata save', async () => {
+    addRouteMock.mockRejectedValueOnce(new Error('route sync failed'))
+    mockNodeStore.loadNodeDetail.mockResolvedValueOnce({
+      ...mockNodeStore.nodes[0],
+      hostname: 'edge-renamed',
+      routes: ['10.10.0.0/16']
+    })
+    const wrapper = mountNodes()
+
+    wrapper.vm.handleEditNode(mockNodeStore.nodes[0])
+    wrapper.vm.editForm.hostname = 'edge-renamed'
+    wrapper.vm.editForm.advertised_routes = ['10.20.0.0/16']
+
+    await wrapper.vm.saveNodeChanges()
+    await flushPromises()
+
+    expect(mockNodeStore.updateNodeRemote).toHaveBeenCalledWith('node-1', {
+      hostname: 'edge-renamed',
+      region: 'sh'
+    })
+    expect(addRouteMock).toHaveBeenCalledWith('node-1', '10.20.0.0/16')
+    expect(mockNodeStore.loadNodes).toHaveBeenCalled()
+    expect(mockNodeStore.loadNodeDetail).toHaveBeenCalledWith('node-1')
+    expect(wrapper.vm.editForm.advertised_routes).toEqual(['10.10.0.0/16'])
+    expect(wrapper.vm.editOriginalAdvertisedRoutes).toEqual(['10.10.0.0/16'])
+    expect(wrapper.vm.editDialogVisible).toBe(true)
+  })
+
   it('polls command status until the queued quick command reaches a terminal state', async () => {
     vi.useFakeTimers()
 

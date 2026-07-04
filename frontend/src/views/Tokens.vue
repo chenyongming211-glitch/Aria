@@ -311,7 +311,7 @@ const saveToken = async () => {
     dialogVisible.value = false
   } catch (error) {
     console.error('Failed to create token:', error)
-    ElMessage.error(`${t('tokens.createFailed')}: ${error.message || error}`)
+    ElMessage.error(`${t('tokens.createFailed')}: ${errorMessage(error)}`)
   }
 }
 
@@ -329,7 +329,7 @@ const revokeToken = async (tokenId) => {
     ElMessage.success(t('tokens.revoked'))
   } catch (error) {
     console.error('Failed to revoke token:', error)
-    ElMessage.error(`${t('tokens.revokeFailed')}: ${error.message || error}`)
+    ElMessage.error(`${t('tokens.revokeFailed')}: ${errorMessage(error)}`)
   }
 }
 
