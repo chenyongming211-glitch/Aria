@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const aiToolNodeReadLimit = controllerstorage.MaxNodeListLimit
+
 func findUniqueNodeByHostnameInNodes(nodes []*controllerstorage.Node, hostname string) (*controllerstorage.Node, int) {
 	var matched *controllerstorage.Node
 	count := 0
@@ -82,10 +84,29 @@ func parseOptionalTenantID(req map[string]interface{}) (uuid.UUID, bool, error) 
 }
 
 func findUniqueNodeByHostnameForScope(store *controllerstorage.Storage, hostname string, tenantID uuid.UUID, tenantScoped bool) (*controllerstorage.Node, int, error) {
-	nodes, err := store.GetAllNodes()
+	var (
+		nodes []*controllerstorage.Node
+		err   error
+	)
+	if tenantScoped {
+		nodes, err = store.ListTenantNodesByHostname(tenantID, hostname, 2)
+	} else {
+		nodes, err = store.ListNodesByHostname(hostname, 2)
+	}
 	if err != nil {
 		return nil, 0, err
 	}
 	node, count := findUniqueNodeByHostnameInNodesForScope(nodes, hostname, tenantID, tenantScoped)
 	return node, count, nil
+}
+
+func listNodesForToolScope(store *controllerstorage.Storage, tenantID uuid.UUID, tenantScoped bool) ([]*controllerstorage.Node, error) {
+	if tenantScoped {
+		return store.GetNodesByTenantPage(tenantID, aiToolNodeReadLimit, 0)
+	}
+	return store.GetAllNodesPage(aiToolNodeReadLimit, 0)
+}
+
+func listNodesForEnrollmentToken(store *controllerstorage.Storage, tenantID uuid.UUID, enrollmentToken string) ([]*controllerstorage.Node, error) {
+	return store.ListTenantNodesByEnrollmentToken(tenantID, enrollmentToken, aiToolNodeReadLimit)
 }

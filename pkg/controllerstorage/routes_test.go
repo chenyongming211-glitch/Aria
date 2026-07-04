@@ -2,8 +2,10 @@ package controllerstorage
 
 import (
 	"errors"
+	"regexp"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 )
 
@@ -64,5 +66,35 @@ func TestFindAdvertisedRouteConflictSkipsInactiveNodes(t *testing.T) {
 
 	if err := FindAdvertisedRouteConflict(nodes, "target-key", "sh", []string{"10.10.1.0/24"}); err != nil {
 		t.Fatalf("expected inactive node to be ignored, got %v", err)
+	}
+}
+
+func TestFindTenantAdvertisedRouteConflictStreamsRoutesAndSkipsInvalidExistingCIDR(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	tenantID := uuid.New()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT route.cidr,`)).
+		WithArgs(tenantID, "target-key", "sh").
+		WillReturnRows(sqlmock.NewRows([]string{"cidr", "hostname", "region", "public_key"}).
+			AddRow("not-a-cidr", "bad-node", "bj", "bad-key").
+			AddRow("10.10.0.0/16", "edge-b", "bj", "other-key"))
+
+	err = NewStorageWithDB(db).FindTenantAdvertisedRouteConflict(tenantID, "target-key", "sh", []string{"10.10.1.0/24"})
+	if err == nil {
+		t.Fatal("expected route conflict")
+	}
+	var conflict *RouteConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("expected RouteConflictError, got %T: %v", err, err)
+	}
+	if conflict.ExistingCIDR != "10.10.0.0/16" || conflict.NodeHostname != "edge-b" {
+		t.Fatalf("unexpected conflict details: %#v", conflict)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }

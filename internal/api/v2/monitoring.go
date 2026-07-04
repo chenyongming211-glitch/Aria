@@ -23,6 +23,8 @@ import (
 const (
 	maxMonitoringTopologyNodes = 200
 	maxGeneratedTopologyLinks  = 256
+	maxMonitoringLearnedRoutes = 1000
+	maxMonitoringTrafficNodes  = controllerstorage.MaxNodeListLimit
 )
 
 // handleMonitoringStats returns tenant-level monitoring statistics.
@@ -198,31 +200,27 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 	data["active_alerts"] = alerts
 
 	// 计算已学习的路由 (Learned Routes)
-	// 在 Mesh 网络中，本节点会学习到同租户其他所有节点宣告的路由
-	tenantNodes, err := r.store.GetNodesByTenant(tenantID)
+	// 在 Mesh 网络中，本节点会学习到同租户其他节点宣告的路由，详情页只返回有界结果。
+	learnedRouteRows, learnedRoutesTruncated, err := r.store.ListTenantLearnedRoutes(tenantID, node.ID, maxMonitoringLearnedRoutes)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load learned routes: "+err.Error(), nil)
 		return
 	}
-	learnedRoutes := make([]map[string]interface{}, 0)
-	for _, tn := range tenantNodes {
-		if tn.ID == node.ID {
-			continue // 跳过自己
-		}
-		if !monitoringRuntimeEligibleNode(tn) {
-			continue
-		}
-		for _, route := range tn.AdvertisedRoutes {
-			learnedRoutes = append(learnedRoutes, map[string]interface{}{
-				"cidr":          route,
-				"next_hop_node": tn.Hostname,
-				"next_hop_ip":   tn.AssignedIP,
-				"region":        tn.Region,
-				"status":        nodeAvailabilityStatus(tn),
-			})
-		}
+	learnedRoutes := make([]map[string]interface{}, 0, len(learnedRouteRows))
+	for _, route := range learnedRouteRows {
+		learnedRoutes = append(learnedRoutes, map[string]interface{}{
+			"cidr":          route.CIDR,
+			"next_hop_node": route.NextHop,
+			"next_hop_ip":   route.NextHopIP,
+			"region":        route.Region,
+			"status": nodeAvailabilityStatus(&controllerstorage.Node{
+				Status:   route.NodeStatus,
+				LastSeen: route.LastSeen,
+			}),
+		})
 	}
 	data["learned_routes"] = learnedRoutes
+	data["learned_routes_truncated"] = learnedRoutesTruncated
 
 	apibase.WriteSuccess(w, data, "Node monitoring detail retrieved")
 }
@@ -569,19 +567,22 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 	end := time.Now()
 	start := end.Add(-duration)
 
-	// 获取租户下所有节点的标识用于 PromQL 过滤
-	nodes, err := r.store.GetNodesByTenant(tenantID)
+	// 获取租户下有界节点页的标识用于 PromQL 过滤，避免大租户构造超长 instance filter。
+	nodes, err := r.store.GetNodesByTenantPage(tenantID, maxMonitoringTrafficNodes, 0)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to load tenant nodes: "+err.Error(), nil)
 		return
 	}
+	trafficNodesTruncated := len(nodes) == maxMonitoringTrafficNodes
 	eligibleNodes := filterMonitoringRuntimeEligibleNodes(nodes)
 	if len(eligibleNodes) == 0 {
 		apibase.WriteSuccess(w, map[string]interface{}{
-			"timestamps":          []int64{},
-			"upload_bytes":        []float64{},
-			"download_bytes":      []float64{},
-			"peak_bandwidth_mbps": 0,
+			"timestamps":                []int64{},
+			"upload_bytes":              []float64{},
+			"download_bytes":            []float64{},
+			"peak_bandwidth_mbps":       0,
+			"traffic_nodes_truncated":   trafficNodesTruncated,
+			"traffic_node_sample_limit": maxMonitoringTrafficNodes,
 		}, "Traffic data retrieved")
 		return
 	}
@@ -590,10 +591,12 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 	instanceFilter := promQLInstanceFilterForNodes(eligibleNodes)
 	if instanceFilter == "" {
 		apibase.WriteSuccess(w, map[string]interface{}{
-			"timestamps":          []int64{},
-			"upload_bytes":        []float64{},
-			"download_bytes":      []float64{},
-			"peak_bandwidth_mbps": 0,
+			"timestamps":                []int64{},
+			"upload_bytes":              []float64{},
+			"download_bytes":            []float64{},
+			"peak_bandwidth_mbps":       0,
+			"traffic_nodes_truncated":   trafficNodesTruncated,
+			"traffic_node_sample_limit": maxMonitoringTrafficNodes,
 		}, "Traffic data retrieved")
 		return
 	}
@@ -675,10 +678,12 @@ func (r *Router) handleMonitoringTraffic(w http.ResponseWriter, req *http.Reques
 	}
 
 	apibase.WriteSuccess(w, map[string]interface{}{
-		"timestamps":          timestamps,
-		"upload_bytes":        uploadBytes,
-		"download_bytes":      downloadBytes,
-		"peak_bandwidth_mbps": math.Round(peakBandwidth*100) / 100,
+		"timestamps":                timestamps,
+		"upload_bytes":              uploadBytes,
+		"download_bytes":            downloadBytes,
+		"peak_bandwidth_mbps":       math.Round(peakBandwidth*100) / 100,
+		"traffic_nodes_truncated":   trafficNodesTruncated,
+		"traffic_node_sample_limit": maxMonitoringTrafficNodes,
 	}, "Traffic data retrieved")
 }
 

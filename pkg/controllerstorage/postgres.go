@@ -73,6 +73,15 @@ type NodeListOptions struct {
 	Unbounded      bool
 }
 
+type LearnedRoute struct {
+	CIDR       string
+	NextHop    string
+	NextHopIP  string
+	Region     string
+	NodeStatus string
+	LastSeen   int64
+}
+
 func NewStorage(cfg *Config, baseIP, cidr string) (*Storage, error) {
 	db, err := sql.Open("postgres", cfg.DSN())
 	if err != nil {
@@ -668,6 +677,10 @@ func (s *Storage) GetNodesByTenantPage(tenantID uuid.UUID, limit, offset int) ([
 	return s.listNodes(NodeListOptions{TenantID: tenantID, Limit: limit, Offset: offset})
 }
 
+func (s *Storage) GetAllNodesPage(limit, offset int) ([]*Node, error) {
+	return s.listNodes(NodeListOptions{Limit: limit, Offset: offset})
+}
+
 // GetNodeByTenant retrieves a specific node for a specific tenant (ensures tenant isolation)
 func (s *Storage) GetNodeByTenant(publicKey string, tenantID uuid.UUID) (*Node, error) {
 	query := `SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE public_key = $1 AND tenant_id = $2`
@@ -804,6 +817,36 @@ func (s *Storage) GetNodeByHostnameForTenant(hostname string, tenantID uuid.UUID
 	return s.scanNode(row)
 }
 
+func (s *Storage) ListNodesByHostname(hostname string, limit int) ([]*Node, error) {
+	query := `SELECT ` + nodeSelectColumns + ` FROM nodes WHERE hostname = $1 AND status != 'deleted' ORDER BY last_seen DESC LIMIT $2`
+	rows, err := s.db.Query(query, hostname, normalizeNodeListLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return s.scanNodeListRows(rows, normalizeNodeListLimit(limit))
+}
+
+func (s *Storage) ListTenantNodesByHostname(tenantID uuid.UUID, hostname string, limit int) ([]*Node, error) {
+	query := `SELECT ` + nodeSelectColumns + ` FROM nodes WHERE tenant_id = $1 AND hostname = $2 AND status != 'deleted' ORDER BY last_seen DESC LIMIT $3`
+	rows, err := s.db.Query(query, tenantID, hostname, normalizeNodeListLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return s.scanNodeListRows(rows, normalizeNodeListLimit(limit))
+}
+
+func (s *Storage) ListTenantNodesByEnrollmentToken(tenantID uuid.UUID, enrollmentToken string, limit int) ([]*Node, error) {
+	query := `SELECT ` + nodeSelectColumns + ` FROM nodes WHERE tenant_id = $1 AND enrolled_with_token = $2 AND status != 'deleted' ORDER BY last_seen DESC LIMIT $3`
+	rows, err := s.db.Query(query, tenantID, enrollmentToken, normalizeNodeListLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return s.scanNodeListRows(rows, normalizeNodeListLimit(limit))
+}
+
 const nodeSelectColumns = `id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at`
 
 func normalizeNodeListLimit(limit int) int {
@@ -849,18 +892,47 @@ func (s *Storage) listNodes(opts NodeListOptions) ([]*Node, error) {
 	}
 	defer rows.Close()
 
-	var nodes []*Node
+	return s.scanNodeListRows(rows, normalizeNodeListLimit(opts.Limit))
+}
+
+func (s *Storage) ListTenantLearnedRoutes(tenantID, excludeNodeID uuid.UUID, limit int) ([]*LearnedRoute, bool, error) {
+	normalizedLimit := normalizeNodeListLimit(limit)
+	queryLimit := normalizedLimit + 1
+	query := `
+		SELECT route.cidr,
+		       COALESCE(n.hostname, ''),
+		       COALESCE(n.assigned_ip, ''),
+		       COALESCE(n.region, ''),
+		       COALESCE(n.status, 'online'),
+		       n.last_seen
+		  FROM nodes n
+		  CROSS JOIN LATERAL unnest(n.advertised_routes) AS route(cidr)
+		 WHERE n.tenant_id = $1
+		   AND n.id <> $2
+		   AND COALESCE(n.status, 'online') NOT IN ('deleted', 'suspended', 'banned')
+		 ORDER BY n.last_seen DESC, route.cidr ASC
+		 LIMIT $3`
+	rows, err := s.db.Query(query, tenantID, excludeNodeID, queryLimit)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+
+	routes := make([]*LearnedRoute, 0, normalizedLimit)
 	for rows.Next() {
-		node, err := s.scanNodeRows(rows)
-		if err != nil {
-			return nil, err
+		route := &LearnedRoute{}
+		if err := rows.Scan(&route.CIDR, &route.NextHop, &route.NextHopIP, &route.Region, &route.NodeStatus, &route.LastSeen); err != nil {
+			return nil, false, err
 		}
-		nodes = append(nodes, node)
+		routes = append(routes, route)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return nodes, nil
+	if len(routes) > normalizedLimit {
+		return routes[:normalizedLimit], true, nil
+	}
+	return routes, false, nil
 }
 
 func (s *Storage) GetAllNodes() ([]*Node, error) {
@@ -1337,6 +1409,24 @@ func (s *Storage) scanNodeRows(rows *sql.Rows) (*Node, error) {
 	)
 	node.AdvertisedRoutes = []string(advertisedRoutes)
 	return node, err
+}
+
+func (s *Storage) scanNodeListRows(rows *sql.Rows, capacityHint int) ([]*Node, error) {
+	if capacityHint < 0 {
+		capacityHint = 0
+	}
+	nodes := make([]*Node, 0, capacityHint)
+	for rows.Next() {
+		node, err := s.scanNodeRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, node)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return nodes, nil
 }
 
 type RegisterDeviceRequest struct {

@@ -121,23 +121,20 @@ func NewGetTokenDetailTool(store *controllerstorage.Storage) Tool {
 				}
 			}
 
-			// 获取使用该 token 的节点
-			allNodes, err := store.GetAllNodes()
+			// 获取使用该 token 的有界节点页
+			allNodes, err := listNodesForEnrollmentToken(store, tenantID, tokenStr)
 			if err != nil {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
-			allNodes = filterNodesByTenant(allNodes, tenantID, tenantScoped)
 
 			var usedByNodes []map[string]interface{}
 			for _, node := range allNodes {
-				if node.EnrolledWithToken == tokenStr {
-					usedByNodes = append(usedByNodes, map[string]interface{}{
-						"hostname":    node.Hostname,
-						"assigned_ip": node.AssignedIP,
-						"region":      node.Region,
-						"status":      node.Status,
-					})
-				}
+				usedByNodes = append(usedByNodes, map[string]interface{}{
+					"hostname":    node.Hostname,
+					"assigned_ip": node.AssignedIP,
+					"region":      node.Region,
+					"status":      node.Status,
+				})
 			}
 
 			result := map[string]interface{}{

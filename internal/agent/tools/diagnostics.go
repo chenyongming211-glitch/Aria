@@ -49,12 +49,11 @@ func NewDiagnoseConnectivityTool(store *controllerstorage.Storage) Tool {
 				return "", fmt.Errorf("tenant_id is required")
 			}
 
-			// 查找节点
-			allNodes, err := store.GetAllNodes()
+			// 查找有界节点页
+			allNodes, err := listNodesForToolScope(store, tenantID, tenantScoped)
 			if err != nil {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
-			allNodes = filterNodesByTenant(allNodes, tenantID, tenantScoped)
 
 			var srcNode, dstNode *controllerstorage.Node
 			for _, n := range allNodes {

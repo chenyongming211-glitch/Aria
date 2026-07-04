@@ -2,6 +2,7 @@ package tools
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 
@@ -62,19 +63,16 @@ func NewAddRouteTool(store *controllerstorage.Storage) Tool {
 			}
 
 			// 查找节点
-			allNodes, err := store.GetAllNodes()
+			targetNode, matchCount, err := findUniqueNodeByHostnameForScope(store, hostname, tenantID, tenantScoped)
 			if err != nil {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
-
-			targetNode, matchCount := findUniqueNodeByHostnameInNodesForScope(allNodes, hostname, tenantID, tenantScoped)
 			if matchCount > 1 {
 				return "", fmt.Errorf("节点名称 [%s] 在多个租户中重复，请提供 tenant_id", hostname)
 			}
 			if targetNode == nil {
 				return fmt.Sprintf("节点 [%s] 不存在", hostname), nil
 			}
-			scopedNodes := filterNodesByTenant(allNodes, tenantID, tenantScoped)
 
 			// 检查是否已存在
 			for _, route := range targetNode.AdvertisedRoutes {
@@ -84,23 +82,13 @@ func NewAddRouteTool(store *controllerstorage.Storage) Tool {
 			}
 
 			// 检查跨 Region 冲突
-			for _, node := range scopedNodes {
-				if node.Region == targetNode.Region || node.PublicKey == targetNode.PublicKey {
-					continue
+			if err := store.FindTenantAdvertisedRouteConflict(targetNode.TenantID, targetNode.PublicKey, targetNode.Region, []string{cidr}); err != nil {
+				var conflict *controllerstorage.RouteConflictError
+				if errors.As(err, &conflict) {
+					return fmt.Sprintf("路由 %s 与 Region %s 的节点 %s 冲突（不同 Region 不能有重叠路由）",
+						cidr, conflict.NodeRegion, conflict.NodeHostname), nil
 				}
-
-				for _, existingRoute := range node.AdvertisedRoutes {
-					_, newNetwork, err := net.ParseCIDR(cidr)
-					_, existingNetwork, err2 := net.ParseCIDR(existingRoute)
-					if err != nil || err2 != nil {
-						continue
-					}
-
-					if cidrsOverlap(newNetwork, existingNetwork) {
-						return fmt.Sprintf("路由 %s 与 Region %s 的节点 %s 冲突（不同 Region 不能有重叠路由）",
-							cidr, node.Region, node.Hostname), nil
-					}
-				}
+				return "", fmt.Errorf("检查路由冲突失败: %v", err)
 			}
 
 			// 添加路由
@@ -176,12 +164,10 @@ func NewRemoveRouteTool(store *controllerstorage.Storage) Tool {
 			}
 
 			// 查找节点
-			allNodes, err := store.GetAllNodes()
+			targetNode, matchCount, err := findUniqueNodeByHostnameForScope(store, hostname, tenantID, tenantScoped)
 			if err != nil {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
-
-			targetNode, matchCount := findUniqueNodeByHostnameInNodesForScope(allNodes, hostname, tenantID, tenantScoped)
 			if matchCount > 1 {
 				return "", fmt.Errorf("节点名称 [%s] 在多个租户中重复，请提供 tenant_id", hostname)
 			}
@@ -293,17 +279,6 @@ func NewGetNodeRoutesTool(store *controllerstorage.Storage) Tool {
 	}
 }
 
-// cidrsOverlap 检查两个 CIDR 是否重叠
-func cidrsOverlap(a, b *net.IPNet) bool {
-	if a.Contains(b.IP) {
-		return true
-	}
-	if b.Contains(a.IP) {
-		return true
-	}
-	return false
-}
-
 // NewListAllRoutesTool 创建查询所有节点路由工具
 func NewListAllRoutesTool(store *controllerstorage.Storage) Tool {
 	return Tool{
@@ -336,12 +311,11 @@ func NewListAllRoutesTool(store *controllerstorage.Storage) Tool {
 				return "", err
 			}
 
-			// 查询所有节点
-			nodes, err := store.GetAllNodes()
+			// 查询有界节点页
+			nodes, err := listNodesForToolScope(store, tenantID, tenantScoped)
 			if err != nil {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
-			nodes = filterNodesByTenant(nodes, tenantID, tenantScoped)
 
 			// 如果指定了区域，过滤节点
 			var filteredNodes []*controllerstorage.Node

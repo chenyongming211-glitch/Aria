@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 // RouteConflictError describes an advertised-route overlap with another node.
@@ -84,6 +86,94 @@ func FindAdvertisedRouteConflict(nodes []*Node, targetPublicKey, targetRegion st
 				}
 			}
 		}
+	}
+
+	return nil
+}
+
+func (s *Storage) FindTenantAdvertisedRouteConflict(tenantID uuid.UUID, targetPublicKey, targetRegion string, candidateRoutes []string) error {
+	targetPublicKey = strings.TrimSpace(targetPublicKey)
+	targetRegion = strings.TrimSpace(targetRegion)
+
+	parsedCandidates := make([]struct {
+		raw string
+		net *net.IPNet
+	}, 0, len(candidateRoutes))
+	for _, route := range candidateRoutes {
+		candidate := strings.TrimSpace(route)
+		if candidate == "" {
+			continue
+		}
+		_, network, err := net.ParseCIDR(candidate)
+		if err != nil {
+			return fmt.Errorf("invalid CIDR %q: %w", candidate, err)
+		}
+		parsedCandidates = append(parsedCandidates, struct {
+			raw string
+			net *net.IPNet
+		}{raw: candidate, net: network})
+	}
+	if len(parsedCandidates) == 0 {
+		return nil
+	}
+
+	rows, err := s.db.Query(`
+		SELECT route.cidr,
+		       COALESCE(n.hostname, ''),
+		       COALESCE(n.region, ''),
+		       COALESCE(n.public_key, '')
+		  FROM nodes n
+		  CROSS JOIN LATERAL unnest(n.advertised_routes) AS route(cidr)
+		 WHERE n.tenant_id = $1
+		   AND n.public_key <> $2
+		   AND COALESCE(n.region, '') <> $3
+		   AND COALESCE(n.status, 'online') NOT IN ('deleted', 'suspended', 'banned')
+		   AND route.cidr <> ''
+		 ORDER BY n.last_seen DESC, route.cidr ASC`,
+		tenantID, targetPublicKey, targetRegion,
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var existingCIDR, hostname, region, publicKey string
+		if err := rows.Scan(&existingCIDR, &hostname, &region, &publicKey); err != nil {
+			return err
+		}
+		existingCIDR = strings.TrimSpace(existingCIDR)
+		if existingCIDR == "" {
+			continue
+		}
+		_, existingNetwork, err := net.ParseCIDR(existingCIDR)
+		if err != nil {
+			continue
+		}
+
+		for _, candidate := range parsedCandidates {
+			if !cidrNetworksOverlap(candidate.net, existingNetwork) {
+				continue
+			}
+			if strings.TrimSpace(hostname) == "" {
+				hostname = publicKey
+			}
+			if strings.TrimSpace(hostname) == "" {
+				hostname = "unknown"
+			}
+			return &RouteConflictError{
+				CIDR:            candidate.raw,
+				ExistingCIDR:    existingCIDR,
+				NodeHostname:    hostname,
+				NodeRegion:      region,
+				NodePublicKey:   publicKey,
+				TargetRegion:    targetRegion,
+				TargetPublicKey: targetPublicKey,
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
 	}
 
 	return nil

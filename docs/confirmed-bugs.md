@@ -728,11 +728,11 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-92: GetNodesByTenant 无分页全量加载到内存
 
-- **状态**: ✅ FIXED (B7: `codex/bugfix-b7-scale-performance`)
+- **状态**: ✅ FIXED (B7 初修 + B11 补齐残留路径: `codex/fix-bug92-bounded-node-reads`)
 - **严重度**: MEDIUM
-- **文件**: `pkg/controllerstorage/postgres.go:639`
+- **文件**: `pkg/controllerstorage/postgres.go`、`pkg/controllerstorage/routes.go`、`internal/api/v2/monitoring.go`、`internal/api/v2/setup.go`、`internal/cli/controller_serve.go`、`internal/agent/tools/*.go`
 - **根因**: 所有节点列表查询无 LIMIT/OFFSET。千级租户时全量加载。
-- **修复结果**: 新增 `GetNodesByTenantPage(tenantID, limit, offset)` 和统一分页解析；节点列表、拓扑和批量命令目标选择等 API 路径改为有界读取。运行期 peer sync 保留全量读取，因为 Agent 同步需要完整租户 peer 快照。
+- **修复结果**: B7 新增 `GetNodesByTenantPage(tenantID, limit, offset)` 和统一分页解析，节点列表、拓扑、批量命令目标选择等 API 路径改为有界读取。B11 继续补齐残留路径：监控详情学习路由改为 `ListTenantLearnedRoutes` 有界查询；监控流量改为有界节点样本并返回 truncation 标记；Policy Center 列表改为分页响应；跨 Region 路由冲突校验改为数据库流式路由扫描；旧 controller server 的 `/agents/network` 和注册 route conflict 校验不再全量加载租户节点；AI 工具的节点、令牌、路由、监控、诊断读取改为 hostname/enrollment token 定向查询或 bounded page。运行期 peer sync 和 CLI 管理命令仍保留全量读取，因为这些路径需要完整租户/全局快照或人工管理语义。
 
 #### BUG-93: Topology O(n²) 链路
 

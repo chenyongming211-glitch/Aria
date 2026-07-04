@@ -11,6 +11,8 @@ interface PolicyFilters {
   kind?: string
   nodeId?: string
   enabled?: boolean | string
+  limit?: number
+  offset?: number
 }
 
 interface PolicyRetryPayload {
@@ -95,6 +97,12 @@ export const usePolicyApi = {
     }
     if (filters.enabled !== undefined && filters.enabled !== null && filters.enabled !== '') {
       params.enabled = String(filters.enabled)
+    }
+    if (typeof filters.limit === 'number' && filters.limit > 0) {
+      params.limit = String(filters.limit)
+    }
+    if (typeof filters.offset === 'number' && filters.offset > 0) {
+      params.offset = String(filters.offset)
     }
 
     const response = await api.get(API_ENDPOINTS.TENANT.POLICIES(tenantId), { params })
