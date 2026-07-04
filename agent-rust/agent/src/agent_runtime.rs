@@ -2663,19 +2663,7 @@ impl AgentRuntime {
     async fn cleanup(&self) -> Result<()> {
         tracing::info!("Cleaning up...");
 
-        let map_names = [
-            "SRC_IPV4_ID_MAP",
-            "DST_IPV4_ID_MAP",
-            "SRC_IPV6_ID_MAP",
-            "DST_IPV6_ID_MAP",
-        ];
-
-        for map_name in map_names {
-            let pin_path = format!("{}/{}", BPF_FS_PATH, map_name);
-            if std::path::Path::new(&pin_path).exists() {
-                let _ = std::fs::remove_file(&pin_path);
-            }
-        }
+        Self::cleanup_pinned_acl_qos_maps();
 
         if std::path::Path::new(&self.unix_socket_path).exists() {
             let _ = std::fs::remove_file(&self.unix_socket_path);
