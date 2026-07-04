@@ -28,6 +28,26 @@ func TestQueueAgentCommandRejectsUnsupportedCommand(t *testing.T) {
 	}
 }
 
+func TestRestartAgentCommandRejectedUntilImplemented(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	store := NewStorageWithDB(db)
+	if IsAllowedAgentCommand("restart") {
+		t.Fatal("restart must stay disabled until the Agent implements it")
+	}
+	if _, err := store.QueueAgentCommand("node-key", "restart", nil, 0, 30); err == nil || !strings.Contains(err.Error(), "unsupported agent command") {
+		t.Fatalf("expected restart to be rejected, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestGetNextPendingAgentCommandRequeuesTimedOutSentCommands(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

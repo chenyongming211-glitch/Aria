@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
 
 	"aria/internal/api/apibase"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestHandleRefreshReloadsUserRoleAndTenantFromDatabase(t *testing.T) {
@@ -245,6 +247,47 @@ func TestHandleLogoutRevokesCurrentTokenVersion(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	rr := httptest.NewRecorder()
 	api.HandleLogout(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestHandleForceChangePasswordAcceptsCaseInsensitiveBearerScheme(t *testing.T) {
+	auth.SetSecret("test-jwt-secret")
+	t.Cleanup(func() { auth.SetSecret("") })
+
+	userID := uuid.New()
+	token, err := auth.GenerateToken(userID.String(), "alice", "admin", uuid.New().String())
+	if err != nil {
+		t.Fatalf("GenerateToken failed: %v", err)
+	}
+	oldHash, err := bcrypt.GenerateFromPassword([]byte("old-password"), 4)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword failed: %v", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT password_hash FROM users WHERE id = $1`)).
+		WithArgs(userID.String()).
+		WillReturnRows(sqlmock.NewRows([]string{"password_hash"}).AddRow(string(oldHash)))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE users SET password_hash = $1, must_change_password = FALSE, token_version = COALESCE(token_version, 0) + 1 WHERE id = $2`)).
+		WithArgs(sqlmock.AnyArg(), userID.String()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	api := NewAuthAPI(controllerstorage.NewStorageWithDB(db))
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/auth/force-change-password", strings.NewReader(`{"old_password":"old-password","new_password":"new-password"}`))
+	req.Header.Set("Authorization", "bearer "+token)
+	rr := httptest.NewRecorder()
+	api.HandleForceChangePassword(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())

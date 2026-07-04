@@ -170,13 +170,43 @@ func TestDeleteIPGroupRejectsReferencedGroup(t *testing.T) {
 	tenantID := uuid.New()
 	groupID := uuid.New()
 
+	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(referencedIPGroupSQL)).
 		WithArgs(tenantID, groupID).
 		WillReturnRows(sqlmock.NewRows([]string{"referenced"}).AddRow(true))
+	mock.ExpectRollback()
 
 	err = store.DeleteIPGroup(tenantID, groupID)
 	if err == nil || !strings.Contains(err.Error(), "ip group is referenced by policy rules") {
 		t.Fatalf("expected referenced error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestDeleteIPGroupChecksReferenceAndDeletesInSingleTransaction(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	store := NewStorageWithDB(db)
+	tenantID := uuid.New()
+	groupID := uuid.New()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(referencedIPGroupSQL)).
+		WithArgs(tenantID, groupID).
+		WillReturnRows(sqlmock.NewRows([]string{"referenced"}).AddRow(false))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM ip_groups WHERE tenant_id = $1 AND id = $2`)).
+		WithArgs(tenantID, groupID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	if err := store.DeleteIPGroup(tenantID, groupID); err != nil {
+		t.Fatalf("DeleteIPGroup failed: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

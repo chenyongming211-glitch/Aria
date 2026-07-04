@@ -536,10 +536,10 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-70: IP Group 删除 TOCTOU 竞态
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B4: `codex/bugfix-b4-controller-correctness`)
 - **严重度**: MEDIUM
 - **文件**: `pkg/controllerstorage/ip_groups.go:271-292`
-- **根因**: reference check (SELECT) 和 DELETE 不在同一事务内。FK 约束防数据损坏，但错误信息是 Postgres raw constraint 而非友好消息。
+- **修复结果**: `DeleteIPGroup` 将 reference check 和 DELETE 放入同一事务；被引用时仍返回友好 conflict，避免并发策略创建导致 raw FK/DB 错误暴露给 API。
 
 #### BUG-71: 部分表恢复可产生孤儿引用
 
@@ -557,10 +557,10 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-73: 过期证书排除在续期候选外
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B4: `codex/bugfix-b4-controller-correctness`)
 - **严重度**: MEDIUM
 - **文件**: `pkg/controllerstorage/certificate_lifecycle.go:42-76`
-- **根因**: `not_after >= NOW()` 过滤掉已过期但未标记 expired 的证书。若 MarkExpiredNodeCertificates 未及时运行，过期证书既不被标记也不续期。
+- **修复结果**: `ListCertificatesExpiringBefore` 不再用 `not_after >= NOW()` 排除已过期但仍为 issued 的证书，续期/对账候选能覆盖调度延迟窗口。
 
 #### BUG-74: eBPF map 关闭清理不完整
 
@@ -678,10 +678,10 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-88: Token tag 无长度/内容校验
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B4: `codex/bugfix-b4-controller-correctness`)
 - **严重度**: MEDIUM
 - **文件**: `internal/api/v2/platform.go:561-603`、`internal/token/generator.go:53`
-- **根因**: Token tag 无长度限制、无字符过滤。可存超大或控制字符，导致 DB 存储膨胀。
+- **修复结果**: 创建 token 时先规范化 tag，限制最多 128 字符并拒绝控制字符；非法 tag 在租户状态查询和 DB 写入前返回 400。
 
 #### BUG-89: getNodes 字符串拼接 SQL（当前安全但脆弱）
 
@@ -736,10 +736,10 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-96: Node update 缺少 hostname/region/vpc_id 长度限制
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B4: `codex/bugfix-b4-controller-correctness`)
 - **严重度**: LOW
 - **文件**: `internal/api/v2/setup.go:1099-1157`、`pkg/controllerstorage/postgres.go:184-186`
-- **根因**: Node update 直接把 hostname/region/vpc_id 写入 SQL，依赖数据库 VARCHAR 长度报错；缺少业务层长度/字符校验和友好错误。
+- **修复结果**: Node update 在 DB 写入前校验 `hostname <= 100`、`region <= 50`、`vpc_id <= 50`，并拒绝控制字符；非法输入返回 400。
 
 #### BUG-97: Rust sync_peers 每次 clone 全部 PeerInfo
 
@@ -790,31 +790,31 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-102: PUT route 空 body 会静默删除旧路由
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B4: `codex/bugfix-b4-controller-correctness`)
 - **严重度**: MEDIUM
 - **文件**: `internal/api/v2/setup.go:1303-1357,2068-2090,2211-2219`
-- **根因**: `decodeRouteBody()` 对 `{}` 返回空字符串且不报错；`replaceTenantNodeRoute()` 用空字符串替换旧 route；随后 `normalizeRoutes()` 丢弃空字符串，最终表现为 update route 变成 delete route。
+- **修复结果**: `decodeRouteBody()` 对缺少 `cidr` / `route` 的请求直接返回 400，空 PUT 不再进入 replace 流程。
 
 #### BUG-103: 裸 IPv6 路由会被错误补成 `/32`
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B4: `codex/bugfix-b4-controller-correctness`)
 - **严重度**: MEDIUM
 - **文件**: `internal/api/v2/setup.go:2068-2082`
-- **根因**: `normalizeRoutes()` 对所有不带 `/` 的 `net.ParseIP` 成功值统一追加 `/32`，IPv6 地址也会被写成 `.../32`，语义错误；IPv6 应补 `/128`。
+- **修复结果**: `normalizeRoutes()` 区分 IPv4/IPv6，裸 IPv4 仍补 `/32`，裸 IPv6 补 `/128`。
 
 #### BUG-104: auth refresh / force-change-password 的 Bearer 解析大小写不一致
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B4: `codex/bugfix-b4-controller-correctness`)
 - **严重度**: MEDIUM
 - **文件**: `internal/api/handlers/auth.go:178,322`、`internal/api/middleware/jwt_auth.go:35-40`
-- **根因**: JWT middleware 用 `strings.EqualFold` 接受 `bearer` / `Bearer`，但 refresh 和 force-change-password handler 用大小写敏感的 `"Bearer "` 判断；同一个 Authorization header 在不同认证路径行为不一致。
+- **修复结果**: `HandleForceChangePassword` 复用 auth handler 的 Bearer parser，和 refresh/logout/middleware 一样接受大小写不敏感的 Bearer scheme。
 
 #### BUG-105: Agent restart 命令被后端允许但 Agent 永远返回未实现
 
-- **状态**: 🔴 OPEN
+- **状态**: ✅ FIXED (B4: `codex/bugfix-b4-controller-correctness`)
 - **严重度**: MEDIUM
 - **文件**: `pkg/controllerstorage/agent_commands.go:24-29`、`agent-rust/agent/src/agent_runtime.rs:1322-1326`
-- **根因**: Controller allowlist 接受 `restart` 并可排队投递，但 Agent 收到后固定返回 `restart is not implemented yet`。用户会看到命令可创建但必失败。
+- **修复结果**: Controller command allowlist 移除 `restart`，直到 Agent 真实实现该命令前不允许排队投递。
 
 #### BUG-106: Policy Center 顶部 IP Groups 按钮把 MouseEvent 当成 policy
 

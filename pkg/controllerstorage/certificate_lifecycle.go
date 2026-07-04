@@ -46,7 +46,6 @@ func (s *Storage) ListCertificatesExpiringBefore(deadline time.Time) ([]*Certifi
 		JOIN nodes n ON n.id = c.node_id
 		WHERE c.status = $1
 		  AND c.not_after <= $2
-		  AND c.not_after >= NOW()
 		  AND COALESCE(n.status, 'online') NOT IN ('deleted', 'suspended', 'banned')
 		ORDER BY c.not_after ASC
 	`, CertStatusIssued, deadline.UTC())

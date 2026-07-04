@@ -269,15 +269,21 @@ func updateIPGroupWith(q ipGroupExecutor, tenantID, groupID uuid.UUID, group *IP
 }
 
 func (s *Storage) DeleteIPGroup(tenantID, groupID uuid.UUID) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer rollbackIfOpen(tx)
+
 	var referenced bool
-	if err := s.db.QueryRow(referencedIPGroupSQL, tenantID, groupID).Scan(&referenced); err != nil {
+	if err := tx.QueryRow(referencedIPGroupSQL, tenantID, groupID).Scan(&referenced); err != nil {
 		return err
 	}
 	if referenced {
 		return fmt.Errorf("ip group is referenced by policy rules")
 	}
 
-	result, err := s.db.Exec(`DELETE FROM ip_groups WHERE tenant_id = $1 AND id = $2`, tenantID, groupID)
+	result, err := tx.Exec(`DELETE FROM ip_groups WHERE tenant_id = $1 AND id = $2`, tenantID, groupID)
 	if err != nil {
 		return err
 	}
@@ -288,7 +294,7 @@ func (s *Storage) DeleteIPGroup(tenantID, groupID uuid.UUID) error {
 	if rowsAffected == 0 {
 		return sql.ErrNoRows
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *Storage) EnsureInlineIPGroup(tenantID uuid.UUID, cidrs []string) (*IPGroupRecord, error) {

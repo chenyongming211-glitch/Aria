@@ -78,7 +78,6 @@ func TestListCertificatesExpiringBeforeReturnsIssuedCandidates(t *testing.T) {
 		JOIN nodes n ON n.id = c.node_id
 		WHERE c.status = $1
 		  AND c.not_after <= $2
-		  AND c.not_after >= NOW()
 		  AND COALESCE(n.status, 'online') NOT IN ('deleted', 'suspended', 'banned')
 		ORDER BY c.not_after ASC
 	`)).
@@ -98,6 +97,47 @@ func TestListCertificatesExpiringBeforeReturnsIssuedCandidates(t *testing.T) {
 	}
 	if candidates[0].NodeID != nodeID.String() {
 		t.Fatalf("expected node id %s, got %q", nodeID, candidates[0].NodeID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestListCertificatesExpiringBeforeIncludesExpiredIssuedCandidates(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	store := NewStorageWithDB(db)
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	deadline := time.Now().UTC().Add(72 * time.Hour)
+	notAfter := time.Now().UTC().Add(-2 * time.Hour)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT c.tenant_id::text, c.node_id::text, COALESCE(n.hostname, ''), c.serial_number, c.not_after
+		FROM node_certificates c
+		JOIN nodes n ON n.id = c.node_id
+		WHERE c.status = $1
+		  AND c.not_after <= $2
+		  AND COALESCE(n.status, 'online') NOT IN ('deleted', 'suspended', 'banned')
+		ORDER BY c.not_after ASC
+	`)).
+		WithArgs(CertStatusIssued, deadline).
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "node_id", "hostname", "serial_number", "not_after"}).
+			AddRow(tenantID.String(), nodeID.String(), "edge-expired", "expired-issued", notAfter))
+
+	candidates, err := store.ListCertificatesExpiringBefore(deadline)
+	if err != nil {
+		t.Fatalf("ListCertificatesExpiringBefore failed: %v", err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	}
+	if candidates[0].SerialNumber != "expired-issued" {
+		t.Fatalf("expected expired issued certificate candidate, got %#v", candidates[0])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

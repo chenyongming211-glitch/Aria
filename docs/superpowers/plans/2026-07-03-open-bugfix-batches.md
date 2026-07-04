@@ -171,6 +171,8 @@ cargo test -p aria-agent --lib
 
 **Bugs:** BUG-70, BUG-73, BUG-102, BUG-103, BUG-104, BUG-105, BUG-88, BUG-96
 
+**2026-07-04 status:** Implemented on `codex/bugfix-b4-controller-correctness`; see `docs/superpowers/plans/2026-07-04-b4-controller-correctness.md`.
+
 **Why fourth:** These are user-visible correctness bugs in API behavior and validation, but they do not require changing Agent runtime internals.
 
 **Files:**

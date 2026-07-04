@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"aria/internal/api/apibase"
 	"aria/internal/api/middleware"
@@ -567,6 +568,11 @@ func (r *Router) createTenantToken(w http.ResponseWriter, req *http.Request, ten
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, "Invalid request body", nil)
 		return
 	}
+	tag, err := normalizeTenantTokenTag(body.Tag)
+	if err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
+		return
+	}
 	maxUses := 1
 	if body.MaxUses != nil {
 		if *body.MaxUses < 0 {
@@ -596,7 +602,7 @@ func (r *Router) createTenantToken(w http.ResponseWriter, req *http.Request, ten
 
 	// 调用 internal/token 中的 Generate 顶级函数
 	t, err := token.Generate(token.GenerateOptions{
-		Tag:      body.Tag,
+		Tag:      tag,
 		TenantID: tenantID.String(),
 		MaxUses:  maxUses,
 		TTL:      ttl,
@@ -618,7 +624,22 @@ func (r *Router) createTenantToken(w http.ResponseWriter, req *http.Request, ten
 const (
 	defaultTenantTokenTTL = 30 * 24 * time.Hour
 	maxTenantTokenTTL     = 365 * 24 * time.Hour
+	maxTenantTokenTagLen  = 128
 )
+
+func normalizeTenantTokenTag(raw string) (string, error) {
+	tag := strings.TrimSpace(raw)
+	if tag == "" {
+		return "", nil
+	}
+	if utf8.RuneCountInString(tag) > maxTenantTokenTagLen {
+		return "", fmt.Errorf("tag must be at most %d characters", maxTenantTokenTagLen)
+	}
+	if strings.ContainsFunc(tag, isControlRune) {
+		return "", fmt.Errorf("tag cannot contain control characters")
+	}
+	return tag, nil
+}
 
 func parseTenantTokenTTL(raw string) (time.Duration, error) {
 	raw = strings.TrimSpace(raw)

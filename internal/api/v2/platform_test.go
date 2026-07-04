@@ -529,3 +529,45 @@ func TestCreateTenantTokenRejectsInvalidTTL(t *testing.T) {
 		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestCreateTenantTokenRejectsOversizedTagBeforeTenantLookup(t *testing.T) {
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db), tokenStore: token.NewStore(db)}
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/tokens", strings.NewReader(`{"tag":"`+strings.Repeat("a", 129)+`"}`))
+	rr := httptest.NewRecorder()
+	router.createTenantToken(rr, req, tenantID)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected database access: %v", err)
+	}
+}
+
+func TestCreateTenantTokenRejectsControlCharacterTagBeforeTenantLookup(t *testing.T) {
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db), tokenStore: token.NewStore(db)}
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/tokens", strings.NewReader("{\"tag\":\"edge\\nprod\"}"))
+	rr := httptest.NewRecorder()
+	router.createTenantToken(rr, req, tenantID)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected database access: %v", err)
+	}
+}
