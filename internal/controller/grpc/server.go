@@ -29,7 +29,10 @@ type ControllerServer struct {
 	store           *controllerstorage.Storage
 }
 
-var commandStreamPollInterval = 2 * time.Second
+var (
+	commandStreamPollInterval    = 2 * time.Second
+	commandStreamMaxPollInterval = 30 * time.Second
+)
 
 type RegistrationRequest struct {
 	PublicKey        string
@@ -251,7 +254,7 @@ func (s *ControllerServer) CommandStream(stream agentpb.ControllerService_Comman
 	if err := stream.SendHeader(metadata.MD{}); err != nil {
 		return fmt.Errorf("stream send header error: %w", err)
 	}
-	if err := s.sendNextPendingCommand(stream, nodePublicKey); err != nil {
+	if _, err := s.sendNextPendingCommand(stream, nodePublicKey); err != nil {
 		return err
 	}
 
@@ -272,8 +275,17 @@ func (s *ControllerServer) CommandStream(stream agentpb.ControllerService_Comman
 		}
 	}()
 
-	ticker := time.NewTicker(commandStreamPollInterval)
-	defer ticker.Stop()
+	idlePolls := 0
+	pollTimer := time.NewTimer(commandStreamIdlePollInterval(commandStreamPollInterval, commandStreamMaxPollInterval, idlePolls))
+	defer pollTimer.Stop()
+	resetPollTimer := func(commandSent bool) {
+		if commandSent {
+			idlePolls = 0
+		} else {
+			idlePolls++
+		}
+		pollTimer.Reset(commandStreamIdlePollInterval(commandStreamPollInterval, commandStreamMaxPollInterval, idlePolls))
+	}
 
 	for {
 		select {
@@ -303,32 +315,56 @@ func (s *ControllerServer) CommandStream(stream agentpb.ControllerService_Comman
 			}
 
 			if isTerminalCommandStatus(resp.Status) {
-				if err := s.sendNextPendingCommand(stream, nodePublicKey); err != nil {
+				commandSent, err := s.sendNextPendingCommand(stream, nodePublicKey)
+				if err != nil {
 					return err
 				}
+				resetPollTimer(commandSent)
 			}
-		case <-ticker.C:
-			if err := s.sendNextPendingCommand(stream, nodePublicKey); err != nil {
+		case <-pollTimer.C:
+			commandSent, err := s.sendNextPendingCommand(stream, nodePublicKey)
+			if err != nil {
 				return err
 			}
+			resetPollTimer(commandSent)
 		}
 	}
 }
 
-func (s *ControllerServer) sendNextPendingCommand(stream agentpb.ControllerService_CommandStreamServer, agentID string) error {
+func commandStreamIdlePollInterval(base, maximum time.Duration, idlePolls int) time.Duration {
+	if base <= 0 {
+		base = 2 * time.Second
+	}
+	if maximum < base {
+		maximum = base
+	}
+	interval := base
+	for i := 0; i < idlePolls; i++ {
+		if interval >= maximum/2 {
+			return maximum
+		}
+		interval *= 2
+	}
+	if interval > maximum {
+		return maximum
+	}
+	return interval
+}
+
+func (s *ControllerServer) sendNextPendingCommand(stream agentpb.ControllerService_CommandStreamServer, agentID string) (bool, error) {
 	if s.store == nil || agentID == "" {
-		return nil
+		return false, nil
 	}
 	if _, err := s.ensureCommandStreamRuntimeActive(agentID); err != nil {
-		return err
+		return false, err
 	}
 
 	cmd, err := s.store.GetNextPendingAgentCommand(agentID)
 	if err != nil {
-		return fmt.Errorf("failed to get pending command: %w", err)
+		return false, fmt.Errorf("failed to get pending command: %w", err)
 	}
 	if cmd == nil {
-		return nil
+		return false, nil
 	}
 
 	if err := stream.Send(&agentpb.CommandRequest{
@@ -340,12 +376,12 @@ func (s *ControllerServer) sendNextPendingCommand(stream agentpb.ControllerServi
 		CreatedAt: cmd.CreatedAt.Unix(),
 	}); err != nil {
 		if requeueErr := s.store.RequeueSentAgentCommand(cmd.ID, agentID, "stream send failed: "+err.Error()); requeueErr != nil {
-			return fmt.Errorf("stream send error: %w; failed to requeue command: %v", err, requeueErr)
+			return false, fmt.Errorf("stream send error: %w; failed to requeue command: %v", err, requeueErr)
 		}
-		return fmt.Errorf("stream send error: %w", err)
+		return false, fmt.Errorf("stream send error: %w", err)
 	}
 
-	return nil
+	return true, nil
 }
 
 func (s *ControllerServer) ensureCommandStreamNodeActive(nodePublicKey string) error {

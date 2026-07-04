@@ -50,6 +50,32 @@ describe('node store', () => {
     logSpy.mockRestore()
   })
 
+  it('loads nodes from paginated tenant node responses', async () => {
+    api.get.mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          items: [{
+            id: 'node-1',
+            hostname: 'edge-1',
+            assigned_ip: '100.64.0.2'
+          }],
+          limit: 200,
+          offset: 0,
+          count: 1
+        }
+      }
+    })
+
+    const store = useNodeStore()
+
+    await store.loadNodes()
+
+    expect(store.nodes).toHaveLength(1)
+    expect(store.nodes[0].hostname).toBe('edge-1')
+    expect(store.nodes[0].vpnIp).toBe('100.64.0.2')
+  })
+
   it('deletes nodes through the tenant-scoped backend API', async () => {
     api.delete.mockResolvedValue({ data: { success: true } })
     const store = useNodeStore()

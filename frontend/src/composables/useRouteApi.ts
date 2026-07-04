@@ -1,4 +1,5 @@
 import api from './useApi'
+import { unwrapApiList } from './apiResponse'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 import {
   mapCommandStatusToPolicyStatus,
@@ -92,19 +93,11 @@ function normalizeRoute(node: RouteNode, route: RouteRecord): NormalizedRoute {
 }
 
 function normalizeNodeList(response: { data?: unknown }): RouteNode[] {
-  const body = response.data
-  const data = body && typeof body === 'object' && 'data' in body
-    ? (body as { data?: unknown }).data
-    : body
-  return Array.isArray(data) ? data as RouteNode[] : []
+  return unwrapApiList<RouteNode>(response)
 }
 
 function normalizeRouteList(response: { data?: unknown }): RouteRecord[] {
-  const body = response.data
-  const data = body && typeof body === 'object' && 'data' in body
-    ? (body as { data?: unknown }).data
-    : body
-  return Array.isArray(data) ? data as RouteRecord[] : []
+  return unwrapApiList<RouteRecord>(response)
 }
 
 async function listTenantNodes(): Promise<{ tenantId: string, nodes: RouteNode[] }> {

@@ -1,4 +1,5 @@
 import api from './useApi'
+import { unwrapApiList } from './apiResponse'
 import { API_ENDPOINTS, requireCurrentTenantId } from '@/config/api'
 import type { NodeRecord, Tenant } from '@/types'
 
@@ -68,13 +69,13 @@ export const useTenantApi = {
 
   /**
    * 获取租户节点
-   * 返回格式: { success: true, data: [...], message: "X nodes retrieved" }
+   * 返回格式: { success: true, data: [...] } 或 { success: true, data: { items: [...] } }
    */
   getTenantNodes: async () => {
     try {
       const tenantId = requireCurrentTenantId()
       const response = await api.get(API_ENDPOINTS.TENANT.NODES(tenantId))
-      return response.data?.data || response.data || []
+      return unwrapApiList<NodeRecord>(response)
     } catch (error) {
       console.error('获取租户节点失败:', error)
       throw error
@@ -89,10 +90,10 @@ export const useTenantApi = {
     try {
       const tenantId = requireCurrentTenantId()
       const nodesResponse = await api.get(API_ENDPOINTS.TENANT.NODES(tenantId))
-      const nodes = nodesResponse.data?.data || nodesResponse.data || []
+      const nodes = unwrapApiList<NodeRecord>(nodesResponse)
 
       const ruleResponses = await Promise.all(
-        (nodes as NodeRecord[]).map(async (node) => {
+        nodes.map(async (node) => {
           const aclResponse = await api.get(API_ENDPOINTS.TENANT.NODE_ACLS(tenantId, node.id))
           const rules = (aclResponse.data?.data || aclResponse.data || []) as TenantScopedACLRule[]
           return rules.map((rule: TenantScopedACLRule) => ({

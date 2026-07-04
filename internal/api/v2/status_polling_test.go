@@ -120,7 +120,8 @@ func TestNodeStatusEndpoint(t *testing.T) {
 			FROM agent_commands
 			WHERE node_public_key = $1
 			  AND status IN ($4, $5, $6)
-			  AND COALESCE(acknowledged_at, sent_at, created_at) + (timeout_seconds * interval '1 second') < NOW()
+			  AND deadline_at IS NOT NULL
+			  AND deadline_at < NOW()
 		)
 	`)).
 		WithArgs(publicKey, controllerstorage.AgentCommandStatusFailed, "command timed out waiting for agent result", controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged).
@@ -133,7 +134,8 @@ func TestNodeStatusEndpoint(t *testing.T) {
 		    completed_at = NOW()
 		WHERE node_public_key = $1
 		  AND status IN ($4, $5, $6)
-		  AND COALESCE(acknowledged_at, sent_at, created_at) + (timeout_seconds * interval '1 second') < NOW()
+		  AND deadline_at IS NOT NULL
+		  AND deadline_at < NOW()
 	`)).
 		WithArgs(publicKey, controllerstorage.AgentCommandStatusFailed, "command timed out waiting for agent result", controllerstorage.AgentCommandStatusPending, controllerstorage.AgentCommandStatusSent, controllerstorage.AgentCommandStatusAcknowledged).
 		WillReturnResult(sqlmock.NewResult(0, 0))

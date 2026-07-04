@@ -60,6 +60,19 @@ type Storage struct {
 	cidr      string
 }
 
+const (
+	DefaultNodeListLimit = 200
+	MaxNodeListLimit     = 1000
+)
+
+type NodeListOptions struct {
+	TenantID       uuid.UUID
+	IncludeDeleted bool
+	Limit          int
+	Offset         int
+	Unbounded      bool
+}
+
 func NewStorage(cfg *Config, baseIP, cidr string) (*Storage, error) {
 	db, err := sql.Open("postgres", cfg.DSN())
 	if err != nil {
@@ -343,6 +356,7 @@ func (s *Storage) Migrate() error {
 		)`,
 
 		`CREATE INDEX IF NOT EXISTS idx_nodes_public_key ON nodes(public_key)`,
+		`CREATE INDEX IF NOT EXISTS idx_nodes_hostname ON nodes(hostname)`,
 		`CREATE INDEX IF NOT EXISTS idx_nodes_tenant_id ON nodes(tenant_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_nodes_last_seen ON nodes(last_seen)`,
 		`CREATE INDEX IF NOT EXISTS idx_ip_allocations_node_id ON ip_allocations(node_id)`,
@@ -379,6 +393,7 @@ func (s *Storage) Migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_src_node ON acl_rules(src_node)`,
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_dst_node ON acl_rules(dst_node)`,
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_node_id ON acl_rules(node_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_acl_rules_tenant_node ON acl_rules(tenant_id, node_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_src_group ON acl_rules(tenant_id, src_group_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_acl_rules_dst_group ON acl_rules(tenant_id, dst_group_id)`,
 
@@ -437,6 +452,10 @@ func (s *Storage) Migrate() error {
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		`ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS deadline_at TIMESTAMPTZ`,
+		`UPDATE agent_commands
+		    SET deadline_at = COALESCE(acknowledged_at, sent_at, created_at) + make_interval(secs => timeout_seconds)
+		  WHERE deadline_at IS NULL`,
 		`CREATE TABLE IF NOT EXISTS policy_deliveries (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			tenant_id UUID NOT NULL REFERENCES tenants(id),
@@ -478,6 +497,7 @@ func (s *Storage) Migrate() error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_node_control_states_unique_node ON node_control_states(node_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_node_policy_stats_tenant_node ON node_policy_stats(tenant_id, node_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_commands_node_status ON agent_commands(node_public_key, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_commands_node_status_deadline ON agent_commands(node_public_key, status, deadline_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_commands_created_at ON agent_commands(created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_policy_deliveries_tenant_node_domain_ref ON policy_deliveries(tenant_id, node_id, policy_domain, policy_ref)`,
 		`CREATE INDEX IF NOT EXISTS idx_policy_deliveries_command_id ON policy_deliveries(command_id)`,
@@ -637,9 +657,15 @@ func (s *Storage) GetTenantStatus(tenantID uuid.UUID) (string, error) {
 	return strings.TrimSpace(status), nil
 }
 
-// GetNodesByTenant retrieves all nodes for a specific tenant
+// GetNodesByTenant retrieves all non-deleted nodes for a specific tenant.
+// Runtime sync paths use the unbounded form because they must see the full peer set.
 func (s *Storage) GetNodesByTenant(tenantID uuid.UUID) ([]*Node, error) {
-	return s.getNodes("WHERE tenant_id = $1 AND status != 'deleted'", []interface{}{tenantID}, "")
+	return s.listNodes(NodeListOptions{TenantID: tenantID, Unbounded: true})
+}
+
+// GetNodesByTenantPage retrieves a bounded page of non-deleted tenant nodes for UI/API listing paths.
+func (s *Storage) GetNodesByTenantPage(tenantID uuid.UUID, limit, offset int) ([]*Node, error) {
+	return s.listNodes(NodeListOptions{TenantID: tenantID, Limit: limit, Offset: offset})
 }
 
 // GetNodeByTenant retrieves a specific node for a specific tenant (ensures tenant isolation)
@@ -780,17 +806,41 @@ func (s *Storage) GetNodeByHostnameForTenant(hostname string, tenantID uuid.UUID
 
 const nodeSelectColumns = `id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at`
 
-// getNodes is a helper that queries nodes with optional WHERE clause and args.
-// extraWhere should include the "WHERE" keyword if non-empty, e.g. "WHERE status != 'deleted'".
-func (s *Storage) getNodes(extraWhere string, args []interface{}, orderBy string) ([]*Node, error) {
-	query := `SELECT ` + nodeSelectColumns + ` FROM nodes`
-	if extraWhere != "" {
-		query += " " + extraWhere
+func normalizeNodeListLimit(limit int) int {
+	if limit <= 0 {
+		return DefaultNodeListLimit
 	}
-	if orderBy != "" {
-		query += " " + orderBy
-	} else {
-		query += " ORDER BY last_seen DESC"
+	if limit > MaxNodeListLimit {
+		return MaxNodeListLimit
+	}
+	return limit
+}
+
+func (s *Storage) listNodes(opts NodeListOptions) ([]*Node, error) {
+	query := `SELECT ` + nodeSelectColumns + ` FROM nodes`
+	conditions := make([]string, 0, 2)
+	args := make([]interface{}, 0, 3)
+	if opts.TenantID != uuid.Nil {
+		args = append(args, opts.TenantID)
+		conditions = append(conditions, fmt.Sprintf("tenant_id = $%d", len(args)))
+	}
+	if !opts.IncludeDeleted {
+		conditions = append(conditions, "status != 'deleted'")
+	}
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY last_seen DESC"
+	if !opts.Unbounded {
+		limit := normalizeNodeListLimit(opts.Limit)
+		offset := opts.Offset
+		if offset < 0 {
+			offset = 0
+		}
+		args = append(args, limit)
+		query += fmt.Sprintf(" LIMIT $%d", len(args))
+		args = append(args, offset)
+		query += fmt.Sprintf(" OFFSET $%d", len(args))
 	}
 
 	rows, err := s.db.Query(query, args...)
@@ -814,12 +864,12 @@ func (s *Storage) getNodes(extraWhere string, args []interface{}, orderBy string
 }
 
 func (s *Storage) GetAllNodes() ([]*Node, error) {
-	return s.getNodes("", nil, "WHERE status != 'deleted'")
+	return s.listNodes(NodeListOptions{Unbounded: true})
 }
 
 // GetAllNodesIncludeDeleted returns all nodes including deleted ones (for audit/admin purposes)
 func (s *Storage) GetAllNodesIncludeDeleted() ([]*Node, error) {
-	return s.getNodes("", nil, "")
+	return s.listNodes(NodeListOptions{IncludeDeleted: true, Unbounded: true})
 }
 
 // ReuseHostnameIP atomically finds a node by hostname within a tenant, marks it deleted,

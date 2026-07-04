@@ -102,11 +102,7 @@ func TestNodeAgentCommandWritesQueuedAuditWithOperationContext(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		INSERT INTO agent_commands (node_public_key, command, params, status, priority, timeout_seconds)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, created_at, updated_at
-	`)).
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO agent_commands")).
 		WithArgs("node-key-1", "sync", sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, 0, 30).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow(commandID, now, now))
 	mock.ExpectQuery(regexp.QuoteMeta(`
@@ -168,27 +164,17 @@ func TestBatchAgentCommandSkipsInactiveNodes(t *testing.T) {
 	rows := sqlmock.NewRows(operationNodeColumns())
 	addOperationNodeRow(rows, activeNodeID, tenantID, "active-node-key", "node-active", "online")
 	addOperationNodeRow(rows, suspendedNodeID, tenantID, "suspended-node-key", "node-suspended", "suspended")
-	expectTenantNodesQuery(mock, tenantID).WillReturnRows(rows)
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		INSERT INTO agent_commands (node_public_key, command, params, status, priority, timeout_seconds)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, created_at, updated_at
-	`)).
+	expectTenantNodesPageQuery(mock, tenantID, maxBatchAgentCommandTargets, 0).WillReturnRows(rows)
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO agent_commands")).
 		WithArgs("active-node-key", "sync", sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, 0, 30).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow(commandID, now, now))
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, tenant_id, node_id, event_type, actor, summary, detail, created_at
-	`)).
+		WillReturnRows(sqlmock.NewRows([]string{"node_public_key", "id", "created_at", "updated_at"}).AddRow("active-node-key", commandID, now, now))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_events")).
 		WithArgs(tenantID, activeNodeID, controllerstorage.AuditCommandQueued, "user", "Command queued: sync", jsonDetailContains{
 			"command_id": commandID,
 			"command":    "sync",
 			"source":     "api.v2",
 		}).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "event_type", "actor", "summary", "detail", "created_at",
-		}).AddRow(uuid.New(), tenantID, activeNodeID.String(), controllerstorage.AuditCommandQueued, "user", "Command queued: sync", []byte(`{}`), now))
+		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/agents/command",
@@ -215,6 +201,76 @@ func TestBatchAgentCommandSkipsInactiveNodes(t *testing.T) {
 	}
 	if !strings.Contains(failed["message"].(string), "suspended") {
 		t.Fatalf("expected suspended failure message, got %#v", failed["message"])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestBatchAgentCommandQueuesActiveNodesInBulk(t *testing.T) {
+	tenantID := uuid.New()
+	nodeAID := uuid.New()
+	nodeBID := uuid.New()
+	now := time.Now()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	rows := sqlmock.NewRows(operationNodeColumns())
+	addOperationNodeRow(rows, nodeAID, tenantID, "active-node-a", "node-a", "online")
+	addOperationNodeRow(rows, nodeBID, tenantID, "active-node-b", "node-b", "online")
+	expectTenantNodesPageQuery(mock, tenantID, maxBatchAgentCommandTargets, 0).WillReturnRows(rows)
+
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO agent_commands")).
+		WithArgs(
+			"active-node-a", "sync", sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, 7, 60,
+			"active-node-b", "sync", sqlmock.AnyArg(), controllerstorage.AgentCommandStatusPending, 7, 60,
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"node_public_key", "id", "created_at", "updated_at"}).
+			AddRow("active-node-a", "cmd-a", now, now).
+			AddRow("active-node-b", "cmd-b", now, now))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO audit_events")).
+		WithArgs(
+			tenantID, nodeAID, controllerstorage.AuditCommandQueued, "user", "Command queued: sync", jsonDetailContains{
+				"command_id": "cmd-a",
+				"command":    "sync",
+				"source":     "api.v2",
+			},
+			tenantID, nodeBID, controllerstorage.AuditCommandQueued, "user", "Command queued: sync", jsonDetailContains{
+				"command_id": "cmd-b",
+				"command":    "sync",
+				"source":     "api.v2",
+			},
+		).
+		WillReturnResult(sqlmock.NewResult(0, 2))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/tenants/"+tenantID.String()+"/agents/command",
+		strings.NewReader(`{"command":{"command":"sync","priority":7,"timeout":60}}`))
+	rr := httptest.NewRecorder()
+
+	router.handleTenantBatchAgentCommand(rr, req, tenantID)
+	resp := decodeAPIResponse(t, rr)
+	data := responseDataMap(t, resp)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if data["success_count"] != float64(2) || data["failed_count"] != float64(0) {
+		t.Fatalf("expected two successful bulk commands, got %#v", data)
+	}
+	results := responseDataSlice(t, data["results"])
+	if len(results) != 2 {
+		t.Fatalf("expected two results, got %#v", results)
+	}
+	if results[0].(map[string]interface{})["command_id"] != "cmd-a" {
+		t.Fatalf("expected first result to match first target, got %#v", results[0])
+	}
+	if results[1].(map[string]interface{})["command_id"] != "cmd-b" {
+		t.Fatalf("expected second result to match second target, got %#v", results[1])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

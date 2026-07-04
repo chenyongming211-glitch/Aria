@@ -45,6 +45,10 @@ type AgentCommand struct {
 	Result         map[string]string      `json:"result,omitempty"`
 }
 
+type AgentCommandTarget struct {
+	NodePublicKey string
+}
+
 func IsAllowedAgentCommand(command string) bool {
 	command = strings.TrimSpace(command)
 	_, ok := allowedAgentCommands[command]
@@ -53,6 +57,83 @@ func IsAllowedAgentCommand(command string) bool {
 
 func (s *Storage) QueueAgentCommand(nodePublicKey, command string, params map[string]interface{}, priority, timeoutSeconds int) (*AgentCommand, error) {
 	return queueAgentCommand(txQueryRowAdapter{s.db}, nodePublicKey, command, params, priority, timeoutSeconds)
+}
+
+func (s *Storage) QueueAgentCommands(targets []AgentCommandTarget, command string, params map[string]interface{}, priority, timeoutSeconds int) ([]*AgentCommand, error) {
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return nil, errors.New("command is required")
+	}
+	if !IsAllowedAgentCommand(command) {
+		return nil, fmt.Errorf("unsupported agent command: %s", command)
+	}
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 30
+	}
+	if params == nil {
+		params = map[string]interface{}{}
+	}
+
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return nil, err
+	}
+
+	values := make([]string, 0, len(targets))
+	args := make([]interface{}, 0, len(targets)*6)
+	for _, target := range targets {
+		if target.NodePublicKey == "" {
+			return nil, errors.New("node public key is required")
+		}
+		args = append(args, target.NodePublicKey, command, paramsJSON, AgentCommandStatusPending, priority, timeoutSeconds)
+		base := len(args) - 5
+		values = append(values, fmt.Sprintf(
+			"($%d, $%d, $%d, $%d, $%d, $%d, NOW() + make_interval(secs => $%d))",
+			base, base+1, base+2, base+3, base+4, base+5, base+5,
+		))
+	}
+
+	rows, err := s.db.Query(`
+		INSERT INTO agent_commands (node_public_key, command, params, status, priority, timeout_seconds, deadline_at)
+		VALUES `+strings.Join(values, ", ")+`
+		RETURNING node_public_key, id, created_at, updated_at
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	byNode := make(map[string]*AgentCommand, len(targets))
+	for rows.Next() {
+		cmd := &AgentCommand{
+			Command:        command,
+			RawParams:      params,
+			Params:         stringifyCommandParams(params),
+			Status:         AgentCommandStatusPending,
+			Priority:       priority,
+			TimeoutSeconds: timeoutSeconds,
+		}
+		if err := rows.Scan(&cmd.NodePublicKey, &cmd.ID, &cmd.CreatedAt, &cmd.UpdatedAt); err != nil {
+			return nil, err
+		}
+		byNode[cmd.NodePublicKey] = cmd
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	commands := make([]*AgentCommand, 0, len(targets))
+	for _, target := range targets {
+		cmd, ok := byNode[target.NodePublicKey]
+		if !ok {
+			return nil, fmt.Errorf("queued agent command missing for node %s", target.NodePublicKey)
+		}
+		commands = append(commands, cmd)
+	}
+	return commands, nil
 }
 
 func queueAgentCommand(q queryRower, nodePublicKey, command string, params map[string]interface{}, priority, timeoutSeconds int) (*AgentCommand, error) {
@@ -89,8 +170,8 @@ func queueAgentCommand(q queryRower, nodePublicKey, command string, params map[s
 	}
 
 	query := `
-		INSERT INTO agent_commands (node_public_key, command, params, status, priority, timeout_seconds)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO agent_commands (node_public_key, command, params, status, priority, timeout_seconds, deadline_at)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW() + make_interval(secs => $6))
 		RETURNING id, created_at, updated_at
 	`
 
@@ -123,8 +204,8 @@ func (s *Storage) GetNextPendingAgentCommand(nodePublicKey string) (*AgentComman
 		    updated_at = NOW()
 		WHERE node_public_key = $1
 		  AND status = $3
-		  AND sent_at IS NOT NULL
-		  AND sent_at + (timeout_seconds * interval '1 second') < NOW()
+		  AND deadline_at IS NOT NULL
+		  AND deadline_at < NOW()
 	`, nodePublicKey, AgentCommandStatusPending, AgentCommandStatusSent); err != nil {
 		return nil, err
 	}
@@ -150,7 +231,10 @@ func (s *Storage) GetNextPendingAgentCommand(nodePublicKey string) (*AgentComman
 	now := time.Now()
 	if _, err := tx.Exec(`
 		UPDATE agent_commands
-		SET status = $2, sent_at = $3, updated_at = $3
+		SET status = $2,
+		    sent_at = $3,
+		    deadline_at = $3 + make_interval(secs => timeout_seconds),
+		    updated_at = $3
 		WHERE id = $1
 	`, cmd.ID, AgentCommandStatusSent, now); err != nil {
 		return nil, err
@@ -182,6 +266,7 @@ func (s *Storage) RequeueSentAgentCommand(commandID, nodePublicKey, message stri
 		SET status = $3,
 		    message = $4,
 		    sent_at = NULL,
+		    deadline_at = NOW() + make_interval(secs => timeout_seconds),
 		    updated_at = NOW()
 		WHERE id = $1 AND node_public_key = $2 AND status = $5
 	`, commandID, nodePublicKey, AgentCommandStatusPending, message, AgentCommandStatusSent)
@@ -248,7 +333,8 @@ func failTimedOutAgentCommandsForNodeTx(tx roleExec, nodePublicKey string) (int6
 			FROM agent_commands
 			WHERE node_public_key = $1
 			  AND status IN ($4, $5, $6)
-			  AND COALESCE(acknowledged_at, sent_at, created_at) + (timeout_seconds * interval '1 second') < NOW()
+			  AND deadline_at IS NOT NULL
+			  AND deadline_at < NOW()
 		)
 	`, nodePublicKey, AgentCommandStatusFailed, message, AgentCommandStatusPending, AgentCommandStatusSent, AgentCommandStatusAcknowledged); err != nil {
 		return 0, err
@@ -262,7 +348,8 @@ func failTimedOutAgentCommandsForNodeTx(tx roleExec, nodePublicKey string) (int6
 		    completed_at = NOW()
 		WHERE node_public_key = $1
 		  AND status IN ($4, $5, $6)
-		  AND COALESCE(acknowledged_at, sent_at, created_at) + (timeout_seconds * interval '1 second') < NOW()
+		  AND deadline_at IS NOT NULL
+		  AND deadline_at < NOW()
 	`, nodePublicKey, AgentCommandStatusFailed, message, AgentCommandStatusPending, AgentCommandStatusSent, AgentCommandStatusAcknowledged)
 	if err != nil {
 		return 0, err
@@ -349,6 +436,10 @@ func (s *Storage) updateAgentCommandStatus(commandID, nodePublicKey, status, mes
 		    completed_at = CASE
 		        WHEN $2::varchar IN ('completed', 'failed') THEN NOW()
 		        ELSE completed_at
+		    END,
+		    deadline_at = CASE
+		        WHEN $2::varchar IN ('sent', 'acknowledged') THEN NOW() + make_interval(secs => timeout_seconds)
+		        ELSE deadline_at
 		    END
 		WHERE id = $1 AND status <> 'stale'
 	`
@@ -367,6 +458,10 @@ func (s *Storage) updateAgentCommandStatus(commandID, nodePublicKey, status, mes
 			    completed_at = CASE
 			        WHEN $2::varchar IN ('completed', 'failed') THEN NOW()
 			        ELSE completed_at
+			    END,
+			    deadline_at = CASE
+			        WHEN $2::varchar IN ('sent', 'acknowledged') THEN NOW() + make_interval(secs => timeout_seconds)
+			        ELSE deadline_at
 			    END
 				WHERE id = $1 AND node_public_key = $5 AND status <> 'stale'
 		`

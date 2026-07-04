@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -531,7 +532,7 @@ func (r *Router) handleTenantNodes(w http.ResponseWriter, req *http.Request, ten
 			return
 		}
 		if req.Method == http.MethodGet {
-			r.listTenantNodes(w, tenantID)
+			r.listTenantNodes(w, req, tenantID)
 		} else {
 			apibase.WriteError(w, http.StatusMethodNotAllowed, apibase.CodeMethodNotAllowed, "Method not allowed", nil)
 		}
@@ -740,8 +741,9 @@ func (r *Router) listTenantPolicies(w http.ResponseWriter, req *http.Request, te
 	apibase.WriteSuccess(w, policies, fmt.Sprintf("%d policies retrieved", len(policies)))
 }
 
-func (r *Router) listTenantNodes(w http.ResponseWriter, tenantID uuid.UUID) {
-	nodes, err := r.store.GetNodesByTenant(tenantID)
+func (r *Router) listTenantNodes(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
+	limit, offset := parseNodeListPagination(req)
+	nodes, err := r.store.GetNodesByTenantPage(tenantID, limit, offset)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeGetNodesFailed, "Failed to get nodes", nil)
 		return
@@ -752,7 +754,34 @@ func (r *Router) listTenantNodes(w http.ResponseWriter, tenantID uuid.UUID) {
 		items = append(items, r.buildTenantNodeResponse(node))
 	}
 
-	apibase.WriteSuccess(w, items, fmt.Sprintf("%d nodes retrieved", len(items)))
+	apibase.WriteSuccess(w, map[string]interface{}{
+		"items":  items,
+		"limit":  limit,
+		"offset": offset,
+		"count":  len(items),
+	}, fmt.Sprintf("%d nodes retrieved", len(items)))
+}
+
+func parseNodeListPagination(req *http.Request) (int, int) {
+	limit := controllerstorage.DefaultNodeListLimit
+	offset := 0
+	if req == nil {
+		return limit, offset
+	}
+	if rawLimit := req.URL.Query().Get("limit"); rawLimit != "" {
+		if parsed, err := strconv.Atoi(rawLimit); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if limit > controllerstorage.MaxNodeListLimit {
+		limit = controllerstorage.MaxNodeListLimit
+	}
+	if rawOffset := req.URL.Query().Get("offset"); rawOffset != "" {
+		if parsed, err := strconv.Atoi(rawOffset); err == nil && parsed > 0 {
+			offset = parsed
+		}
+	}
+	return limit, offset
 }
 
 func (r *Router) listAllTenants(w http.ResponseWriter) {

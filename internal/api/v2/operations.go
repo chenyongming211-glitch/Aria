@@ -18,6 +18,8 @@ import (
 
 const codeCommandDispatchFailed = "COMMAND_DISPATCH_FAILED"
 
+const maxBatchAgentCommandTargets = 1000
+
 type v2AgentCommandRequest struct {
 	Command  string                 `json:"command"`
 	Params   map[string]interface{} `json:"params"`
@@ -200,7 +202,7 @@ func (r *Router) handleTenantBatchAgentCommand(w http.ResponseWriter, req *http.
 		err   error
 	)
 	if len(body.NodeIDs) == 0 {
-		nodes, err = r.store.GetNodesByTenant(tenantID)
+		nodes, err = r.store.GetNodesByTenantPage(tenantID, maxBatchAgentCommandTargets, 0)
 		if err != nil {
 			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeGetNodesFailed, "Failed to load tenant nodes", nil)
 			return
@@ -223,41 +225,75 @@ func (r *Router) handleTenantBatchAgentCommand(w http.ResponseWriter, req *http.
 	results := make([]map[string]interface{}, 0, len(nodes))
 	successCount := 0
 	failedCount := 0
-	for _, node := range nodes {
+	activeNodes := make([]*controllerstorage.Node, 0, len(nodes))
+	activeIndexes := make([]int, 0, len(nodes))
+	results = make([]map[string]interface{}, len(nodes))
+	for i, node := range nodes {
 		if message := inactiveCommandTargetMessage(node); message != "" {
 			failedCount++
-			results = append(results, map[string]interface{}{
+			results[i] = map[string]interface{}{
 				"node_id":         node.ID.String(),
 				"node_public_key": node.PublicKey,
 				"status":          controllerstorage.AgentCommandStatusFailed,
 				"message":         message,
-			})
+			}
 			continue
 		}
 
-		cmd, err := r.store.QueueAgentCommand(node.PublicKey, body.Command.Command, body.Command.Params, body.Command.Priority, body.Command.Timeout)
+		activeNodes = append(activeNodes, node)
+		activeIndexes = append(activeIndexes, i)
+	}
+
+	if len(activeNodes) > 0 {
+		targets := make([]controllerstorage.AgentCommandTarget, 0, len(activeNodes))
+		for _, node := range activeNodes {
+			targets = append(targets, controllerstorage.AgentCommandTarget{NodePublicKey: node.PublicKey})
+		}
+
+		commands, err := r.store.QueueAgentCommands(targets, body.Command.Command, body.Command.Params, body.Command.Priority, body.Command.Timeout)
 		if err != nil {
+			for i, node := range activeNodes {
+				failedCount++
+				results[activeIndexes[i]] = map[string]interface{}{
+					"node_id":         node.ID.String(),
+					"node_public_key": node.PublicKey,
+					"status":          controllerstorage.AgentCommandStatusFailed,
+					"message":         "Failed to queue command: " + err.Error(),
+				}
+			}
+		} else {
+			auditEvents := make([]*controllerstorage.AuditEvent, 0, len(commands))
+			for i, cmd := range commands {
+				node := activeNodes[i]
+				auditEvents = append(auditEvents, r.buildAgentCommandQueuedAuditEvent(req, node, cmd))
+				successCount++
+				results[activeIndexes[i]] = map[string]interface{}{
+					"command_id":      cmd.ID,
+					"node_id":         node.ID.String(),
+					"node_public_key": node.PublicKey,
+					"status":          cmd.Status,
+					"message":         "Command queued for delivery",
+					"created_at":      cmd.CreatedAt,
+					"updated_at":      cmd.UpdatedAt,
+				}
+			}
+			if err := r.store.CreateAuditEvents(auditEvents); err != nil {
+				log.Printf("[api/v2] failed to create batch command.queued audit events: %v", err)
+			}
+		}
+	}
+
+	for i, result := range results {
+		if result == nil {
+			node := nodes[i]
 			failedCount++
-			results = append(results, map[string]interface{}{
+			results[i] = map[string]interface{}{
 				"node_id":         node.ID.String(),
 				"node_public_key": node.PublicKey,
 				"status":          controllerstorage.AgentCommandStatusFailed,
-				"message":         "Failed to queue command: " + err.Error(),
-			})
-			continue
+				"message":         "Failed to queue command",
+			}
 		}
-		r.recordAgentCommandQueuedAudit(req, node, cmd)
-
-		successCount++
-		results = append(results, map[string]interface{}{
-			"command_id":      cmd.ID,
-			"node_id":         node.ID.String(),
-			"node_public_key": node.PublicKey,
-			"status":          cmd.Status,
-			"message":         "Command queued for delivery",
-			"created_at":      cmd.CreatedAt,
-			"updated_at":      cmd.UpdatedAt,
-		})
 	}
 
 	apibase.WriteSuccess(w, map[string]interface{}{
@@ -269,8 +305,18 @@ func (r *Router) handleTenantBatchAgentCommand(w http.ResponseWriter, req *http.
 }
 
 func (r *Router) recordAgentCommandQueuedAudit(req *http.Request, node *controllerstorage.Node, cmd *controllerstorage.AgentCommand) {
-	if r == nil || r.store == nil || node == nil || cmd == nil || node.ID == uuid.Nil || node.TenantID == uuid.Nil {
+	event := r.buildAgentCommandQueuedAuditEvent(req, node, cmd)
+	if event == nil {
 		return
+	}
+	if _, err := r.store.CreateAuditEvent(event); err != nil {
+		log.Printf("[api/v2] failed to create command.queued audit event for node %s command %s: %v", node.ID, cmd.ID, err)
+	}
+}
+
+func (r *Router) buildAgentCommandQueuedAuditEvent(req *http.Request, node *controllerstorage.Node, cmd *controllerstorage.AgentCommand) *controllerstorage.AuditEvent {
+	if r == nil || r.store == nil || node == nil || cmd == nil || node.ID == uuid.Nil || node.TenantID == uuid.Nil {
+		return nil
 	}
 
 	actor := "user"
@@ -305,15 +351,13 @@ func (r *Router) recordAgentCommandQueuedAudit(req *http.Request, node *controll
 	}
 
 	nodeID := node.ID
-	if _, err := r.store.CreateAuditEvent(&controllerstorage.AuditEvent{
+	return &controllerstorage.AuditEvent{
 		TenantID:  node.TenantID,
 		NodeID:    &nodeID,
 		EventType: controllerstorage.AuditCommandQueued,
 		Actor:     actor,
 		Summary:   "Command queued: " + cmd.Command,
 		Detail:    detail,
-	}); err != nil {
-		log.Printf("[api/v2] failed to create command.queued audit event for node %s command %s: %v", node.ID, cmd.ID, err)
 	}
 }
 

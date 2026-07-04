@@ -69,6 +69,40 @@ describe('useRouteApi', () => {
     expect(result[0].lastDeliveryCommandId).toBe('cmd-1')
   })
 
+  it('应该支持分页租户节点响应', async () => {
+    api.get
+      .mockResolvedValueOnce({
+        data: {
+          success: true,
+          data: {
+            items: [{
+              id: 'node-1',
+              hostname: 'node-1',
+              public_ip: '203.0.113.10',
+              region: 'sh'
+            }]
+          }
+        }
+      })
+      .mockResolvedValueOnce({
+        data: {
+          success: true,
+          data: {
+            items: [{
+              id: 'route-1',
+              cidr: '10.10.0.0/24'
+            }]
+          }
+        }
+      })
+
+    const result = await useRouteApi.getRoutes()
+
+    expect(result).toHaveLength(1)
+    expect(result[0].nodeId).toBe('node-1')
+    expect(result[0].cidr).toBe('10.10.0.0/24')
+  })
+
   it('应该保留 route 投递失败原因用于页面展示', async () => {
     api.get
       .mockResolvedValueOnce({

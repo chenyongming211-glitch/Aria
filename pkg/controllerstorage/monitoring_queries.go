@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // CountNodesByTenantAndStatus returns total, online, and offline node counts for a tenant.
@@ -116,6 +117,33 @@ func (s *Storage) ListRecentPolicyDeliveriesByNode(tenantID, nodeID uuid.UUID, l
 		deliveries = append(deliveries, delivery)
 	}
 	return deliveries, rows.Err()
+}
+
+func (s *Storage) GetLatestNodeCertificateActivity(tenantID, nodeID uuid.UUID) (map[string]*AuditEvent, error) {
+	eventTypes := []string{"certificate_renewed", "certificate_renew_failed", AuditCertRevoked}
+	rows, err := s.db.Query(`
+		SELECT DISTINCT ON (event_type) id, tenant_id, node_id, event_type, actor, summary, detail, created_at
+		FROM audit_events
+		WHERE tenant_id = $1 AND node_id = $2 AND event_type = ANY($3)
+		ORDER BY event_type, created_at DESC
+	`, tenantID, nodeID, pq.Array(eventTypes))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	events := make(map[string]*AuditEvent, len(eventTypes))
+	for rows.Next() {
+		event, err := scanAuditEventRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		events[event.EventType] = event
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return events, nil
 }
 
 // EventFeedFilter defines filtering options for the unified event feed.

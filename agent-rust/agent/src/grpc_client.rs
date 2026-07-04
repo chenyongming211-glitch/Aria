@@ -290,79 +290,7 @@ impl GrpcClient {
 
         let mut client = ControllerServiceClient::new(self.channel.clone());
         let response = client.sync(request).await?;
-        let resp = response.into_inner();
-
-        let new_runtime_token = if !resp.runtime_token.trim().is_empty() {
-            Some(resp.runtime_token)
-        } else {
-            None
-        };
-        let new_runtime_token_expires_at = if resp.runtime_token_expires_at > 0 {
-            Some(resp.runtime_token_expires_at)
-        } else {
-            None
-        };
-
-        Ok(SyncResult {
-            peers: resp.peers.into_iter().map(|p| PeerInfo {
-                public_key: p.public_key,
-                endpoint: p.endpoint,
-                private_ip: p.private_ip,
-                public_ip: p.public_ip,
-                region: p.region,
-                vpc_id: p.vpc_id,
-                hostname: p.hostname,
-                assigned_ip: p.assigned_ip,
-                role: p.role,
-                advertised_routes: p.advertised_routes,
-            }).collect(),
-            assigned_ip: resp.assigned_ip,
-            desired_state_version: resp.desired_state_version,
-            ip_groups: resp.ip_groups.into_iter().map(|g| IPGroup {
-                id: g.id,
-                name: g.name,
-                cidrs: g.cidrs,
-                kind: g.kind,
-            }).collect(),
-            acl_rules: resp.acl_rules.into_iter().map(|r| AclRule {
-                id: r.id,
-                src_net: r.src_net,
-                dst_net: r.dst_net,
-                src_group_id: r.src_group_id,
-                dst_group_id: r.dst_group_id,
-                protocol: r.protocol,
-                min_port: r.min_port,
-                max_port: r.max_port,
-                action: r.action,
-                direction: r.direction,
-                ports: r.ports,
-                priority: r.priority,
-            }).collect(),
-            qos_rules: resp.qos_rules.into_iter().map(|r| QoSRule {
-                id: r.id,
-                src_ip: r.src_ip,
-                dst_ip: r.dst_ip,
-                group_id: r.group_id,
-                src_port: r.src_port,
-                dst_port: r.dst_port,
-                protocol: r.protocol,
-                bandwidth_mbps: r.bandwidth_mbps,
-                direction: r.direction,
-                rate_bps: r.rate_bps,
-                burst_bytes: r.burst_bytes,
-                priority: r.priority,
-                mode: r.mode,
-            }).collect(),
-            blacklist_rules: resp.blacklist_rules.into_iter().map(|r| BlacklistRule {
-                scope: r.scope,
-                cidr: r.cidr,
-                port: r.port,
-            }).collect(),
-            runtime_token: new_runtime_token,
-            runtime_token_expires_at: new_runtime_token_expires_at,
-            snapshot_complete: resp.snapshot_complete,
-            domain_versions: resp.domain_versions,
-        })
+        Ok(sync_response_to_result(response.into_inner()))
     }
 
     pub async fn report_metrics(
@@ -461,6 +389,120 @@ impl GrpcClient {
         let response = client.command_stream(request).await?;
 
         Ok((tx, response.into_inner()))
+    }
+}
+
+fn sync_response_to_result(resp: aria::SyncResponse) -> SyncResult {
+    let aria::SyncResponse {
+        peers,
+        assigned_ip,
+        acl_rules,
+        qos_rules,
+        blacklist_rules,
+        desired_state_version,
+        runtime_token,
+        runtime_token_expires_at,
+        snapshot_complete,
+        domain_versions,
+        ip_groups,
+        ..
+    } = resp;
+
+    let new_runtime_token = if !runtime_token.trim().is_empty() {
+        Some(runtime_token)
+    } else {
+        None
+    };
+    let new_runtime_token_expires_at = if runtime_token_expires_at > 0 {
+        Some(runtime_token_expires_at)
+    } else {
+        None
+    };
+
+    let mut converted_peers = Vec::with_capacity(peers.len());
+    for p in peers {
+        converted_peers.push(PeerInfo {
+            public_key: p.public_key,
+            endpoint: p.endpoint,
+            private_ip: p.private_ip,
+            public_ip: p.public_ip,
+            region: p.region,
+            vpc_id: p.vpc_id,
+            hostname: p.hostname,
+            assigned_ip: p.assigned_ip,
+            role: p.role,
+            advertised_routes: p.advertised_routes,
+        });
+    }
+
+    let mut converted_ip_groups = Vec::with_capacity(ip_groups.len());
+    for g in ip_groups {
+        converted_ip_groups.push(IPGroup {
+            id: g.id,
+            name: g.name,
+            cidrs: g.cidrs,
+            kind: g.kind,
+        });
+    }
+
+    let mut converted_acl_rules = Vec::with_capacity(acl_rules.len());
+    for r in acl_rules {
+        converted_acl_rules.push(AclRule {
+            id: r.id,
+            src_net: r.src_net,
+            dst_net: r.dst_net,
+            src_group_id: r.src_group_id,
+            dst_group_id: r.dst_group_id,
+            protocol: r.protocol,
+            min_port: r.min_port,
+            max_port: r.max_port,
+            action: r.action,
+            direction: r.direction,
+            ports: r.ports,
+            priority: r.priority,
+        });
+    }
+
+    let mut converted_qos_rules = Vec::with_capacity(qos_rules.len());
+    for r in qos_rules {
+        converted_qos_rules.push(QoSRule {
+            id: r.id,
+            src_ip: r.src_ip,
+            dst_ip: r.dst_ip,
+            group_id: r.group_id,
+            src_port: r.src_port,
+            dst_port: r.dst_port,
+            protocol: r.protocol,
+            bandwidth_mbps: r.bandwidth_mbps,
+            direction: r.direction,
+            rate_bps: r.rate_bps,
+            burst_bytes: r.burst_bytes,
+            priority: r.priority,
+            mode: r.mode,
+        });
+    }
+
+    let mut converted_blacklist_rules = Vec::with_capacity(blacklist_rules.len());
+    for r in blacklist_rules {
+        converted_blacklist_rules.push(BlacklistRule {
+            scope: r.scope,
+            cidr: r.cidr,
+            port: r.port,
+        });
+    }
+
+    SyncResult {
+        peers: converted_peers,
+        assigned_ip,
+        desired_state_version,
+        ip_groups: converted_ip_groups,
+        acl_rules: converted_acl_rules,
+        qos_rules: converted_qos_rules,
+        blacklist_rules: converted_blacklist_rules,
+        runtime_token: new_runtime_token,
+        runtime_token_expires_at: new_runtime_token_expires_at,
+        snapshot_complete,
+        domain_versions,
     }
 }
 
@@ -824,9 +866,11 @@ fn qos_mode_from_string(mode: &str) -> Result<u8> {
 #[cfg(test)]
 mod tests {
     use super::{
+        aria,
         acl_policy_from_sync_rule,
         authorization_metadata_value,
         qos_policy_from_sync_rule,
+        sync_response_to_result,
         AclRule,
         QoSRule,
     };
@@ -836,6 +880,36 @@ mod tests {
         let value = authorization_metadata_value("bad\nruntime-token");
 
         assert!(value.is_err());
+    }
+
+    #[test]
+    fn sync_response_conversion_preserves_runtime_metadata() {
+        let result = sync_response_to_result(aria::SyncResponse {
+            assigned_ip: "100.64.0.2".to_string(),
+            desired_state_version: "dsv-1".to_string(),
+            runtime_token: "rt.new-token".to_string(),
+            runtime_token_expires_at: 1_700_000_000,
+            snapshot_complete: true,
+            ..Default::default()
+        });
+
+        assert_eq!(result.assigned_ip, "100.64.0.2");
+        assert_eq!(result.desired_state_version, "dsv-1");
+        assert_eq!(result.runtime_token.as_deref(), Some("rt.new-token"));
+        assert_eq!(result.runtime_token_expires_at, Some(1_700_000_000));
+        assert!(result.snapshot_complete);
+    }
+
+    #[test]
+    fn sync_response_conversion_treats_blank_runtime_token_as_absent() {
+        let result = sync_response_to_result(aria::SyncResponse {
+            runtime_token: "   ".to_string(),
+            runtime_token_expires_at: 0,
+            ..Default::default()
+        });
+
+        assert_eq!(result.runtime_token, None);
+        assert_eq!(result.runtime_token_expires_at, None);
     }
 
     #[test]
