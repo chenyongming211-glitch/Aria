@@ -96,6 +96,102 @@ func TestSettingsBackupsLifecycle(t *testing.T) {
 	}
 }
 
+func TestSettingsBackupRedactsSensitiveFieldsByDefault(t *testing.T) {
+	backupRoot := t.TempDir()
+	t.Setenv("ARIA_BACKUP_DIR", backupRoot)
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	expectSettingsBackupExportRows(mock)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSettingsContext(httptest.NewRequest(http.MethodPost, "/api/v2/settings/backups", nil), "super_admin", "alice")
+	rr := httptest.NewRecorder()
+
+	router.HandleSettings(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected create status %d, got %d, body=%s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	manifest := readSettingsBackupManifestMap(t, backupRoot+"/"+decodeBackupID(t, rr.Body.Bytes())+".json")
+	if manifest["sensitive_redacted"] != true {
+		t.Fatalf("expected sensitive_redacted=true, got %#v", manifest["sensitive_redacted"])
+	}
+	assertManifestField(t, manifest, "users", 0, "password_hash", "<redacted>")
+	assertManifestField(t, manifest, "tokens", 0, "token", "<redacted>")
+	assertManifestField(t, manifest, "nodes", 0, "enrolled_with_token", "<redacted>")
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestSettingsBackupSensitiveExportRequiresConfirmation(t *testing.T) {
+	t.Setenv("ARIA_BACKUP_DIR", t.TempDir())
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSettingsContext(httptest.NewRequest(http.MethodPost, "/api/v2/settings/backups?include_sensitive=true", nil), "super_admin", "alice")
+	rr := httptest.NewRecorder()
+
+	router.HandleSettings(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusBadRequest, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "required_confirm") {
+		t.Fatalf("expected required confirmation detail, got %s", rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sensitive export without confirmation should not query database: %v", err)
+	}
+}
+
+func TestSettingsBackupSensitiveExportPreservesSensitiveFields(t *testing.T) {
+	backupRoot := t.TempDir()
+	t.Setenv("ARIA_BACKUP_DIR", backupRoot)
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	expectSettingsBackupExportRows(mock)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSettingsContext(
+		httptest.NewRequest(http.MethodPost, "/api/v2/settings/backups?include_sensitive=true&confirm=EXPORT%20SENSITIVE%20ARIA%20BACKUP", nil),
+		"super_admin",
+		"alice",
+	)
+	rr := httptest.NewRecorder()
+
+	router.HandleSettings(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected create status %d, got %d, body=%s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	manifest := readSettingsBackupManifestMap(t, backupRoot+"/"+decodeBackupID(t, rr.Body.Bytes())+".json")
+	if manifest["sensitive_redacted"] != false {
+		t.Fatalf("expected sensitive_redacted=false, got %#v", manifest["sensitive_redacted"])
+	}
+	assertManifestField(t, manifest, "users", 0, "password_hash", "hash-secret")
+	assertManifestField(t, manifest, "tokens", 0, "token", "token-secret")
+	assertManifestField(t, manifest, "nodes", 0, "enrolled_with_token", "enroll-secret")
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestSettingsBackupIncludesIPGroupPolicyColumns(t *testing.T) {
 	exportQueries := map[string]string{}
 	for _, table := range backupExportTables {
@@ -261,6 +357,7 @@ func TestSettingsBackupRestoreAppliesManifest(t *testing.T) {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
+	expectRestorePreflightCounts(mock, 0, 0, 0)
 	mock.ExpectBegin()
 	for _, table := range backupRestoreCleanupTables {
 		mock.ExpectExec(regexp.QuoteMeta("DELETE FROM " + table)).
@@ -407,7 +504,12 @@ func TestSettingsBackupRestoreSelectedTablesOnly(t *testing.T) {
 	}`
 	writeSettingsBackupFixture(t, backupID, manifest)
 
+	expectRestorePreflightCounts(mock, 0, 0, 0)
 	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM qos_rules")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM acl_rules")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM ip_group_members")).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM ip_groups")).
@@ -453,7 +555,7 @@ func TestSettingsBackupRestoreSelectedTablesOnly(t *testing.T) {
 		httptest.NewRequest(
 			http.MethodPost,
 			"/api/v2/settings/backups/"+backupID+"/restore",
-			strings.NewReader(`{"confirm":"RESTORE ARIA CONFIG","tables":["ip_groups","ip_group_members"]}`),
+			strings.NewReader(`{"confirm":"RESTORE ARIA CONFIG","tables":["ip_groups","ip_group_members","acl_rules","qos_rules"]}`),
 		),
 		"super_admin",
 		"bob",
@@ -477,6 +579,9 @@ func TestSettingsBackupRestoreSelectedTablesOnly(t *testing.T) {
 	if restoredTables["ip_group_members"] != float64(1) {
 		t.Fatalf("expected ip_group_members restore count 1, got %#v", restoredTables["ip_group_members"])
 	}
+	if restoredTables["acl_rules"] != float64(0) || restoredTables["qos_rules"] != float64(0) {
+		t.Fatalf("expected empty ACL/QoS restore counts, got %#v", restoredTables)
+	}
 	if _, exists := restoredTables["tenants"]; exists {
 		t.Fatalf("expected selected restore to omit tenants, got %#v", restoredTables)
 	}
@@ -496,6 +601,7 @@ func TestSettingsBackupRestoreDryRunDoesNotModifyDatabase(t *testing.T) {
 
 	backupID := "dry-run-fixture"
 	writeSettingsBackupFixture(t, backupID, settingsBackupRestoreFixtureManifest)
+	expectRestorePreflightCounts(mock, 0, 0, 0)
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSettingsContext(
@@ -522,6 +628,9 @@ func TestSettingsBackupRestoreDryRunDoesNotModifyDatabase(t *testing.T) {
 	if data["dry_run"] != true {
 		t.Fatalf("expected dry_run=true, got %#v", data["dry_run"])
 	}
+	if data["blocked"] != false {
+		t.Fatalf("expected dry-run blocked=false, got %#v", data["blocked"])
+	}
 	tableCounts, ok := data["table_counts"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected table_counts field, got %#v", data["table_counts"])
@@ -534,7 +643,119 @@ func TestSettingsBackupRestoreDryRunDoesNotModifyDatabase(t *testing.T) {
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("dry-run should not execute SQL, got unmet expectations: %v", err)
+		t.Fatalf("dry-run should only execute preflight SQL, got unmet expectations: %v", err)
+	}
+}
+
+func TestSettingsBackupRestoreRejectsMissingDependency(t *testing.T) {
+	t.Setenv("ARIA_BACKUP_DIR", t.TempDir())
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	backupID := "restore-missing-dependency"
+	writeSettingsBackupFixture(t, backupID, settingsBackupRestoreFixtureManifest)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSettingsContext(
+		httptest.NewRequest(
+			http.MethodPost,
+			"/api/v2/settings/backups/"+backupID+"/restore",
+			strings.NewReader(`{"dry_run":true,"tables":["ip_group_members"]}`),
+		),
+		"super_admin",
+		"bob",
+	)
+	rr := httptest.NewRecorder()
+
+	router.HandleSettings(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusBadRequest, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "dependency closure") {
+		t.Fatalf("expected dependency closure error, got %s", rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("dependency validation should not execute SQL, got unmet expectations: %v", err)
+	}
+}
+
+func TestSettingsBackupRestoreRejectsRuntimeHazardsBeforeMutation(t *testing.T) {
+	t.Setenv("ARIA_BACKUP_DIR", t.TempDir())
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	backupID := "restore-runtime-hazard"
+	writeSettingsBackupFixture(t, backupID, settingsBackupRestoreFixtureManifest)
+	expectRestorePreflightCounts(mock, 1, 2, 3)
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSettingsContext(
+		httptest.NewRequest(
+			http.MethodPost,
+			"/api/v2/settings/backups/"+backupID+"/restore",
+			strings.NewReader(`{"confirm":"RESTORE ARIA CONFIG"}`),
+		),
+		"super_admin",
+		"bob",
+	)
+	rr := httptest.NewRecorder()
+
+	router.HandleSettings(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusConflict, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "preflight") {
+		t.Fatalf("expected preflight error, got %s", rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("runtime preflight should not mutate database: %v", err)
+	}
+}
+
+func TestSettingsBackupRestoreRejectsRedactedManifest(t *testing.T) {
+	t.Setenv("ARIA_BACKUP_DIR", t.TempDir())
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	backupID := "restore-redacted"
+	writeSettingsBackupFixture(t, backupID, strings.Replace(settingsBackupRestoreFixtureManifest, `"created_by":"alice",`, `"created_by":"alice","sensitive_redacted":true,`, 1))
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSettingsContext(
+		httptest.NewRequest(
+			http.MethodPost,
+			"/api/v2/settings/backups/"+backupID+"/restore",
+			strings.NewReader(`{"confirm":"RESTORE ARIA CONFIG"}`),
+		),
+		"super_admin",
+		"bob",
+	)
+	rr := httptest.NewRecorder()
+
+	router.HandleSettings(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusBadRequest, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "redacted") {
+		t.Fatalf("expected redacted backup error, got %s", rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("redacted restore validation should not execute SQL: %v", err)
 	}
 }
 
@@ -605,6 +826,72 @@ func writeSettingsBackupFixture(t *testing.T, backupID, manifest string) {
 	backupPath := backupDir + "/" + backupID + ".json"
 	if err := os.WriteFile(backupPath, []byte(manifest), 0o600); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
+	}
+}
+
+func expectSettingsBackupExportRows(mock sqlmock.Sqlmock) {
+	for _, table := range backupExportTables {
+		rows := sqlmock.NewRows([]string{"id"})
+		switch table.Name {
+		case "users":
+			rows = sqlmock.NewRows([]string{"id", "password_hash"}).AddRow("user-1", "hash-secret")
+		case "tokens":
+			rows = sqlmock.NewRows([]string{"id", "token"}).AddRow("token-1", "token-secret")
+		case "nodes":
+			rows = sqlmock.NewRows([]string{"id", "enrolled_with_token"}).AddRow("node-1", "enroll-secret")
+		}
+		mock.ExpectQuery(regexp.QuoteMeta(table.Query)).WillReturnRows(rows)
+	}
+}
+
+func expectRestorePreflightCounts(mock sqlmock.Sqlmock, activeNodes, incompleteCommands, incompleteDeliveries int) {
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM nodes WHERE COALESCE(status, 'online') = 'online'`)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(activeNodes))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM agent_commands WHERE status IN ($1, $2, $3)`)).
+		WithArgs(
+			controllerstorage.AgentCommandStatusPending,
+			controllerstorage.AgentCommandStatusSent,
+			controllerstorage.AgentCommandStatusAcknowledged,
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(incompleteCommands))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM policy_deliveries WHERE command_status IN ($1, $2, $3)`)).
+		WithArgs(
+			controllerstorage.AgentCommandStatusPending,
+			controllerstorage.AgentCommandStatusSent,
+			controllerstorage.AgentCommandStatusAcknowledged,
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(incompleteDeliveries))
+}
+
+func readSettingsBackupManifestMap(t *testing.T, path string) map[string]interface{} {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	var manifest map[string]interface{}
+	if err := json.Unmarshal(content, &manifest); err != nil {
+		t.Fatalf("failed to decode manifest: %v", err)
+	}
+	return manifest
+}
+
+func assertManifestField(t *testing.T, manifest map[string]interface{}, table string, rowIndex int, field string, expected interface{}) {
+	t.Helper()
+	tables, ok := manifest["tables"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("manifest tables missing or malformed: %#v", manifest["tables"])
+	}
+	rows, ok := tables[table].([]interface{})
+	if !ok || len(rows) <= rowIndex {
+		t.Fatalf("manifest table %s row %d missing: %#v", table, rowIndex, tables[table])
+	}
+	row, ok := rows[rowIndex].(map[string]interface{})
+	if !ok {
+		t.Fatalf("manifest table %s row %d malformed: %#v", table, rowIndex, rows[rowIndex])
+	}
+	if row[field] != expected {
+		t.Fatalf("expected %s.%s=%#v, got %#v", table, field, expected, row[field])
 	}
 }
 

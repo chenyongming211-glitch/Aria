@@ -174,11 +174,11 @@ func (s *Storage) Migrate() error {
 		`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS phone VARCHAR(32)`,
 
 		`CREATE TABLE IF NOT EXISTS nodes (
-			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			public_key VARCHAR(44) NOT NULL UNIQUE,
-			machine_id VARCHAR(100) NOT NULL,
-			tenant_id UUID REFERENCES tenants(id),
-			endpoint VARCHAR(100),
+				id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+				public_key VARCHAR(44) NOT NULL UNIQUE,
+				machine_id VARCHAR(100) NOT NULL,
+				tenant_id UUID REFERENCES tenants(id),
+				endpoint VARCHAR(100),
 			private_ip VARCHAR(45),
 			public_ip VARCHAR(45),
 			region VARCHAR(50),
@@ -187,11 +187,12 @@ func (s *Storage) Migrate() error {
 			assigned_ip INET,
 			ip_offset INT NOT NULL DEFAULT 0,
 			last_seen BIGINT NOT NULL,
-			registered_at BIGINT NOT NULL,
-			role VARCHAR(20) DEFAULT 'spoke',
-			created_at TIMESTAMPTZ DEFAULT NOW(),
-			updated_at TIMESTAMPTZ DEFAULT NOW()
-		)`,
+				registered_at BIGINT NOT NULL,
+				role VARCHAR(20) DEFAULT 'spoke',
+				created_at TIMESTAMPTZ DEFAULT NOW(),
+				updated_at TIMESTAMPTZ DEFAULT NOW()
+			)`,
+		`ALTER TABLE nodes ADD COLUMN IF NOT EXISTS runtime_token_version INTEGER NOT NULL DEFAULT 0`,
 
 		`CREATE TABLE IF NOT EXISTS state (
 			key TEXT PRIMARY KEY,
@@ -258,13 +259,14 @@ func (s *Storage) Migrate() error {
 			password_hash VARCHAR(255) NOT NULL,
 			tenant_id UUID REFERENCES tenants(id),
 			role VARCHAR(20) DEFAULT 'viewer',
-			email VARCHAR(100),
-			created_at TIMESTAMPTZ DEFAULT NOW(),
-			updated_at TIMESTAMPTZ DEFAULT NOW(),
-			last_login TIMESTAMPTZ
-		)`,
+				email VARCHAR(100),
+				created_at TIMESTAMPTZ DEFAULT NOW(),
+				updated_at TIMESTAMPTZ DEFAULT NOW(),
+				last_login TIMESTAMPTZ
+			)`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE users ALTER COLUMN tenant_id DROP NOT NULL`,
 
 		`CREATE TABLE IF NOT EXISTS ip_groups (

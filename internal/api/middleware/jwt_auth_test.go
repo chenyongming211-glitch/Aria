@@ -4,10 +4,13 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 
 	"aria/internal/auth"
+	"aria/pkg/controllerstorage"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 )
 
@@ -103,5 +106,41 @@ func TestJWTAuthMiddlewareBlocksOtherPathsDuringForcedPasswordChange(t *testing.
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestJWTAuthMiddlewareWithStoreRejectsStaleTokenVersion(t *testing.T) {
+	auth.SetSecret("test-jwt-secret")
+	t.Cleanup(func() { auth.SetSecret("") })
+
+	userID := uuid.New()
+	token, err := auth.GenerateTokenWithVersion(userID.String(), "alice", "admin", uuid.New().String(), 1)
+	if err != nil {
+		t.Fatalf("GenerateTokenWithVersion failed: %v", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COALESCE(token_version, 0) FROM users WHERE id = $1`)).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"token_version"}).AddRow(2))
+
+	handler := JWTAuthMiddlewareWithStore(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("handler should not be called for stale token")
+	}, controllerstorage.NewStorageWithDB(db))
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/tenants", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+
+	handler(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }

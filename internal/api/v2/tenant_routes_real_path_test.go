@@ -2,6 +2,7 @@ package v2
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -200,6 +201,79 @@ func TestTenantUpdateReturnsNotFoundWhenNoRowsUpdated(t *testing.T) {
 	}
 }
 
+func TestTenantUpdateSuspendsViaLifecycle(t *testing.T) {
+	t.Setenv("RBAC_ENFORCEMENT", "enforce")
+
+	tenantID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT status FROM tenants WHERE id = $1 FOR UPDATE`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("active"))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE tenants
+		SET status = $2, updated_at = NOW()
+		WHERE id = $1
+	`)).
+		WithArgs(tenantID, "suspended").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE users
+		SET token_version = COALESCE(token_version, 0) + 1,
+		    updated_at = NOW()
+		WHERE tenant_id = $1
+	`)).
+		WithArgs(tenantID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, public_key
+		FROM nodes
+		WHERE tenant_id = $1
+		  AND COALESCE(status, 'online') NOT IN ('deleted', 'suspended', 'banned')
+		FOR UPDATE
+	`)).
+		WithArgs(tenantID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "public_key"}))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE nodes
+		SET status = $2,
+		    runtime_token_version = COALESCE(runtime_token_version, 0) + 1,
+		    updated_at = NOW()
+		WHERE tenant_id = $1
+		  AND COALESCE(status, 'online') NOT IN ('deleted', 'suspended', 'banned')
+	`)).
+		WithArgs(tenantID, "suspended").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		INSERT INTO audit_events (tenant_id, node_id, event_type, actor, summary, detail)
+		VALUES ($1, NULL, $2, $3, $4, $5)
+	`)).
+		WithArgs(tenantID, controllerstorage.AuditTenantSuspended, "super_admin", "Tenant suspended", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withAuthContext(httptest.NewRequest(
+		http.MethodPut,
+		"/api/v2/tenants/"+tenantID.String(),
+		bytes.NewReader([]byte(`{"status":"suspended"}`)),
+	), "super_admin", tenantID)
+	rr := httptest.NewRecorder()
+	router.HandleTenantScoped(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestTenantDeleteReturnsNotFoundWhenNoRowsUpdated(t *testing.T) {
 	t.Setenv("RBAC_ENFORCEMENT", "enforce")
 
@@ -210,9 +284,11 @@ func TestTenantDeleteReturnsNotFoundWhenNoRowsUpdated(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE tenants SET status = 'deleted', updated_at = NOW() WHERE id = $1`)).
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT status FROM tenants WHERE id = $1 FOR UPDATE`)).
 		WithArgs(tenantID).
-		WillReturnResult(sqlmock.NewResult(0, 0))
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withAuthContext(httptest.NewRequest(

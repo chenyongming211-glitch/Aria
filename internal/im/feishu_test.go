@@ -35,6 +35,19 @@ func TestFeishuWebhookRejectsMissingVerifyToken(t *testing.T) {
 	}
 }
 
+func TestFeishuWebhookRejectsWhenVerifyTokenNotConfigured(t *testing.T) {
+	handler := NewFeishuHandler(stubAIService{}, "", "", "", "")
+	body := `{"type":"url_verification","challenge":"challenge-1","token":"client-token"}`
+	req := httptest.NewRequest(http.MethodPost, "/feishu", bytes.NewBufferString(body))
+	rr := httptest.NewRecorder()
+
+	handler.HandleWebhook(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when verify token is not configured, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestFeishuWebhookAcceptsTopLevelVerifyTokenForURLVerification(t *testing.T) {
 	handler := NewFeishuHandler(stubAIService{}, "", "", "", "expected-token")
 	body := `{"type":"url_verification","challenge":"challenge-1","token":"expected-token"}`

@@ -12,7 +12,9 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 type pollingCommandStream struct {
@@ -69,8 +71,10 @@ func TestCommandStreamPollsForCommandsAfterIdleInit(t *testing.T) {
 	expectCommandStreamNodeLookup(mock, publicKey, tenantID, nodeID, now)
 	expectRuntimeTenantStatus(mock, tenantID, "active")
 	expectCommandStreamActiveNodeLookup(mock, publicKey, tenantID, nodeID, now, "online")
+	expectRuntimeTenantStatus(mock, tenantID, "active")
 	expectNoPendingAgentCommand(mock, publicKey)
 	expectCommandStreamActiveNodeLookup(mock, publicKey, tenantID, nodeID, now, "online")
+	expectRuntimeTenantStatus(mock, tenantID, "active")
 	expectPendingAgentCommand(mock, publicKey, commandID, now)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -115,6 +119,66 @@ func TestCommandStreamPollsForCommandsAfterIdleInit(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("CommandStream did not stop after context cancellation")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet database expectations: %v", err)
+	}
+}
+
+func TestCommandStreamStopsWhenTenantSuspendedMidStream(t *testing.T) {
+	previousPollInterval := commandStreamPollInterval
+	commandStreamPollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { commandStreamPollInterval = previousPollInterval })
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	nodeID := uuid.New()
+	tenantID := uuid.New()
+	publicKey := "pub-key-tenant-stop"
+	now := time.Now()
+
+	expectCommandStreamNodeLookup(mock, publicKey, tenantID, nodeID, now)
+	expectRuntimeTenantStatus(mock, tenantID, "active")
+	expectCommandStreamActiveNodeLookup(mock, publicKey, tenantID, nodeID, now, "online")
+	expectRuntimeTenantStatus(mock, tenantID, "active")
+	expectNoPendingAgentCommand(mock, publicKey)
+	expectCommandStreamActiveNodeLookup(mock, publicKey, tenantID, nodeID, now, "online")
+	expectRuntimeTenantStatus(mock, tenantID, "suspended")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx = context.WithValue(ctx, RuntimeNodeIDKey, nodeID.String())
+	ctx = context.WithValue(ctx, RuntimeTenantIDKey, tenantID.String())
+	stream := &pollingCommandStream{
+		ctx:  ctx,
+		recv: make(chan *agentpb.CommandResponse, 1),
+		sent: make(chan *agentpb.CommandRequest, 1),
+	}
+	stream.recv <- &agentpb.CommandResponse{
+		CommandId: "init",
+		Status:    "ready",
+		NodeId:    nodeID.String(),
+		PublicKey: publicKey,
+	}
+
+	server := &ControllerServer{store: controllerstorage.NewStorageWithDB(db)}
+	done := make(chan error, 1)
+	go func() {
+		done <- server.CommandStream(stream)
+	}()
+
+	select {
+	case err := <-done:
+		if status.Code(err) != codes.PermissionDenied {
+			t.Fatalf("expected PermissionDenied when tenant is suspended mid-stream, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("CommandStream did not stop after tenant suspension")
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

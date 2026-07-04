@@ -127,7 +127,7 @@ func writeFeishuJSON(w http.ResponseWriter, status int, payload any) {
 
 func (h *FeishuHandler) verifyIncomingToken(event FeishuEvent) bool {
 	if h.verifyToken == "" {
-		return true
+		return false
 	}
 	token := event.Header.Token
 	if token == "" {

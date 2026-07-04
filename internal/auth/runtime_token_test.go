@@ -35,6 +35,24 @@ func TestGenerateAndValidateRuntimeToken_WithConfiguredSecret(t *testing.T) {
 	}
 }
 
+func TestGenerateRuntimeTokenWithVersionIncludesTokenVersion(t *testing.T) {
+	SetRuntimeSecret("test-runtime-secret")
+	t.Cleanup(func() { SetRuntimeSecret("") })
+
+	token, _, err := GenerateRuntimeTokenWithVersion("node-1", "tenant-1", 3)
+	if err != nil {
+		t.Fatalf("GenerateRuntimeTokenWithVersion failed: %v", err)
+	}
+
+	claims, err := ValidateRuntimeToken(token)
+	if err != nil {
+		t.Fatalf("ValidateRuntimeToken failed: %v", err)
+	}
+	if claims.TokenVersion != 3 {
+		t.Fatalf("expected runtime token version 3, got %d", claims.TokenVersion)
+	}
+}
+
 func TestGenerateRuntimeToken_FailsWhenSecretMissing(t *testing.T) {
 	SetRuntimeSecret("")
 

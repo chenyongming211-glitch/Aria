@@ -30,6 +30,14 @@ func NewDingTalkHandler(aiSvc service.AIService, webhook, secret string) *DingTa
 	}
 }
 
+func writeDingTalkJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		fmt.Printf("[DingTalk] 写入 JSON 响应失败: %v\n", err)
+	}
+}
+
 // DingTalkMessage 钉钉消息格式
 type DingTalkMessage struct {
 	MsgType string `json:"msgtype"`
@@ -44,8 +52,8 @@ type DingTalkMessage struct {
 
 // DingTalkCallbackRequest 钉钉 Webhook 回调请求
 type DingTalkCallbackRequest struct {
-	MsgID    string `json:"msgId"`
-	Content  struct {
+	MsgID   string `json:"msgId"`
+	Content struct {
 		Text string `json:"text"`
 	} `json:"content"`
 	SenderNick string `json:"senderNick"`
@@ -58,20 +66,16 @@ func (h *DingTalkHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 	// 1. 读取请求体
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to read request body"})
+		writeDingTalkJSON(w, http.StatusBadRequest, map[string]string{"error": "Failed to read request body"})
 		return
 	}
 
-	// 2. 验证签名（如果配置了 secret）
-	if h.secret != "" {
-		timestamp := r.Header.Get("timestamp")
-		sign := r.Header.Get("sign")
-		if !h.verifySign(timestamp, sign) {
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid signature"})
-			return
-		}
+	// 2. 验证签名
+	timestamp := r.Header.Get("timestamp")
+	sign := r.Header.Get("sign")
+	if !h.verifySign(timestamp, sign) {
+		writeDingTalkJSON(w, http.StatusUnauthorized, map[string]string{"error": "Invalid signature"})
+		return
 	}
 
 	// 3. 解析消息
@@ -96,8 +100,7 @@ func (h *DingTalkHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 // processMessage 处理用户消息
 func (h *DingTalkHandler) processMessage(message string, w http.ResponseWriter, r *http.Request) {
 	if message == "" {
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		writeDingTalkJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 
@@ -117,8 +120,7 @@ func (h *DingTalkHandler) processMessage(message string, w http.ResponseWriter, 
 
 	// 如果是 Webhook 回调模式，直接返回
 	if w != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		writeDingTalkJSON(w, http.StatusOK, map[string]interface{}{
 			"status": "success",
 			"reply":  reply,
 		})
@@ -179,7 +181,7 @@ func (h *DingTalkHandler) sendReply(reply string) error {
 // verifySign 验证钉钉签名
 func (h *DingTalkHandler) verifySign(timestamp, sign string) bool {
 	if h.secret == "" {
-		return true // 没有配置密钥则跳过验证
+		return false
 	}
 
 	if timestamp == "" || sign == "" {

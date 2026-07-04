@@ -2,11 +2,14 @@ package middleware
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"net/http"
 	"strings"
 
 	"aria/internal/api/apibase"
 	"aria/internal/auth"
+	"aria/pkg/controllerstorage"
 
 	"github.com/google/uuid"
 )
@@ -43,6 +46,14 @@ func extractHTTPAuthorizationToken(authHeader string) string {
 
 // JWTAuthMiddleware 创建JWT认证中间件
 func JWTAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return jwtAuthMiddleware(next, nil)
+}
+
+func JWTAuthMiddlewareWithStore(next http.HandlerFunc, store *controllerstorage.Storage) http.HandlerFunc {
+	return jwtAuthMiddleware(next, store)
+}
+
+func jwtAuthMiddleware(next http.HandlerFunc, store *controllerstorage.Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
@@ -65,6 +76,22 @@ func JWTAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "Invalid token", nil)
 			}
 			return
+		}
+
+		if store != nil {
+			currentVersion, err := store.GetUserTokenVersion(claims.UserID)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "Invalid token", nil)
+					return
+				}
+				apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to verify token state", nil)
+				return
+			}
+			if claims.TokenVersion != currentVersion {
+				apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "Invalid token", nil)
+				return
+			}
 		}
 
 		if claims.MustChangePassword && !containsPath(mcpWhitelist, r.URL.Path) {

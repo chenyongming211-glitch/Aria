@@ -26,6 +26,12 @@ import (
 const backupTimestampLayout = "2006-01-02 15:04:05"
 const maxBackupUploadBytes = 10 << 20
 const backupRestoreConfirmPhrase = "RESTORE ARIA CONFIG"
+const backupSensitiveExportConfirmPhrase = "EXPORT SENSITIVE ARIA BACKUP"
+const redactedSensitiveValue = "<redacted>"
+
+const restorePreflightActiveNodesQuery = `SELECT COUNT(*) FROM nodes WHERE COALESCE(status, 'online') = 'online'`
+const restorePreflightIncompleteCommandsQuery = `SELECT COUNT(*) FROM agent_commands WHERE status IN ($1, $2, $3)`
+const restorePreflightIncompleteDeliveriesQuery = `SELECT COUNT(*) FROM policy_deliveries WHERE command_status IN ($1, $2, $3)`
 
 var backupExportTables = []struct {
 	Name  string
@@ -52,10 +58,11 @@ type backupRecord struct {
 }
 
 type backupManifest struct {
-	Version   string                   `json:"version"`
-	CreatedAt string                   `json:"created_at"`
-	CreatedBy string                   `json:"created_by"`
-	Tables    map[string][]interface{} `json:"tables"`
+	Version           string                   `json:"version"`
+	CreatedAt         string                   `json:"created_at"`
+	CreatedBy         string                   `json:"created_by"`
+	SensitiveRedacted bool                     `json:"sensitive_redacted"`
+	Tables            map[string][]interface{} `json:"tables"`
 }
 
 type backupRestoreRequest struct {
@@ -67,9 +74,18 @@ type backupRestoreRequest struct {
 type backupRestorePlan struct {
 	BackupID       string         `json:"backup_id"`
 	DryRun         bool           `json:"dry_run"`
+	Blocked        bool           `json:"blocked"`
 	SelectedTables []string       `json:"selected_tables"`
 	TableCounts    map[string]int `json:"table_counts"`
 	Warnings       []string       `json:"warnings"`
+}
+
+type backupRestorePreflight struct {
+	Blocked              bool
+	ActiveNodes          int
+	IncompleteCommands   int
+	IncompleteDeliveries int
+	Warnings             []string
 }
 
 type backupFile struct {
@@ -117,6 +133,12 @@ var backupRestoreCleanupTables = []string{
 	"tokens",
 	"nodes",
 	"tenants",
+}
+
+var backupSensitiveFields = map[string][]string{
+	"users":  {"password_hash"},
+	"tokens": {"token"},
+	"nodes":  {"enrolled_with_token"},
 }
 
 // HandleSettings handles /api/v2/settings/* routes.
@@ -207,6 +229,14 @@ func (r *Router) listBackups(w http.ResponseWriter) {
 }
 
 func (r *Router) createBackup(w http.ResponseWriter, req *http.Request) {
+	includeSensitive, err := parseBackupSensitiveExport(req)
+	if err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeBadRequest, err.Error(), map[string]string{
+			"required_confirm": backupSensitiveExportConfirmPhrase,
+		})
+		return
+	}
+
 	dir, err := backupDir()
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to prepare backup directory: "+err.Error(), nil)
@@ -218,7 +248,7 @@ func (r *Router) createBackup(w http.ResponseWriter, req *http.Request) {
 		username = "system"
 	}
 
-	manifest, err := r.buildBackupManifest(username)
+	manifest, err := r.buildBackupManifest(username, includeSensitive)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to build backup: "+err.Error(), nil)
 		return
@@ -441,7 +471,12 @@ func (r *Router) restoreBackup(w http.ResponseWriter, req *http.Request, backupI
 		return
 	}
 	if restoreReq.DryRun {
-		apibase.WriteSuccess(w, buildRestorePlan(manifest, backupID, selected), "Backup restore dry-run completed")
+		preflight, err := r.runBackupRestorePreflight()
+		if err != nil {
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Backup restore preflight failed: "+err.Error(), nil)
+			return
+		}
+		apibase.WriteSuccess(w, buildRestorePlan(manifest, backupID, selected, preflight), "Backup restore dry-run completed")
 		return
 	}
 	if strings.TrimSpace(restoreReq.Confirm) != backupRestoreConfirmPhrase {
@@ -454,6 +489,18 @@ func (r *Router) restoreBackup(w http.ResponseWriter, req *http.Request, backupI
 	username, _ := middleware.GetUsername(req.Context())
 	if strings.TrimSpace(username) == "" {
 		username = "system"
+	}
+
+	preflight, err := r.runBackupRestorePreflight()
+	if err != nil {
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Backup restore preflight failed: "+err.Error(), nil)
+		return
+	}
+	if preflight.Blocked {
+		apibase.WriteError(w, http.StatusConflict, apibase.CodeConflict, "Backup restore preflight blocked destructive restore", map[string]string{
+			"warnings": strings.Join(preflight.Warnings, "; "),
+		})
+		return
 	}
 
 	restoredTables, err := r.restoreBackupManifest(manifest, backupID, username, selected)
@@ -479,30 +526,37 @@ func selectedRestoreTables(requested []string) ([]backupTableSpec, error) {
 		allowed[spec.Name] = spec
 	}
 
-	selected := make([]backupTableSpec, 0, len(requested))
 	seen := make(map[string]bool, len(requested))
 	for _, name := range requested {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
 		}
-		spec, ok := allowed[name]
-		if !ok {
+		if _, ok := allowed[name]; !ok {
 			return nil, fmt.Errorf("unknown restore table: %s", name)
 		}
 		if seen[name] {
 			continue
 		}
 		seen[name] = true
-		selected = append(selected, spec)
 	}
-	if len(selected) == 0 {
+	if len(seen) == 0 {
 		return nil, fmt.Errorf("at least one restore table is required")
+	}
+	if err := validateRestoreTableDependencyClosure(seen); err != nil {
+		return nil, err
+	}
+
+	selected := make([]backupTableSpec, 0, len(seen))
+	for _, spec := range backupRestoreTables {
+		if seen[spec.Name] {
+			selected = append(selected, spec)
+		}
 	}
 	return selected, nil
 }
 
-func buildRestorePlan(manifest *backupManifest, backupID string, selected []backupTableSpec) backupRestorePlan {
+func buildRestorePlan(manifest *backupManifest, backupID string, selected []backupTableSpec, preflight backupRestorePreflight) backupRestorePlan {
 	counts := make(map[string]int, len(selected))
 	names := make([]string, 0, len(selected))
 	for _, spec := range selected {
@@ -512,16 +566,47 @@ func buildRestorePlan(manifest *backupManifest, backupID string, selected []back
 	return backupRestorePlan{
 		BackupID:       backupID,
 		DryRun:         true,
+		Blocked:        preflight.Blocked,
 		SelectedTables: names,
 		TableCounts:    counts,
-		Warnings: []string{
+		Warnings: append([]string{
 			"restore replaces selected control-plane configuration tables",
 			"active Agent runtime state may need a sync after restore",
-		},
+		}, preflight.Warnings...),
 	}
 }
 
-func (r *Router) buildBackupManifest(createdBy string) (*backupManifest, error) {
+func parseBackupSensitiveExport(req *http.Request) (bool, error) {
+	includeSensitive := strings.EqualFold(strings.TrimSpace(req.URL.Query().Get("include_sensitive")), "true")
+	if !includeSensitive {
+		return false, nil
+	}
+	if strings.TrimSpace(req.URL.Query().Get("confirm")) != backupSensitiveExportConfirmPhrase {
+		return false, fmt.Errorf("Sensitive backup export confirmation phrase is required")
+	}
+	return true, nil
+}
+
+func validateRestoreTableDependencyClosure(selected map[string]bool) error {
+	if selected["ip_group_members"] && !selected["ip_groups"] {
+		return fmt.Errorf("restore table dependency closure incomplete: ip_group_members requires ip_groups")
+	}
+	if selected["ip_groups"] {
+		required := []string{"ip_group_members", "acl_rules", "qos_rules"}
+		missing := make([]string, 0, len(required))
+		for _, table := range required {
+			if !selected[table] {
+				missing = append(missing, table)
+			}
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("restore table dependency closure incomplete: ip_groups requires %s", strings.Join(missing, ", "))
+		}
+	}
+	return nil
+}
+
+func (r *Router) buildBackupManifest(createdBy string, includeSensitive bool) (*backupManifest, error) {
 	tables := make(map[string][]interface{}, len(backupExportTables))
 	for _, table := range backupExportTables {
 		rows, err := queryRowsAsObjects(r.store.DB(), table.Query)
@@ -530,13 +615,71 @@ func (r *Router) buildBackupManifest(createdBy string) (*backupManifest, error) 
 		}
 		tables[table.Name] = rows
 	}
+	if !includeSensitive {
+		redactBackupSensitiveFields(tables)
+	}
 
 	return &backupManifest{
-		Version:   "v0.1.0",
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-		CreatedBy: createdBy,
-		Tables:    tables,
+		Version:           "v0.1.0",
+		CreatedAt:         time.Now().UTC().Format(time.RFC3339),
+		CreatedBy:         createdBy,
+		SensitiveRedacted: !includeSensitive,
+		Tables:            tables,
 	}, nil
+}
+
+func redactBackupSensitiveFields(tables map[string][]interface{}) {
+	for tableName, fields := range backupSensitiveFields {
+		rows := tables[tableName]
+		for _, row := range rows {
+			item, ok := row.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			for _, field := range fields {
+				if _, exists := item[field]; exists {
+					item[field] = redactedSensitiveValue
+				}
+			}
+		}
+	}
+}
+
+func (r *Router) runBackupRestorePreflight() (backupRestorePreflight, error) {
+	var preflight backupRestorePreflight
+	db := r.store.DB()
+
+	if err := db.QueryRow(restorePreflightActiveNodesQuery).Scan(&preflight.ActiveNodes); err != nil {
+		return preflight, fmt.Errorf("count active nodes: %w", err)
+	}
+	if err := db.QueryRow(
+		restorePreflightIncompleteCommandsQuery,
+		controllerstorage.AgentCommandStatusPending,
+		controllerstorage.AgentCommandStatusSent,
+		controllerstorage.AgentCommandStatusAcknowledged,
+	).Scan(&preflight.IncompleteCommands); err != nil {
+		return preflight, fmt.Errorf("count incomplete agent commands: %w", err)
+	}
+	if err := db.QueryRow(
+		restorePreflightIncompleteDeliveriesQuery,
+		controllerstorage.AgentCommandStatusPending,
+		controllerstorage.AgentCommandStatusSent,
+		controllerstorage.AgentCommandStatusAcknowledged,
+	).Scan(&preflight.IncompleteDeliveries); err != nil {
+		return preflight, fmt.Errorf("count incomplete policy deliveries: %w", err)
+	}
+
+	if preflight.ActiveNodes > 0 {
+		preflight.Warnings = append(preflight.Warnings, fmt.Sprintf("%d active Agent node(s) are online", preflight.ActiveNodes))
+	}
+	if preflight.IncompleteCommands > 0 {
+		preflight.Warnings = append(preflight.Warnings, fmt.Sprintf("%d incomplete Agent command(s) are pending", preflight.IncompleteCommands))
+	}
+	if preflight.IncompleteDeliveries > 0 {
+		preflight.Warnings = append(preflight.Warnings, fmt.Sprintf("%d incomplete policy delivery record(s) are pending", preflight.IncompleteDeliveries))
+	}
+	preflight.Blocked = len(preflight.Warnings) > 0
+	return preflight, nil
 }
 
 func (r *Router) listBackupFiles() ([]backupFile, error) {
@@ -765,6 +908,12 @@ func validateBackupManifest(manifest *backupManifest, requireRestoreFields bool)
 	}
 
 	if requireRestoreFields {
+		if manifest.SensitiveRedacted {
+			return fmt.Errorf("backup contains redacted sensitive fields and cannot be restored")
+		}
+		if err := validateNoRedactedSensitiveFields(manifest); err != nil {
+			return err
+		}
 		users, ok := manifest.Tables["users"]
 		if !ok {
 			return fmt.Errorf("missing table %q", "users")
@@ -780,6 +929,24 @@ func validateBackupManifest(manifest *backupManifest, requireRestoreFields bool)
 		}
 	}
 
+	return nil
+}
+
+func validateNoRedactedSensitiveFields(manifest *backupManifest) error {
+	for tableName, fields := range backupSensitiveFields {
+		rows := manifest.Tables[tableName]
+		for _, row := range rows {
+			item, ok := row.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("%s rows must be objects", tableName)
+			}
+			for _, field := range fields {
+				if eventDetailString(item, field) == redactedSensitiveValue {
+					return fmt.Errorf("%s.%s is redacted and cannot be restored", tableName, field)
+				}
+			}
+		}
+	}
 	return nil
 }
 
