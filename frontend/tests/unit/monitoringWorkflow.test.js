@@ -906,6 +906,23 @@ describe('policy center context handling', () => {
     })
   })
 
+  it('ignores MouseEvent payloads from the top IP Groups button', async () => {
+    const wrapper = mountWithStubs(Policies)
+    await flushPromises()
+
+    wrapper.vm.goToIpGroups(new MouseEvent('click'))
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'IPGroups',
+      query: {
+        nodeId: 'node-1',
+        policyRef: 'acl-1',
+        kind: 'acl',
+        commandId: 'cmd-1'
+      }
+    })
+  })
+
   it('retries failed policy delivery from policy center', async () => {
     const wrapper = mountWithStubs(Policies)
     await flushPromises()

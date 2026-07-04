@@ -871,6 +871,7 @@ import {
   isPendingCommandStatus,
   isTerminalCommandStatus
 } from '../utils/controlLoopStatus'
+import { isValidCidrOrIp } from '../utils/ipNetwork'
 
 // 使用节点 store
 const nodeStore = useNodeStore()
@@ -1409,7 +1410,7 @@ const showInput = () => {
 const handleInputConfirm = (): boolean => {
   const pendingRoute = inputValue.value.trim()
   if (pendingRoute) {
-    if (!/^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(pendingRoute)) {
+    if (!isValidCidrOrIp(pendingRoute)) {
       ElMessage.warning(t('nodesPage.invalidCidr'))
       return false
     }
@@ -1420,6 +1421,35 @@ const handleInputConfirm = (): boolean => {
   inputVisible.value = false
   inputValue.value = ''
   return true
+}
+
+const resetEditBaselineFromNode = (node: AnyRecord) => {
+  editForm.hostname = node.hostname || editForm.hostname
+  editForm.region = node.region || editForm.region
+  const routes = Array.isArray(node.routes)
+    ? node.routes
+    : Array.isArray(node.advertised_routes)
+      ? node.advertised_routes
+      : []
+  editForm.advertised_routes = normalizeEditedRoutes(routes)
+  editOriginalAdvertisedRoutes.value = [...editForm.advertised_routes]
+}
+
+const refreshEditBaseline = async () => {
+  try {
+    await refreshNodes()
+  } catch (error) {
+    console.warn('Failed to refresh node list after partial node save:', error)
+  }
+
+  try {
+    const latestNode = await nodeStore.loadNodeDetail(editForm.id)
+    if (latestNode) {
+      resetEditBaselineFromNode(latestNode as AnyRecord)
+    }
+  } catch (error) {
+    console.warn('Failed to refresh node edit baseline after partial node save:', error)
+  }
 }
 
 const normalizeEditedRoutes = (routes: string[]): string[] => {
@@ -1455,17 +1485,25 @@ const saveNodeChanges = async () => {
     return
   }
   submitting.value = true
+  let nodeMetadataSaved = false
   try {
     await nodeStore.updateNodeRemote(editForm.id, {
       hostname: editForm.hostname,
       region: editForm.region
     })
+    nodeMetadataSaved = true
     await syncEditedAdvertisedRoutes()
     ElMessage.success(t('nodesPage.nodeUpdated'))
     editDialogVisible.value = false
     await refreshNodes()
   } catch (error) {
-    ElMessage.error(t('nodesPage.updateNodeFailed'))
+    console.error('Failed to save node changes:', error)
+    if (nodeMetadataSaved) {
+      await refreshEditBaseline()
+      ElMessage.error(t('nodesPage.updateNodePartialFailed'))
+    } else {
+      ElMessage.error(t('nodesPage.updateNodeFailed'))
+    }
   } finally {
     submitting.value = false
   }

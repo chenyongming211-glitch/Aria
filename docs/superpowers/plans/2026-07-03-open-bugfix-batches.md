@@ -214,6 +214,8 @@ go test ./internal/api/v2 ./internal/api/handlers ./pkg/controllerstorage -count
 
 **Bugs:** BUG-58, BUG-59, BUG-60, BUG-61, BUG-77, BUG-78, BUG-79, BUG-106
 
+**2026-07-04 status:** Implemented on `codex/bugfix-b5-frontend-stability`; see `docs/superpowers/plans/2026-07-04-b5-frontend-stability.md`.
+
 **Why fifth:** These are visible UI bugs, but they should follow API correctness so frontend tests can target final API behavior.
 
 **Files:**

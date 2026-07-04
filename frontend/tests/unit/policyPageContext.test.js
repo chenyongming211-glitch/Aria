@@ -799,6 +799,23 @@ describe('policy page context handoff', () => {
     })
   })
 
+  it('rejects invalid route CIDR values before calling the route API', async () => {
+    const wrapper = mountWithStubs(Routing)
+    await flushPromises()
+
+    wrapper.vm.dialogMode = 'add'
+    Object.assign(wrapper.vm.currentRoute, {
+      nodeId: 'node-2',
+      cidr: '999.999.999.999/99',
+      originalCidr: ''
+    })
+
+    await wrapper.vm.confirmRouteAction()
+    await flushPromises()
+
+    expect(routeApiMock.addRoute).not.toHaveBeenCalled()
+  })
+
   it('routes Route update to the node command trace', async () => {
     routeState.query = {
       nodeId: 'node-2',

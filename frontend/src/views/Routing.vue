@@ -174,6 +174,7 @@ import {
   policyContextFromQuery,
   policyRowMatchesContext
 } from '@/utils/policyContext'
+import { isValidCidrOrIp } from '@/utils/ipNetwork'
 
 const { hasPermission } = usePermission()
 const route = useRoute() || { query: {}, fullPath: '' }
@@ -260,6 +261,16 @@ const activePolicyRefs = computed(() => allRoutes.value
 
 const policyStatusKey = (nodeId, domain, policyRef) => `${nodeId || ''}|${domain || ''}|${policyRef || ''}`
 
+const errorMessage = (error, fallback = t('policyTerms.unknownError')) => {
+  const responseMessage = error && typeof error === 'object'
+    ? error.response?.data?.message
+    : ''
+  if (responseMessage) return responseMessage
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string') return error
+  return fallback
+}
+
 const refreshFocusedPolicyStatuses = async () => {
   const refs = activePolicyRefs.value
   if (refs.length === 0) return
@@ -301,7 +312,7 @@ const loadRoutes = async () => {
     }
   } catch (error) {
     console.error('[Routing] Failed to load routes:', error)
-    ElMessage.error(`${t('routing.loadFailed')}: ${error.message || t('policyTerms.unknownError')}`)
+    ElMessage.error(`${t('routing.loadFailed')}: ${errorMessage(error)}`)
     allRoutes.value = []
   } finally {
     loading.value = false
@@ -344,8 +355,7 @@ const confirmRouteAction = async () => {
     return
   }
 
-  const cidrPattern = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/
-  if (!cidrPattern.test(currentRoute.value.cidr)) {
+  if (!isValidCidrOrIp(currentRoute.value.cidr)) {
     ElMessage.error(t('routing.invalidCidr'))
     return
   }
@@ -370,8 +380,7 @@ const confirmRouteAction = async () => {
     openCommandTrace(traceRoute, result)
   } catch (error) {
     console.error('[Routing] Route operation failed:', error)
-    const errorMsg = error.response?.data?.message || error.message || t('routing.operationFailed')
-    ElMessage.error(errorMsg)
+    ElMessage.error(errorMessage(error, t('routing.operationFailed')))
   }
 }
 
@@ -391,8 +400,7 @@ const confirmDeleteRoute = async () => {
     openCommandTrace(routeToDelete, result)
   } catch (error) {
     console.error('[Routing] Failed to delete route:', error)
-    const errorMsg = error.response?.data?.message || error.message || t('routing.deleteFailed')
-    ElMessage.error(errorMsg)
+    ElMessage.error(errorMessage(error, t('routing.deleteFailed')))
   }
 }
 

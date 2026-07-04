@@ -14,6 +14,26 @@ import router from './router'
 import useAppStore from './stores/app'
 import useUserStore from './stores/user'
 
+function renderStartupFailure(error: unknown) {
+  console.error('[Startup] Application bootstrap failed:', error)
+
+  const target = document.querySelector('#app')
+  if (!target) return
+
+  const container = document.createElement('div')
+  container.className = 'startup-failure'
+  container.setAttribute('role', 'alert')
+
+  const title = document.createElement('h1')
+  title.textContent = 'Application failed to start'
+
+  const message = document.createElement('p')
+  message.textContent = 'Refresh the page or contact the administrator if the problem continues.'
+
+  container.append(title, message)
+  target.replaceChildren(container)
+}
+
 async function bootstrap() {
   const app = createApp(App)
   const pinia = createPinia()
@@ -463,4 +483,4 @@ async function bootstrap() {
   document.head.appendChild(style)
 }
 
-void bootstrap()
+void bootstrap().catch(renderStartupFailure)
