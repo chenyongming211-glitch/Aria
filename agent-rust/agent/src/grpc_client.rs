@@ -163,6 +163,7 @@ impl GrpcClient {
             public_ip,
             hostname,
             token,
+            None,
             region,
             String::new(),
             Vec::new(),
@@ -178,6 +179,7 @@ impl GrpcClient {
         public_ip: String,
         hostname: String,
         token: String,
+        runtime_token: Option<String>,
         region: String,
         machine_id: String,
         advertised_routes: Vec<String>,
@@ -207,6 +209,14 @@ impl GrpcClient {
             csr_pem: csr_pem.unwrap_or_default(),
         });
         apply_unary_timeout(&mut request);
+        if let Some(runtime_token) = runtime_token
+            .as_deref()
+            .filter(|token| !token.trim().is_empty())
+        {
+            request
+                .metadata_mut()
+                .insert("authorization", authorization_metadata_value(runtime_token)?);
+        }
 
         let mut client = ControllerServiceClient::new(self.channel.clone());
         let response = client.register(request).await?;

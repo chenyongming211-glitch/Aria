@@ -8,7 +8,7 @@ use aya::{
     EbpfLoader,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tokio::signal;
@@ -156,6 +156,7 @@ pub struct AgentRuntime {
     runtime_credential: RuntimeCredentialStore,
     log_handle: Arc<StdMutex<Option<reload::Handle<EnvFilter, Registry>>>>,
     current_log_level: Arc<StdMutex<String>>,
+    pending_command_responses: Arc<Mutex<VecDeque<GrpcCommandResponse>>>,
 }
 
 impl AgentRuntime {
@@ -237,6 +238,7 @@ impl AgentRuntime {
         let current_log_level = Arc::new(StdMutex::new("info".to_string()));
         let last_sync_peers = Arc::new(Mutex::new(Vec::new()));
         let runtime_credential = RuntimeCredentialStore::new(config.current_credential.clone());
+        let pending_command_responses = Arc::new(Mutex::new(VecDeque::new()));
 
         Ok(Self {
             config,
@@ -253,6 +255,7 @@ impl AgentRuntime {
             runtime_credential,
             log_handle,
             current_log_level,
+            pending_command_responses,
         })
     }
     fn set_sync_observation(&mut self, status: &str, message: String) {
@@ -828,6 +831,12 @@ impl AgentRuntime {
                     if let Err(e) = self.sync().await {
                         tracing::error!("Immediate sync failed: {:?}", e);
                         self.set_sync_observation("error", e.to_string());
+                        if let Err(save_err) = self.persist_runtime_state() {
+                            tracing::warn!(
+                                "Failed to persist runtime state after immediate sync error: {:?}",
+                                save_err
+                            );
+                        }
                     } else {
                         tracing::info!("✅ Immediate sync completed");
                         metrics::record_sync_success(self.last_sync_peers.lock().await.len());
@@ -915,6 +924,7 @@ impl AgentRuntime {
         let node_id = self.config.node_id.clone();
         let public_key = self.config.public_key.clone();
         let runtime_credential = self.runtime_credential.clone();
+        let pending_command_responses = self.pending_command_responses.clone();
 
         tokio::spawn(async move {
             loop {
@@ -934,71 +944,92 @@ impl AgentRuntime {
                     Ok((response_tx, mut request_stream)) => {
                         tracing::info!("Controller command stream connected");
 
-                        // 连接成功，通知主循环立即执行一次 Sync
-                        sync_now.notify_one();
+                        if !Self::flush_pending_command_responses(
+                            &pending_command_responses,
+                            &response_tx,
+                        ).await {
+                            tracing::warn!("Failed to flush pending command responses; reconnecting");
+                        } else {
+                            // 连接成功，通知主循环立即执行一次 Sync
+                            sync_now.notify_one();
 
-                        loop {
-                            tokio::select! {
-                                _ = cancel_token.cancelled() => {
-                                    tracing::info!("Command stream task shutting down");
-                                    return;
-                                }
-                                message = request_stream.message() => {
-                                    match message {
-                                        Ok(Some(request)) => {
-                                            let command_id = request.command_id.clone();
-                                            let command_name = request.command.clone();
-                                            let (reply_tx, reply_rx) = oneshot::channel();
+                            loop {
+                                tokio::select! {
+                                    _ = cancel_token.cancelled() => {
+                                        tracing::info!("Command stream task shutting down");
+                                        return;
+                                    }
+                                    message = request_stream.message() => {
+                                        match message {
+                                            Ok(Some(request)) => {
+                                                let command_id = request.command_id.clone();
+                                                let command_name = request.command.clone();
+                                                let (reply_tx, reply_rx) = oneshot::channel();
 
-                                            if remote_command_tx.send(RemoteCommandEnvelope {
-                                                request,
-                                                reply_tx,
-                                            }).await.is_err() {
-                                                let _ = response_tx.send(build_failed_command_response(
-                                                    command_id,
-                                                    "remote command executor unavailable".to_string(),
-                                                )).await;
-                                                return;
-                                            }
-
-                                            if response_tx.send(GrpcCommandResponse {
-                                                command_id: command_id.clone(),
-                                                status: "acknowledged".to_string(),
-                                                message: format!("command {} queued", command_name),
-                                                result: HashMap::new(),
-                                                completed_at: 0,
-                                                node_id: node_id.clone().unwrap_or_default(),
-                                                public_key: public_key.clone(),
-                                            }).await.is_err() {
-                                                tracing::warn!("Failed to send acknowledged response for {}", command_id);
-                                                break;
-                                            }
-
-                                            match reply_rx.await {
-                                                Ok(response) => {
-                                                    if response_tx.send(response).await.is_err() {
-                                                        tracing::warn!("Failed to send final response for {}", command_id);
-                                                        break;
-                                                    }
+                                                if remote_command_tx.send(RemoteCommandEnvelope {
+                                                    request,
+                                                    reply_tx,
+                                                }).await.is_err() {
+                                                    let response = build_failed_command_response(
+                                                        command_id,
+                                                        "remote command executor unavailable".to_string(),
+                                                    );
+                                                    let _ = Self::send_or_store_command_response(
+                                                        &pending_command_responses,
+                                                        &response_tx,
+                                                        response,
+                                                    ).await;
+                                                    return;
                                                 }
-                                                Err(e) => {
-                                                    if response_tx.send(build_failed_command_response(
+
+                                                if response_tx.send(GrpcCommandResponse {
+                                                    command_id: command_id.clone(),
+                                                    status: "acknowledged".to_string(),
+                                                    message: format!("command {} queued", command_name),
+                                                    result: HashMap::new(),
+                                                    completed_at: 0,
+                                                    node_id: node_id.clone().unwrap_or_default(),
+                                                    public_key: public_key.clone(),
+                                                }).await.is_err() {
+                                                    tracing::warn!("Failed to send acknowledged response for {}", command_id);
+                                                    let response = match reply_rx.await {
+                                                        Ok(response) => response,
+                                                        Err(e) => build_failed_command_response(
+                                                            command_id.clone(),
+                                                            format!("command execution dropped: {}", e),
+                                                        ),
+                                                    };
+                                                    Self::store_pending_command_response(
+                                                        &pending_command_responses,
+                                                        response,
+                                                    ).await;
+                                                    break;
+                                                }
+
+                                                let response = match reply_rx.await {
+                                                    Ok(response) => response,
+                                                    Err(e) => build_failed_command_response(
                                                         command_id.clone(),
                                                         format!("command execution dropped: {}", e),
-                                                    )).await.is_err() {
-                                                        tracing::warn!("Failed to report dropped command {}", command_id);
-                                                        break;
-                                                    }
+                                                    ),
+                                                };
+                                                if !Self::send_or_store_command_response(
+                                                    &pending_command_responses,
+                                                    &response_tx,
+                                                    response,
+                                                ).await {
+                                                    tracing::warn!("Failed to send final response for {}", command_id);
+                                                    break;
                                                 }
                                             }
-                                        }
-                                        Ok(None) => {
-                                            tracing::warn!("Controller command stream closed");
-                                            break;
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!("Command stream receive error: {:?}", e);
-                                            break;
+                                            Ok(None) => {
+                                                tracing::warn!("Controller command stream closed");
+                                                break;
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!("Command stream receive error: {:?}", e);
+                                                break;
+                                            }
                                         }
                                     }
                                 }
@@ -1018,6 +1049,47 @@ impl AgentRuntime {
 
             tracing::info!("Command stream task stopped");
         });
+    }
+
+    async fn flush_pending_command_responses(
+        pending_command_responses: &Arc<Mutex<VecDeque<GrpcCommandResponse>>>,
+        response_tx: &mpsc::Sender<GrpcCommandResponse>,
+    ) -> bool {
+        loop {
+            let response = {
+                let mut pending = pending_command_responses.lock().await;
+                pending.pop_front()
+            };
+            let Some(response) = response else {
+                return true;
+            };
+
+            if response_tx.send(response.clone()).await.is_err() {
+                let mut pending = pending_command_responses.lock().await;
+                pending.push_front(response);
+                return false;
+            }
+        }
+    }
+
+    async fn store_pending_command_response(
+        pending_command_responses: &Arc<Mutex<VecDeque<GrpcCommandResponse>>>,
+        response: GrpcCommandResponse,
+    ) {
+        let mut pending = pending_command_responses.lock().await;
+        pending.push_back(response);
+    }
+
+    async fn send_or_store_command_response(
+        pending_command_responses: &Arc<Mutex<VecDeque<GrpcCommandResponse>>>,
+        response_tx: &mpsc::Sender<GrpcCommandResponse>,
+        response: GrpcCommandResponse,
+    ) -> bool {
+        if response_tx.send(response.clone()).await.is_ok() {
+            return true;
+        }
+        Self::store_pending_command_response(pending_command_responses, response).await;
+        false
     }
 
     fn start_unix_socket_server(&self) -> Result<()> {

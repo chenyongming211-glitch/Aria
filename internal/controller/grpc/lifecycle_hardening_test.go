@@ -14,6 +14,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
+	"google.golang.org/grpc/metadata"
 )
 
 func TestRegisterFailsWhenRuntimeTokenCannotBeIssued(t *testing.T) {
@@ -115,6 +116,43 @@ func TestRegisterUsesHandlerIssuedRuntimeIdentity(t *testing.T) {
 	}
 	if len(captured.AdvertisedRoutes) != 1 || captured.AdvertisedRoutes[0] != "10.10.0.0/16" {
 		t.Fatalf("advertised routes were not preserved: %#v", captured.AdvertisedRoutes)
+	}
+}
+
+func TestRegisterCopiesRuntimeBearerTokenToHandler(t *testing.T) {
+	nodeID := uuid.New().String()
+	var captured *RegistrationRequest
+
+	server := NewControllerServer(
+		func(req *RegistrationRequest) (*RegistrationResult, error) {
+			captured = req
+			return &RegistrationResult{
+				AssignedIP:            "100.64.0.2",
+				NodeID:                nodeID,
+				RuntimeToken:          "runtime-token-next",
+				RuntimeTokenExpiresAt: 1893456000,
+			}, nil
+		},
+		nil,
+		nil,
+	)
+
+	ctx := metadata.NewIncomingContext(
+		context.Background(),
+		metadata.Pairs("authorization", "Bearer runtime-token-existing"),
+	)
+	_, err := server.Register(ctx, &agentpb.RegisterRequest{
+		PublicKey: "node-register-key",
+		Hostname:  "node-register",
+	})
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+	if captured == nil {
+		t.Fatalf("expected registration handler to receive request")
+	}
+	if captured.RuntimeToken != "runtime-token-existing" {
+		t.Fatalf("expected runtime bearer token to reach handler, got %q", captured.RuntimeToken)
 	}
 }
 
