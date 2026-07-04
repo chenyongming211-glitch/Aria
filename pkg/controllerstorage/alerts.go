@@ -162,6 +162,47 @@ func (s *Storage) ListAlerts(tenantID uuid.UUID, filter AlertFilter) ([]*Alert, 
 	return alerts, total, nil
 }
 
+// ListRecentNodeAlerts returns a bounded alert list for detail views that do not need a total count.
+func (s *Storage) ListRecentNodeAlerts(tenantID, nodeID uuid.UUID, status string, limit int) ([]*Alert, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	status = strings.TrimSpace(status)
+	if status == "" {
+		status = "active"
+	}
+
+	rows, err := s.db.Query(`
+		SELECT id, tenant_id, node_id, alert_type, severity, title, COALESCE(message, ''),
+		       context, status, created_at, resolved_at
+		FROM alerts
+		WHERE tenant_id = $1 AND status = $2 AND node_id = $3
+		ORDER BY created_at DESC
+		LIMIT $4
+	`, tenantID, status, nodeID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query recent node alerts: %w", err)
+	}
+	defer rows.Close()
+
+	alerts := make([]*Alert, 0, limit)
+	for rows.Next() {
+		alert, err := scanAlertRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		alerts = append(alerts, alert)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return alerts, nil
+}
+
 // CountActiveAlerts returns the number of active alerts for a tenant.
 func (s *Storage) CountActiveAlerts(tenantID uuid.UUID) (int, error) {
 	var count int
@@ -178,7 +219,7 @@ func scanAlertRow(row interface {
 	var (
 		alert      Alert
 		nodeID     sql.NullString
-		rawContext  []byte
+		rawContext []byte
 		resolvedAt sql.NullTime
 	)
 

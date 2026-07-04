@@ -1793,50 +1793,52 @@ impl AgentRuntime {
     }
 
     async fn sync_peers(&mut self, new_peers: &[GrpcPeerInfo]) -> Result<()> {
-        let new_peers = new_peers.to_vec();
         let _multi_tunnel = self.config.multi_tunnel;
         let interfaces = self.get_active_interfaces();
+        let interface_count = interfaces.len();
+        if interface_count == 0 {
+            anyhow::bail!("no active WireGuard interfaces for peer sync");
+        }
         let wg_managers = self.wg_managers.clone();
         let base_iface = self.config.interface_name.clone();
         let listen_port = self.config.listen_port;
 
-        let result =
-            tokio::task::spawn_blocking(move || -> Result<(usize, usize, usize, usize)> {
-                let interface_count = interfaces.len();
-                if interface_count == 0 {
-                    anyhow::bail!("no active WireGuard interfaces for peer sync");
-                }
-
-                let snapshots = Self::collect_peer_snapshots(&interfaces, &wg_managers)?;
-                let plans = Self::build_peer_sync_plans(
-                    &snapshots,
-                    &new_peers,
-                    &base_iface,
-                    listen_port,
-                )?;
-
-                if let Err(err) = Self::apply_peer_sync_plans(&wg_managers, &plans, &base_iface) {
-                    if let Err(rollback_err) = Self::rollback_peer_sync(&wg_managers, &snapshots) {
-                        tracing::error!(
-                            "Peer sync failed and rollback was incomplete: {:?}",
-                            rollback_err
-                        );
-                    }
-                    return Err(err);
-                }
-
-                let total_added: usize = plans.iter().map(|plan| plan.to_add.len()).sum();
-                let total_removed: usize = plans.iter().map(|plan| plan.to_remove.len()).sum();
-                let total_updated: usize = plans.iter().map(|plan| plan.to_update.len()).sum();
-
-                Ok((
-                    total_added / interface_count,
-                    total_removed / interface_count,
-                    total_updated / interface_count,
-                    new_peers.len(),
-                ))
+        let snapshots = {
+            let interfaces = interfaces.clone();
+            let wg_managers = wg_managers.clone();
+            tokio::task::spawn_blocking(move || {
+                Self::collect_peer_snapshots(&interfaces, &wg_managers)
             })
-            .await?;
+            .await??
+        };
+
+        let plans = Self::build_peer_sync_plans(&snapshots, new_peers, &base_iface, listen_port)?;
+        let total_peers = new_peers.len();
+        let apply_base_iface = base_iface.clone();
+
+        let result = tokio::task::spawn_blocking(move || -> Result<(usize, usize, usize, usize)> {
+            if let Err(err) = Self::apply_peer_sync_plans(&wg_managers, &plans, &apply_base_iface) {
+                if let Err(rollback_err) = Self::rollback_peer_sync(&wg_managers, &snapshots) {
+                    tracing::error!(
+                        "Peer sync failed and rollback was incomplete: {:?}",
+                        rollback_err
+                    );
+                }
+                return Err(err);
+            }
+
+            let total_added: usize = plans.iter().map(|plan| plan.to_add.len()).sum();
+            let total_removed: usize = plans.iter().map(|plan| plan.to_remove.len()).sum();
+            let total_updated: usize = plans.iter().map(|plan| plan.to_update.len()).sum();
+
+            Ok((
+                total_added / interface_count,
+                total_removed / interface_count,
+                total_updated / interface_count,
+                total_peers,
+            ))
+        })
+        .await?;
 
         match result {
             Ok((added, removed, updated, total)) => {

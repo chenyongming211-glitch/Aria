@@ -3,6 +3,7 @@ package v2
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,6 +70,79 @@ func expectTenantNodesQuery(mock sqlmock.Sqlmock, tenantID uuid.UUID) *sqlmock.E
 	return mock.ExpectQuery(regexp.QuoteMeta(
 		`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND status != 'deleted' ORDER BY last_seen DESC`,
 	)).WithArgs(tenantID)
+}
+
+func nodeMonitoringDetailStateColumns() []string {
+	return []string{
+		"control_tenant_id", "control_node_id", "desired_state_version", "desired_state_metadata", "desired_state_updated_at",
+		"applied_state_version", "applied_state_updated_at", "observed_state", "observed_message", "observed_at",
+		"last_sync_at", "last_sync_error", "control_created_at", "control_updated_at",
+		"stats_tenant_id", "stats_node_id", "policy_stats", "policy_stats_updated_at",
+		"cert_id", "cert_tenant_id", "cert_node_id", "serial_number", "cert_pem", "ca_pem",
+		"not_before", "not_after", "cert_status", "issued_at", "revoked_at", "revoke_reason", "renewed_from", "cert_updated_at",
+	}
+}
+
+func emptyNodeMonitoringDetailStateRow() []driver.Value {
+	row := make([]driver.Value, len(nodeMonitoringDetailStateColumns()))
+	for i := range row {
+		row[i] = nil
+	}
+	return row
+}
+
+func expectNodeMonitoringDetailStateEmpty(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) *sqlmock.ExpectedQuery {
+	return mock.ExpectQuery(`WITH control AS`).
+		WithArgs(tenantID, nodeID).
+		WillReturnRows(sqlmock.NewRows(nodeMonitoringDetailStateColumns()).AddRow(emptyNodeMonitoringDetailStateRow()...))
+}
+
+func expectNodeMonitoringDetailStateWithCertificate(
+	mock sqlmock.Sqlmock,
+	tenantID, nodeID uuid.UUID,
+	now time.Time,
+) *sqlmock.ExpectedQuery {
+	row := emptyNodeMonitoringDetailStateRow()
+	certID := uuid.New()
+	row[18] = certID.String()
+	row[19] = tenantID.String()
+	row[20] = nodeID.String()
+	row[21] = "serial-1"
+	row[22] = "cert-pem"
+	row[23] = "ca-pem"
+	row[24] = now.Add(-24 * time.Hour)
+	row[25] = now.Add(24 * time.Hour)
+	row[26] = controllerstorage.CertStatusIssued
+	row[27] = now.Add(-24 * time.Hour)
+	row[28] = nil
+	row[29] = ""
+	row[30] = nil
+	row[31] = now
+
+	return mock.ExpectQuery(`WITH control AS`).
+		WithArgs(tenantID, nodeID).
+		WillReturnRows(sqlmock.NewRows(nodeMonitoringDetailStateColumns()).AddRow(row...))
+}
+
+func expectNodeMonitoringDetailStateError(
+	mock sqlmock.Sqlmock,
+	tenantID, nodeID uuid.UUID,
+	err error,
+) *sqlmock.ExpectedQuery {
+	return mock.ExpectQuery(`WITH control AS`).
+		WithArgs(tenantID, nodeID).
+		WillReturnError(err)
+}
+
+func expectRecentNodeAlertsQuery(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, status string, limit int) *sqlmock.ExpectedQuery {
+	return mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, tenant_id, node_id, alert_type, severity, title, COALESCE(message, ''),
+		       context, status, created_at, resolved_at
+		FROM alerts
+		WHERE tenant_id = $1 AND status = $2 AND node_id = $3
+		ORDER BY created_at DESC
+		LIMIT $4
+	`)).WithArgs(tenantID, status, nodeID, limit)
 }
 
 func expectTenantNodesPageQuery(mock sqlmock.Sqlmock, tenantID uuid.UUID, limit, offset int) *sqlmock.ExpectedQuery {
@@ -841,47 +915,7 @@ func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	expectNodeLookup(mock, tenantID, nodeID, "{10.10.0.0/16}")
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT tenant_id, node_id, COALESCE(desired_state_version, ''), desired_state_metadata, desired_state_updated_at,
-		       COALESCE(applied_state_version, ''), applied_state_updated_at, COALESCE(observed_state, ''),
-		       COALESCE(observed_message, ''), observed_at, last_sync_at, COALESCE(last_sync_error, ''),
-		       created_at, updated_at
-		FROM node_control_states
-		WHERE tenant_id = $1 AND node_id = $2
-	`)).
-		WithArgs(tenantID, nodeID).
-		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(`SELECT tenant_id, node_id, stats, updated_at\s+FROM node_policy_stats\s+WHERE tenant_id = \$1 AND node_id = \$2`).
-		WithArgs(tenantID, nodeID).
-		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
-		       not_before, not_after, status, issued_at, revoked_at,
-		       COALESCE(revoke_reason, ''), renewed_from, updated_at
-		FROM node_certificates
-		WHERE node_id = $1
-	`)).
-		WithArgs(nodeID).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "tenant_id", "node_id", "serial_number", "cert_pem", "ca_pem",
-			"not_before", "not_after", "status", "issued_at", "revoked_at",
-			"revoke_reason", "renewed_from", "updated_at",
-		}).AddRow(
-			uuid.New(),
-			tenantID,
-			nodeID,
-			"serial-1",
-			"cert-pem",
-			"ca-pem",
-			now.Add(-24*time.Hour),
-			now.Add(24*time.Hour),
-			controllerstorage.CertStatusIssued,
-			now.Add(-24*time.Hour),
-			nil,
-			"",
-			nil,
-			now,
-		))
+	expectNodeMonitoringDetailStateWithCertificate(mock, tenantID, nodeID, now)
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT DISTINCT ON (event_type) id, tenant_id, node_id, event_type, actor, summary, detail, created_at
 		FROM audit_events
@@ -947,18 +981,7 @@ func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
 			"action", "command_id", "command_status", "last_error", "metadata",
 			"created_at", "updated_at", "completed_at",
 		}))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM alerts WHERE tenant_id = $1 AND status = $2 AND node_id = $3")).
-		WithArgs(tenantID, "active", nodeID).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, alert_type, severity, title, COALESCE(message, ''),
-		       context, status, created_at, resolved_at
-		FROM alerts
-		WHERE tenant_id = $1 AND status = $2 AND node_id = $3
-		ORDER BY created_at DESC
-		LIMIT $4 OFFSET $5
-	`)).
-		WithArgs(tenantID, "active", nodeID, 10, 0).
+	expectRecentNodeAlertsQuery(mock, tenantID, nodeID, "active", 10).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "alert_type", "severity", "title",
 			"message", "context", "status", "created_at", "resolved_at",
@@ -1091,13 +1114,8 @@ func TestMonitoringAPI_NodeDetailPolicyStatsFailureReturnsInternalError(t *testi
 	t.Cleanup(func() { _ = db.Close() })
 
 	expectNodeLookup(mock, tenantID, nodeID, "{}")
-	mock.ExpectQuery(`SELECT tenant_id, node_id, COALESCE\(desired_state_version, ''\), desired_state_metadata, desired_state_updated_at,\s+COALESCE\(applied_state_version, ''\), applied_state_updated_at, COALESCE\(observed_state, ''\),\s+COALESCE\(observed_message, ''\), observed_at, last_sync_at, COALESCE\(last_sync_error, ''\),\s+created_at, updated_at\s+FROM node_control_states\s+WHERE tenant_id = \$1 AND node_id = \$2`).
-		WithArgs(tenantID, nodeID).
-		WillReturnError(sql.ErrNoRows)
-	statsErr := errors.New("policy stats unavailable")
-	mock.ExpectQuery(`SELECT tenant_id, node_id, stats, updated_at\s+FROM node_policy_stats\s+WHERE tenant_id = \$1 AND node_id = \$2`).
-		WithArgs(tenantID, nodeID).
-		WillReturnError(statsErr)
+	stateErr := errors.New("node detail state unavailable")
+	expectNodeMonitoringDetailStateError(mock, tenantID, nodeID, stateErr)
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/nodes/"+nodeID.String(), nil), tenantID)
@@ -1112,8 +1130,8 @@ func TestMonitoringAPI_NodeDetailPolicyStatsFailureReturnsInternalError(t *testi
 	if resp.Code != apibase.CodeInternalServerError {
 		t.Fatalf("expected code %s, got %s", apibase.CodeInternalServerError, resp.Code)
 	}
-	if !strings.Contains(resp.Message, "Failed to get policy stats") {
-		t.Fatalf("expected policy stats error, got %q", resp.Message)
+	if !strings.Contains(resp.Message, "Failed to get node detail state") {
+		t.Fatalf("expected node detail state error, got %q", resp.Message)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
@@ -1130,21 +1148,7 @@ func TestMonitoringAPI_NodeDetailLearnedRoutesFailureReturnsInternalError(t *tes
 	t.Cleanup(func() { _ = db.Close() })
 
 	expectNodeLookup(mock, tenantID, nodeID, "{}")
-	mock.ExpectQuery(`SELECT tenant_id, node_id, COALESCE\(desired_state_version, ''\), desired_state_metadata, desired_state_updated_at,\s+COALESCE\(applied_state_version, ''\), applied_state_updated_at, COALESCE\(observed_state, ''\),\s+COALESCE\(observed_message, ''\), observed_at, last_sync_at, COALESCE\(last_sync_error, ''\),\s+created_at, updated_at\s+FROM node_control_states\s+WHERE tenant_id = \$1 AND node_id = \$2`).
-		WithArgs(tenantID, nodeID).
-		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(`SELECT tenant_id, node_id, stats, updated_at\s+FROM node_policy_stats\s+WHERE tenant_id = \$1 AND node_id = \$2`).
-		WithArgs(tenantID, nodeID).
-		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, serial_number, cert_pem, ca_pem,
-		       not_before, not_after, status, issued_at, revoked_at,
-		       COALESCE(revoke_reason, ''), renewed_from, updated_at
-		FROM node_certificates
-		WHERE node_id = $1
-	`)).
-		WithArgs(nodeID).
-		WillReturnError(sql.ErrNoRows)
+	expectNodeMonitoringDetailStateEmpty(mock, tenantID, nodeID)
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT DISTINCT ON (event_type) id, tenant_id, node_id, event_type, actor, summary, detail, created_at
 		FROM audit_events
@@ -1181,18 +1185,7 @@ func TestMonitoringAPI_NodeDetailLearnedRoutesFailureReturnsInternalError(t *tes
 			"action", "command_id", "command_status", "last_error", "metadata",
 			"created_at", "updated_at", "completed_at",
 		}))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM alerts WHERE tenant_id = $1 AND status = $2 AND node_id = $3")).
-		WithArgs(tenantID, "active", nodeID).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, tenant_id, node_id, alert_type, severity, title, COALESCE(message, ''),
-		       context, status, created_at, resolved_at
-		FROM alerts
-		WHERE tenant_id = $1 AND status = $2 AND node_id = $3
-		ORDER BY created_at DESC
-		LIMIT $4 OFFSET $5
-	`)).
-		WithArgs(tenantID, "active", nodeID, 10, 0).
+	expectRecentNodeAlertsQuery(mock, tenantID, nodeID, "active", 10).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "tenant_id", "node_id", "alert_type", "severity", "title",
 			"message", "context", "status", "created_at", "resolved_at",
