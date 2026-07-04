@@ -37,6 +37,11 @@
 - BUG-97 is partially mitigated. The `sync_peers` entry still clones the peer slice once because `spawn_blocking` requires owned `'static` data; removing that safely requires a separate blocking-boundary refactor.
 - Rust local validation is blocked on this macOS workstation because `cargo` and `rustfmt` are not installed. Branch CI must pass the Rust Agent build/test job before merge.
 
+## B10 Follow-up
+
+- BUG-84 residual closed in `codex/bugfix-b10-ops-and-auth-hardening`: node detail now loads control state, policy stats, and certificate metadata through one `GetNodeMonitoringDetailState` bundle query, and fetches recent node alerts without an unused count query.
+- BUG-97 residual closed in `codex/bugfix-b10-ops-and-auth-hardening`: `sync_peers` no longer clones the full desired peer slice before entering a blocking closure; only WireGuard snapshot/apply operations remain behind `spawn_blocking`.
+
 ## Validation
 
 ```bash

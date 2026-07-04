@@ -5,8 +5,9 @@
 **说明**: 本文档记录“当前状态”，不再把历史 OPEN 条目和后续 FIXED 结论混写在一起。
 **AI 范围决定**: AI Agent 后续计划替换为 Hermes Agent。本轮不扩展旧 AI 写操作闭环，但已把旧 AI 写入口后端 fail-closed：聊天只暴露只读工具，`ExecuteTool` 即使 `confirmed=true` 也拒绝旧写工具；Hermes 接入时再重新设计 pending confirmation、policy delivery 和审计链路。
 **2026-07-03 复核结论**: BUG-58~61、BUG-63~82、BUG-84~89、BUG-91~93、BUG-95~99 均有当前代码证据；BUG-62、BUG-83 复核为不成立；BUG-90 原描述部分成立（ACL 缺复合索引，QoS 已有）；BUG-94、BUG-97、BUG-99 是优化债，不按 correctness bug 排序。新增 BUG-100~110。
-**2026-07-04 状态复核结论**: B1~B8 已合入当前 `master`；BUG-64、BUG-65、BUG-66、BUG-76、BUG-100、BUG-101 经代码复核为 FIXED；BUG-74、BUG-75 已在 B9 分支修复；BUG-84、BUG-97 为 PARTIAL。
+**2026-07-04 状态复核结论**: B1~B9 已合入当前 `master`；BUG-64、BUG-65、BUG-66、BUG-74、BUG-75、BUG-76、BUG-100、BUG-101 经代码复核为 FIXED；BUG-84、BUG-97 已在 B10 分支修复，待 PR CI 验证后合入。
 **2026-07-04 B8 修复结论**: B8 分支修复 BUG-76、BUG-100、BUG-101；本地已通过 Go gRPC/contract 测试，Rust 编译和 Rust 单测需由 CI 验证。
+**2026-07-04 B10 修复结论**: B10 分支修复 BUG-84、BUG-97；Go 侧新增 bundle 查询和无 count 告警列表回归测试，Rust 侧新增源码契约测试；Rust 编译和 Rust 单测需由 CI 验证。
 
 ---
 
@@ -663,11 +664,11 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-84: Node 详情页 8+ 次独立 DB 查询
 
-- **状态**: 🟡 PARTIAL (B7: `codex/bugfix-b7-scale-performance`)
+- **状态**: ✅ FIXED (B10: `codex/bugfix-b10-ops-and-auth-hardening`)
 - **严重度**: MEDIUM
-- **文件**: `internal/api/v2/monitoring.go:82-210`、`pkg/controllerstorage/monitoring_queries.go:122-129`
+- **文件**: `internal/api/v2/monitoring.go:82-210`、`pkg/controllerstorage/monitoring_detail_state.go`
 - **根因**: `handleMonitoringNodeDetail` 对节点详情、控制状态、策略统计、证书、证书审计、命令、策略下发、告警、同租户节点等逐项查询；这是确认存在的 N+1/多查询性能风险，但不是 correctness bug。
-- **修复结果**: 证书活动从 3 类事件的 count/list 多次查询收敛为一次 `DISTINCT ON (event_type)` 查询；同租户节点相关 API 读取改走分页/有界路径。节点详情仍保留若干独立业务区块查询，后续如有压测瓶颈再做更大范围聚合查询。
+- **修复结果**: B7 已将证书活动收敛为一次 `DISTINCT ON (event_type)` 查询，并将同租户节点相关 API 读取改为分页/有界路径；B10 新增 `GetNodeMonitoringDetailState`，把详情页的控制状态、策略统计、证书元数据合并为一次 bundle 查询，`handleMonitoringNodeDetail` 不再分别调用 `GetNodeControlState`、`GetNodePolicyStats`、`GetNodeCertificate`。B10 同时新增 `ListRecentNodeAlerts`，详情页取最近 active alerts 时不再额外执行 total count。命令、策略下发、学习路由仍保留独立查询，因为它们各自有独立列表语义。
 
 #### BUG-85: 批量命令每节点一次独立 DB 写入
 
@@ -767,11 +768,11 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-97: Rust sync_peers 每次 clone 全部 PeerInfo
 
-- **状态**: 🟡 PARTIAL (B7: `codex/bugfix-b7-scale-performance`, CI Rust validation required)
+- **状态**: ✅ FIXED (B10: `codex/bugfix-b10-ops-and-auth-hardening`, CI Rust validation required)
 - **严重度**: LOW
-- **文件**: `agent-rust/agent/src/agent_runtime.rs:1723-1724,1817-1826`
+- **文件**: `agent-rust/agent/src/agent_runtime.rs:1795-1845`
 - **根因**: `sync_peers` 入口先 `to_vec()`，diff 时又 clone desired peer；这是确认存在的性能优化点，不是功能错误。
-- **修复结果**: `diff_peers_static` 改为返回 desired peer 引用，移除 diff 阶段二次 clone。入口 `to_vec()` 仍保留，因为 `spawn_blocking` 需要 `'static` owned data；彻底移除需要重构 blocking 边界，另行评估。
+- **修复结果**: B7 将 `diff_peers_static` 改为返回 desired peer 引用，移除 diff 阶段二次 clone；B10 进一步重构 `sync_peers` blocking 边界：WireGuard snapshot 和 apply/rollback 仍在 `spawn_blocking`，但 peer plan 构建回到 async 侧并借用 `new_peers`，入口不再 `to_vec()` clone 全量 desired peers。
 
 #### BUG-98: agent_commands deadline 表达式阻索引使用
 

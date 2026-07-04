@@ -90,11 +90,15 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 		return
 	}
 
-	controlState, err := r.store.GetNodeControlState(tenantID, node.ID)
+	detailState, err := r.store.GetNodeMonitoringDetailState(tenantID, node.ID)
 	if err != nil {
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to get control state: "+err.Error(), nil)
+		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to get node detail state: "+err.Error(), nil)
 		return
 	}
+	if detailState == nil {
+		detailState = &controllerstorage.NodeMonitoringDetailState{}
+	}
+	controlState := detailState.ControlState
 
 	data := map[string]interface{}{
 		"node_id":             node.ID.String(),
@@ -124,11 +128,7 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 		data["state_convergence"] = "idle"
 	}
 
-	policyStats, err := r.store.GetNodePolicyStats(tenantID, node.ID)
-	if err != nil {
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to get policy stats: "+err.Error(), nil)
-		return
-	}
+	policyStats := detailState.PolicyStats
 	if policyStats != nil {
 		data["policy_stats"] = policyStats.Stats
 		data["policy_stats_updated_at"] = policyStats.UpdatedAt
@@ -137,11 +137,7 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 		data["policy_stats_updated_at"] = nil
 	}
 
-	certificate, err := r.store.GetNodeCertificate(node.ID)
-	if err != nil {
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to get node certificate: "+err.Error(), nil)
-		return
-	}
+	certificate := detailState.Certificate
 	if certificate != nil {
 		certData := map[string]interface{}{
 			"status":        certificate.Status,
@@ -194,11 +190,7 @@ func (r *Router) handleMonitoringNodeDetail(w http.ResponseWriter, req *http.Req
 	}
 	data["recent_policy_deliveries"] = pdItems
 
-	alerts, _, err := r.store.ListAlerts(tenantID, controllerstorage.AlertFilter{
-		Status: "active",
-		NodeID: &node.ID,
-		Limit:  10,
-	})
+	alerts, err := r.store.ListRecentNodeAlerts(tenantID, node.ID, "active", 10)
 	if err != nil {
 		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to list active alerts: "+err.Error(), nil)
 		return
