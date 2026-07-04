@@ -258,6 +258,7 @@ func TestHandleTenantIPGroupDeleteRejectsReferencedGroup(t *testing.T) {
 	groupID := uuid.New()
 	expectTenantStatusActive(mock, tenantID)
 	expectPermissionLookup(mock, tenantID, "admin", []string{middleware.PermIPGroupsWrite})
+	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS (
 		SELECT 1 FROM acl_rules
 		 WHERE tenant_id = $1 AND (src_group_id = $2 OR dst_group_id = $2)
@@ -267,6 +268,7 @@ func TestHandleTenantIPGroupDeleteRejectsReferencedGroup(t *testing.T) {
 	) AS referenced`)).
 		WithArgs(tenantID, groupID).
 		WillReturnRows(sqlmock.NewRows([]string{"referenced"}).AddRow(true))
+	mock.ExpectRollback()
 
 	req := withAuthContext(
 		httptest.NewRequest(http.MethodDelete, "/api/v2/tenants/"+tenantID.String()+"/ip-groups/"+groupID.String(), nil),

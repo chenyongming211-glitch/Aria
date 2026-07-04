@@ -23,7 +23,6 @@ const (
 
 var allowedAgentCommands = map[string]struct{}{
 	"sync":          {},
-	"restart":       {},
 	"health_check":  {},
 	"config_reload": {},
 }

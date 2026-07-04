@@ -351,6 +351,40 @@ func TestNodesAPI_UpdateRejectsAdvertisedRoutesOnGenericNodeEdit(t *testing.T) {
 	}
 }
 
+func TestNodesAPI_UpdateRejectsOverlongLocationFieldsBeforeDBWrite(t *testing.T) {
+	tenantID := uuid.New()
+	nodeID := uuid.New()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	expectNodeLookup(mock, tenantID, nodeID, "{10.1.0.0/24}")
+	expectNodeLookup(mock, tenantID, nodeID, "{10.1.0.0/24}")
+
+	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
+	req := withSuperAdmin(httptest.NewRequest(
+		http.MethodPut,
+		"/api/v2/tenants/"+tenantID.String()+"/nodes/"+nodeID.String(),
+		strings.NewReader(`{"hostname":"edge-1","region":"`+strings.Repeat("r", 51)+`","vpc_id":"vpc-prod"}`),
+	), tenantID)
+	rr := httptest.NewRecorder()
+
+	router.HandleTenantScoped(rr, req)
+	resp := decodeAPIResponse(t, rr)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for overlong node field, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if resp.Code != apibase.CodeInvalidRequest {
+		t.Fatalf("expected code %s, got %s", apibase.CodeInvalidRequest, resp.Code)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestNodesAPI_DeleteNotFoundReturnsNodeNotFound(t *testing.T) {
 	tenantID := uuid.New()
 	nodeID := uuid.New()

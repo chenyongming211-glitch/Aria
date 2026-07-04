@@ -1167,6 +1167,11 @@ func (r *Router) updateTenantNode(w http.ResponseWriter, req *http.Request, tena
 		return
 	}
 
+	if err := normalizeAndValidateNodeUpdateFields(&body.Hostname, &body.Region, &body.VPCID); err != nil {
+		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
+		return
+	}
+
 	normalizedRoutes, err := normalizeRoutes(node.AdvertisedRoutes)
 	if err != nil {
 		apibase.WriteError(w, http.StatusBadRequest, apibase.CodeInvalidRequest, err.Error(), nil)
@@ -2124,11 +2129,16 @@ func normalizeRoutes(routes []string) ([]string, error) {
 			continue
 		}
 		if _, _, err := net.ParseCIDR(trimmed); err != nil {
-			if net.ParseIP(trimmed) == nil {
+			ip := net.ParseIP(trimmed)
+			if ip == nil {
 				return nil, fmt.Errorf("invalid CIDR or IP: %s", trimmed)
 			}
 			if !strings.Contains(trimmed, "/") {
-				trimmed = trimmed + "/32"
+				if ip.To4() != nil {
+					trimmed = trimmed + "/32"
+				} else {
+					trimmed = trimmed + "/128"
+				}
 			}
 		}
 		if !unique[trimmed] {
@@ -2266,5 +2276,39 @@ func decodeRouteBody(req *http.Request) (string, error) {
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		return "", fmt.Errorf("invalid request body")
 	}
-	return firstNonEmpty(body.CIDR, body.Route), nil
+	route := strings.TrimSpace(firstNonEmpty(body.CIDR, body.Route))
+	if route == "" {
+		return "", fmt.Errorf("route CIDR is required")
+	}
+	return route, nil
+}
+
+func normalizeAndValidateNodeUpdateFields(hostname, region, vpcID *string) error {
+	fields := []struct {
+		name  string
+		value *string
+		max   int
+	}{
+		{name: "hostname", value: hostname, max: 100},
+		{name: "region", value: region, max: 50},
+		{name: "vpc_id", value: vpcID, max: 50},
+	}
+	for _, field := range fields {
+		normalized := strings.TrimSpace(*field.value)
+		*field.value = normalized
+		if normalized == "" {
+			continue
+		}
+		if utf8.RuneCountInString(normalized) > field.max {
+			return fmt.Errorf("%s must be at most %d characters", field.name, field.max)
+		}
+		if strings.ContainsFunc(normalized, isControlRune) {
+			return fmt.Errorf("%s cannot contain control characters", field.name)
+		}
+	}
+	return nil
+}
+
+func isControlRune(r rune) bool {
+	return r < 0x20 || r == 0x7f
 }

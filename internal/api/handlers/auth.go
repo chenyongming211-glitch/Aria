@@ -386,11 +386,12 @@ func (a *AuthAPI) HandleForceChangePassword(w http.ResponseWriter, r *http.Reque
 	}
 
 	authHeader := r.Header.Get("Authorization")
-	if len(authHeader) < 8 || authHeader[:7] != "Bearer " {
+	tokenString := extractAuthTokenFromHeader(authHeader)
+	if tokenString == "" {
 		apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "Missing or malformed Authorization header", nil)
 		return
 	}
-	claims, err := auth.ValidateToken(authHeader[7:])
+	claims, err := auth.ValidateToken(tokenString)
 	if err != nil {
 		apibase.WriteError(w, http.StatusUnauthorized, apibase.CodeInvalidToken, "Invalid token", nil)
 		return
