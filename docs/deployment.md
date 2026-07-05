@@ -1382,6 +1382,28 @@ Purpose:
 | Verification | Master Actions run `28667878751` passed Go Build, Frontend Build, and Rust Agent Build. Local merged-master validation passed `go test ./...`, frontend unit tests (`224` tests), frontend type-check, and frontend production build. Server-side `https://aria.yun/api/version` returned `0.2.91`; frontend entry and `/api/v2/controller-info` returned HTTP 200; `aria-controller` and `aria-frontend` were healthy. Login succeeded as `sysadmin`; tenant, permissions, nodes, IP Groups, Policy Center, ACL, QoS, and focused policy delivery status smoke checks returned HTTP 200. Controller and frontend logs showed no recent panic, fatal, error, or failed entries during the deployment window. |
 | Deployment note | This master deployment supersedes the `codex/policy-workbench-flow` gray deployment. This docs-only deployment record commit does not require another runtime redeploy. |
 
+### 2026-07-05 BUG-92 Bounded Node Reads Master Deployment
+
+Status: deployed from `master` and server-side smoke validated.
+
+Purpose:
+
+- Ship BUG-92 residual unbounded node-read fixes from PR #12.
+- Redeploy Controller and frontend from the merged `master` commit.
+- Record the live `0.2.92` state and master CI evidence.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-07-05T02:58Z deployment; 2026-07-05T02:59Z smoke validation |
+| Git commit | `5bb8b2be838ffdf90ccb17358483988d741df4de` |
+| Master CI run | `28727430034` |
+| Version | `0.2.92` |
+| Controller image | Local runtime image `aria-controller:0.2.92` / `aria-controller:local@sha256:089b631c02796da01fd0d199bf4cfc99987ef959f909cf807e7487573d093017`. |
+| Backup | `/root/aria-controller/deploy-backups/20260705T025812Z-0.2.92-28727430034-5bb8b2b-master` |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in master Actions. |
+| Verification | Master Actions run `28727430034` passed Go Build, Frontend Build, and Rust Agent Build. Local artifact build passed linux/amd64 Controller and `ariactl` cross-compile plus frontend production build. Server-side `https://aria.yun/api/version` returned `0.2.92`; homepage returned HTTP/2 200 with `Cache-Control: no-store`; `/api/v2/controller-info` returned HTTP 200 from the Controller container; `aria-controller` and `aria-frontend` were healthy. Controller startup logs showed `Version: 0.2.92`; recent Controller and frontend logs showed no panic, fatal, error, or failed entries during the deployment window. |
+| Deployment note | This master deployment updates the live Controller/frontend runtime on the current `aria.yun` host. The docs-only deployment record commit does not require another runtime redeploy. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
