@@ -1404,6 +1404,28 @@ Purpose:
 | Verification | Master Actions run `28727430034` passed Go Build, Frontend Build, and Rust Agent Build. Local artifact build passed linux/amd64 Controller and `ariactl` cross-compile plus frontend production build. Server-side `https://aria.yun/api/version` returned `0.2.92`; homepage returned HTTP/2 200 with `Cache-Control: no-store`; `/api/v2/controller-info` returned HTTP 200 from the Controller container; `aria-controller` and `aria-frontend` were healthy. Controller startup logs showed `Version: 0.2.92`; recent Controller and frontend logs showed no panic, fatal, error, or failed entries during the deployment window. |
 | Deployment note | This master deployment updates the live Controller/frontend runtime on the current `aria.yun` host. The docs-only deployment record commit does not require another runtime redeploy. |
 
+## 2026-07-05 BUG-101 Runtime State Persistence Deployment (0.2.93)
+
+Purpose:
+
+- Deploy BUG-101 Agent runtime state persistence fixes from PR #13.
+- Advance the deployed release version to `0.2.93` so the BUG-101 rollout does
+  not reuse the previous `0.2.92` Controller/frontend release marker.
+- Update the live Controller/frontend runtime, Controller-hosted Agent artifact,
+  and online Agent node `82.156.48.111` from the same `master` CI run.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-07-05T05:53Z deployment; 2026-07-05T05:56Z smoke validation |
+| Git commit | `7d2337fa04f60bbeb3eac74f2674e9f19a07c5f8` |
+| Master CI run | `28731052913` |
+| Version | `0.2.93` |
+| Controller image | Local runtime image `aria-controller:0.2.93` / `aria-controller:local@sha256:5ada8a9d55beebeca84031c1f9b6e3d3104e4b28fae503ffe15b516e56a02e10`. |
+| Backup | `/root/aria-controller/deploy-backups/20260705T055306Z-0.2.93-28731052913-7d2337f-master` |
+| Controller/frontend artifacts | `go-binaries` and `frontend-dist` from master Actions. Controller SHA256: `5273ad7a41c6f1047f33d8431dcde64f70951f044a13ffdef166c39ff3442a2a`; `ariactl` SHA256: `66a531b5b11252d2795b038b0f068a96c7dfaed4c472c85442c3284f78cdfa42`; frontend entry assets include `assets/index-1194c083.js` and `assets/index-1f19a7d6.css`. |
+| Agent artifact | `rust-agent-binary` from master Actions, deployed to `/root/aria-controller/artifacts/aria-agent-linux-amd64` and online Agent `82.156.48.111:/usr/local/bin/aria-agent`. SHA256: `5ceac7673fd5f65a49851c8091fc15af55f9027835ebde5f970e970df09daaef`. |
+| Verification | Master Actions run `28731052913` passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.93`; the Controller-hosted Agent download endpoint returned SHA256 `5ceac7673fd5f65a49851c8091fc15af55f9027835ebde5f970e970df09daaef`; homepage returned HTTP 200; `aria-controller`, `aria-frontend`, `aria-postgres`, and `aria-redis` were healthy. Login succeeded as `sysadmin`; tenant scan found `Aria Default` with 4 nodes, and online node `82.156.48.111` was `online`. Agent service was active after restart, `/usr/local/bin/aria-agent` matched the deployed SHA, and post-restart logs showed route sync completed, ACL/QoS snapshot applied, and no panic, fatal, error, or failed entries. Controller startup logs showed `Version: 0.2.93`, HTTP ready, and gRPC one-way TLS listening on `:50051`. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
