@@ -1426,6 +1426,32 @@ Purpose:
 | Agent artifact | `rust-agent-binary` from master Actions, deployed to `/root/aria-controller/artifacts/aria-agent-linux-amd64` and online Agent `82.156.48.111:/usr/local/bin/aria-agent`. SHA256: `5ceac7673fd5f65a49851c8091fc15af55f9027835ebde5f970e970df09daaef`. |
 | Verification | Master Actions run `28731052913` passed Go Build, Frontend Build, and Rust Agent Build. Server-side `https://aria.yun/api/version` and `/api/v2/controller-info` both returned `0.2.93`; the Controller-hosted Agent download endpoint returned SHA256 `5ceac7673fd5f65a49851c8091fc15af55f9027835ebde5f970e970df09daaef`; homepage returned HTTP 200; `aria-controller`, `aria-frontend`, `aria-postgres`, and `aria-redis` were healthy. Login succeeded as `sysadmin`; tenant scan found `Aria Default` with 4 nodes, and online node `82.156.48.111` was `online`. Agent service was active after restart, `/usr/local/bin/aria-agent` matched the deployed SHA, and post-restart logs showed route sync completed, ACL/QoS snapshot applied, and no panic, fatal, error, or failed entries. Controller startup logs showed `Version: 0.2.93`, HTTP ready, and gRPC one-way TLS listening on `:50051`. |
 
+## 2026-07-05 Console UI Polish and AI Entry Downgrade Deployment (0.2.94)
+
+Purpose:
+
+- Deploy PR #14, which removes the legacy AI Assistant / Ask AI entry points
+  from the v0.1.0 console surface.
+- Replace the login page's decorative orb/glow/large-hero treatment with a
+  flatter operations-console login view.
+- Tighten Dashboard, Nodes, and Layout styling toward a low-decoration,
+  higher-density control-console baseline.
+- Validate English mode on the deployed console pages requested for this batch.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-07-05T10:11Z deployment; 2026-07-05T10:19Z smoke validation |
+| Git commit | `2a3dbae3a5012af7ed792b7a0033f702ad42a9a8` |
+| Pull request | #14, `codex/ui-polish-i18n-smoke` |
+| Master CI run | `28737131632` |
+| Version | `0.2.94` |
+| Controller image | Local runtime image `aria-controller:0.2.94` / `aria-controller:local@sha256:ccb7768f8cc9d0983618f2027230c36e264a3702872075a559ad39a9a7a5efa4`. |
+| Backup | `/root/aria-controller/deploy-backups/20260705T101131Z-0.2.94-28737131632-2a3dbae-master` |
+| Controller/frontend artifacts | Local low-bandwidth linux/amd64 Controller build and frontend dist from the merged `master` commit. Controller SHA256: `d1625a34e04d040c18f94343d8ca4969af813202c6cfa7ccb22a45950afba1e7`; `ariactl` SHA256: `0cd3ab71b4e461a51acef4e67f68f7c4dcdbf4df4dc14b63d54887f991446d32`; deployed frontend assets include `Login-7f2d762b.js`, `Login-579f094c.css`, `Dashboard-4e187140.js`, `Dashboard-b494d588.css`, `Monitoring-e750e32f.js`, and `Monitoring-3531769c.css`. |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in master Actions. |
+| Verification | PR #14 and master Actions run `28737131632` passed Go Build, Frontend Build, and Rust Agent Build. Local verification passed full frontend unit tests (`243` tests), frontend type-check, frontend production build, and `git diff --check`. Server-side `https://aria.yun/api/version` returned `0.2.94`; `/api/v2/controller-info` and homepage returned HTTP 200; `aria-controller`, `aria-frontend`, `aria-postgres`, and `aria-redis` were healthy. Browser smoke against the deployed site through an `aria.yun` host-mapped HTTPS tunnel logged in as `sysadmin` and checked Dashboard, Nodes, Monitoring, Policy Center, and Settings in English mode: no visible `Ask AI`, `AI Assistant`, `AI Copilot`, or `Ask Aria`; no leaked i18n keys; no unexpected Chinese UI text. The only Chinese strings observed on Dashboard/Nodes were existing node `region` data values (`广州`, `上海`, `北京`) from the database, not frontend copy. Login and dashboard screenshots confirmed the decorative login orbs/glows/large hero treatment and old AI navigation entry were absent. |
+| Deployment note | This master deployment updates the live Controller/frontend runtime only. It does not change the online Rust Agent binary. Public direct curl from the local machine still failed on the external TLS path, but server-side HTTPS and host-mapped tunnel checks reached the deployed `aria.yun` Nginx successfully. This docs-only deployment record commit does not require another runtime redeploy. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
