@@ -135,15 +135,6 @@
                 {{ t('monitoringPage.healthCheck') }}
               </el-button>
               <el-button
-                v-if="isActionableAlert(row) && hasPermission('ai:use')"
-                size="small"
-                type="success"
-                plain
-                @click="askAIForAlert(row)"
-              >
-                {{ t('monitoringPage.askAI') }}
-              </el-button>
-              <el-button
                 v-if="hasPermission('commands:write')"
                 size="small"
                 type="warning"
@@ -584,30 +575,6 @@ const openQueuedCommandFromAlert = (alert: AnyRecord = {}, commandId = '') => {
       policy_ref: context.policy_ref,
       policy_domain: context.policy_domain
     }, 'commands')
-  })
-}
-
-const buildAlertAIQuery = (alert: AnyRecord = {}) => {
-  const context = normalizeContextRecord(alert.context)
-  return {
-    source: 'monitoring',
-    ...(alert.node_id ? { nodeId: alert.node_id } : {}),
-    ...(alert.id ? { alertId: alert.id } : {}),
-    ...(alert.alert_type ? { eventType: alert.alert_type } : {}),
-    ...(context.command_id ? { commandId: context.command_id } : {}),
-    ...(context.policy_ref ? { policyRef: context.policy_ref } : {}),
-    ...(context.policy_domain ? { policyDomain: context.policy_domain } : {})
-  }
-}
-
-const askAIForAlert = (alert: AnyRecord = {}) => {
-  if (!hasPermission('ai:use')) {
-    ElMessage.error(t('monitoringPage.missingAiPermission'))
-    return
-  }
-  router.push({
-    name: 'AiAssistant',
-    query: buildAlertAIQuery(alert)
   })
 }
 

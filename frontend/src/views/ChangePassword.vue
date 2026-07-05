@@ -1,9 +1,5 @@
 <template>
   <div class="change-password-container">
-    <div class="background-layer">
-      <div class="grid-pattern"></div>
-    </div>
-
     <div class="brand-corner">
       <img src="/aria-logo.png" alt="Aria Logo" class="corner-logo" />
       <div class="corner-info">
@@ -155,39 +151,23 @@ const handleChangePassword = async () => {
   display: flex;
   flex-direction: column;
   position: relative;
-  overflow: hidden;
+  overflow: auto;
   background: var(--aria-sidebar-bg);
-}
-
-.background-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-}
-
-.grid-pattern {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(var(--aria-dark-border-primary) 1px, transparent 1px),
-    linear-gradient(90deg, var(--aria-dark-border-primary) 1px, transparent 1px);
-  background-size: 60px 60px;
-  opacity: 0.05;
 }
 
 .brand-corner {
   position: absolute;
-  top: 40px;
-  left: 60px;
+  top: 28px;
+  left: 32px;
   z-index: 20;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
 .corner-logo {
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   object-fit: contain;
 }
 
@@ -197,7 +177,7 @@ const handleChangePassword = async () => {
 }
 
 .corner-title {
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 700;
   margin: 0;
   color: #fff;
@@ -209,11 +189,13 @@ const handleChangePassword = async () => {
 
 .pro-badge {
   font-size: 10px;
-  padding: 3px 8px;
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.6) 0%, rgba(6, 182, 212, 0.6) 100%);
+  padding: 2px 6px;
+  background: rgba(59, 130, 246, 0.14);
+  border: 1px solid rgba(96, 165, 250, 0.34);
   border-radius: 4px;
   letter-spacing: 0;
   font-weight: 600;
+  color: #bfdbfe;
 }
 
 .corner-subtitle {
@@ -236,12 +218,11 @@ const handleChangePassword = async () => {
 .password-panel {
   width: 100%;
   max-width: 430px;
-  padding: 44px 38px;
-  background: rgba(15, 23, 42, 0.78);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 40px 36px;
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 8px;
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--aria-shadow-md);
 }
 
 .panel-header {
@@ -297,7 +278,8 @@ const handleChangePassword = async () => {
 
 :deep(.el-input__wrapper.is-focus) {
   border-color: var(--aria-primary);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+  outline: 2px solid rgba(59, 130, 246, 0.24);
+  outline-offset: 1px;
 }
 
 :deep(.el-input__inner) {

@@ -569,34 +569,6 @@ describe('monitoring workflow routing', () => {
     expect(monitorApiMock.getAlerts).toHaveBeenCalled()
   })
 
-  it('routes actionable alerts to AI with full diagnostic context', async () => {
-    const wrapper = mountWithStubs(Monitoring)
-    await flushPromises()
-
-    wrapper.vm.askAIForAlert({
-      id: 'alert-1',
-      node_id: 'node-1',
-      alert_type: 'policy_failed',
-      context: {
-        command_id: 'cmd-1',
-        policy_ref: 'acl-1',
-        policy_domain: 'acl'
-      }
-    })
-
-    expect(routerPush).toHaveBeenCalledWith({
-      name: 'AiAssistant',
-      query: {
-        source: 'monitoring',
-        nodeId: 'node-1',
-        alertId: 'alert-1',
-        eventType: 'policy_failed',
-        commandId: 'cmd-1',
-        policyRef: 'acl-1',
-        policyDomain: 'acl'
-      }
-    })
-  })
 })
 
 describe('node monitor detail context handling', () => {
@@ -733,26 +705,6 @@ describe('node monitor detail context handling', () => {
       command_id: 'cmd-1'
     })
     expect(monitorApiMock.getNodeDetail.mock.calls.length).toBeGreaterThan(callsBeforeResolve)
-  })
-
-  it('routes focused node context to AI diagnostics', async () => {
-    const wrapper = mountWithStubs(NodeMonitorDetail)
-    await flushPromises()
-
-    wrapper.vm.askAIForContext()
-
-    expect(routerPush).toHaveBeenCalledWith({
-      name: 'AiAssistant',
-      query: {
-        source: 'node_monitor_detail',
-        nodeId: 'node-1',
-        alertId: 'alert-1',
-        eventType: 'policy_failed',
-        commandId: 'cmd-1',
-        policyRef: 'acl-1',
-        policyDomain: 'acl'
-      }
-    })
   })
 
   it('accepts snake_case node detail context from external links', async () => {

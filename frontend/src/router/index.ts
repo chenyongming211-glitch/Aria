@@ -106,12 +106,6 @@ const routes: RouteRecordRaw[] = [
         meta: { titleKey: 'nav.monitoringCenter', requiresAuth: true, permission: 'monitoring:read' }
       },
       {
-        path: 'ai-copilot',
-        name: 'AiAssistant',
-        component: () => import('@/views/AIAssistant.vue'),
-        meta: { titleKey: 'nav.aiAssistant', requiresAuth: true, permission: 'ai:use' }
-      },
-      {
         path: 'platform/settings',
         name: 'Settings',
         component: () => import('@/views/Settings.vue'),
@@ -148,10 +142,6 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'settings',
         redirect: '/platform/settings'
-      },
-      {
-        path: 'ai-assistant',
-        redirect: '/ai-copilot'
       }
     ]
   },
