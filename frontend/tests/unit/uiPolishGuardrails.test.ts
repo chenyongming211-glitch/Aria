@@ -31,13 +31,21 @@ describe('UI polish guardrails', () => {
     expect(nodeDetailSource).not.toContain("monitoringPage.askAI")
   })
 
-  it('keeps auth pages free of decorative glow and gradient-orb treatments', () => {
-    for (const path of ['views/Login.vue', 'views/ChangePassword.vue']) {
-      const source = readSource(path)
-      expect(source).not.toMatch(/gradient-orb|orb-\d|glow-pulse|avatar-glow/)
-      expect(source).not.toMatch(/radial-gradient|linear-gradient|backdrop-filter|filter:\s*blur/)
-      expect(source).not.toMatch(/0 25px 60px|0 6px 20px|box-shadow:\s*0 0/)
-    }
+  it('preserves the original branded login page shell', () => {
+    const source = readSource('views/Login.vue')
+
+    expect(source).toContain('logo-side')
+    expect(source).toContain('big-logo')
+    expect(source).toContain('/aria-3d-cloud.png')
+    expect(source).toContain('features-tags')
+    expect(source).toContain('gradient-orb')
+  })
+
+  it('keeps the forced password page free of decorative glow and gradient-orb treatments', () => {
+    const source = readSource('views/ChangePassword.vue')
+    expect(source).not.toMatch(/gradient-orb|orb-\d|glow-pulse|avatar-glow/)
+    expect(source).not.toMatch(/radial-gradient|linear-gradient|backdrop-filter|filter:\s*blur/)
+    expect(source).not.toMatch(/0 25px 60px|0 6px 20px|box-shadow:\s*0 0/)
   })
 
   it('uses dense console framing instead of decorative hero or logo glow chrome', () => {
