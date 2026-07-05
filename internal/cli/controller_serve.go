@@ -1490,7 +1490,6 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 
 	// Find node by hostname within the authenticated tenant. super_admin is
 	// platform-scoped; tenant users are restricted to their JWT tenant.
-	var allNodes []*controllerstorage.Node
 	var err error
 	var tenantID uuid.UUID
 	if claims.Role == middleware.RoleSuperAdmin {
@@ -1499,7 +1498,6 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 			http.Error(w, "tenant_id is required for super_admin network changes", http.StatusBadRequest)
 			return
 		}
-		allNodes, err = c.store.GetNodesByTenant(tenantID)
 	} else {
 		var parseErr error
 		tenantID, parseErr = uuid.Parse(claims.TenantID)
@@ -1507,20 +1505,17 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 			http.Error(w, "Invalid tenant context", http.StatusForbidden)
 			return
 		}
-		allNodes, err = c.store.GetNodesByTenant(tenantID)
 	}
+	matchedNodes, err := c.store.ListTenantNodesByHostname(tenantID, req.Hostname, 1)
 	if err != nil {
-		c.logger.Error("Failed to get nodes: %v", err)
-		http.Error(w, "Failed to get nodes", http.StatusInternalServerError)
+		c.logger.Error("Failed to get node by hostname: %v", err)
+		http.Error(w, "Failed to get node", http.StatusInternalServerError)
 		return
 	}
 
 	var targetNode *controllerstorage.Node
-	for _, node := range allNodes {
-		if node.Hostname == req.Hostname {
-			targetNode = node
-			break
-		}
+	if len(matchedNodes) > 0 {
+		targetNode = matchedNodes[0]
 	}
 
 	if targetNode == nil {
@@ -1549,7 +1544,7 @@ func (c *Controller) HandleNetworkManage(w http.ResponseWriter, r *http.Request)
 			}
 		}
 
-		if err := controllerstorage.FindAdvertisedRouteConflict(allNodes, targetNode.PublicKey, targetNode.Region, []string{newNetwork.String()}); err != nil {
+		if err := c.store.FindTenantAdvertisedRouteConflict(tenantID, targetNode.PublicKey, targetNode.Region, []string{newNetwork.String()}); err != nil {
 			var conflict *controllerstorage.RouteConflictError
 			if errors.As(err, &conflict) {
 				http.Error(w, fmt.Sprintf("请勿在不同 Region 添加重叠路由！路由 %s 与 Region %s 的节点 %s 冲突",
@@ -2207,27 +2202,11 @@ func formatPortRange(minPort, maxPort uint16) string {
 // Returns true if:
 //   - One network contains the other
 //   - The networks have any IP addresses in common
-func cidrsOverlap(a, b *net.IPNet) bool {
-	// Check if a contains b's network address
-	if a.Contains(b.IP) {
-		return true
-	}
-	// Check if b contains a's network address
-	if b.Contains(a.IP) {
-		return true
-	}
-	return false
-}
-
 func (c *Controller) validateAdvertisedRouteConflicts(tenantID uuid.UUID, publicKey, region string, routes []string) error {
 	if len(routes) == 0 {
 		return nil
 	}
-	nodes, err := c.store.GetNodesByTenant(tenantID)
-	if err != nil {
-		return err
-	}
-	return controllerstorage.FindAdvertisedRouteConflict(nodes, publicKey, region, routes)
+	return c.store.FindTenantAdvertisedRouteConflict(tenantID, publicKey, region, routes)
 }
 
 // ipInRoutes checks if an IP address is within any of the given CIDR routes.

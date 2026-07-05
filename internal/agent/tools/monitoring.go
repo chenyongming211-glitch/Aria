@@ -31,11 +31,10 @@ func NewGetMonitorStatsTool(store *controllerstorage.Storage) Tool {
 				return "", fmt.Errorf("tenant_id is required")
 			}
 
-			nodes, err := store.GetAllNodes()
+			nodes, err := listNodesForToolScope(store, tenantID, tenantScoped)
 			if err != nil {
 				return "", fmt.Errorf("查询节点失败: %v", err)
 			}
-			nodes = filterNodesByTenant(nodes, tenantID, tenantScoped)
 
 			// 统计数据
 			stats := map[string]interface{}{

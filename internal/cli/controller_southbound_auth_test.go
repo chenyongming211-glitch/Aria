@@ -138,6 +138,24 @@ func TestHandleNetworkManageRequiresJWT(t *testing.T) {
 	}
 }
 
+func expectTenantNodeByHostnameQuery(mock sqlmock.Sqlmock, tenantID uuid.UUID, hostname string, limit int) *sqlmock.ExpectedQuery {
+	return mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND hostname = $2 AND status != 'deleted' ORDER BY last_seen DESC LIMIT $3`)).
+		WithArgs(tenantID, hostname, limit)
+}
+
+func expectTenantAdvertisedRouteConflictQuery(mock sqlmock.Sqlmock, tenantID uuid.UUID, publicKey, region string) *sqlmock.ExpectedQuery {
+	return mock.ExpectQuery(regexp.QuoteMeta(`SELECT route.cidr,`)).
+		WithArgs(tenantID, publicKey, region)
+}
+
+func southboundNodeSelectColumns() []string {
+	return []string{
+		"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
+		"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
+		"created_at", "updated_at",
+	}
+}
+
 func TestHandleNetworkManageScopesHostnameLookupToJWTTenant(t *testing.T) {
 	auth.SetSecret("network-jwt-secret")
 	t.Cleanup(func() { auth.SetSecret("") })
@@ -157,13 +175,8 @@ func TestHandleNetworkManageScopesHostnameLookupToJWTTenant(t *testing.T) {
 	`)).
 		WithArgs(tenantID, controllerstorage.SystemRoleAdmin).
 		WillReturnRows(sqlmock.NewRows([]string{"permissions"}).AddRow("{routes:write}"))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND status != 'deleted' ORDER BY last_seen DESC`)).
-		WithArgs(tenantID).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
-			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
-			"created_at", "updated_at",
-		}))
+	expectTenantNodeByHostnameQuery(mock, tenantID, "shared-host", 1).
+		WillReturnRows(sqlmock.NewRows(southboundNodeSelectColumns()))
 
 	token, err := auth.GenerateToken("user-1", "admin", controllerstorage.SystemRoleAdmin, tenantID.String())
 	if err != nil {
@@ -209,13 +222,8 @@ func TestHandleNetworkManageRejectsInactiveTargetNode(t *testing.T) {
 	`)).
 		WithArgs(tenantID, controllerstorage.SystemRoleAdmin).
 		WillReturnRows(sqlmock.NewRows([]string{"permissions"}).AddRow("{routes:write}"))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND status != 'deleted' ORDER BY last_seen DESC`)).
-		WithArgs(tenantID).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
-			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
-			"created_at", "updated_at",
-		}).AddRow(
+	expectTenantNodeByHostnameQuery(mock, tenantID, "suspended-host", 1).
+		WillReturnRows(sqlmock.NewRows(southboundNodeSelectColumns()).AddRow(
 			nodeID, "suspended-key", "machine-1", tenantID, "1.1.1.1:51820", "", "1.1.1.1", "sh", "vpc-1", "suspended-host", "100.64.0.2", 2,
 			now.Unix(), now.Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "suspended", int64(0), "{}", "", now, now,
 		))
@@ -266,16 +274,13 @@ func TestHandleNetworkManagePreservesOfflineNodeStatus(t *testing.T) {
 	`)).
 		WithArgs(tenantID, controllerstorage.SystemRoleAdmin).
 		WillReturnRows(sqlmock.NewRows([]string{"permissions"}).AddRow("{routes:write}"))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE tenant_id = $1 AND status != 'deleted' ORDER BY last_seen DESC`)).
-		WithArgs(tenantID).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
-			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
-			"created_at", "updated_at",
-		}).AddRow(
+	expectTenantNodeByHostnameQuery(mock, tenantID, "offline-host", 1).
+		WillReturnRows(sqlmock.NewRows(southboundNodeSelectColumns()).AddRow(
 			nodeID, "offline-key", "machine-1", tenantID, "1.1.1.1:51820", "", "1.1.1.1", "sh", "vpc-1", "offline-host", "100.64.0.2", 2,
 			now.Add(-time.Hour).Unix(), now.Add(-24*time.Hour).Unix(), "member", "kernel", "6.0", true, "offline", int64(now.Add(-time.Hour).Unix()), "{}", "", now, now,
 		))
+	expectTenantAdvertisedRouteConflictQuery(mock, tenantID, "offline-key", "sh").
+		WillReturnRows(sqlmock.NewRows([]string{"cidr", "hostname", "region", "public_key"}))
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE nodes SET advertised_routes = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`)).
 		WithArgs(sqlmock.AnyArg(), nodeID, tenantID).

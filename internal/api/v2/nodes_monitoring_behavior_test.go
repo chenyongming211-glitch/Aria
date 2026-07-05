@@ -151,6 +151,21 @@ func expectTenantNodesPageQuery(mock sqlmock.Sqlmock, tenantID uuid.UUID, limit,
 	)).WithArgs(tenantID, limit, offset)
 }
 
+func expectTenantLearnedRoutesQuery(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID) *sqlmock.ExpectedQuery {
+	return mock.ExpectQuery(regexp.QuoteMeta(`SELECT route.cidr,`)).
+		WithArgs(tenantID, nodeID, maxMonitoringLearnedRoutes+1)
+}
+
+func expectAdvertisedRouteConflictQuery(
+	mock sqlmock.Sqlmock,
+	tenantID uuid.UUID,
+	targetPublicKey string,
+	targetRegion string,
+) *sqlmock.ExpectedQuery {
+	return mock.ExpectQuery(regexp.QuoteMeta(`SELECT route.cidr,`)).
+		WithArgs(tenantID, targetPublicKey, targetRegion)
+}
+
 func expectNodeLookupWithStatus(mock sqlmock.Sqlmock, tenantID, nodeID uuid.UUID, routes, status string) {
 	now := time.Now()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, public_key, machine_id, tenant_id, endpoint, private_ip, public_ip, region, vpc_id, hostname, assigned_ip, ip_offset, last_seen, registered_at, role, COALESCE(runtime_mode, 'kernel'), COALESCE(kernel_version, ''), COALESCE(has_aesni, false), COALESCE(status, 'online'), COALESCE(offline_since, 0), advertised_routes, COALESCE(enrolled_with_token, ''), created_at, updated_at FROM nodes WHERE id = $1`)).
@@ -998,14 +1013,11 @@ func TestMonitoringAPI_NodeDetailSuccessReturnsContractFields(t *testing.T) {
 			now,
 			nil,
 		))
-	expectTenantNodesQuery(mock, tenantID).
+	expectTenantLearnedRoutesQuery(mock, tenantID, nodeID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
-			"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
-			"created_at", "updated_at",
+			"cidr", "hostname", "assigned_ip", "region", "status", "last_seen",
 		}).AddRow(
-			nodeID, "pub-key-1", "machine-1", tenantID, "1.1.1.1:51820", "10.0.0.1", "1.1.1.1", "sh", "vpc-1", "node-1", "10.0.0.10", 10,
-			time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "online", int64(0), "{}", "", now, now,
+			"10.20.0.0/16", "node-2", "10.0.0.11", "bj", "online", now.Unix(),
 		))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
@@ -1191,7 +1203,7 @@ func TestMonitoringAPI_NodeDetailLearnedRoutesFailureReturnsInternalError(t *tes
 			"message", "context", "status", "created_at", "resolved_at",
 		}))
 	learnedRoutesErr := errors.New("tenant nodes unavailable")
-	expectTenantNodesQuery(mock, tenantID).WillReturnError(learnedRoutesErr)
+	expectTenantLearnedRoutesQuery(mock, tenantID, nodeID).WillReturnError(learnedRoutesErr)
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/nodes/"+nodeID.String(), nil), tenantID)
@@ -1894,8 +1906,6 @@ func TestNodesAPI_RoutesMethodBoundaryReturnsMethodNotAllowed(t *testing.T) {
 func TestNodesAPI_AddRouteRejectsCrossRegionConflict(t *testing.T) {
 	tenantID := uuid.New()
 	targetNodeID := uuid.New()
-	conflictNodeID := uuid.New()
-	now := time.Now()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New failed: %v", err)
@@ -1904,14 +1914,9 @@ func TestNodesAPI_AddRouteRejectsCrossRegionConflict(t *testing.T) {
 
 	expectNodeLookup(mock, tenantID, targetNodeID, "{}")
 	expectNodeLookup(mock, tenantID, targetNodeID, "{}")
-	expectTenantNodesQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows([]string{
-		"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
-		"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
-		"created_at", "updated_at",
-	}).AddRow(
-		conflictNodeID, "conflict-key", "machine-b", tenantID, "2.2.2.2:51820", "10.0.0.2", "2.2.2.2", "bj", "vpc-2", "node-b", "10.0.0.11", 11,
-		time.Now().Unix(), time.Now().Add(-time.Hour).Unix(), "member", "kernel", "6.0", true, "online", int64(0), "{10.10.0.0/16}", "", now, now,
-	))
+	expectAdvertisedRouteConflictQuery(mock, tenantID, "pub-key-1", "sh").
+		WillReturnRows(sqlmock.NewRows([]string{"cidr", "hostname", "region", "public_key"}).
+			AddRow("10.10.0.0/16", "node-b", "bj", "conflict-key"))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSuperAdmin(httptest.NewRequest(
@@ -2768,7 +2773,8 @@ func TestMonitoringAPI_TrafficBoundaryNoNodesReturnsEmptySeries(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	expectTenantNodesQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	expectTenantNodesPageQuery(mock, tenantID, maxMonitoringTrafficNodes, 0).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/traffic?range=24h", nil), tenantID)
@@ -2798,7 +2804,7 @@ func TestMonitoringAPI_TrafficVMUnavailableReturnsServiceUnavailable(t *testing.
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	expectTenantNodesQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows([]string{
+	expectTenantNodesPageQuery(mock, tenantID, maxMonitoringTrafficNodes, 0).WillReturnRows(sqlmock.NewRows([]string{
 		"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
 		"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
 		"created_at", "updated_at",
@@ -2835,7 +2841,7 @@ func TestMonitoringAPI_TrafficReturnsEmptySeriesWhenOnlySuspendedNodesHaveInstan
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	expectTenantNodesQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows([]string{
+	expectTenantNodesPageQuery(mock, tenantID, maxMonitoringTrafficNodes, 0).WillReturnRows(sqlmock.NewRows([]string{
 		"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
 		"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
 		"created_at", "updated_at",
@@ -2871,7 +2877,7 @@ func TestMonitoringAPI_TrafficNodeQueryFailureReturnsInternalError(t *testing.T)
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	expectTenantNodesQuery(mock, tenantID).WillReturnError(errors.New("db timeout"))
+	expectTenantNodesPageQuery(mock, tenantID, maxMonitoringTrafficNodes, 0).WillReturnError(errors.New("db timeout"))
 
 	router := &Router{store: controllerstorage.NewStorageWithDB(db)}
 	req := withSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/v2/tenants/"+tenantID.String()+"/monitoring/traffic?range=24h", nil), tenantID)
@@ -2901,7 +2907,7 @@ func TestMonitoringAPI_TrafficVMFailureReturnsInternalError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	expectTenantNodesQuery(mock, tenantID).WillReturnRows(sqlmock.NewRows([]string{
+	expectTenantNodesPageQuery(mock, tenantID, maxMonitoringTrafficNodes, 0).WillReturnRows(sqlmock.NewRows([]string{
 		"id", "public_key", "machine_id", "tenant_id", "endpoint", "private_ip", "public_ip", "region", "vpc_id", "hostname", "assigned_ip", "ip_offset",
 		"last_seen", "registered_at", "role", "runtime_mode", "kernel_version", "has_aesni", "status", "offline_since", "advertised_routes", "enrolled_with_token",
 		"created_at", "updated_at",

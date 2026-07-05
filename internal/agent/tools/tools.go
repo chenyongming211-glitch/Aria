@@ -52,9 +52,9 @@ func NewListNodesToolWithStore(store *controllerstorage.Storage) Tool {
 				return "", tenantErr
 			}
 
-			// 从真实数据库获取节点
-			fmt.Printf("[Tool:list_nodes] Calling store.GetAllNodes()...\n")
-			nodes, err := store.GetAllNodes()
+			// 从真实数据库获取有界节点页
+			fmt.Printf("[Tool:list_nodes] Calling bounded node list...\n")
+			nodes, err := listNodesForToolScope(store, tenantID, tenantScoped)
 			if err != nil {
 				fmt.Printf("[Tool:list_nodes] Error: %v\n", err)
 				return "", fmt.Errorf("查询节点失败: %v", err)

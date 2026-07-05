@@ -673,16 +673,28 @@ func (r *Router) handleTenantNodeStatus(w http.ResponseWriter, req *http.Request
 }
 
 func (r *Router) listTenantPolicies(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
-	nodes, err := r.store.GetNodesByTenant(tenantID)
-	if err != nil {
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeGetNodesFailed, "Failed to load tenant nodes", nil)
-		return
-	}
-
 	query := req.URL.Query()
 	kindFilter := strings.TrimSpace(query.Get("kind"))
 	nodeFilter := strings.TrimSpace(query.Get("node_id"))
 	enabledFilter := strings.TrimSpace(query.Get("enabled"))
+
+	limit, offset := parseNodeListPagination(req)
+	var nodes []*controllerstorage.Node
+	if nodeFilter != "" {
+		node, err := r.getTenantNodeRecord(nodeFilter, tenantID)
+		if err != nil {
+			r.writeNodeLookupError(w, err)
+			return
+		}
+		nodes = []*controllerstorage.Node{node}
+	} else {
+		var err error
+		nodes, err = r.store.GetNodesByTenantPage(tenantID, limit, offset)
+		if err != nil {
+			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeGetNodesFailed, "Failed to load tenant nodes", nil)
+			return
+		}
+	}
 
 	var enabledPtr *bool
 	if enabledFilter != "" {
@@ -692,9 +704,6 @@ func (r *Router) listTenantPolicies(w http.ResponseWriter, req *http.Request, te
 
 	policies := make([]map[string]interface{}, 0)
 	for _, node := range nodes {
-		if nodeFilter != "" && node.ID.String() != nodeFilter {
-			continue
-		}
 		if err := r.failTimedOutNodeCommands(node); err != nil {
 			apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeInternalServerError, "Failed to refresh timed out commands", nil)
 			return
@@ -738,7 +747,12 @@ func (r *Router) listTenantPolicies(w http.ResponseWriter, req *http.Request, te
 		policies = filtered
 	}
 
-	apibase.WriteSuccess(w, policies, fmt.Sprintf("%d policies retrieved", len(policies)))
+	apibase.WriteSuccess(w, map[string]interface{}{
+		"items":  policies,
+		"limit":  limit,
+		"offset": offset,
+		"count":  len(policies),
+	}, fmt.Sprintf("%d policies retrieved", len(policies)))
 }
 
 func (r *Router) listTenantNodes(w http.ResponseWriter, req *http.Request, tenantID uuid.UUID) {
@@ -2180,12 +2194,7 @@ func normalizeRoutes(routes []string) ([]string, error) {
 }
 
 func (r *Router) validateTenantAdvertisedRouteConflicts(w http.ResponseWriter, tenantID uuid.UUID, node *controllerstorage.Node, targetRegion string, routes []string) bool {
-	tenantNodes, err := r.store.GetNodesByTenant(tenantID)
-	if err != nil {
-		apibase.WriteError(w, http.StatusInternalServerError, apibase.CodeGetNodesFailed, "Failed to load tenant nodes", nil)
-		return false
-	}
-	if err := controllerstorage.FindAdvertisedRouteConflict(tenantNodes, node.PublicKey, targetRegion, routes); err != nil {
+	if err := r.store.FindTenantAdvertisedRouteConflict(tenantID, node.PublicKey, targetRegion, routes); err != nil {
 		var conflict *controllerstorage.RouteConflictError
 		if errors.As(err, &conflict) {
 			apibase.WriteError(w, http.StatusConflict, apibase.CodeBadRequest, err.Error(), nil)
