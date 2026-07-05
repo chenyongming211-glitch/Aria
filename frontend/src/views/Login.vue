@@ -1,6 +1,13 @@
 <!-- src/views/Login.vue - 深色主题登录页 -->
 <template>
   <div class="login-container">
+    <!-- 动态背景 -->
+    <div class="background-layer">
+      <div class="grid-pattern"></div>
+      <div class="gradient-orb orb-1"></div>
+      <div class="gradient-orb orb-2"></div>
+    </div>
+
     <!-- 左上角品牌 -->
     <div class="brand-corner">
       <img src="/aria-logo.png" alt="Aria Logo" class="corner-logo" />
@@ -15,6 +22,19 @@
 
     <!-- 主要内容区域 -->
     <div class="login-wrapper">
+      <!-- 左侧大 Logo -->
+      <div class="logo-side">
+        <div class="logo-wrapper">
+          <img src="/aria-3d-cloud.png" alt="Aria Logo" class="big-logo" />
+        </div>
+        <div class="features-tags">
+          <span class="feature-tag">{{ t('login.featurePerformance') }}</span>
+          <span class="feature-tag">{{ t('login.featureZeroTrust') }}</span>
+          <span class="feature-tag">{{ t('login.featureSmartRouting') }}</span>
+        </div>
+      </div>
+
+      <!-- 右侧登录表单 -->
       <div class="login-side">
         <div class="login-card">
           <div class="login-header">
@@ -235,22 +255,61 @@ const handleLogin = async () => {
   flex-direction: column;
   position: relative;
   background: var(--aria-sidebar-bg);
-  overflow: auto;
+  overflow: hidden;
+}
+
+.background-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.grid-pattern {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--aria-dark-border-primary) 1px, transparent 1px),
+    linear-gradient(90deg, var(--aria-dark-border-primary) 1px, transparent 1px);
+  background-size: 60px 60px;
+  opacity: 0.05;
+}
+
+.gradient-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.25;
+}
+
+.orb-1 {
+  width: 600px;
+  height: 600px;
+  top: -200px;
+  right: -100px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.4) 0%, transparent 70%);
+}
+
+.orb-2 {
+  width: 500px;
+  height: 500px;
+  bottom: -150px;
+  left: -100px;
+  background: radial-gradient(circle, rgba(34, 197, 94, 0.3) 0%, transparent 70%);
 }
 
 .brand-corner {
   position: absolute;
-  top: 28px;
-  left: 32px;
+  top: 40px;
+  left: 60px;
   z-index: 20;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
 }
 
 .corner-logo {
-  width: 40px;
-  height: 40px;
+  width: 48px;
+  height: 48px;
   object-fit: contain;
 }
 
@@ -260,25 +319,23 @@ const handleLogin = async () => {
 }
 
 .corner-title {
-  font-size: 22px;
+  font-size: 26px;
   font-weight: 700;
   margin: 0;
   color: #fff;
   display: flex;
   align-items: center;
-  gap: 8px;
-  letter-spacing: 0;
+  gap: 10px;
+  letter-spacing: -0.5px;
 }
 
 .pro-badge {
   font-size: 10px;
-  padding: 2px 6px;
-  background: rgba(59, 130, 246, 0.14);
-  border: 1px solid rgba(96, 165, 250, 0.34);
+  padding: 3px 8px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.6) 0%, rgba(6, 182, 212, 0.6) 100%);
   border-radius: 4px;
-  letter-spacing: 0;
+  letter-spacing: 1px;
   font-weight: 600;
-  color: #bfdbfe;
 }
 
 .corner-subtitle {
@@ -293,25 +350,81 @@ const handleLogin = async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 112px 24px 40px;
+  gap: 100px;
+  padding: 40px;
   position: relative;
   z-index: 10;
+}
+
+.logo-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+}
+
+.logo-wrapper {
+  position: relative;
+  animation: float 6s ease-in-out infinite;
+}
+
+.logo-wrapper::before {
+  content: '';
+  position: absolute;
+  inset: -40px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.25) 0%, transparent 70%);
+  filter: blur(30px);
+  animation: glow-pulse 3s ease-in-out infinite;
+  z-index: -1;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+.big-logo {
+  width: 480px;
+  height: 480px;
+  object-fit: contain;
+  mask-image: radial-gradient(circle, white 40%, transparent 100%);
+  -webkit-mask-image: radial-gradient(circle, white 40%, transparent 100%);
+}
+
+.features-tags {
+  display: flex;
+  gap: 16px;
+}
+
+.feature-tag {
+  padding: 8px 20px;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 20px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .login-side {
   display: flex;
   justify-content: center;
-  width: min(100%, 420px);
 }
 
 .login-card {
   width: 100%;
   max-width: 400px;
-  padding: 40px 36px;
-  background: #0f172a;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 8px;
-  box-shadow: var(--aria-shadow-md);
+  padding: 48px 40px;
+  background: rgba(15, 23, 42, 0.7);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5);
 }
 
 .login-header {
@@ -351,8 +464,7 @@ const handleLogin = async () => {
 
 :deep(.login-input .el-input__wrapper.is-focus) {
   border-color: var(--aria-primary);
-  outline: 2px solid rgba(59, 130, 246, 0.24);
-  outline-offset: 1px;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
 }
 
 :deep(.login-input .el-input__inner) {
@@ -395,14 +507,15 @@ const handleLogin = async () => {
   height: 46px;
   font-size: 15px;
   font-weight: 600;
-  border-radius: 8px;
-  background: var(--aria-primary);
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--aria-primary) 0%, #3b82f6 100%);
   border: none;
   transition: all 0.25s ease;
 }
 
 :deep(.submit-button:hover) {
-  background: var(--aria-primary-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.35);
 }
 
 .footer-section {
@@ -415,7 +528,7 @@ const handleLogin = async () => {
   font-size: 11px;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   margin: 0;
-  letter-spacing: 0;
+  letter-spacing: 0.5px;
 }
 
 @media (max-width: 900px) {
@@ -438,8 +551,26 @@ const handleLogin = async () => {
   }
 
   .login-wrapper {
+    flex-direction: column;
+    gap: 40px;
     padding: 24px;
     padding-top: 100px;
+  }
+
+  .big-logo {
+    width: 280px;
+    height: 280px;
+  }
+
+  .features-tags {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+  }
+
+  .feature-tag {
+    padding: 6px 14px;
+    font-size: 12px;
   }
 
   .login-card {
