@@ -20,15 +20,6 @@
               {{ t('nodeMonitorDetail.openPolicy') }}
             </el-button>
             <el-button
-              v-if="hasPermission('ai:use')"
-              size="small"
-              type="success"
-              plain
-              @click="askAIForContext"
-            >
-              {{ t('monitoringPage.askAI') }}
-            </el-button>
-            <el-button
               v-if="hasPermission('commands:write')"
               size="small"
               type="primary"
@@ -718,25 +709,6 @@ const resolveContextAlert = async () => {
   } finally {
     resolvingContextAlert.value = false
   }
-}
-
-const askAIForContext = () => {
-  if (!hasPermission('ai:use')) {
-    ElMessage.error(t('nodeMonitorDetail.missingAiPermission'))
-    return
-  }
-  router.push({
-    name: 'AiAssistant',
-    query: {
-      source: 'node_monitor_detail',
-      nodeId: nodeId.value,
-      ...(contextQuery.value.alertId ? { alertId: contextQuery.value.alertId } : {}),
-      ...(contextQuery.value.eventType ? { eventType: contextQuery.value.eventType } : {}),
-      ...(contextQuery.value.commandId ? { commandId: contextQuery.value.commandId } : {}),
-      ...(contextQuery.value.policyRef ? { policyRef: contextQuery.value.policyRef } : {}),
-      ...(contextQuery.value.policyDomain ? { policyDomain: contextQuery.value.policyDomain } : {})
-    }
-  })
 }
 
 const sectionRefForFocus = (focus: string): SectionRef | null => {

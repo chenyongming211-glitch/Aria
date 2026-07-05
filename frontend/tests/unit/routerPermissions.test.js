@@ -12,8 +12,7 @@ const routePermissionCases = [
   ['BandwidthControl', 'qos:read'],
   ['Tokens', 'tokens:read'],
   ['Roles', 'roles:read'],
-  ['Monitoring', 'monitoring:read'],
-  ['AiAssistant', 'ai:use']
+  ['Monitoring', 'monitoring:read']
 ]
 
 describe('router RBAC metadata', () => {

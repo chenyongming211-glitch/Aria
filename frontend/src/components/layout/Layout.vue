@@ -6,7 +6,6 @@
       <!-- Logo 区域 -->
       <div class="sidebar-header">
         <div class="logo-wrapper">
-          <div class="logo-glow"></div>
           <img src="/aria-logo.png" alt="Aria Logo" class="logo-image" />
         </div>
         <transition name="fade">
@@ -70,10 +69,6 @@
         <el-menu-item v-if="canAccess('monitoring:read')" index="/monitoring">
           <el-icon><DataLine /></el-icon>
           <template #title>{{ t('nav.monitoringCenter') }}</template>
-        </el-menu-item>
-        <el-menu-item v-if="canAccess('ai:use')" index="/ai-copilot">
-          <el-icon><ChatLineRound /></el-icon>
-          <template #title>{{ t('nav.aiAssistant') }}</template>
         </el-menu-item>
         <el-sub-menu v-if="isSuperAdmin || canAnyAccess(['tokens:read', 'roles:read'])" index="platform">
           <template #title>
@@ -217,7 +212,6 @@ import {
   Coin,
   Lock,
   Collection,
-  ChatLineRound,
   CaretBottom,
   SwitchButton
 } from '@element-plus/icons-vue'
@@ -329,19 +323,6 @@ const openHelp = () => {
   flex-shrink: 0;
 }
 
-.logo-glow {
-  position: absolute;
-  inset: -8px;
-  background: radial-gradient(circle, rgba(59, 130, 246, 0.3) 0%, transparent 70%);
-  filter: blur(8px);
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.logo-wrapper:hover .logo-glow {
-  opacity: 1;
-}
-
 .logo-image {
   width: 36px;
   height: 36px;
@@ -356,19 +337,20 @@ const openHelp = () => {
   font-weight: 700;
   color: var(--aria-dark-text-primary);
   white-space: nowrap;
-  letter-spacing: -0.3px;
+  letter-spacing: 0;
   transition: all 0.3s ease;
 }
 
 .pro-badge {
   font-size: 10px;
-  padding: 3px 8px;
-  background: linear-gradient(135deg, var(--aria-primary) 0%, var(--aria-primary-dark) 100%);
-  border-radius: var(--radius-full);
+  padding: 2px 6px;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(96, 165, 250, 0.32);
+  border-radius: 4px;
   margin-left: 8px;
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
   font-weight: 600;
-  color: white;
+  color: #bfdbfe;
 }
 
 /* Sidebar Menu */
@@ -454,7 +436,7 @@ const openHelp = () => {
 }
 
 :deep(.sidebar-menu .el-menu-item.is-active) {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(59, 130, 246, 0.1) 100%);
+  background: rgba(59, 130, 246, 0.14);
   color: var(--aria-primary);
   font-weight: 500;
 }
@@ -498,13 +480,7 @@ const openHelp = () => {
 
 .status-dot.online {
   background: var(--aria-success);
-  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
-  animation: pulse-dot 2s ease-in-out infinite;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+  border: 1px solid rgba(187, 247, 208, 0.6);
 }
 
 .status-text {
@@ -626,7 +602,7 @@ const openHelp = () => {
 }
 
 .user-avatar {
-  background: linear-gradient(135deg, var(--aria-primary) 0%, var(--aria-primary-dark) 100%);
+  background: var(--aria-primary);
   color: white;
   font-weight: 600;
   flex-shrink: 0;

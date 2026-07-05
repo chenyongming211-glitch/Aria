@@ -1,13 +1,10 @@
 <!-- src/views/Dashboard.vue - 浅色主题仪表盘 -->
 <template>
   <div class="dashboard page-shell">
-    <section class="page-hero">
-      <div class="page-hero-main">
-        <div class="page-eyebrow">{{ t('dashboard.eyebrow') }}</div>
-        <h1 class="page-heading">{{ t('dashboard.heading') }}</h1>
-        <p class="page-description">{{ t('dashboard.description') }}</p>
-      </div>
-    </section>
+    <PageHeader
+      :title="t('dashboard.heading')"
+      :subtitle="t('dashboard.description')"
+    />
 
     <!-- 统计卡片行 -->
     <el-row :gutter="20" class="stats-row">
@@ -223,6 +220,7 @@ import { useRouter } from 'vue-router'
 import { useMonitorApi } from '@/composables/useMonitorApi'
 import { useTenantApi } from '@/composables/useTenantApi'
 import { useTenantChangeReload } from '@/composables/useTenantChangeReload'
+import PageHeader from '@/components/ui/PageHeader.vue'
 import { t } from '@/i18n'
 
 const router = useRouter()
@@ -698,8 +696,8 @@ onBeforeUnmount(() => {
 
 .stat-card {
   position: relative;
-  padding: 24px;
-  border-radius: var(--aria-radius-lg);
+  padding: 18px;
+  border-radius: var(--aria-radius);
   transition: border-color var(--aria-transition-base), box-shadow var(--aria-transition-base);
   cursor: pointer;
 }
@@ -713,17 +711,17 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 
 .stat-icon {
-  width: 56px;
-  height: 56px;
+  width: 42px;
+  height: 42px;
   border-radius: var(--aria-radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 28px;
+  font-size: 22px;
   transition: all var(--aria-transition-base);
 }
 
@@ -732,15 +730,15 @@ onBeforeUnmount(() => {
 .stat-card-orange .stat-icon { background: rgba(245, 158, 11, 0.1); color: #F59E0B; }
 .stat-card-purple .stat-icon { background: rgba(139, 92, 246, 0.1); color: #8B5CF6; }
 
-.stat-content { margin-bottom: 16px; }
+.stat-content { margin-bottom: 12px; }
 
 .stat-value {
-  font-size: 32px;
+  font-size: 26px;
   font-weight: 700;
   color: var(--aria-text-primary);
   line-height: 1;
-  margin-bottom: 8px;
-  letter-spacing: -0.5px;
+  margin-bottom: 6px;
+  letter-spacing: 0;
 }
 
 .stat-label {
@@ -759,10 +757,10 @@ onBeforeUnmount(() => {
 .progress-bar { height: 100%; background: var(--aria-content-bg-tertiary); border-radius: 2px; }
 .progress-fill { height: 100%; border-radius: 2px; transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
 
-.stat-card-blue .progress-fill { background: linear-gradient(90deg, #3B82F6 0%, #60A5FA 100%); }
-.stat-card-green .progress-fill { background: linear-gradient(90deg, #22C55E 0%, #4ADE80 100%); }
-.stat-card-orange .progress-fill { background: linear-gradient(90deg, #F59E0B 0%, #FBBF24 100%); }
-.stat-card-purple .progress-fill { background: linear-gradient(90deg, #8B5CF6 0%, #A78BFA 100%); }
+.stat-card-blue .progress-fill { background: #3B82F6; }
+.stat-card-green .progress-fill { background: #22C55E; }
+.stat-card-orange .progress-fill { background: #F59E0B; }
+.stat-card-purple .progress-fill { background: #8B5CF6; }
 
 .content-row { margin-bottom: 0; }
 

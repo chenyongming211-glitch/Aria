@@ -44,6 +44,7 @@
       <el-table
         :data="paginatedNodes"
         stripe
+        size="small"
         class="nodes-table"
         v-loading="loading"
       >
