@@ -1,6 +1,6 @@
 # 代码 Bug 追踪
 
-**最后复核**: 2026-07-04
+**最后复核**: 2026-07-05
 **复核方式**: 全量静态代码复核 + 多 Agent 并行 Review + 本地 Go/Frontend 回归验证 + 已记录 bug 状态复核
 **说明**: 本文档记录“当前状态”，不再把历史 OPEN 条目和后续 FIXED 结论混写在一起。
 **AI 范围决定**: AI Agent 后续计划替换为 Hermes Agent。本轮不扩展旧 AI 写操作闭环，但已把旧 AI 写入口后端 fail-closed：聊天只暴露只读工具，`ExecuteTool` 即使 `confirmed=true` 也拒绝旧写工具；Hermes 接入时再重新设计 pending confirmation、policy delivery 和审计链路。
@@ -8,6 +8,7 @@
 **2026-07-04 状态复核结论**: B1~B9 已合入当前 `master`；BUG-64、BUG-65、BUG-66、BUG-74、BUG-75、BUG-76、BUG-100、BUG-101 经代码复核为 FIXED；BUG-84、BUG-97 已在 B10 分支修复，待 PR CI 验证后合入。
 **2026-07-04 B8 修复结论**: B8 分支修复 BUG-76、BUG-100、BUG-101；本地已通过 Go gRPC/contract 测试，Rust 编译和 Rust 单测需由 CI 验证。
 **2026-07-04 B10 修复结论**: B10 分支修复 BUG-84、BUG-97；Go 侧新增 bundle 查询和无 count 告警列表回归测试，Rust 侧新增源码契约测试；Rust 编译和 Rust 单测需由 CI 验证。
+**2026-07-05 BUG-101 闭合结论**: BUG-101 的 B8 修复仍遗漏首次 sync 失败和远程命令触发 sync 失败两个持久化路径；`codex/fix-bug-101-runtime-state-persist` 已补齐这两个路径，并新增源码契约测试防回归。
 
 ---
 
@@ -810,11 +811,11 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/aria-controller-linux-amd
 
 #### BUG-101: Sync 下发的新 runtime token 在 peer/route apply 失败时不会落盘
 
-- **状态**: ✅ FIXED (B8: `codex/bugfix-b8-agent-runtime-recovery`)
+- **状态**: ✅ FIXED (B8 + `codex/fix-bug-101-runtime-state-persist`)
 - **严重度**: HIGH
-- **文件**: `agent-rust/agent/src/agent_runtime.rs:814-831,1511-1563,2617-2632`、`internal/controller/grpc/server.go:209-226`
+- **文件**: `agent-rust/agent/src/agent_runtime.rs:739-749,817-839,1366-1416,1600-1656,2679-2694`、`internal/controller/grpc/server.go:209-226`
 - **根因**: Controller 每次 Sync 刷新 runtime token；Agent 先把 token 写进内存，再执行 `sync_peers` / `sync_advertised_routes`。如果 apply 失败路径没有落盘，新 token 重启后可能丢失。
-- **修复结果**: `sync()` 在本地 apply 前记录 runtime token；定时 sync、immediate sync 和 ACL/QoS apply error 路径都会在记录 error observation 后调用 `persist_runtime_state()`。
+- **修复结果**: `sync()` 在本地 apply 前记录 runtime token；定时 sync、immediate sync、首次 sync、远程命令触发 sync 和 ACL/QoS apply error 路径都会在记录 error observation 后调用 `persist_runtime_state()`，避免新 token 已写入内存但失败返回时未落盘。
 
 ### 🟡 MEDIUM（7）
 
