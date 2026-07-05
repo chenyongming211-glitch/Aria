@@ -1452,6 +1452,32 @@ Purpose:
 | Verification | PR #14 and master Actions run `28737131632` passed Go Build, Frontend Build, and Rust Agent Build. Local verification passed full frontend unit tests (`243` tests), frontend type-check, frontend production build, and `git diff --check`. Server-side `https://aria.yun/api/version` returned `0.2.94`; `/api/v2/controller-info` and homepage returned HTTP 200; `aria-controller`, `aria-frontend`, `aria-postgres`, and `aria-redis` were healthy. Browser smoke against the deployed site through an `aria.yun` host-mapped HTTPS tunnel logged in as `sysadmin` and checked Dashboard, Nodes, Monitoring, Policy Center, and Settings in English mode: no visible `Ask AI`, `AI Assistant`, `AI Copilot`, or `Ask Aria`; no leaked i18n keys; no unexpected Chinese UI text. The only Chinese strings observed on Dashboard/Nodes were existing node `region` data values (`广州`, `上海`, `北京`) from the database, not frontend copy. Login and dashboard screenshots confirmed the decorative login orbs/glows/large hero treatment and old AI navigation entry were absent. |
 | Deployment note | This master deployment updates the live Controller/frontend runtime only. It does not change the online Rust Agent binary. Public direct curl from the local machine still failed on the external TLS path, but server-side HTTPS and host-mapped tunnel checks reached the deployed `aria.yun` Nginx successfully. This docs-only deployment record commit does not require another runtime redeploy. |
 
+## 2026-07-05 Branded Login Restore Deployment (0.2.95)
+
+Purpose:
+
+- Correct the `0.2.94` UI polish overreach by restoring the original branded
+  login page shell, including the large SD-WAN image, left logo area, corner
+  logo, and feature tags.
+- Keep the v0.1.0 AI Assistant / Ask AI entry downgrade and Dashboard / Nodes /
+  Layout console styling changes from PR #14.
+- Add a guardrail test so future UI polish cannot remove the original login
+  branding again.
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-07-05T10:43Z deployment; 2026-07-05T10:44Z smoke validation |
+| Git commit | `f9826b1f1a7bfd0a7ea58e1b11a2b2ce68df9510` |
+| Pull request | #15, `codex/restore-login-page` |
+| Master CI run | `28737901134` |
+| Version | `0.2.95` |
+| Controller image | Local runtime image `aria-controller:0.2.95` / `aria-controller:local@sha256:2ef8c8f7a18c2590d8ae9c8308e410f664bd081ab3420fca1ac6fa9347c4c6d4`. |
+| Backup | `/root/aria-controller/deploy-backups/20260705T104222Z-0.2.95-28737901134-f9826b1-master` |
+| Controller/frontend artifacts | Local low-bandwidth linux/amd64 Controller build and frontend dist from the merged `master` commit. Controller SHA256: `d585983523b88c6efa7edb4d95e23f6dda8dc22134a68f6810cb5e0fccc2328e`; `ariactl` SHA256: `977b359b0955337f2834e7b7c877a392090b2cd1b1e53b20a3d89d209a874f86`; deployed frontend assets include `Login-b348de73.js`, `Login-38cd8e86.css`, `Dashboard-d2a3ec7b.js`, `Dashboard-b494d588.css`, `Nodes-28813757.js`, `Nodes-f1493977.css`, `Monitoring-1ee8def6.js`, and `Monitoring-3531769c.css`. |
+| Agent artifact | Not changed on servers; Rust Agent Build passed in master Actions. |
+| Verification | PR #15 and master Actions run `28737901134` passed Go Build, Frontend Build, and Rust Agent Build. Local verification passed focused UI/i18n/router/monitoring tests (`52` tests), full frontend unit tests (`244` tests), frontend type-check, frontend production build, browser preview of the restored login page, and `git diff --check`. Server-side `https://aria.yun/api/version` returned `0.2.95`; `/api/v2/controller-info` and homepage returned HTTP 200; `aria-controller` and `aria-frontend` were healthy. Browser smoke against the deployed site through an `aria.yun` host-mapped HTTPS tunnel logged in as `sysadmin`: login page showed one `.big-logo`, one `.logo-side`, one `.corner-logo`, and three `.feature-tag` elements; Dashboard, Nodes, Monitoring, Policy Center, and Settings remained clean in English mode with no visible `Ask AI`, `AI Assistant`, `AI Copilot`, or `Ask Aria`, no leaked i18n keys, and no unexpected Chinese UI text outside existing node region data. Controller logs showed `Version: 0.2.95`, `Controller ready`, HTTP ready, and gRPC TLS listening on `:50051`; frontend logs showed successful requests for the restored Login bundle and `aria-logo.png`. |
+| Deployment note | This master deployment supersedes the `0.2.94` login-page visual change while preserving the rest of the UI polish and AI entry downgrade. It updates the live Controller/frontend runtime only and does not change the online Rust Agent binary. |
+
 ## Notes
 
 - `deployments/ansible/roles/controller/templates/docker-compose.yml.j2` mirrors
