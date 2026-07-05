@@ -736,7 +736,17 @@ impl AgentRuntime {
             .context("Failed to initialize routing manager")?;
 
         // Step 4: 首次同步
-        self.sync().await?;
+        if let Err(e) = self.sync().await {
+            tracing::error!("Initial sync failed: {:?}", e);
+            self.set_sync_observation("error", e.to_string());
+            if let Err(save_err) = self.persist_runtime_state() {
+                tracing::warn!(
+                    "Failed to persist runtime state after initial sync error: {:?}",
+                    save_err
+                );
+            }
+            return Err(e);
+        }
         tracing::info!("✅ Initial sync completed");
 
         self.start_unix_socket_server()?;
@@ -1412,6 +1422,13 @@ impl AgentRuntime {
                     )
                 }
                 Err(e) => {
+                    self.set_sync_observation("error", e.to_string());
+                    if let Err(save_err) = self.persist_runtime_state() {
+                        tracing::warn!(
+                            "Failed to persist runtime state after remote command sync error: {:?}",
+                            save_err
+                        );
+                    }
                     build_failed_command_response(command_id.clone(), format!("sync failed: {}", e))
                 }
             },
